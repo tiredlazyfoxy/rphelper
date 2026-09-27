@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Vite
+frontend/dist/
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Backend dev data
+backend/data/
+
+# Docker
+docker-compose.override.yml
+
+# Pipeline caches (product/roadmap/etc. scratch)
+docs/.cache/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+.handoffs
+
+# Deploy artifacts
+/data/
+*.7z
+
+# Dev log file sink (BOOKWRITER_LOG_DIR, set by start.ps1 -app)
+/logs/
