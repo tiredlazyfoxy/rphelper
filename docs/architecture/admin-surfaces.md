@@ -1,0 +1,480 @@
+# Admin surfaces
+
+**Realizes:** FEAT-003, FEAT-004, FEAT-005, FEAT-018, FEAT-019, ACT-001,
+UC-006, UC-007, UC-008, UC-009, UC-010, UC-011, UC-012, UC-013, UC-014, UC-015,
+UC-016, UC-061, UC-065, UC-066
+
+The `admin` Vite entry in full: its routes, its shell, its access gate, and the
+three pages ACT-001 works in. Entry-level build reasoning is in
+`frontend-structure.md`; the shared table/modal/form conventions this doc leans
+on are in `ui-conventions.md`; every backend route named here obeys
+`backend-structure.md`'s router/service split.
+
+Most of what follows is **inherited** from the sibling project (BookWriter) and
+is recorded so a page is built the same way twice. Where RPHelper **deviates**,
+the deviation is marked and the reason is given — the admin gate in particular is
+a genuine architectural difference, not a port.
+
+---
+
+## Scope — three pages and a 404
+
+| Route | Page | Realizes |
+|---|---|---|
+| `/` | Users | FEAT-003 |
+| `/llm-servers` | LLM Servers | FEAT-004 |
+| `/database` | Database | FEAT-005, plus FEAT-018's whole-database granularity |
+| `*` | Not found | — |
+
+Routes are relative to the entry's `basename="/admin"`, so `/llm-servers` is
+served at `/admin/llm-servers` (`deployment.md`'s per-entry nginx fallback).
+
+**Deliberately dropped from the inherited set.** BookWriter's admin area also has
+an `AssistantModesPage` and a `SubAgentsPage`. Both are authoring-domain
+surfaces — they configure a book-writing assistant's modes and its sub-agent
+roster — and RPHelper has **no analogue**: ACT-004's reach is fixed at exactly
+three tools (R9 in `domain-rules.md`), and a "mode" is not a concept anywhere in
+`docs/product/`. They are named here as **deliberately dropped** so that nobody
+re-adds them by pattern-matching against the sibling project.
+
+Two of their *patterns* are worth remembering in case a later requirement needs
+them, which is the only reason they are mentioned at all:
+
+- the **"no create, edit-only, fixed seeded rows"** list variant — a table whose
+  row set is fixed by a seed and where the only action is edit;
+- a **generic pick-from-a-catalogue multi-select** widget — probe a catalogue,
+  render checkboxes over it, save the selected subset. The LLM Servers models
+  modal below is an instance of the same shape.
+
+Neither is built now. No requirement asks for either.
+
+---
+
+## Shell — inherited unchanged
+
+A separate Vite entry: `admin/index.html` → `src/admin/main.tsx`
+(`frontend-structure.md`). Inside it, `BrowserRouter basename="/admin"` and the
+**same Mantine `AppShell`** the app area uses (`ui-conventions.md`), configured:
+
+```tsx
+<AppShell
+  header={{ height: 56 }}
+  navbar={{ width: 220, breakpoint: "sm", collapsed: { mobile: !navbarOpened } }}
+>
+```
+
+- **`padding` is omitted deliberately.** Each page supplies its own
+  `Container size="lg" py="md"`, so a page controls its own measure. A shell-level
+  padding plus a page-level container produces two nested gutters and a
+  content column nobody intended.
+- **No `aside`.** The admin area has no three-pane workspace; that geometry and
+  the two resize behaviours belong to `/sessions/:id` only.
+
+**Header.** On mobile, a `Burger` bound to the shell state; then a
+`Title order={4}`. On the right, a **real `<a href="/">`** back-to-app link and a
+user menu. The plain anchor is deliberate and is *not* a router `Link`: the app
+area is a **different document** (`frontend-structure.md`), so a router link
+would be wrong anyway — and an anchor is what makes middle-click and
+ctrl-click open a new tab, which is exactly how an administrator flips between
+the admin area and their own app view.
+
+**No breadcrumbs.** Three flat pages, each one click from the navbar; a
+breadcrumb trail would always be one segment long.
+
+**Flat `<Routes>`.** Four route elements, no nested layout route and no
+`<Outlet/>`. The shell is rendered once above the `<Routes>` rather than as a
+parent route. With three sibling pages and no per-page layout variation, a layout
+route buys nothing and costs a level of indirection when reading where a page
+mounts.
+
+### Shell state is a MobX class, not `useDisclosure`
+
+```tsx
+class AdminShellState {
+  navbarOpened = false;
+  constructor() { makeAutoObservable(this, {}, { autoBind: true }); }
+}
+const [shell] = useState(() => new AdminShellState());
+```
+
+Mantine's `useDisclosure` would be the obvious choice and is **not** used.
+**Convention, recorded because it is project-wide and not obvious:** custom hooks
+must not hold reactive state in this codebase. State lives in MobX observable
+classes instantiated with `useState(() => new X())` and passed explicitly as
+props (`frontend-structure.md`). A hook holding state hides both its lifetime and
+its identity, and mixing two state mechanisms in one tree means a reader cannot
+tell from a component's props what makes it re-render.
+
+### Nav is a static table plus a pure active-match function
+
+The navbar is a **static declaration table** mapped to Mantine `NavLink`s:
+
+| Item | Path | Icon | `exact` |
+|---|---|---|---|
+| Users | `/` | `IconUsers` | yes |
+| LLM Servers | `/llm-servers` | `IconServer2` | no |
+| Database | `/database` | `IconDatabase` | no |
+
+Active state comes from a **pure** function, not from react-router:
+
+```
+isNavItemActive(pathname: string, item: NavItem) -> boolean
+```
+
+It matches on `/`-delimited path segments so a descendant route highlights its
+parent item, and honours an `exact` flag for the root item (otherwise `/` matches
+everything). Deliberately **not** react-router's `end` prop: a pure function of
+two plain arguments is unit-testable with no router, no DOM and no render, which
+is precisely what the pipeline's test-coder can write against from the spec alone
+(`docs/plans/CLAUDE.md`). Every `/`-prefix matcher gets the `/database` vs
+`/database-backups` case wrong the first time; the point of extracting it is that
+the wrong answer is a failing test rather than a mis-highlighted link nobody
+files.
+
+---
+
+## The admin gate — RPHelper deviates
+
+This is the one place where the inherited design **cannot** be copied.
+
+### What BookWriter does
+
+Its admin entry decodes a **JWT client-side, before `createRoot`**:
+
+| Condition | Action |
+|---|---|
+| no token | redirect `/login/` |
+| token present but undecodable | redirect `/login/` |
+| `role !== "admin"` | redirect `/` — **without clearing tokens** |
+
+The third case not clearing the token is deliberate there: the session is
+perfectly valid for the non-admin application, so signing the user out would be a
+punishment for visiting the wrong URL. The valuable property of the whole
+arrangement is that **a non-admin never mounts the admin bundle** — there is no
+flash of admin chrome before the redirect.
+
+### Why RPHelper cannot do that, for two independent reasons
+
+1. **The session is an HttpOnly `SameSite=Lax` cookie** (FEAT-002,
+   `overview.md`). JavaScript cannot read it, so there is no token to decode and
+   no client-side claim to inspect.
+2. **FEAT-003 requires that disabling an account ends that user's sessions**, and
+   a stateless JWT cannot be revoked before it expires — you can only wait it
+   out. That is the same reason `auth_sessions` exists as a server-side table
+   (`data-model.md`), and it is a *product* requirement, not a consequence of the
+   cookie choice. Even if the session were a readable token, RPHelper would still
+   need server-side session rows, and therefore a server round-trip to know
+   whether a session is still live.
+
+Both reasons are recorded because the first alone reads like a reversible
+implementation preference and the second does not.
+
+### What RPHelper does instead
+
+`src/admin/main.tsx` **awaits `GET /api/me`** before mounting, then mounts or
+redirects. One round-trip before mount, rendering nothing at all in the meantime
+— which preserves BookWriter's "no flash of admin content" property, at the cost
+of a blank document for the duration of one request.
+
+The **pure/impure split is kept**, now asynchronous:
+
+```
+resolveAdminAccess(currentUser: CurrentUser | null) -> AdminAccessDecision   // pure
+enforceAdminAccess(): Promise<AdminAccessDecision>                            // impure
+```
+
+`resolveAdminAccess` is a total function over the fetched identity and returns a
+decision; `enforceAdminAccess` performs the fetch and navigates on deny. The
+split survives the change to async for the same reason it existed: the decision
+table is testable without a network, a router or a DOM, and the navigation is a
+one-line effect with nothing to get wrong.
+
+The same three deny cases, mapped onto cookie-session semantics:
+
+| BookWriter | RPHelper | Action |
+|---|---|---|
+| no token | **no session** — `/api/me` answers 401 | redirect `/login` |
+| token undecodable | **session but no resolvable user** — the account is gone or disabled | redirect `/login` |
+| `role !== "admin"` | **role is not `admin`** | redirect `/` (app area) |
+
+The second case is where the two designs genuinely differ in *behaviour*, not
+just mechanism: a revoked or disabled account fails here at the server, which is
+the FEAT-003 guarantee working as specified. A JWT holder would have sailed past
+it.
+
+A `401` already triggers a document navigation to `/login` in the shared API
+client (`frontend-structure.md`), so the gate's no-session branch is that
+existing behaviour rather than a second redirect path.
+
+### Backend gating is independent and authoritative
+
+The frontend gate is **UX only**. The real boundary is a FastAPI dependency
+factory on **every** admin route:
+
+```
+require_role(min_role: Role) -> Callable[..., CurrentUser]
+```
+
+It resolves the caller from the session cookie and compares their role against a
+**numeric ladder**:
+
+```
+{ roleplayer: 0, admin: 1 }
+```
+
+`roleplayer` is ACT-002, `admin` is ACT-001. This **replaces** BookWriter's
+`{author, admin}` ladder — the low rung is renamed to RPHelper's actor, not
+re-purposed. A numeric ladder rather than a set of boolean flags because the
+comparison a route wants to express is "at least this much", and a ladder makes
+adding a rung a one-line change instead of an audit of every route's flag
+conjunction.
+
+Two things must stay true, and both are stated as constraints rather than left to
+care:
+
+- **Frontend routing is never the authorization.** Removing the gate must change
+  nothing but the flash; every admin endpoint refuses a `roleplayer` on its own.
+- **R5 applies to every route behind `require_role(admin)`**: an admin route
+  exposes no user content — no character, setup, session, entry or memo, and no
+  count derived from them (FEAT-019, UC-065, UC-066).
+
+`require_role(Role.admin)` is what `backend-structure.md`'s authorization table
+previously called `require_admin`; see that doc for how it sits alongside
+`require_unconfigured` and `require_user`.
+
+---
+
+## Users page — FEAT-003
+
+**Realizes:** FEAT-003, FEAT-019, UC-006, UC-007, UC-008, UC-009, UC-066
+
+A table of accounts. Columns: **username**, **role** (badge), **last login**,
+**active**. Row overflow menu (`IconDots`, `ui-conventions.md`): Set Password,
+Change Role, Disable, **Re-enable**. A header **Create user** button.
+
+**Create modal.** Fields: username, password, password confirmation, role
+select. Client validation: username required, password at or above a minimum
+length, confirmation must match. Server errors are mapped **by status**: a
+conflict becomes "username taken" on the username field, a bad request becomes a
+password-policy message on the password field. Mapping by status rather than by
+parsing a message keeps the UI from breaking when the backend's prose changes.
+
+**Set Password.** An administrator-initiated reset: **no current password is
+required**, and the new password travels as plaintext in the request body to the
+admin endpoint. There is **no email flow and no reset link** — the product has no
+mail transport and `docs/product/` asks for none. Recorded explicitly so the
+absence is not read as a missing feature.
+
+**Change Role.** A `Select` over the ladder. The **backend refuses a
+self-targeted role change** — an administrator cannot demote themselves, which is
+what keeps an instance from ending up with zero administrators through a single
+mis-click. The check belongs on the server; the UI may also hide the action on
+one's own row, but that is cosmetic.
+
+**DEVIATION — re-enable must be added.** BookWriter's admin API has
+`disableUser` and **no `enableUser`, and no delete at all**. FEAT-003 explicitly
+requires disable **and re-enable**. So this is a case of
+**required-by-spec-and-absent-from-the-inherited-pattern**: the endpoint, the row
+action and its test do not exist upstream and must be written. `users.is_enabled`
+is already a flag rather than a deletion for exactly this reason
+(`data-model.md`).
+
+**Disabling must also terminate that user's login sessions.** FEAT-003's own note
+requires it, and the mechanism is the `auth_sessions` table
+(`data-model.md`) — the disable service revokes the user's rows in the same
+transaction as the flag flip. This is the requirement that made a server-side
+session table necessary and that rules out the JWT gate above; it is cross-
+referenced in both places so neither can be simplified in isolation.
+
+Disabling an account is **destructive in effect** (it signs the person out mid-
+roleplay), so it takes the confirm step below.
+
+**Per R5 / FEAT-019 / UC-066:** this page shows **accounts only**. No character
+count, no session count, no "last active session", no preview of anything the
+user wrote. The temptation here is a helpful "3 characters, 11 sessions" column;
+it is forbidden.
+
+---
+
+## LLM Servers page — FEAT-004
+
+**Realizes:** FEAT-004, FEAT-019, UC-010, UC-011, UC-012, UC-013
+
+A table of registered servers. Columns: **name**, **backend type** (badge),
+**base URL**, **has API key**, **enabled-model count**, **active** (badge). Row
+overflow menu: Edit, Select Models, Set Embedding, Clear Embedding
+(conditional), Delete, **Test connection**.
+
+The enabled-model count is a count of *models on this server*, which is
+administrative data. It is not a count of anything user-owned — see the R5 note
+at the end of this section.
+
+**Server form modal.** Name, backend type `Select` (`llamaswap` | `OpenAI`,
+matching `llm_servers.kind` in `data-model.md`), base URL, API key as a
+`PasswordInput`, active switch.
+
+**The API-key round-trip rule — inherited, and the single easiest thing to get
+wrong.** The key is **never returned by the server**. Therefore, on edit:
+
+| Field state on submit | Meaning |
+|---|---|
+| left empty / untouched | **leave the stored value unchanged** |
+| an explicit empty string (cleared by the user) | **clear the stored value** |
+| a value | replace the stored value |
+
+The distinction between "untouched" and "explicitly cleared" has to survive into
+the request payload — typically as an omitted key versus a present empty
+string — because a form that sends `""` for an untouched field silently deletes
+the credential on every save.
+
+Combine this with RPHelper's **`"$ENV_VAR"` secret-pointer pattern**
+(`backend-structure.md`), which the inherited pattern does not have, and the
+interaction becomes explicit: what this field holds is **a pointer, not a
+secret** — the literal text `$OPENAI_API_KEY`. So
+
+- a value not starting with `$` is **rejected on write**, and the field's
+  description says so;
+- "has API key" in the table means **a pointer is recorded**, not that it
+  resolves — a pointer naming an absent variable fails later as
+  `secret_ref_missing` at call time, by design;
+- a `PasswordInput` is still the right control even though the contents are not a
+  secret, because the field sits where an operator expects to paste a key and
+  masking it discourages exactly that mistake.
+
+**Models modal (UC-012).** Probes the server's available models when it opens,
+then renders a checkbox list over **`available ∪ already-enabled`** and saves the
+enabled set. The union matters: a model that was enabled but is no longer offered
+by the server must still be visible and still be un-checkable, otherwise the
+administrator cannot see, let alone clear, a stale enablement.
+
+**Failed-probe resilience.** A probe failure surfaces an error and **clears the
+available list**, but **must not disturb the existing selection**. Stated as a
+requirement because the naive implementation — set `available = []` and derive
+the checkboxes from it — silently presents "nothing enabled" and saves that.
+
+**Embedding modal (UC-013).** The same probe-on-open shape, but **single**
+select: at most one model is designated across the whole table
+(`models.is_embedding_designated`, `data-model.md`). Plus a page-level
+**Clear embedding** action. Clearing is not a no-op: with no designation, every
+semantic path fails as `no_embedding_model` rather than substituting a model
+(R4), because vectors from a different model are not comparable with the stored
+ones (`search-and-retrieval.md`).
+
+**DEVIATION — Test connection is its own endpoint and its own action.** See
+decision 5 in `overview.md`. BookWriter tests a connection by reusing the
+model-listing probe; RPHelper does not, because FEAT-004's purpose line treats
+testing a connection as **its own capability** (UC-011), and overloading
+model-listing conflates two concerns: "can I reach this server and authenticate"
+and "what can it run". The **backend probe primitive is reused** — there is one
+piece of code that talks to an OpenAI-compatible server — but it is exposed as
+its **own route with its own typed result**, and surfaced in the UI as a badge or
+alert **without opening the models list**. The result is recorded on
+`llm_servers.last_test_at` / `last_test_ok` / `last_test_error`
+(`data-model.md`), and per UC-011 registration is unaffected either way: a failed
+test never blocks or removes a registration.
+
+Proposed result taxonomy: `reachable`, `unreachable`, `auth_failed`,
+`model_list_empty`. `_TBD: docs/product/ states no result taxonomy for UC-011 —
+it asks only that the administrator can test a connection. The four values above
+are a design proposal sized to what the probe can actually distinguish; FEAT-004's
+plan may narrow or extend them, but the route must return a typed value rather
+than a free-text message the UI has to parse._`
+
+**Cross-references that belong on this page, because this is where the mistakes
+get made:**
+
+- **R4.** Enabling and disabling models *here* is precisely what makes R4's
+  use-time validation necessary. Disabling a model is a flag flip and is **never
+  refused** on account of dependent sessions; the consequence surfaces later, in
+  the affected session, as `model_not_enabled`.
+- **R5.** A **`model → dependent sessions` lookup must not exist on this page**,
+  in any form. The tempting string is literally
+  **"Are you sure? N sessions use this model"** — and it is **forbidden**: the
+  count is derived from other users' data, so rendering it is a cross-user
+  disclosure (FEAT-019, UC-012, UC-065, UC-066). There is no endpoint to power
+  it, and none may be added. Named here because this page — a delete/disable
+  confirm dialog wanting a blast radius — is the exact site where a developer
+  would add it in good faith.
+
+---
+
+## Database page — FEAT-005 + FEAT-018's admin half
+
+**Realizes:** FEAT-005, FEAT-018, FEAT-019, UC-014, UC-015, UC-016, UC-061,
+UC-066
+
+A **per-table drift report**: one row per table, a coloured status badge, and a
+summary of missing and extra columns. It is rendered from the `PRAGMA`-based
+introspection of `db/drift.py` against the `db/schema.py` registry
+(`data-model.md`, `backend-structure.md`) — which is why the registry is the
+single introspectable source of truth and why the ORM decision below was
+constrained by it.
+
+Page-level actions:
+
+| Action | Behaviour | Realizes |
+|---|---|---|
+| Export | download the whole-database export | FEAT-018, UC-061 |
+| Import | file picker, then upload | FEAT-018, UC-002 |
+| Rebuild index | re-embed everything; returns an **indexed-row count**; **fails when no embedding provider is designated** | FEAT-005, UC-016 |
+
+Rebuild's failure mode is `no_embedding_model` (R4,
+`search-and-retrieval.md`), and its report is **counts and completion only** — no
+per-user breakdown, no sample, no progress line naming a character (UC-066, R5).
+Rebuild is expensive and touches every user's content, so it takes the confirm
+step below.
+
+**Scope discipline — do not silently expand this page.** BookWriter's report
+carries **four** statuses (`ok` / `drift` / `missing` / `seed-missing`) with
+per-row **Create**, **Sync** and **Seed** actions. FEAT-005 asks for three
+things: per-table drift reporting (UC-014), creating missing tables (UC-015), and
+rebuilding the vector index (UC-016).
+
+`_TBD: Sync and Seed exist in the inherited pattern and are required by no use
+case. RPHelper has no seed data in docs/product/ at all, and per-column Sync is a
+DDL migration path that UC-015 does not ask for (it asks that missing tables be
+created). Whether to carry either across is FEAT-005's planner's call, not the
+architect's; they are recorded here as available prior art and deliberately NOT
+written up as requirements._`
+
+**Export/import here is the whole-database granularity only.** FEAT-018's
+per-user, per-character and per-session exports are **roleplayer-side** (ACT-002,
+UC-062/UC-063/UC-064) and live in the `app` entry; their full contract is
+deferred (`data-model.md`'s sketch, `overview.md`'s deferred list).
+
+**The whole-database export is opaque to the administrator.** FEAT-018/UC-061
+produces the one artifact that necessarily contains every user's data, and R5
+keeps it compatible with FEAT-019 by offering **no viewer, no search and no
+rendering** of it. This page therefore has no export preview, no export diff and
+no export browser, now or later. It downloads a file and says how large it was;
+it never shows what is inside. The export also carries **no credentials** — only
+`"$ENV_VAR"` pointers — so a restored instance needs its environment supplied
+separately (`data-model.md`).
+
+---
+
+## Conventions this page set depends on
+
+The full statements live in `ui-conventions.md`, which is the authority. The
+short list, so a reader of this doc knows what shape to expect:
+
+- **Tables** — plain Mantine `Table`, `striped highlightOnHover`. No data-table
+  library, no cards.
+- **Row actions** — an overflow `Menu` behind an `IconDots` `ActionIcon` in a
+  trailing `w={60}` column; never inline icon buttons in the row.
+- **No sorting, filtering or pagination** anywhere in the admin area. Every list
+  loads and renders the full set.
+- **Loading** — a centered `Loader` gated on an idle/loading status.
+  **Errors** — an inline red `Text`/`Alert` above the table.
+- **Create/edit is always a Mantine `Modal`** — never a drawer, never inline row
+  editing, never a separate route.
+- **`@mantine/form` is not used.** Every modal has a hand-rolled MobX **draft
+  class** in a same-named `*Draft.ts` sibling, and the effectful submit is an
+  external function, never a method.
+- **No toasts.** Success is implicit: the modal closes and the list refreshes.
+- **Mutations are never optimistic** — re-load after every mutation.
+- **Confirm step** on destructive admin actions: disabling an account
+  (FEAT-003), deleting an LLM connection (FEAT-004), rebuilding the vector index
+  (FEAT-005).
+- **Page state** — one `makeAutoObservable` class with **no methods**, driven by
+  free functions from a page-level `useEffect` with an `AbortController`.
