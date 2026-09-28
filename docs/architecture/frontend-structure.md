@@ -7,6 +7,10 @@ FEAT-019, FEAT-020, ACT-001, ACT-002, ACT-003
 React 19 + TypeScript, built by Vite as **four separate entries**. Component
 library, state library and icon set are fixed in `overview.md`.
 
+**TypeScript only.** No `.js` / `.jsx` / `.mjs` / `.cjs` file is authored anywhere
+under `frontend/` — config included — and neither tsconfig enables `allowJs` or
+`checkJs`. Reason in `overview.md`; the rule itself is in the root `CLAUDE.md`.
+
 **The `app` entry's visual shell is in `workspace-shell.md`** — the three columns,
 all geometry, the note wall, layout persistence, and the anatomy of the stream and
 the current zone. It is not described here, and the pointer that used to send

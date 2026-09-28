@@ -151,6 +151,14 @@ surfaces with genuinely disjoint code exist (table above). Vite because
 multi-entry via `build.rollupOptions.input` is a first-class feature, and its dev
 proxy gives the single-origin story for free.
 
+**TypeScript only — no JavaScript anywhere on the Node side.** Every authored file
+under `frontend/`, including Vite/Vitest config and any build script, is `.ts` /
+`.tsx`; `allowJs` and `checkJs` stay off. We chose this because the project has no
+linter, so `tsc --noEmit` is the only static gate, and a `.js` file walks straight
+past it — most dangerously past the "ids are strings" rule below, which only the
+type system can hold. A tool that only ships a JavaScript config is configured in a
+`.ts` file or not adopted. (The backend is Python; this rule has no backend half.)
+
 **Mantine 7 as the component library.** The product needs a markdown editor with
 live preview (UC-043), forms, tables, modals and a large set of icon actions.
 Mantine ships `Table`, `Modal` and `@mantine/tiptap` as one coherent set, so none

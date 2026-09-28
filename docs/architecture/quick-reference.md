@@ -154,6 +154,11 @@ workspace's layout only — grid, `--navw` rail, the 820px media query; the `app
 entry alone). Everything else is Mantine (`frontend-structure.md` owns the
 division; `workspace-shell.md` carries the same decision).
 
+**TypeScript only — no JavaScript source.** Every authored file under `frontend/`
+— components, stores, tests, and Node-side config such as `vite.config.ts` — is
+`.ts` / `.tsx`. No `.js` / `.jsx` / `.mjs` / `.cjs`, no `allowJs`, no `checkJs`
+(`overview.md` has the reason; the root `CLAUDE.md` holds the rule).
+
 ## The four frontend entries
 
 | Entry | Actor | Realizes |

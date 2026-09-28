@@ -150,7 +150,8 @@ UC-001..086, US-001..139 — treat as a sanity check, not as the source.) Rules:
 
 Python + FastAPI backend, **SQLAlchemy Core (not the ORM)**, SQLite (one file for
 rows and vectors, `sqlite-vec` + FTS5), React 19 + TypeScript + Vite multi-entry
-frontend, Mantine 7 + MobX 6 + Tabler icons, SSE over POST, HttpOnly cookie auth,
+frontend (**TypeScript only — no JavaScript source, config included, no
+`allowJs`**), Mantine 7 + MobX 6 + Tabler icons, SSE over POST, HttpOnly cookie auth,
 two roles (`roleplayer` / `admin`), single origin in dev and prod.
 **Alembic is present as a batch-DDL executor only** — it is what the drift page's
 `Create` / `Sync` runs behind; `db/schema.py` stays the schema's source of truth,

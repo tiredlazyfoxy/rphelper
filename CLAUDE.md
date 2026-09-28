@@ -36,7 +36,7 @@ Every downstream agent reads its commands from this section and nowhere else.
 | Vectors | `sqlite-vec` (`vec0` virtual tables, exact brute-force KNN) |
 | Full text | SQLite FTS5 (BM25), fused with vectors by reciprocal-rank fusion |
 | Schema DDL | Alembic **batch operations only** — the executor behind the admin drift page's `Sync`/`Create`. Not a migration framework: no `versions/`, no version table, no startup upgrade; `db/schema.py` is the source of truth |
-| Frontend | React 19 + TypeScript + Vite, **multi-entry** build (4 entries) |
+| Frontend | React 19 + TypeScript + Vite, **multi-entry** build (4 entries); **TypeScript only — no JavaScript** |
 | Components | Mantine 7 (`@mantine/core`, `/form`, `/hooks`, `/tiptap`) |
 | State | MobX 6 + `mobx-react-lite`; `react-router-dom` 7 |
 | Icons | `@tabler/icons-react` `^3.40` |
@@ -110,6 +110,13 @@ frontend never receives a backend base URL; it always calls same-origin
 ## Conventions every agent must hold
 
 - Backend is fully type-annotated; `mypy app` is a gate, not advice.
+- **Frontend and every Node-side file are TypeScript only — no JavaScript.** Every
+  authored file under `frontend/` (React, MobX stores, tests, `vite.config.ts`,
+  any build script) is `.ts` / `.tsx`. No `.js`, `.jsx`, `.mjs` or `.cjs`; no
+  `allowJs` or `checkJs` in any tsconfig. A tool that generates a JS config gets a
+  `.ts` equivalent or is not added. Only generated output (`node_modules/`,
+  `dist/`, `coverage/`) is exempt. `npm run typecheck` is the gate, and there is
+  no linter.
 - Requirements live in `docs/product/` and are **cited** (`FEAT-###`, `UC-###`,
   `US-###.AC-#`), never copied into architecture docs or plans.
 - Unknowns are marked `_TBD: <reason>_`. Never invent a requirement to close a
