@@ -173,6 +173,42 @@ Consequences, stated so neither is mistaken for a bug:
 
 ---
 
+## The single-generator guarantee — one uvicorn, one node id
+
+**Realizes:** FEAT-018, UC-061, UC-062, UC-063, UC-064
+
+Every primary key in RPHelper is a snowflake minted in application code, and the
+scheme requires **exactly one generator process per node id**. The topology above
+is what supplies that today — **one container, one uvicorn process, one generator
+instance held on application state** (`backend-structure.md`'s `app/ids.py`). This
+doc owns the topology, so it owns the guarantee: it is a **deployment
+commitment**, not a happy accident of how the container is currently started.
+
+What it forbids, stated concretely because the change looks routine:
+
+- **A second uvicorn worker on the same node id mints duplicate ids.** Each
+  process keeps its own last-millisecond-and-sequence pair, so two workers sharing
+  a node id collide the first time their inserts land in the same millisecond.
+  Adding `--workers 2`, or a second replica behind the same volume, is therefore
+  **not** a configuration tweak — it is the flip condition recorded against the id
+  decision in `overview.md`, and the bit layout and the JSON string boundary both
+  have to be re-examined before it ships.
+- **The node id comes from config** — `RPHELPER_NODE_ID`, default `0`
+  (`backend-structure.md`'s `Settings`). It is deliberately configurable so two
+  *instances* can be given different node ids, which is what lets FEAT-018 import
+  preserve ids instead of re-mapping them. Two instances left on the default `0`
+  will collide, and `data-model.md` requires the importer to detect that rather
+  than assume it away — so an operator running a second instance should set it.
+
+The bit layout, the fixed epoch and the backwards-clock refusal are
+`data-model.md`'s Identifiers section and are not restated here.
+
+The corollary for SQLite is the same shape and already holds: one writer, one
+file, one volume mount (`./data:/app/data`). A second instance pointed at the same
+volume breaks both guarantees at once.
+
+---
+
 ## nginx configuration — every directive, and why
 
 ### Static entries and SPA fallback
@@ -328,5 +364,5 @@ requesting an asset bundle that no longer exists after a deploy. `no-cache`
   (UC-016) — which is why they are not exported (`data-model.md`).
 - `_TBD: no logging, metrics or alerting posture is specified. docs/product/ names
   no observability requirement, so none is designed; note that FEAT-019 constrains
-  whatever is eventually added — logs must not record memo bodies, entry text or
-  discussion content._`
+  whatever is eventually added — logs must not record memo bodies or message text,
+  settled, buried or current-zone alike._`

@@ -17,26 +17,77 @@ to know what it is designing for; the product layer never reads back.
 
 ## File set
 
-**Eleven** docs, fixed. A new top-level doc must come from the architect's
+**Twelve** docs, fixed. A new top-level doc must come from the architect's
 briefing — never added unilaterally.
 
 | File | Holds |
 |---|---|
 | `overview.md` | System context, actor→surface map, topology, the stack decision list, deferrals |
-| `quick-reference.md` | Dense agent-first index: ports, commands, paths, invariants, doc map |
-| `data-model.md` | Tables, ownership columns, archive semantics, vector + FTS tables, export/import contract |
+| `quick-reference.md` | Dense agent-first index: doc map, ports, commands, paths, the id rule, invariants, error codes, geometry |
+| `data-model.md` | Tables, snowflake identifiers, ownership columns, the merged `messages` table and its two views, archive semantics, vector + FTS tables, export/import contract |
 | `domain-rules.md` | The role ladder and the cross-cutting invariants every feature binds to |
-| `backend-structure.md` | FastAPI layout, routers/services split, persistence access, config, secrets, error model |
-| `frontend-structure.md` | Vite multi-entry, MobX convention, routing, SSE consumer |
-| `ui-conventions.md` | Layout shell, the two resize behaviours, persistence, icons, the list/modal/form CRUD conventions |
+| `backend-structure.md` | FastAPI layout, routers/services split, the JSON id boundary, the stream routes, settle/re-open, the `(( ))` seam, persistence access, config, secrets, error model |
+| `frontend-structure.md` | Vite multi-entry, MobX convention, routing, "ids are strings", the API client, SSE consumer |
+| `workspace-shell.md` | The `app` entry's one screen: the three columns, all geometry, the note wall's two modes, layout persistence, the stream, the ruler and the current zone, the character page, the user menu |
+| `ui-conventions.md` | Everything that is **not** the shell: icons and the shared `IconButton`, the icon table, the accessibility floor, and the list/modal/MobX-draft/confirm CRUD conventions |
 | `admin-surfaces.md` | The `admin` entry in full: its routes, shell, access gate, and the three administrative pages — what is inherited from the sibling project, what deviates, and why |
 | `llm-and-streaming.md` | LLM client abstraction, SSE protocol, tool loop, context assembly |
 | `search-and-retrieval.md` | Hybrid vector + FTS search, the three search surfaces, embedding lifecycle |
 | `deployment.md` | Ports, dev/prod topology, nginx, compose, config conventions |
 
-Line budget: ~400 lines per doc. `quick-reference.md` is the one exception — it
-is intentionally dense. A doc that outgrows its budget splits off its largest
-subsystem, and the split is named in `quick-reference.md`.
+### When a doc splits
+
+**Split a doc when it has come to cover two subjects, not when it crosses a line
+count. Name the split in `quick-reference.md`.** A doc that is long because its
+subject is long is doing its job; a doc that is long because two subjects moved in
+under one filename is the thing to fix. Either way the split is a new top-level
+doc and therefore needs a briefing.
+
+Current lengths, recorded honestly rather than implied:
+
+| Doc | Lines | |
+|---|---|---|
+| `backend-structure.md` | 745 | **split candidate — two subjects** |
+| `data-model.md` | 691 | deliberate exception |
+| `domain-rules.md` | 556 | deliberate exception |
+| `admin-surfaces.md` | 531 | over |
+| `workspace-shell.md` | 529 | deliberate exception |
+| `search-and-retrieval.md` | 520 | deliberate exception |
+| `quick-reference.md` | 511 | exempt; intentionally dense — the count is informational only |
+| `frontend-structure.md` | 491 | over |
+| `ui-conventions.md` | 473 | **split candidate — two subjects** |
+| `llm-and-streaming.md` | 468 | over |
+| `overview.md` | 429 | over |
+| `deployment.md` | 368 | within |
+
+These counts are a snapshot taken at one pass and drift with every one after it,
+so a reader who needs the real number opens the file rather than trusting the row.
+
+The four deliberate exceptions, each with the reason it stays whole:
+
+- **`data-model.md`** — it is **one schema**. Splitting it puts half the columns
+  behind a second filename and makes "which table holds `related_to`?" a lookup.
+- **`domain-rules.md`** — it is **one flat R-namespace**. "Which doc has R9?" must
+  never be a question anyone has to ask.
+- **`search-and-retrieval.md`** — the **contrast** between the assistant's two
+  tools and the roleplayer's my-search *is* the point of the doc. Split, the
+  distinction the product insisted on stops being visible on one page.
+- **`workspace-shell.md`** — it is **one screen**.
+
+Two splits are **identified and not authorized**. Neither is done; each needs a
+briefing:
+
+- **`session-stream.md`** — would lift the stream routes, settle/re-open and the
+  `(( ))` seam out of `backend-structure.md`. That doc now genuinely carries two
+  subjects: the FastAPI application's shape, and the session stream's behaviour.
+  It would be the backend counterpart to `workspace-shell.md`.
+- **`forms-and-lists.md`** — would lift the CRUD conventions out of
+  `ui-conventions.md`, leaving icons and the accessibility floor behind. Already
+  named as the split candidate in `quick-reference.md`.
+
+`admin-surfaces.md` was already over budget **before** this delta began — it grew
+inside it, but its length is not a consequence of the workspace rework — and is
+**not** proposed for a split: it is one subject, the `admin` entry in full.
 
 ## Who writes, who reads
 
@@ -56,8 +107,13 @@ Every doc that realizes product requirements opens with:
 **Realizes:** FEAT-003, UC-007, UC-008
 ```
 
-Ids come from `docs/product/` (FEAT-001..019, UC-001..068, US-001..087,
-acceptance criteria as `US-###.AC-#`). Rules:
+Ids come from `docs/product/`, and **`docs/product/quick-reference.md` is the
+registry of record** — the sole canonical list of every `ACT-###`, `FEAT-###`,
+`UC-###`, `US-###` and `US-###.AC-#`. Check an id there, never against a range
+quoted in a design doc or a briefing: a range goes stale the moment a feature
+lands, and a range that spans ids owned by several features is how a citation ends
+up attributed to the wrong one. (Current as of this writing: FEAT-001..020,
+UC-001..084, US-001..131 — treat as a sanity check, not as the source.) Rules:
 
 - **Cite, do not copy.** If a reader needs the behavioural detail, they open the
   product doc. Architecture states the *mechanism* that satisfies the
@@ -73,8 +129,8 @@ acceptance criteria as `US-###.AC-#`). Rules:
 - **State decisions with reasoning.** "We chose X because Y" — never a bare "We
   chose X". A decision with no recorded reason is re-litigated within a month.
 - **Name deliberate asymmetries as deliberate.** RPHelper has several (the
-  inheritance chains, the collapse rule, the two resize performance strategies).
-  Each must say *so it is not "fixed" later*.
+  inheritance chains, the collapse rule, the hand-written `app` grid beside
+  `admin`'s `AppShell`). Each must say *so it is not "fixed" later*.
 - **State what is not in scope.** Deferrals belong in `overview.md`'s deferred
   section with the reason for deferring.
 - **Record the flip condition** on any decision taken under uncertainty (for
@@ -91,5 +147,13 @@ Python + FastAPI backend, **SQLAlchemy Core (not the ORM)**, SQLite (one file fo
 rows and vectors, `sqlite-vec` + FTS5), React 19 + TypeScript + Vite multi-entry
 frontend, Mantine 7 + MobX 6 + Tabler icons, SSE over POST, HttpOnly cookie auth,
 two roles (`roleplayer` / `admin`), single origin in dev and prod.
+**Alembic is present as a batch-DDL executor only** — it is what the drift page's
+`Create` / `Sync` runs behind; `db/schema.py` stays the schema's source of truth,
+and there is no `versions/` directory, no revision chain, no version table and no
+DDL at startup (`backend-structure.md`, `overview.md`). Styling is **two
+hand-written stylesheets, not one**: `global.css` for resets across every entry,
+`shell.css` for the `app` workspace's layout alone — the grid, the `--navw` rail,
+the 820px threshold (`frontend-structure.md`). Everything else is Mantine;
+Tailwind, CSS Modules and styled-components stay forbidden.
 Build and test commands live in the **root `CLAUDE.md`** and are never duplicated
 here.

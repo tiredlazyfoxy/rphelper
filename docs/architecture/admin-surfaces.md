@@ -1,8 +1,9 @@
 # Admin surfaces
 
-**Realizes:** FEAT-003, FEAT-004, FEAT-005, FEAT-018, FEAT-019, ACT-001,
+**Realizes:** FEAT-003, FEAT-004, FEAT-005, FEAT-018, FEAT-019,
+FEAT-020 (the admin entry point only), ACT-001,
 UC-006, UC-007, UC-008, UC-009, UC-010, UC-011, UC-012, UC-013, UC-014, UC-015,
-UC-016, UC-061, UC-065, UC-066
+UC-016, UC-061, UC-065, UC-066, UC-071
 
 The `admin` Vite entry in full: its routes, its shell, its access gate, and the
 three pages ACT-001 works in. Entry-level build reasoning is in
@@ -50,11 +51,33 @@ Neither is built now. No requirement asks for either.
 
 ---
 
+## How ACT-001 gets here
+
+**Realizes:** FEAT-020 (the admin entry point only), UC-071, US-093
+
+The way in is one item in the app's **user menu, bottom-left** (UC-071, US-093).
+Two of its properties belong to this doc, because they are properties of *the
+entry* rather than of the menu:
+
+- **It is a cross-entry document navigation to `/admin` — a real
+  `<a href="/admin">`, never in-entry routing.** `/admin` is its own Vite entry and
+  its own document; `frontend-structure.md` states the client-side half and why no
+  router can route to it. The HttpOnly session cookie travels with the navigation,
+  so this entry needs no auth handoff of its own.
+- **For a non-admin the item is absent, not disabled** (US-093.AC-2) — the
+  roleplayer's document does not name this area at all, which is the frontend half
+  of the separate-bundle posture. It changes only what is *offered*; the boundary
+  is the pre-mount gate below and, authoritatively, `require_role`.
+
+The menu itself is `workspace-shell.md`'s.
+
+---
+
 ## Shell — inherited unchanged
 
 A separate Vite entry: `admin/index.html` → `src/admin/main.tsx`
-(`frontend-structure.md`). Inside it, `BrowserRouter basename="/admin"` and the
-**same Mantine `AppShell`** the app area uses (`ui-conventions.md`), configured:
+(`frontend-structure.md`). Inside it, `BrowserRouter basename="/admin"` and a
+Mantine **`AppShell`**, configured:
 
 ```tsx
 <AppShell
@@ -67,8 +90,19 @@ A separate Vite entry: `admin/index.html` → `src/admin/main.tsx`
   `Container size="lg" py="md"`, so a page controls its own measure. A shell-level
   padding plus a page-level container produces two nested gutters and a
   content column nobody intended.
-- **No `aside`.** The admin area has no three-pane workspace; that geometry and
-  the two resize behaviours belong to `/sessions/:id` only.
+- **No `aside`.** The admin area has no three-column workspace; that geometry
+  belongs to `/sessions/:id` only (`workspace-shell.md`).
+
+**`AppShell` now lives here and only here — a deliberate asymmetry, not drift.**
+The app entry's workspace moved to a **hand-written CSS grid**
+(`workspace-shell.md`), so the two entries no longer share a shell, and
+`frontend-structure.md`'s earlier claim that this entry uses "the same Mantine
+`AppShell` as the app area" was false and has been corrected there. Each side kept
+what fits it: the admin area *is* a fixed navbar plus a main region, which is what
+`AppShell` models; the workspace left because its wall is a floating overlay in
+one mode and a real grid column in the other, and the collapse rail re-points a
+single custom property — neither survives `AppShell`'s navbar/main/aside
+computation. Recorded so nobody harmonises the two entries in either direction.
 
 **Header.** On mobile, a `Burger` bound to the shell state; then a
 `Title order={4}`. On the right, a **real `<a href="/">`** back-to-app link and a
@@ -430,12 +464,29 @@ per-row **Create**, **Sync** and **Seed** actions. FEAT-005 asks for three
 things: per-table drift reporting (UC-014), creating missing tables (UC-015), and
 rebuilding the vector index (UC-016).
 
-`_TBD: Sync and Seed exist in the inherited pattern and are required by no use
-case. RPHelper has no seed data in docs/product/ at all, and per-column Sync is a
-DDL migration path that UC-015 does not ask for (it asks that missing tables be
-created). Whether to carry either across is FEAT-005's planner's call, not the
-architect's; they are recorded here as available prior art and deliberately NOT
-written up as requirements._`
+**`Sync` is authorized.** It is no longer an inherited action looking for a
+justification: it is **the mechanism by which RPHelper's schema changes shape at
+all** (`backend-structure.md`'s Schema evolution section, `data-model.md`). The
+registry in `db/schema.py` is the source of truth, there is no migration history
+and no automatic upgrade at startup, so the only path from a drifted table to a
+correct one is an administrator reading this page and pressing `Sync` on that
+row. `Create` is its sibling and is exactly UC-015's "creating missing tables";
+`Sync` covers the case UC-015 does not name — an existing table whose shape
+moved. The human-in-the-loop gate is the point, not an accident of the inherited
+design: a DDL rebuild of a table holding the roleplayer's own material is not
+something to run silently at boot.
+
+Both are per-row actions, as in the inherited pattern. Their executor is
+`db/sync.py` — Alembic's batch operations, because SQLite cannot drop or retype
+a column in place, and nothing else Alembic offers.
+
+`_TBD: Seed alone remains unrequired. It exists in the inherited pattern —
+BookWriter's fourth per-row status is seed-missing — and RPHelper has no seed
+data in docs/product/ at all, so there is nothing for the action to insert. It is
+recorded here as available prior art and deliberately NOT written up as a
+requirement; inventing a use for it is not the architect's call. The report's
+status set is correspondingly three values, not BookWriter's four, unless
+FEAT-005's plan finds a seed to need._`
 
 **Export/import here is the whole-database granularity only.** FEAT-018's
 per-user, per-character and per-session exports are **roleplayer-side** (ACT-002,

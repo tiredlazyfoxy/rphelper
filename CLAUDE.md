@@ -35,6 +35,7 @@ Every downstream agent reads its commands from this section and nowhere else.
 | Store | SQLite — one file for relational rows **and** vectors |
 | Vectors | `sqlite-vec` (`vec0` virtual tables, exact brute-force KNN) |
 | Full text | SQLite FTS5 (BM25), fused with vectors by reciprocal-rank fusion |
+| Schema DDL | Alembic **batch operations only** — the executor behind the admin drift page's `Sync`/`Create`. Not a migration framework: no `versions/`, no version table, no startup upgrade; `db/schema.py` is the source of truth |
 | Frontend | React 19 + TypeScript + Vite, **multi-entry** build (4 entries) |
 | Components | Mantine 7 (`@mantine/core`, `/form`, `/hooks`, `/tiptap`) |
 | State | MobX 6 + `mobx-react-lite`; `react-router-dom` 7 |
@@ -44,8 +45,10 @@ Every downstream agent reads its commands from this section and nowhere else.
 | Auth | HttpOnly `SameSite=Lax` cookie session |
 | Prod runtime | one container: nginx + uvicorn under `supervisord` |
 
-No Tailwind, no CSS modules, no styled-components — one small hand-written
-`global.css` for resets, everything else Mantine.
+No Tailwind, no CSS modules, no styled-components — two small hand-written
+stylesheets and no more: `global.css` for resets, `shell.css` for the `app`
+workspace's layout (grid, `--navw` rail, the 820px threshold); everything else
+Mantine.
 
 ## Repo layout
 
@@ -93,11 +96,14 @@ frontend never receives a backend base URL; it always calls same-origin
 ## Where to look
 
 - **Requirements** — `docs/product/`. `vision.md`, `actors.md` (ACT-001..004),
-  `features.md` (FEAT-001..019 plus the dependency graph),
-  `use-cases/FEAT-*.md` (UC-001..068), `stories/FEAT-*.md` (US-001..087).
+  `features.md` (FEAT blocks plus the dependency graph),
+  `use-cases/FEAT-*.md`, `stories/FEAT-*.md` (with `US-###.AC-#` criteria).
+  **`docs/product/quick-reference.md` is the id registry** — the sole canonical
+  list of every id. Verify an id there, never against a range quoted elsewhere.
+  Current as of this writing: FEAT-001..020, UC-001..084, US-001..131.
   Requirements are cited by id, never restated elsewhere.
 - **Design** — `docs/architecture/`. Start at
-  `docs/architecture/quick-reference.md`; it indexes the other nine docs.
+  `docs/architecture/quick-reference.md`; it indexes the other eleven docs.
 - **The work** — `docs/plans/`. `docs/plans/CLAUDE.md` is the pipeline contract
   every planning and coding agent binds to.
 

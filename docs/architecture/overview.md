@@ -46,7 +46,9 @@ component we build or deploy**. It is the remote model plus the system prompt,
 the assembled context, and the three-tool loop defined in
 `llm-and-streaming.md`. It has no state of its own and no path to the database
 except through the tool implementations, which is what makes FEAT-019's
-isolation enforceable — see `domain-rules.md`.
+isolation enforceable — see `domain-rules.md`. It also has no path into the
+*record*: it writes only into a session's current zone, and only the roleplayer's
+settle files anything (R11).
 
 ## Actor → surface map
 
@@ -59,7 +61,7 @@ frontend is a multi-entry build rather than one bundle (`frontend-structure.md`)
 | ACT-001 / ACT-002 (unauthenticated) | Login | `login` | `/login` | Always, once configured |
 | ACT-001 administrator | Admin | `admin` | `/admin` | Authenticated, admin role |
 | ACT-002 roleplayer | App | `app` | `/` | Authenticated |
-| ACT-004 assistant | — | none | — | Inside a discussion only |
+| ACT-004 assistant | — | none | — | Inside a session's **current zone** only (R11) |
 
 Two consequences are load-bearing:
 
@@ -98,6 +100,10 @@ administrative data only, and no count derived from user content
 **Roles are a two-rung ladder, `{roleplayer: 0, admin: 1}`** (`domain-rules.md`),
 enforced by a `require_role(min_role)` dependency on every admin route
 (`backend-structure.md`). The frontend gate is UX only.
+
+How ACT-001 *reaches* this surface — a user-menu item shown only to an
+administrator, navigating cross-entry to `/admin` (UC-071, US-093) — is recorded
+in `admin-surfaces.md`, which owns the entry in full.
 
 ## Topology
 
@@ -144,26 +150,41 @@ surfaces with genuinely disjoint code exist (table above). Vite because
 multi-entry via `build.rollupOptions.input` is a first-class feature, and its dev
 proxy gives the single-origin story for free.
 
-**Mantine 7 as the component library.** The product needs a three-pane
-application shell, a markdown editor with live preview (UC-043), forms, tables,
-modals and a large set of icon actions. Mantine ships `AppShell`, `Table`,
-`Modal` and `@mantine/tiptap` as one coherent set, so none of that is hand-built.
+**Mantine 7 as the component library.** The product needs a markdown editor with
+live preview (UC-043), forms, tables, modals and a large set of icon actions.
+Mantine ships `Table`, `Modal` and `@mantine/tiptap` as one coherent set, so none
+of that is hand-built. **`AppShell` is used by the `admin` entry and nowhere
+else**: the `app` entry's workspace is a hand-written CSS grid, because a note
+wall that is a floating overlay in one mode and a real column in the other cannot
+be expressed through `AppShell`'s navbar/main/aside model (`workspace-shell.md`,
+`admin-surfaces.md`). That asymmetry is deliberate and does not weaken the choice
+of Mantine — the shell was one reason among several, not the reason.
 Two of its packages are deliberately *not* used: **`@mantine/form`**, because forms
 go through the MobX draft convention in `ui-conventions.md`, and
 **`@mantine/notifications`**, because there is no toast system. No
-Tailwind, no CSS modules, no styled-components — one small hand-written
-`global.css` for resets only. Reason: a single styling authority. Mixing Mantine's
+Tailwind, no CSS modules, no styled-components — two small hand-written
+stylesheets and no more: `global.css` for resets, and `shell.css` for the
+workspace's layout rules alone (`frontend-structure.md`,
+`workspace-shell.md`). Reason: a single styling authority. Mixing Mantine's
 theme with a utility framework produces two sources of truth for spacing and
-colour, and the resize behaviours in `ui-conventions.md` depend on knowing
-exactly who owns a width.
+colour, and the workspace's geometry is a set of fixed constants owned in exactly
+one place (`workspace-shell.md`).
 
-**MobX 6 + `mobx-react-lite`.** The hot paths are a streaming transcript and a
-per-keystroke answer box. MobX's fine-grained observation lets the aside width be
-driven by an `autorun` into a CSS custom property with **zero component
-re-renders** (`ui-conventions.md` (A)) — a thing that is awkward to express in a
-reducer-based store. Per-page store classes are instantiated and passed as props
-explicitly; there is no React context, so a store's lifetime is visibly the
-page's lifetime.
+**MobX 6 + `mobx-react-lite`.** The hot path is a streaming transcript: a reply
+arrives as many small `token` frames (`llm-and-streaming.md`), each appended to an
+observable message in the current zone, so only the component observing that
+message re-renders and the tree, the wall and the settled record are untouched.
+Two further grounds: per-page store classes instantiated and passed as props
+explicitly — there is no React context, so a store's lifetime is visibly the
+page's lifetime — and blur-save round trips that write one field of one observable
+and re-read one row (`frontend-structure.md`, `workspace-shell.md`).
+
+**No benchmark is claimed, and the one measurement-shaped argument this decision
+used to carry is gone with its subject** — it cited a per-keystroke answer box and
+an aside width driven into a CSS custom property by one `autorun`. The product has
+**no answer box** and nothing in the workspace resizes (`workspace-shell.md`'s
+reversal record); `frontend-structure.md` re-argued MobX on the three grounds
+above and invented no replacement measurement. Neither does this line.
 
 **`react-router-dom` 7** inside each entry, for in-entry navigation only.
 Cross-entry navigation is a plain document navigation, because the entries are
@@ -184,16 +205,45 @@ benefit. One file also makes FEAT-018's export a file-level or
 logical-dump problem rather than a distributed-consistency problem, and makes
 FEAT-005's drift report answerable from `PRAGMA` introspection.
 
+**Alembic, for batch DDL only — not as the schema's source of truth.** The
+unusual part is worth stating plainly, because the library's name carries an
+assumption with it: RPHelper has **no migration history, no `versions/`
+directory, no version table and no automatic upgrade at startup.** The
+table-definition registry in `db/schema.py` is the source of truth, and the
+administrator applies shape changes from the drift page's per-row `Create` and
+`Sync` actions (`admin-surfaces.md`), which is a deliberate human-in-the-loop
+gate over a table holding the roleplayer's own material. Alembic is present for
+exactly one capability: SQLite cannot drop or retype a column in place, so a
+`Sync` needs the create-copy-drop-rename table rebuild, and Alembic's **batch
+operations** are the well-tested implementation of it. Adopted as an executor,
+not as a framework. The decision follows the sibling project BookWriter's "DB
+shape check" page, which works the same way. Full statement in
+`backend-structure.md`. **Flip condition:** if the registry ever stops being able
+to express a structure the product needs, or if an **unattended** upgrade becomes
+a requirement — an instance nobody logs into as an administrator before it is
+used — the migration-files trade gets re-opened, because both cases want an
+ordered, replayable change history that a registry plus a button does not
+provide.
+
 **`sqlite-vec` for vectors, not LanceDB.** A deliberate divergence from
 BookWriter, the sibling project these conventions are inherited from. RPHelper's
 retrieval is *relational-with-vector-ordering*, not pure vector search:
 `memo_search` joins vectors against a four-level memo chain filtered by
-`state = 'searchable'` (FEAT-014/UC-052), and `session_search` filters by owner
-and character (FEAT-015/UC-054). With a separate vector store, those filter
-columns must be denormalized into the vector store and kept in sync — and
-FEAT-012/UC-044 lets a memo's state change at any time, so every toggle becomes a
-second-store write and a standing source of drift, in a product that has an
-entire feature (FEAT-005) about detecting drift. `sqlite-vec` keeps vector writes
+`is_enabled AND NOT is_forced` (R3, FEAT-014/UC-052), and `session_search` filters
+by owner and character (FEAT-015/UC-054). With a separate vector store, those
+filter columns must be denormalized into the vector store and kept in sync — and
+both flags are togglable at any time, from the note wall as readily as from
+anywhere else (FEAT-012/UC-044, UC-075), so every toggle becomes a second-store
+write and a standing source of drift, in a product that has an
+entire feature (FEAT-005) about detecting drift.
+
+**The schema change strengthened this argument rather than weakening it.** The
+single `memos.state` column of `forced` / `searchable` / `disabled` became the two
+booleans `is_enabled` and `is_forced` (R3, `data-model.md`) — still relational,
+still in the same database, and a toggle is still **one row updated in one
+transaction with no vector work at all** (`search-and-retrieval.md`'s embedding
+lifecycle). Where a split store owed one denormalized column per toggle, it now
+owes two. `sqlite-vec` keeps vector writes
 in the **same transaction** as relational writes, gives real SQL joins, and keeps
 FEAT-018's four export granularities and FEAT-005's rebuild a one-store problem.
 Its brute-force KNN is **exact**, so there is no recall tuning, and the relational
@@ -210,6 +260,37 @@ exact phrases that embeddings blur, and lexical-only search misses the
 "same person or situation" semantics FEAT-015 promises. Both, fused, is cheap
 when both indexes live in the same file.
 
+**Snowflake ids, minted in application code before the INSERT.** Every primary key
+is a 64-bit snowflake, not an `AUTOINCREMENT` rowid. Two product reasons, neither
+of them a preference: settle stamps the head row's own id onto
+`messages.related_to` for every row it buries, **inside one transaction** (R11), so
+the id has to exist before the row is durable; and FEAT-018's import wants ids that
+mean the same thing on two instances, which turns identity-on-import from a
+wholesale re-mapping problem into a collision check (UC-061..UC-064). A snowflake
+is also k-sortable, so `ORDER BY id` *is* the stream order and the schema carries
+no `position` column. The mechanism — bit layout, the fixed epoch, the node-id
+rule, the backwards-clock refusal, the cross-instance qualifier — is in
+`data-model.md`'s Identifiers section and is not restated here.
+
+The cost is one rule that has to hold at every boundary: **an id is an `int` in
+SQLite and Python and a decimal string in every JSON payload and every SSE
+frame**, because a snowflake passes JavaScript's `Number.MAX_SAFE_INTEGER` about
+25 days after the epoch, and an id that reaches JS as a `number` rounds silently —
+possibly onto another row's id (`backend-structure.md`'s JSON id boundary,
+`frontend-structure.md`'s "ids are strings"). Accepted as the price of the two
+reasons above; it fails silently and late, which is why three docs state it.
+
+**Flip condition, recorded because the whole scheme rests on one assumption.** The
+41/10/12 layout **and** the JSON string boundary both assume **exactly one
+generator process per node id**. Today that is a deployment guarantee — one
+container, one uvicorn, the node id from config (`deployment.md`,
+`backend-structure.md`) — not an accident of how it happens to be started. If
+RPHelper ever runs more than one generator process — **a second uvicorn worker, or
+a second instance that syncs rather than imports** — both need re-examining before
+that change ships: a second worker left on the same node id mints a duplicate the
+first time two inserts land in the same millisecond, and a syncing pair has no
+import step at which a collision check could run.
+
 **HttpOnly `SameSite=Lax` cookie session (FEAT-002).** Single origin in both
 topologies means no CORS configuration and no token plumbing in the SPA; HttpOnly
 keeps the session out of reach of any script. This was the decisive reason the
@@ -218,9 +299,10 @@ cookie automatically, so the entries need share no auth code.
 
 **SSE for streaming, consumed with `fetch()` + `body.getReader()` +
 `TextDecoder`, splitting frames on `"\n\n"` — not native `EventSource`.** The
-reason is concrete: sending a discussion message is a **POST with a JSON body**,
-and `EventSource` can only issue a GET. Rewriting the request as a GET with a
-query string to satisfy the browser API would put discussion text in a URL. SSE
+reason is concrete: composing in the current zone is a **POST with a JSON body**
+(`POST /api/sessions/{id}/zone/compose`, `backend-structure.md`), and
+`EventSource` can only issue a GET. Rewriting the request as a GET with a query
+string to satisfy the browser API would put the roleplayer's text in a URL. SSE
 itself (over WebSockets) because the stream is one-directional
 server→client, and it survives the nginx hop with two directives rather than an
 upgrade dance.
@@ -249,22 +331,30 @@ real use to need lexical recall.
 
 **2. Persistence access is SQLAlchemy Core, not the ORM.**
 (`backend-structure.md`.) Three reasons: (a) **explicit transaction scoping**,
-which the R-rules require — a memo and its embedding commit together, and a
-disable flips the flag and revokes `auth_sessions` together; (b) a **`text()`
+which the R-rules require — a memo and its embedding commit together, a disable
+flips the flag and revokes `auth_sessions` together, and settle's two UPDATEs plus
+its `session_vec` refresh commit together or not at all (R11); (b) a **`text()`
 escape hatch** for `vec0 MATCH` and FTS5 `MATCH`/`bm25()`, which no ORM
 expression language covers; (c) declarative models would fight FEAT-005/UC-014's
 need for **`PRAGMA`-based introspection against a single schema registry** —
-`db/schema.py` stays the introspectable source of truth. Schema *evolution*
-(migration files versus registry-only create-if-missing) is deliberately still
-open there.
+`db/schema.py` stays the introspectable source of truth. Schema *evolution* was
+left open here in the first pass and is now settled — the registry stays the
+truth and the administrator applies shape changes with Alembic batch DDL; see
+the Alembic entry in the stack list above.
 
-**3. My-search shows `disabled` memos.**
-(`search-and-retrieval.md`, cross-referenced from R3.) R3 constrains **the
-assistant's** reach, not the owner's own UI — and re-enabling a memo (UC-044)
-requires being able to find it first, so hiding it would make it unreachable. The
-absolute exclusion still holds for `memo_search`, `session_search` and context
-assembly. **This is a requirements gap resolved at the architecture layer:
-`/product-spec` should ratify it into FEAT-017's acceptance criteria.**
+**3. My-search shows disabled notes.**
+(`search-and-retrieval.md`, cross-referenced from R3.) My-search applies **no
+`is_enabled` / `is_forced` predicate at all** — only the owner predicate. Stated
+as a predicate rather than as a state, because the single `state` column this
+decision was first written against is gone: reach is two booleans now (R3,
+`data-model.md`), and "shows disabled memos" became "applies neither flag". The
+reasoning is unchanged. R3 constrains **the assistant's** reach, not the owner's
+own UI — and re-enabling a note (UC-044) requires being able to find it first, so
+hiding it would make it unreachable. A disabled hit is visibly marked as disabled
+in the result list. The absolute exclusion still holds for `memo_search`,
+`session_search` and context assembly. **This is a requirements gap resolved at
+the architecture layer: `/product-spec` should ratify it into FEAT-017's
+acceptance criteria.**
 
 **4. Destructive admin actions get a confirm step.**
 (`ui-conventions.md`.) A **deliberate addition** — the sibling project has no
@@ -286,9 +376,11 @@ server" with "what can it run". The **backend probe primitive is reused** — on
 implementation — but exposed as its own route with its own **typed** result, so the
 UI can report a bad base URL without opening a model picker.
 
-## Deliberately deferred
+## Deliberately deferred, and known gaps
 
-Stated here so no reader mistakes an absence for an oversight.
+Stated here so no reader mistakes an absence for an oversight. The first four are
+deferrals the architecture chose; the last is a product gap the architecture
+deliberately does **not** close.
 
 - **FEAT-018's four export granularities in full detail.** The contract is
   *sketched* in `data-model.md` — envelope shape, granularity boundaries, the
@@ -307,6 +399,16 @@ Stated here so no reader mistakes an absence for an oversight.
   anywhere. `_TBD: if the instance is ever reachable beyond a trusted LAN, TLS
   termination and cookie `Secure` flags must be designed; neither is specified
   today._` See `deployment.md`.
+- **Abandoning a current zone without settling — a known product gap, recorded as
+  a gap and not as a design decision.** `docs/product/` states it twice, on
+  FEAT-010 (challenge C22) and on UC-083 itself: nothing says how a roleplayer
+  walks away from what is in the zone without settling it. The architecture invents
+  no answer — `backend-structure.md`'s stream route table carries append, compose,
+  settle, re-open and a per-message edit and **no discard operation**, so the
+  omission stays visible to whoever plans FEAT-010. `_TBD: carried forward from
+  docs/product/ (features.md FEAT-010 challenge C22, use-cases/FEAT-010 UC-083).
+  Until it is resolved, no route removes a message from the zone and settle (R11)
+  is the only way the zone empties. Resolving it is a product decision._`
 
 ## Non-functional posture
 
@@ -316,11 +418,11 @@ satisfy:
 
 | Stated requirement | Where the design satisfies it |
 |---|---|
-| S2 — a reply takes minutes, not tens of minutes (`vision.md`) | Streaming candidates (SSE) so first tokens appear immediately; cached translations (UC-041); zero re-typing of context (S1) via the memo chain |
+| S2 — a reply takes minutes, not tens of minutes (`vision.md`) | A candidate streams into the current zone over SSE (UC-034) so first tokens appear immediately; cached translations (UC-041); no re-explaining of context on every reply (S1) via the memo chain (R2) |
 | No cross-user visibility of any kind, including for the admin | `domain-rules.md` isolation rules; separate admin entry; the forbidden reverse lookup |
 | An enormous paste warns but is never refused (US-035.AC-2) | `client_max_body_size` set generously (`deployment.md`); the warning is a client-side context-cost notice, never a server rejection |
-| Nothing the roleplayer typed is lost when the LLM fails (UC-032) | Roleplayer text is persisted before any model call (`llm-and-streaming.md`) |
-| Archived material is never destroyed (UC-019/UC-068/UC-025) | `archived_at` column, never a delete (`data-model.md`) |
+| Nothing the roleplayer typed is lost when the LLM fails (UC-032) | Roleplayer text is persisted before any model call (R10, `llm-and-streaming.md`) |
+| Archived material is never destroyed (UC-067/UC-068/UC-025) | `archived_at` column, never a delete (R6, `data-model.md`) |
 
 `_TBD: no concurrency target exists. The design assumes one active roleplayer at
 a time per instance, which SQLite's single-writer model suits; nothing in

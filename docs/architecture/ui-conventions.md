@@ -1,263 +1,18 @@
 # UI conventions
 
 **Realizes:** FEAT-006, FEAT-007, FEAT-008, FEAT-009, FEAT-010, FEAT-011,
-FEAT-012, FEAT-013, FEAT-017, FEAT-018, UC-030, UC-035, UC-043
+FEAT-012, FEAT-013, FEAT-017, FEAT-018, FEAT-020, UC-030, UC-035, UC-037,
+UC-043, UC-069, UC-070, UC-071, UC-072, UC-075, UC-082
 
-This is a **contract**, not folklore. The geometry constants, the event-handling
-choices and the performance strategies below were arrived at against real
-browser and jsdom behaviour in the sibling project these conventions are
-inherited from; each one that looks arbitrary has a reason recorded next to it.
-A plan that "simplifies" one of these is changing behaviour, not style.
+**The workspace shell lives in `workspace-shell.md`** — the three columns, all
+geometry, the note wall's two modes, layout persistence, and the anatomy of the
+stream and the current zone. This file holds everything that is not the shell:
+icons, tables, modals, forms, feedback and page state.
 
----
-
-## Layout shell
-
-Mantine `AppShell` with three regions: `navbar` (left), `Main` (center), `Aside`
-(right). The aside is **hidden below the `md` breakpoint**.
-
-RPHelper's mapping:
-
-```
-┌────────┬───────────────────────────┬──────────────────────────────┐
-│ navbar │ main: session entry list  │ aside: compose discussion    │
-│        │       (FEAT-009)          │        + answer box          │
-│        │                           │        (FEAT-010)            │
-└────────┴───────────────────────────┴──────────────────────────────┘
-          ▲                          ▲
-          │                    horizontal splitter (A)
-      navigation                     │
-                                vertical splitter (B) sits inside
-                                the aside, between transcript and
-                                answer box
-```
-
-The mapping is not incidental. FEAT-009's entry list is the roleplay's record and
-FEAT-010's discussion is the workspace that produces the next item in it; both are
-visible at once because the roleplayer works from the partner's text while
-composing. Below `md` there is no room for both, so the aside hides and the
-discussion becomes a full-width view.
-
----
-
-## Two independent, hand-rolled resize behaviours
-
-No resize library. **All geometry and persistence live in one pure, DOM-free
-module** — the equivalent of the sibling project's `workspaceLayout.ts`. Its
-functions take numbers and return numbers; they touch no `document`, no `window`
-and no React. The reason is testability: every clamp, every edge case and every
-persistence fallback below is unit-testable with no DOM at all, which is exactly
-what the pipeline's test-coder needs (`docs/plans/CLAUDE.md` — tests written from
-the spec, bound to frozen signatures).
-
-The two behaviours are deliberately **not** unified. They differ in anchoring, in
-geometry model, and in performance strategy, and each difference has a reason
-recorded below. A shared abstraction would have to be parameterised on all three
-and would obscure every one of them.
-
-### (A) Aside width — horizontal splitter, right-anchored
-
-**The handle.** A `Box role="separator"` absolutely positioned over the aside's
-leading edge:
-
-| Property | Value | Why |
-|---|---|---|
-| `width` | `6px` | wide enough to grab, narrow enough not to eat the aside's content |
-| `cursor` | `col-resize` | |
-| `touchAction` | `"none"` | otherwise the browser claims the gesture as a scroll and the pointer events stop arriving |
-
-**Event handling.** `onPointerDown` calls `preventDefault()` **first**, then begins
-the resize. The handlers attach `pointermove` / `pointerup` / `pointercancel` to
-**`window`, deliberately NOT `setPointerCapture`**. Two reasons, both concrete:
-
-- jsdom does not implement `setPointerCapture`, so a captured implementation is
-  untestable without a browser.
-- Window listeners keep tracking once the pointer has left the 6px handle — which
-  it does immediately on any real drag.
-
-`pointercancel` is handled alongside `pointerup` so a cancelled gesture ends the
-drag and restores the body styles rather than leaving the page in a resizing
-state.
-
-**Geometry — right-anchored.** The aside is anchored to the right edge, so width
-is measured from the right:
-
-```
-fraction = (viewportWidth - clientX) / viewportWidth
-```
-
-clamped to the range below. If `viewportWidth` is **non-finite or `<= 0`**, the
-function returns the default rather than producing `Infinity` or a negative
-width. That guard is not theoretical — a zero-size viewport is the normal state
-in a headless test environment.
-
-**Constants.**
-
-| Constant | Value |
-|---|---|
-| default | `0.35` |
-| min | `0.15` |
-| max | `0.60` |
-| keyboard step | `0.02` |
-
-Expressed in **`vw` units**, so a window resize needs no listener at all — the
-browser re-evaluates the unit. Values are **rounded to 2 decimals** to avoid
-float noise accumulating in the persisted record and in the CSS string.
-
-**No collapse-to-zero.** The minimum is `0.15`, and there is no separate collapse
-state for the aside. The discussion is the working surface; a resize gesture must
-not be able to make it disappear.
-
-**Keyboard.** The separator is focusable. `ArrowLeft` **widens** the aside,
-`ArrowRight` **narrows** it — because the aside is right-anchored, so moving the
-boundary left makes it bigger. Stated explicitly because the mapping reads
-backwards until you remember the anchor.
-
-**Performance — CSS custom property driven by a single `autorun`.** The live width
-is pushed to a CSS custom property by one MobX `autorun`:
-
-```ts
-autorun(() => {
-  document.documentElement.style.setProperty("--rph-aside-width", `${state.asideWidthVw}vw`);
-});
-```
-
-so **a pointer-move never re-renders the shell**. The aside's `width` prop is a
-**frozen constant string computed once**:
-
-```ts
-const ASIDE_WIDTH = `calc(var(--rph-aside-width, 35vw))`;
-```
-
-**Gotcha, recorded because it will otherwise be "cleaned up":** the `calc(...)`
-wrapper is **load-bearing**. Mantine's `rem()` processes the `width` prop, and it
-mangles comma-bearing strings — a bare `var(--rph-aside-width, 35vw)` does not
-survive it, while the same expression inside `calc(...)` does. Do not remove the
-`calc`. Do not inline the fallback differently. Do not pass the raw `var()`.
-
-**`AppShell` `transitionDuration` must be `0` while resizing.** Mantine animates
-the shell's padding; with a non-zero duration the panel rubber-bands behind the
-pointer for the whole drag. Set it to `0` on drag start and restore it on drag
-end.
-
-**Body styles for the drag duration.** `document.body` gets
-`userSelect: "none"` and `cursor: "col-resize"`, both restored when the drag
-ends (including on `pointercancel`). Without `userSelect: none` the drag selects
-the transcript text it passes over.
-
-### (B) Answer-box height — vertical splitter
-
-**The handle.** An **ordinary flow child**, not absolutely positioned, sitting
-between the discussion transcript and the answer box:
-
-| Property | Value | Why |
-|---|---|---|
-| `height` | `12px` | a comfortable hit target for a horizontal grab |
-| `marginBlock` | `-3px` | reclaims layout footprint from the surrounding stack gap, so a 12px hit target does not add 12px of visual space |
-| inner line | 2px, `pointer-events: none` | the visible affordance must not intercept the gesture aimed at the 12px target |
-| `cursor` | `row-resize` | |
-| `touchAction` | `"none"` | same reason as (A) |
-
-A flow child rather than an absolute overlay because the answer box's height is
-part of the aside's vertical stack; an absolutely positioned handle would have to
-track a position that the stack already computes.
-
-**Geometry — delta-based, not absolute.**
-
-```
-height = clamp(startHeight + (startY - clientY))
-```
-
-Dragging **up grows** the box. Delta-based rather than absolute because the
-handle's own position moves as the box grows; an absolute
-`viewportHeight - clientY` model makes the box drift relative to the pointer
-whenever the surrounding layout is not flush against the viewport bottom.
-
-**Constants.**
-
-| Constant | Value | Why |
-|---|---|---|
-| min | `64px` | about two lines — the box must always be usable |
-| default | `96px` | about three lines |
-| max | `0.5 × viewportHeight` | the transcript can never be squeezed out |
-| keyboard step | `24px` | about one line |
-
-**Clamp rule — the lower bound wins.** When the upper bound
-(`0.5 × viewportHeight`) would fall **below** the lower bound (`64px`), the clamp
-must return the lower bound. This is the short-screen edge case: on a very short
-viewport, half the height is less than two lines, and the correct answer is a
-usable box rather than an unusably small one. A naive
-`Math.min(Math.max(v, min), max)` gets this wrong and returns `max`. State and
-test it.
-
-**No collapse-to-zero.**
-
-**Keyboard.** `ArrowUp` grows the box, `ArrowDown` shrinks it.
-
-**Performance — a plain MobX observable, NOT a CSS custom property.** This is
-**deliberately different from (A)**, and the reasoning is the point, not the
-mechanism: the answer box already re-renders on every keystroke, because it is a
-controlled textarea holding the roleplayer's text. A per-pointermove re-render of
-that same subtree therefore costs no more than ordinary typing does. Paying the
-extra complexity of a CSS-variable channel would buy nothing here, while in (A) it
-buys avoiding a re-render of the **entire shell** — a much larger tree that is
-otherwise idle. Two different answers because the two subtrees have different
-baseline render costs, recorded so neither is "made consistent" with the other.
-
-### (C) The answer textarea deliberately does NOT auto-grow
-
-Fixed height, driven entirely by (B):
-
-- `resize: "none"`
-- **no** `autosize`
-- **no** `minRows` / `maxRows`
-- it **scrolls internally** past its height
-
-`resize: "none"` is **not cosmetic.** A fixed-height textarea keeps the browser's
-native bottom-right resize grip unless it is disabled — and that grip would sit
-directly under the Send icon, and would compete with the (B) handle for the same
-gesture. Two resize affordances on one element, one of them native and
-unstyleable, is a worse experience than one explicit handle. Stated here so it is
-not "fixed" later by re-enabling autosize or the native grip.
-
-The roleplayer controls the box's height explicitly through (B); auto-growth would
-fight that control on every keystroke.
-
----
-
-## Layout persistence
-
-**One** localStorage record under the key **`rphelper.workspace-layout`**.
-
-The key is **renamed** from the sibling project's and **must not be copied
-verbatim** — two applications sharing a localStorage key on the same host would
-read each other's geometry, and these two projects are explicitly designed to run
-side by side (`deployment.md`'s port table).
-
-Shape:
-
-```ts
-type WorkspaceLayout = {
-  navCollapsed: boolean;
-  asideWidth: number;       // vw fraction, 2 decimals
-  answerBoxHeight: number;  // px
-};
-```
-
-**Read is total and never throws.** Absent key, unparseable JSON, wrong types,
-missing fields, out-of-range numbers — every case falls back **per field** to that
-field's default, and every numeric field is **clamped on read** using the same
-clamps as (A) and (B). A stored record from an older version, or from a much larger
-monitor, therefore produces a usable layout rather than a broken one. The function
-returns a complete record; there is no partial result and no `null`.
-
-**Write is best-effort.** Wrapped in `try`/`catch` and **swallowed** — private
-browsing modes and quota exhaustion both throw, and neither is a reason to
-interrupt a resize. A write merges its patch over a **fresh total read**, so two
-independently-persisted fields cannot clobber each other.
-
-**Written once on pointer-up, never mid-drag.** A localStorage write per
-pointermove is both wasteful and a jank source.
+This is a **contract**, not folklore. The conventions below were arrived at in the
+sibling project these are inherited from, or designed here against a stated
+requirement; each one that looks arbitrary has a reason recorded next to it. A plan
+that "simplifies" one of these is changing behaviour, not style.
 
 ---
 
@@ -284,7 +39,7 @@ serves as the accessible name.
 
 **This is a deliberate deviation from the sibling project.** BookWriter has no
 shared component: every call site repeats the `Tooltip`, the `ActionIcon`, the
-`size`, the `stroke` and the `aria-label` inline. RPHelper has roughly **15
+`size`, the `stroke` and the `aria-label` inline. RPHelper has roughly **30
 distinct icon actions** (table below), several of them appearing in more than one
 place, so the abstraction pays for itself immediately — and, more importantly, an
 accessible name that is repeated at 20 call sites is an accessible name that is
@@ -322,46 +77,97 @@ there is no accessible-name problem for `IconButton` to solve, and a row of four
 icon buttons is both a discoverability problem and the thing that makes a row
 layout collapse on a narrow viewport.
 
+The stream is a third case and is governed by `workspace-shell.md`: an entry's
+actions sit inside the entry as `IconButton`s, because an entry is a document, not
+a row, and the overflow-menu rule exists to keep a *row* from collapsing.
+
 ### Icon table
 
 | Action | Icon | Feature |
 |---|---|---|
-| Send message in discussion | `IconSend` | FEAT-010 |
+| Send message in discussion | **labelled button**, not an icon | FEAT-010 |
 | Stop generation | `IconPlayerStop` | FEAT-010 |
-| Settle answer | `IconMessageCheck` | FEAT-010 |
-| **Copy settled answer out** | `IconCopy` | FEAT-009 |
+| Settle | **labelled primary button**, not an icon | FEAT-010 |
+| **Copy settled turn out** | `IconCopy` | FEAT-009 |
+| Copy as plain text (composer) | `IconCopy` | FEAT-009 |
 | Translate / flicker | `IconLanguage` | FEAT-011 |
 | New session / character / setup | `IconPlus` | FEAT-006 / FEAT-007 / FEAT-008 |
 | Archive / restore | `IconArchive` / `IconArchiveOff` | FEAT-006 / FEAT-007 / FEAT-008 |
-| Session configuration | `IconAdjustmentsHorizontal` | FEAT-013 |
+| Session configuration | `IconSettings` | FEAT-013 |
 | My search | `IconSearch` | FEAT-017 |
-| Memos | `IconNotes` | FEAT-012 |
-| Edit entry | `IconEdit` | FEAT-009 |
+| Memos / the note wall | `_TBD:` — see the note below | FEAT-012 / FEAT-020 |
+| Edit entry, message or note | `IconEdit` | FEAT-009 / FEAT-010 / FEAT-012 |
 | Save | `IconDeviceFloppy` | FEAT-012 |
-| Collapse / expand | `IconChevronDown` / `IconChevronRight` | FEAT-010 |
-| Re-open discussion | `IconArrowBackUp` | FEAT-010 |
+| Collapse / expand (chevron) | `IconChevronDown`, rotated | FEAT-010 / FEAT-020 |
+| Re-open a settled block | `IconArrowBackUp` | FEAT-010 |
 | Overflow menu | `IconDots` | — |
 | Export / import | `IconDownload` / `IconUpload` | FEAT-018 |
 | Admin nav — Users | `IconUsers` | FEAT-003 |
 | Admin nav — LLM Servers | `IconServer2` | FEAT-004 |
 | Admin nav — Database | `IconDatabase` | FEAT-005 |
 
+Workspace additions (FEAT-020 and its neighbours). The mockup they come from draws
+**inline SVG rather than importing Tabler components**, so it settles the glyph and
+its meaning, not the import name. A Tabler name appears below only where the drawn
+glyph maps onto one unambiguously; the rest are `_TBD:` rather than a guess.
+
+| Action | Icon | Realizes |
+|---|---|---|
+| Kind switch — *partner* / *my turn* | **two labelled segments**, no icons | US-120 |
+| Collapse the tree | `_TBD:` — glyph is a left chevron against a right-hand bar | UC-070, US-090 |
+| Expand the tree from the rail | `IconMenu2` | UC-070, US-090 |
+| Expand / collapse a character in the tree | `IconChevronDown`, rotated `-90°` when collapsed | UC-069, US-088 |
+| Open the note wall | same glyph as Memos — `_TBD:` | UC-072 |
+| Pin / unpin the wall | `IconPin`, **one icon with an active state** | UC-072, US-094 |
+| Dismiss the wall | `IconX` | UC-072 |
+| Note forced / not forced | `IconPin` — **the same glyph as the wall pin** | UC-075, US-098, US-099 |
+| Note enabled / disabled | `_TBD:` — glyphs are a circle with a bar and a circle with a slash | UC-075, US-100, US-101 |
+| Collapse / expand a tool call | `IconChevronDown`, rotated, plus a tool glyph `_TBD:` | US-114 |
+| Collapse / expand thinking | `IconChevronDown`, rotated, plus `IconBulb` | US-114 |
+| User menu — settings | `IconSettings` | UC-071, US-092 |
+| User menu — admin area | `IconShield` | UC-071, US-093 |
+| User menu — log out | `IconLogout` | UC-071, US-091 |
+
 Notes on individual choices:
 
 - **`IconCopy` has no precedent in the sibling project** — BookWriter has no copy
-  action at all. It is specified here rather than inherited, because copying the
-  settled answer out is RPHelper's **entire outbound boundary**: `vision.md` states
-  "the boundary is the clipboard", and UC-030/US-033.AC-1 is the one operation that
-  crosses it. It is not a convenience affordance; it is the last step of the
-  product's main flow, and it should be as prominent as Send.
+  action at all. It is specified here because copying the settled turn out is
+  RPHelper's **entire outbound boundary**: `vision.md` states "the boundary is the
+  clipboard", and UC-030/UC-082/US-033.AC-1 is the one operation that crosses it.
+  Not a convenience affordance — the last step of the product's main flow. It
+  yields **plain text, never markdown** (US-124), and a `kind='decision'` entry
+  offers **no copy action at all** (US-123) — absent, not disabled.
+- **Settle and Send are labelled buttons, not icons.** This **resolves** the
+  previous `_TBD:` that proposed `IconMessageCheck` for settle and noted a
+  label-bearing button might be right instead. Settle is the most consequential
+  action in the product (UC-035) and is the composer's primary button; Send is
+  secondary beside it. `IconMessageCheck` is not used anywhere.
 - **`IconArrowBackUp` for re-open** rather than an "expand" icon, because re-open
-  is an **undo for a mis-click, not a workflow** (UC-037, R7). The icon should say
-  "undo", and it should be absent — not merely disabled — once an entry follows the
-  answer, since at that point the action does not exist.
-- `_TBD: IconMessageCheck for "settle" is a proposal. Settling is the most
-  consequential action in the product (UC-035) and no icon was validated against a
-  user; a label-bearing button may be the right answer instead of an icon-only
-  one._`
+  is an **undo for a mis-click, not a workflow** (UC-037, R7). It should be absent
+  — not merely disabled — once anything sits in the current zone, since at that
+  point the action does not exist (US-128).
+- **One chevron, rotated, not two icons.** The mockup rotates a single
+  `IconChevronDown` by `-90°` rather than swapping to `IconChevronRight`: one icon
+  animates between the two states, two icons cut. This supersedes the earlier
+  `IconChevronDown` / `IconChevronRight` pair.
+- **`IconSettings` (a gear) for session configuration**, not
+  `IconAdjustmentsHorizontal` — the mockup draws the same gear for the session's
+  settings and the user menu's, and two glyphs for "settings" in one shell reads as
+  a bug.
+- **Edit is one action with one icon** across settled entries, current-zone
+  messages and notes — all three are the same in-place edit saved on focus loss
+  (US-104, US-109, US-110, US-115). The mockup's glyph is a plain pencil
+  (`IconPencil`); `IconEdit` is kept as the name because it was already this
+  project's choice and the two differ only in whether the pencil sits in a frame.
+  Substituting `IconPencil` is a glyph choice, not a behaviour change.
+- `_TBD: the wall pin and the note "forced" flag are drawn with the same pin
+  glyph — one means "keep this panel open", the other "put this note in the system
+  prompt". Two unrelated meanings on one glyph in one screen. Unresolved: neither
+  the mockup nor docs/product/ settles a second glyph._
+- `_TBD: the enabled/disabled note toggle's glyphs (a circle with a bar, a circle
+  with a slash) map onto no Tabler icon unambiguously, and whether the control is a
+  two-icon swap or one icon with a struck state is also unsettled; the mockup swaps
+  the glyph and additionally dims and strikes the note body._
 - `_TBD: IconLanguage is proposed for the translation flicker (UC-039/UC-040),
   which is a two-state toggle rather than a one-shot action. Whether the flicked
   state is shown by a filled/active button, a different icon, or a text label is
@@ -372,12 +178,18 @@ Notes on individual choices:
 ### Accessibility floor
 
 - Every icon-only control has an accessible name (via `IconButton`'s `label`).
-- Both splitters are `role="separator"`, focusable, and keyboard-operable with the
-  arrow keys and steps given in (A) and (B). A pointer-only resize would put the
-  workspace layout out of reach entirely for keyboard users.
+- **Actions revealed on hover must also be revealed on `:focus-within`.** The
+  stream's per-entry actions and the note's flag icons are hover-revealed
+  (`workspace-shell.md`); a hover-only reveal puts them out of reach of a keyboard
+  entirely.
+- **Note reordering must have a keyboard path.** `@dnd-kit`'s keyboard sensor is
+  required, not optional, because reordering changes what the system prompt
+  contains (R3, US-102) — it is a content operation wearing a drag gesture. This
+  is the same principle the deleted resize splitters were held to, and it is now
+  the only place it applies.
 - `_TBD: no wider accessibility target (WCAG level, screen-reader matrix) is
-  stated in docs/product/. The floor above is what the resize and icon contracts
-  require, not a considered accessibility posture._`
+  stated in docs/product/. The floor above is what the icon and interaction
+  contracts require, not a considered accessibility posture._`
 
 ---
 
@@ -415,7 +227,7 @@ LLM servers.
 count. docs/product/ states no cardinality bound. A deployment with a large
 number of accounts — or any future admin list over content-scale data — needs this
 revisited; the flip condition is a list that no longer fits in one screenful of
-scrolling._`
+scrolling._
 
 ### Loading, errors and empty states
 
@@ -438,6 +250,15 @@ A Mantine **`Modal`** — never a drawer, never inline row editing, never a sepa
 route. One interaction model for every create and edit in the product, so a
 reader of any page knows where the form will appear, and so a form's lifetime is
 visibly the modal's.
+
+**Two named exceptions, both in the workspace and both detailed in
+`workspace-shell.md`**: a settled entry, a current-zone message and a note are
+**edited in place** where they sit (UC-078, US-104, US-109, US-110, US-115), and
+creating a character opens a **draft page** (UC-074, US-097). Neither weakens the
+rule, which exists to give a *form* a visible lifetime and one predictable place to
+appear: the first is a single text field rendered where its content belongs, the
+second persists nothing until there is content. Every create and every multi-field
+edit is still a modal.
 
 **Modal open/target flags are component-local `useState`**, never page MobX state:
 
@@ -542,6 +363,10 @@ re-load also means the list reflects whatever the server actually did, including
 side effects the client did not predict (a disable that also revoked sessions, a
 role change the server refused).
 
+The workspace's in-place edits narrow the *scope* of the re-load to the edited row
+rather than the whole stream, and the reasoning is in `workspace-shell.md`. The
+rule's intent — what renders is what the server stored — is unchanged.
+
 ### NEW — the confirm convention
 
 **The sibling project has no confirm pattern anywhere**: every delete and every
@@ -596,7 +421,9 @@ class UsersPageState {
 }
 
 export async function loadUsers(state: UsersPageState, signal?: AbortSignal) { ... }
-export async function disableUser(state: UsersPageState, id: number, signal?: AbortSignal) { ... }
+export async function disableUser(state: UsersPageState, id: string, signal?: AbortSignal) { ... }
+//                                                            ^ string, never number
+//                                                              (frontend-structure.md, "Ids are strings")
 ```
 
 - **`makeAutoObservable` class with no methods.** Behaviour is free functions
@@ -641,5 +468,6 @@ screen:
 - **TipTap + `tiptap-markdown`** for editing and **`react-markdown`** for
   rendering — together these cover FEAT-012/UC-043's markdown editor with live
   preview.
-- **`@dnd-kit`** is available for reorder interactions; nothing currently requires
-  it (`frontend-structure.md`).
+- **`@dnd-kit`** is used for exactly one interaction: reordering notes within a
+  level on the wall (UC-076, US-102, US-103). See `workspace-shell.md`. It is not
+  available for anything else without a requirement that asks for it.
