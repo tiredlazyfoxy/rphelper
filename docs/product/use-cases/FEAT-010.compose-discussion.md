@@ -32,18 +32,18 @@
 - **Main flow:**
   1. Roleplayer asks the assistant for a candidate reply.
   2. Assistant produces a candidate in the RP language.
-  3. Candidate appears in the answer box, available to promote or edit (UC-035).
-- **Postconditions:** Candidate sits in the answer box; nothing is settled yet.
+  3. Candidate appears in the current zone, available to promote or edit (UC-035).
+- **Postconditions:** Candidate sits in the current zone; nothing is settled yet.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7, round 8.
 
-### UC-035 — Promote, write or edit into the answer box and settle
+### UC-035 — Promote, write or edit in the current zone and settle
 - **Actor:** ACT-002 (+ ACT-004)
 - **Feature:** FEAT-010
-- **Preconditions:** An answer box exists for the entry being worked on.
+- **Preconditions:** The current zone is open below the ruler for the entry being worked on.
 - **Main flow:**
-  1. Roleplayer either promotes an assistant candidate, writes their own text from scratch, or edits a candidate, in the answer box.
+  1. Roleplayer either promotes an assistant candidate, writes their own text from scratch, or edits a candidate, in the current zone.
   2. Roleplayer settles the answer.
-  3. Instance takes whatever the answer box holds at that moment as the settled answer.
+  3. Instance takes whatever the current zone holds at that moment as the settled answer.
 - **Postconditions:** The assistant never writes into the session directly — only the roleplayer's settling action commits the answer.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
 
@@ -80,4 +80,47 @@
   3. The collapsed discussion's messages are absent from what the assistant reads.
 - **Postconditions:** Only the settled answer text (RP language) ever entered context; the discussion that produced it never does, then or later — deliberate asymmetry against UC-029 (a settled answer is editable forever).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 6.
+
+### UC-079 — Follow a live discussion inline beneath the answer it belongs to
+- **Actor:** ACT-002 (+ ACT-004)
+- **Feature:** FEAT-010
+- **Preconditions:** A discussion is open (UC-032).
+- **Main flow:**
+  1. Roleplayer views the stream — the session's settled record and the live discussion together.
+  2. Discussion appears inline, beneath the answer being worked on.
+  3. Assistant's tool calls and thinking appear expanded while it works.
+  4. Instance tucks the tool calls and thinking away once the assistant finishes.
+  5. Roleplayer re-expands them at any time.
+- **Postconditions:** Settling the answer collapses the discussion in place, in the same stream (UC-036).
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 11, round 14.
+
+### UC-083 — Work in the current zone below the ruler
+- **Actor:** ACT-002 (+ ACT-004)
+- **Feature:** FEAT-010
+- **Preconditions:** Session is open.
+- **Main flow:**
+  1. Roleplayer views the ruler separating the settled record above from exactly one current zone below.
+  2. Roleplayer or assistant adds messages to the current zone.
+  3. Roleplayer edits any message in the current zone, the assistant's included, before settling.
+  4. Roleplayer presses Settle.
+  5. Instance takes the last message in the current zone, whoever wrote it, files it as the entry, moves the ruler below it, and opens an empty current zone.
+- **Alternate flows:**
+  - The current zone's kind switch is set to partner — pasting text files a partner entry immediately with no Settle press (US-121).
+  - The last message settled is wholly wrapped in double parentheses — the entry files as a decision, not a turn (UC-081).
+- **Postconditions:** A settled block is re-openable only while the current zone below it is still empty (US-128).
+- **_TBD:** nothing states how a current zone is abandoned without settling anything — predates this delta; the existing spec had no discard path either.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+
+### UC-084 — Give the assistant a fast instruction inside a draft
+- **Actor:** ACT-002 (+ ACT-004)
+- **Feature:** FEAT-010
+- **Preconditions:** Roleplayer is drafting a message in the current zone.
+- **Main flow:**
+  1. Roleplayer writes a fast instruction wrapped in double parentheses inside an otherwise ordinary draft.
+  2. Roleplayer settles the draft as a turn.
+  3. Instance files the prose only — the parenthesised instruction never appears in the settled turn, and the assistant does not reproduce it in the prose.
+- **Alternate flows:**
+  - The roleplayer writes a message wholly wrapped in double parentheses — it is out-of-character; settling it files a decision, not a turn (UC-081). OOC messages are in the preferred language, and the assistant answers OOC in kind; candidates stay in the RP language regardless.
+- **Postconditions:** A fast instruction shapes the assistant's next candidate but never becomes part of the record.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
 <!-- product-spec:end -->

@@ -30,4 +30,12 @@
 - **Acceptance criteria:**
   - **US-029.AC-1** — Given the roleplayer opens the session list, when it is shown, then only the roleplayer's own sessions appear.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 3, round 7.
+
+### US-117 — Writing the first message on a character's page creates the session
+- **Actor:** ACT-002 · **Feature:** FEAT-008 · **Exercises:** UC-080
+- **Story:** As a roleplayer, I want to just start typing on a character's page, so that beginning a new roleplay doesn't need a separate "create session" step first.
+- **Acceptance criteria:**
+  - **US-117.AC-1** — Given a character's page with no session yet started from it, when the roleplayer writes a message in its composer, then the instance creates a new session under that character with a turn being drafted.
+  - **US-117.AC-2** — Given the session was just created this way, when the roleplayer views the drafted turn, then the written message is the opening message of that turn's discussion.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 15.
 <!-- product-spec:end -->

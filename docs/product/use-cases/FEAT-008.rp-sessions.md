@@ -46,4 +46,16 @@
   2. Instance orders sessions by last use, most recent first.
 - **Postconditions:** Every session stays resumable regardless of its position in the list — no "finished" state.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
+
+### UC-080 — Start a session by writing the first message on a character's page
+- **Actor:** ACT-002
+- **Feature:** FEAT-008
+- **Preconditions:** Character exists (FEAT-006).
+- **Main flow:**
+  1. Roleplayer opens a character's page.
+  2. Roleplayer writes a message in the composer there.
+  3. Instance creates a new session under the character.
+  4. Instance opens a first turn in drafting, and the written message becomes the opening message of that turn's discussion (FEAT-010).
+- **Postconditions:** Session exists with its first turn already being drafted; the partner's block, if any, is pasted afterward as a separate entry.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 15.
 <!-- product-spec:end -->

@@ -51,7 +51,7 @@ recorded plainly rather than papered over. `[confirmed: user]` interview
 
 ## Scope & non-goals
 
-Full feature scope is the spine in `features.md` (`FEAT-001`..`FEAT-019`).
+Full feature scope is the spine in `features.md` (`FEAT-001`..`FEAT-020`).
 Non-goals below are boundaries meaningful against this vision, each with its
 reason:
 

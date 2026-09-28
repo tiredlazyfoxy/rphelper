@@ -19,10 +19,10 @@
 
 ### US-038 — Promote a candidate and edit it before settling
 - **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-035
-- **Story:** As a roleplayer, I want to promote an assistant candidate into the answer box and edit it, so that the final answer is exactly as I want it.
+- **Story:** As a roleplayer, I want to promote an assistant candidate into the current zone and edit it, so that the final answer is exactly as I want it.
 - **Acceptance criteria:**
-  - **US-038.AC-1** — Given a candidate sits in the answer box, when the roleplayer promotes it, then it becomes the box's contents, editable.
-  - **US-038.AC-2** — Given the roleplayer edits the promoted candidate and settles, then the instance takes the edited text as the settled answer.
+  - **US-038.AC-1** — Given a candidate sits in the current zone, when the roleplayer promotes it, then it becomes the current zone's contents, editable.
+  - **US-038.AC-2** — Given a promoted candidate sits in the current zone, when the roleplayer edits it and settles, then the instance takes the edited text as the settled answer.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
 
 ### US-039 — Settling collapses the discussion
@@ -69,4 +69,93 @@
   - **US-044.AC-2** — Given the LLM was unreachable mid-discussion, when the failure occurs, then it is shown to the roleplayer visibly.
   - **US-044.AC-3** — Given the LLM was unreachable mid-discussion, when the roleplayer acts on the visible failure, then a retry is possible.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4, round 9.
+
+### US-113 — A discussion appears beneath its answer in the same stream, and collapses there when the answer is settled
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-079
+- **Story:** As a roleplayer, I want the discussion in the same stream as the session's entries, not a separate pane, so that following the roleplay and composing my reply are one continuous view.
+- **Acceptance criteria:**
+  - **US-113.AC-1** — Given a discussion is open on an answer, when the roleplayer views the stream, then the discussion appears inline beneath that answer, alongside the session's settled entries.
+  - **US-113.AC-2** — Given the roleplayer settles the answer, when the stream updates, then the discussion collapses in place, in the same stream.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 11, round 14.
+
+### US-114 — The assistant's tool calls and thinking are visible while it works and are tucked away once it finishes
+- **Actor:** ACT-002, ACT-004 · **Feature:** FEAT-010 · **Exercises:** UC-079
+- **Story:** As a roleplayer, I want to see what the assistant is doing while it works, so that I understand where a candidate came from.
+- **Acceptance criteria:**
+  - **US-114.AC-1** — Given the assistant is producing a candidate, when it calls a tool or reasons, then the tool call and its thinking are shown expanded while it works.
+  - **US-114.AC-2** — Given the assistant finishes, when its tool calls and thinking have completed, then they are tucked away, out of view by default.
+  - **US-114.AC-3** — Given tool calls and thinking are tucked away, when the roleplayer re-expands them, then they are still viewable, at any later time.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 14.
+
+### US-115 — Any message in the current zone is edited in place, the assistant's included, not findable by session search, with no new reply
+- **Actor:** ACT-002, ACT-004 · **Feature:** FEAT-010 · **Exercises:** UC-083
+- **Story:** As a roleplayer, I want to edit any message in the current zone before I settle, including one the assistant wrote, so that the final wording is always mine to control.
+- **Acceptance criteria:**
+  - **US-115.AC-1** — Given a message sits in the current zone, whoever wrote it, when the roleplayer edits its text, then the instance saves the edit in place.
+  - **US-115.AC-2** — Given a message in the current zone was edited, when the edit saves, then that message's text is not findable by session search — only settled entries are.
+  - **US-115.AC-3** — Given a message in the current zone was edited, when the edit saves, then the assistant does not produce a new reply on its own.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 12; 2026-09-28, round 17.
+
+### US-116 — A collapsed discussion cannot be edited
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-079
+- **Story:** As a roleplayer, I want a collapsed discussion locked, so that I can't accidentally alter something that's already out of context.
+- **Acceptance criteria:**
+  - **US-116.AC-1** — Given a discussion has collapsed, when the roleplayer opens it to read, then no message inside it is editable.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 12.
+
+### US-125 — A ruler separates the settled record above from exactly one current zone below
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-083
+- **Story:** As a roleplayer, I want a visible ruler marking where the settled record ends, so that I always know what's already recorded and what's still in progress.
+- **Acceptance criteria:**
+  - **US-125.AC-1** — Given a session is open, when the roleplayer views the stream, then a ruler separates the settled record above it from a single current zone below it.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+
+### US-126 — Settle takes the last message in the current zone, whoever wrote it
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-083
+- **Story:** As a roleplayer, I want Settle to take whatever is last in the current zone, so that promoting the assistant's own wording doesn't need a separate copy step.
+- **Acceptance criteria:**
+  - **US-126.AC-1** — Given the current zone's last message was written by the assistant, when the roleplayer presses Settle, then that message becomes the settled entry's text.
+  - **US-126.AC-2** — Given the current zone's last message was written by the roleplayer, when they press Settle, then that message becomes the settled entry's text.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+
+### US-127 — Settling files the entry, moves the ruler below it, and opens an empty current zone
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-083
+- **Story:** As a roleplayer, I want the ruler to move and a fresh current zone to open the moment I settle, so that I can keep going without any manual cleanup.
+- **Acceptance criteria:**
+  - **US-127.AC-1** — Given the roleplayer presses Settle, when the entry is filed, then the ruler moves to sit below the newly settled entry.
+  - **US-127.AC-2** — Given the ruler has moved, when the roleplayer views the stream, then the current zone below it is empty.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+
+### US-128 — A settled block is re-openable only while the current zone below it is still empty
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-083
+- **Story:** As a roleplayer, I want to undo a mis-settled entry while nothing has followed it yet, so that a slip doesn't lock in the wrong text.
+- **Acceptance criteria:**
+  - **US-128.AC-1** — Given a settled entry's current zone is still empty, when the roleplayer re-opens it, then it re-opens as an active discussion.
+  - **US-128.AC-2** — Given a settled entry's current zone already holds a message, when the roleplayer tries to re-open it, then re-opening is refused.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+
+### US-129 — A wholly-parenthesised message is out-of-character; settling one files a decision, not a turn
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-084, UC-081
+- **Story:** As a roleplayer, I want a message that's entirely OOC to settle as a decision, so that stepping out of character never gets mistaken for the character's own turn.
+- **Acceptance criteria:**
+  - **US-129.AC-1** — Given the current zone's last message is wholly wrapped in double parentheses, when the roleplayer settles it, then the instance files it as a decision entry, not a turn.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+
+### US-130 — A double-parenthesised fragment inside a draft is an instruction that never appears in the settled turn
+- **Actor:** ACT-002, ACT-004 · **Feature:** FEAT-010 · **Exercises:** UC-084
+- **Story:** As a roleplayer, I want to slip a fast instruction into my draft without it becoming part of the posted text, so that I can steer the reply without editing it out afterward.
+- **Acceptance criteria:**
+  - **US-130.AC-1** — Given a draft contains a double-parenthesised fragment alongside ordinary prose, when the roleplayer settles it as a turn, then the fragment is absent from the settled turn's text.
+  - **US-130.AC-2** — Given a draft contained a double-parenthesised fragment, when the assistant produces the next candidate, then it does not reproduce the fragment's text in the prose.
+- **_TBD:** nothing states what happens when RP prose itself contains double parentheses — a draft could silently lose text.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+
+### US-131 — OOC messages are in the preferred language; the assistant answers OOC in kind, while candidates stay in the RP language
+- **Actor:** ACT-002, ACT-004 · **Feature:** FEAT-010 · **Exercises:** UC-084
+- **Story:** As a roleplayer, I want to step out of character in my own preferred language and get an answer in kind, so that talking to the assistant as myself never forces me into the RP language.
+- **Acceptance criteria:**
+  - **US-131.AC-1** — Withdrawn: unfalsifiable — the language the roleplayer types in is their own habit, not a product obligation.
+  - **US-131.AC-2** — Given the roleplayer writes an OOC message, when the assistant replies, then the reply is in the preferred language.
+  - **US-131.AC-3** — Given an OOC exchange is underway, when the assistant produces a candidate reply, then the candidate is in the RP language regardless.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
 <!-- product-spec:end -->

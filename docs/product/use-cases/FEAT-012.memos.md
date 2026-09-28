@@ -8,9 +8,9 @@
 - **Main flow:**
   1. Roleplayer chooses a level — user, character, setup, or session.
   2. Roleplayer writes the memo's content.
-  3. Instance saves it at the chosen level with state `searchable`, the default on creation.
+  3. Instance saves it at the chosen level, enabled and not forced, the default on creation.
 - **Postconditions:** Memo exists, feeding the memo chain of every session it scopes (UC-046).
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 5, round 6.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 5, round 6, round 12.
 
 ### UC-043 — Edit a memo in markdown with live preview
 - **Actor:** ACT-002
@@ -30,22 +30,22 @@
 - **Preconditions:** Memo exists.
 - **Main flow:**
   1. Roleplayer opens a memo.
-  2. Roleplayer sets its state to forced, searchable, or disabled.
-  3. Instance saves the state.
+  2. Roleplayer sets its forced flag (forced / not forced) and its enabled flag (enabled / disabled) independently.
+  3. Instance saves both flags.
 - **Alternate flows:**
-  - Roleplayer re-enables a disabled memo — they choose its mode, forced or searchable, again.
-- **Postconditions:** Memo is in exactly one of the three states at any time.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 5.
+  - Roleplayer re-enables a disabled memo — the memo returns to whatever forced state it had when it was disabled; the roleplayer does not choose again.
+- **Postconditions:** A memo always carries both flags; disabled always wins regardless of the forced flag (UC-045).
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 5, round 11, round 12.
 
 ### UC-045 — Forced memos reach the system prompt
 - **Actor:** ACT-002 (+ ACT-004)
 - **Feature:** FEAT-012
-- **Preconditions:** A memo's state is `forced` (UC-044).
+- **Preconditions:** A memo is enabled and forced (UC-044).
 - **Main flow:**
   1. Roleplayer opens a session within the memo's scope.
-  2. Instance includes the forced memo's content in what the assistant is given for every message in that session.
-- **Postconditions:** A forced memo is always present to the assistant in scope; it never requires a tool call.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 5.
+  2. Instance includes every enabled, forced memo's content in what the assistant is given for every message in that session, in the roleplayer's arranged order within a fixed level order (user, character, setup, session).
+- **Postconditions:** An enabled, forced memo is always present to the assistant in scope; it never requires a tool call. A disabled memo is excluded regardless of its forced flag.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 5, round 11, round 12.
 
 ### UC-046 — Resolve a session's memo chain, with or without a setup
 - **Actor:** ACT-002
@@ -54,7 +54,32 @@
 - **Main flow:**
   1. Roleplayer opens a session.
   2. Instance resolves the memo chain: session's own memos, plus the setup's when one is chosen, plus the character's, plus the user's.
-  3. Chain feeds forced memos into context and searchable memos into `memo_search` (FEAT-014).
+  3. Chain feeds enabled+forced memos into context and enabled, not-forced memos into `memo_search` (FEAT-014).
 - **Postconditions:** With no setup, the chain degrades to user + character + session with no gap.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 6.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 6, round 12.
+
+### UC-075 — Change a note's forced and enabled state from the wall
+- **Actor:** ACT-002
+- **Feature:** FEAT-012
+- **Preconditions:** Note exists, wall is open (FEAT-020).
+- **Main flow:**
+  1. Roleplayer changes a note's forced flag (forced / not forced) from the wall, without leaving it.
+  2. Roleplayer changes a note's enabled flag (enabled / disabled) from the wall, without leaving it.
+  3. Instance saves the changed flag immediately.
+- **Alternate flows:**
+  - Roleplayer disables a forced note — the forced flag is kept and restored automatically on re-enable (UC-044).
+- **Postconditions:** The two flags always change independently of each other.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 11, round 12.
+
+### UC-076 — Reorder notes within a level
+- **Actor:** ACT-002
+- **Feature:** FEAT-012
+- **Preconditions:** A level (user, character, setup or session) holds more than one note.
+- **Main flow:**
+  1. Roleplayer drags a note within its own level's group on the wall.
+  2. Instance saves the new order for that level.
+- **Alternate flows:**
+  - Roleplayer attempts to drag a note into a different level's group — the instance does not allow it; levels keep a fixed order (user, character, setup, session) and a note cannot move between them by dragging.
+- **Postconditions:** Forced notes in that level enter the system prompt in the new order (UC-045); order has no observable effect on disabled or not-forced notes.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 11, round 12.
 <!-- product-spec:end -->

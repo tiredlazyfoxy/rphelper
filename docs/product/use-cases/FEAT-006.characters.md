@@ -7,11 +7,11 @@
 - **Preconditions:** Roleplayer is authenticated.
 - **Main flow:**
   1. Roleplayer opens character creation.
-  2. Roleplayer supplies persona details — name, appearance, backstory, voice, writing style.
-  3. Instance saves the character.
-  4. New character appears in the roleplayer's character list.
-- **Postconditions:** Character exists, available for setups (FEAT-007) and sessions (FEAT-008).
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 3.
+  2. Instance opens a draft page with nothing yet persisted (FEAT-020, UC-074).
+  3. Roleplayer supplies persona details — name, appearance, backstory, voice, writing style.
+  4. Instance persists the character on the roleplayer's first real input, and it appears in the roleplayer's character list.
+- **Postconditions:** Character exists, available for setups (FEAT-007) and sessions (FEAT-008); nothing was persisted before the roleplayer entered something real.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 3, round 14.
 
 ### UC-018 — Edit a character's persona
 - **Actor:** ACT-002

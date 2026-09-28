@@ -44,8 +44,8 @@
 - **Context:** Consumes forced memos and the session's RP-language entries;
   never acts outside a session the roleplayer opened.
 - **Constraints:** Reaches anything else only through `memo_search`,
-  `session_search` and `web_search`; never writes into the session directly
-  — only into the roleplayer's answer box.
+  `session_search` and `web_search`; nothing reaches the session record
+  without the roleplayer settling it.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 9.
 
 ## Non-actors

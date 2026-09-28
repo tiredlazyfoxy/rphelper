@@ -59,4 +59,38 @@
   - Roleplayer pastes several partner blocks in sequence — no answer between them.
 - **Postconditions:** No partner-block → discussion → answer triple is enforced; entries stay independent.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 4.
+
+### UC-078 — Edit a session entry where it sits in the stream
+- **Actor:** ACT-002
+- **Feature:** FEAT-009
+- **Preconditions:** A settled entry (partner block, turn, or decision) exists in the stream.
+- **Main flow:**
+  1. Roleplayer edits the entry's text directly where it sits.
+  2. Roleplayer moves focus away from the entry.
+  3. Instance saves the edit, and search thereafter reflects the new text.
+- **Exception flows:**
+  - No embedding model is configured — the edit still saves; the roleplayer is told search coverage is incomplete.
+- **Postconditions:** Search reflects the new text; a partner block's edit discards its cached translation (FEAT-011).
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 12, round 13.
+
+### UC-081 — Record a decision in the session
+- **Actor:** ACT-002
+- **Feature:** FEAT-009
+- **Preconditions:** Session is open; the roleplayer is working in the current zone (FEAT-010).
+- **Main flow:**
+  1. Roleplayer writes a message wholly wrapped in double parentheses.
+  2. Roleplayer settles it.
+  3. Instance files it as a decision entry, not a turn.
+- **Postconditions:** The decision sits in the record, reaches the assistant as context from that point on, and is found by session search; it offers no copy-out.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+
+### UC-082 — Copy a settled turn for posting outside
+- **Actor:** ACT-002
+- **Feature:** FEAT-009
+- **Preconditions:** A settled turn exists.
+- **Main flow:**
+  1. Roleplayer selects a settled turn's copy action.
+  2. Instance places the turn's text on the clipboard as plain text, not markdown.
+- **Postconditions:** Nothing else changes; a settled decision offers no equivalent action (UC-081).
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
 <!-- product-spec:end -->

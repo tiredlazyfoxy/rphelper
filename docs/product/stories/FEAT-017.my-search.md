@@ -21,4 +21,12 @@
 - **Acceptance criteria:**
   - **US-076.AC-1** — Given the roleplayer runs a search, when results are returned, then no result belonging to another user is ever included.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7, round 8.
+
+### US-118 — My search is reachable whether the left column is expanded or collapsed
+- **Actor:** ACT-002 · **Feature:** FEAT-017 · **Exercises:** UC-058
+- **Story:** As a roleplayer, I want the search box reachable in both states of the left column, so that collapsing it for space never costs me the search I might need next.
+- **Acceptance criteria:**
+  - **US-118.AC-1** — Given the left column is expanded, when the roleplayer looks for the search box, then it is reachable.
+  - **US-118.AC-2** — Given the left column is collapsed to an icon rail, when the roleplayer looks for the search trigger, then it is reachable from the rail.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 7, round 8, round 14, round 15.
 <!-- product-spec:end -->
