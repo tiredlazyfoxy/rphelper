@@ -1,8 +1,9 @@
 # Search and retrieval
 
-**Realizes:** FEAT-004, FEAT-005, FEAT-007, FEAT-009, FEAT-012, FEAT-014,
-FEAT-015, FEAT-017, FEAT-019, UC-013, UC-016, UC-046, UC-051, UC-052, UC-053,
-UC-054, UC-058, UC-059, UC-060, UC-065, UC-075, UC-078
+**Realizes:** FEAT-004, FEAT-005, FEAT-006, FEAT-007, FEAT-009, FEAT-012,
+FEAT-014, FEAT-015, FEAT-017, FEAT-019, UC-013, UC-016, UC-018, UC-046, UC-051,
+UC-052, UC-053, UC-054, UC-058, UC-059, UC-060, UC-065, UC-075, UC-078,
+US-137, US-138
 
 Three distinct search surfaces, one hybrid retrieval engine, one store. The
 store decision and its flip condition are in `overview.md`; the tables are in
@@ -258,9 +259,21 @@ Both predicates are in the query, applied before ranking. UC-054's postcondition
 "No session belonging to another character or another user is ever returned" — is
 tested with data that would match semantically and must still be absent.
 
+### What text represents a session — settled; the `_TBD:` here is closed
+
 The unit of result is a **past session**, not an entry, which is why `session_vec`
-embeds a session-level text (`data-model.md`). Two things about that text are
-already fixed and are not the plan's to choose:
+embeds a session-level text (`data-model.md`). **US-138 settles what that text
+is**, closing the `_TBD:` this section carried. It spans **three sources**:
+
+```
+session_vec text  =  the session's settled entries      (settled_entries view;
+                                                         INCLUDING decisions)
+                  +  the character's persona            (characters.sheet)
+                  +  the setup text                     (setups.description,
+                                                         absent when there is no setup)
+```
+
+The two constraints that were already fixed are unchanged by the addition:
 
 - It is composed from the **`settled_entries` view** (`data-model.md`, R11), so a
   current-zone message is never findable by `session_search` (US-115) and buried
@@ -269,10 +282,72 @@ already fixed and are not the plan's to choose:
   to appear in `session_search` results, so the composition cannot be narrowed to
   `kind='turn'` rows.
 
-`_TBD: docs/product/ does not specify what text represents a session for semantic
-matching beyond those two constraints; UC-053 says only "by meaning, for a similar
-person or situation". The composition is left to FEAT-015's plan. When it is
-recomputed is no longer open — see the embedding lifecycle below._`
+**Why the persona and the setup are in there at all**, since a session's own
+entries look like the obvious and complete answer: US-138.AC-2 asks for a query
+describing a **similar person** rather than a similar situation to find the
+session **even when its entries do not describe the query**. That is not
+satisfiable from the entries — the person is described in the character's
+persona, and the situation in the setup, and a session's prose frequently assumes
+both rather than restating them. Adding them is the only way the feature's
+"similar person" half is true at all; without them `session_search` matches
+*what happened*, never *who it was with*.
+
+The setup term is simply absent when `sessions.setup_id IS NULL` — the same
+degrades-with-no-gap shape as R2's memo chain, not a second composition path.
+
+### The invalidation fan-out this creates — the first one-to-many in the system
+
+**Until now every `session_vec` write was one session per relational write**:
+settle, a settled-text edit, re-open. Each is a write *to that session*, so the
+refresh was one embedding call in the transaction that caused it.
+
+**Editing a character's persona — or a setup's text — now invalidates every
+session vector under that character.** One relational write, N embedding writes.
+This is the system's **first one-to-many embedding invalidation**, and it is
+named as such because nothing else in the embedding lifecycle behaves this way
+and a reader will size the cost from the wrong precedent.
+
+**Decision: re-embed inline, in the same transaction as the relational write.**
+Consistent with the rule that governs every other embedding in this design
+(embeddings are written in the same transaction as the relational row), and it
+means **search is never stale** — a persona edit and the search results that
+depend on it commit together or not at all.
+
+**The cost, stated honestly rather than left to be discovered:** a persona edit
+on a character with **N sessions performs N embedding calls inside one request**,
+and the edit is as slow as that takes. On a character with a long history and a
+metered provider, that is a real and visible pause on what looks like a text
+edit. That is the price of never-stale, and it is paid at the moment the
+roleplayer edits rather than at the moment the assistant searches.
+
+**Flip condition — recorded so this is one decision away, not a redesign.** If
+persona edits become slow enough to be disruptive, the fallback is
+**mark-stale-plus-rebuild**: flag the affected sessions with a staleness marker,
+let FEAT-005's rebuild (UC-016) reconcile them, and accept temporarily stale
+search results in between. That was the runner-up, and the design is already
+shaped for it — the per-session staleness marker is the open column question
+recorded in the embedding lifecycle below, and the degraded-write path already
+tolerates a stale `session_vec` row as an expected state rather than as drift.
+
+Two questions about the fan-out are **deliberately not answered here**, because
+neither is decidable from `docs/product/`:
+
+`_TBD: whether ARCHIVED sessions participate in the persona-edit re-embed
+fan-out. R6 puts an archived session out of the working list but never destroys
+it and always restores it fully usable, and session_search excludes nothing on
+archive state today — so skipping them would make a restored session's vector
+silently stale, while including them makes the fan-out proportional to a
+character's whole history rather than to its live sessions. The alternative is to
+skip archived sessions and re-embed on restore. Nothing in docs/product/ chooses.
+Raised for /product-spec._
+
+`_TBD: whether a persona edit touching many sessions needs a PROGRESS SURFACE.
+Inline re-embedding makes the edit a single long request with no feedback — the
+roleplayer presses nothing and waits. docs/product/ describes no progress
+indication for any operation except UC-016's completion report, which is an
+admin surface and not this one. Whether a blur-save that takes thirty seconds
+needs to say so, and what it says, is not designed here. Raised for
+/product-spec._
 
 Excluding the current session is a design inference, not a stated requirement:
 returning the session the assistant is already fully reading would waste the call.
@@ -343,13 +418,22 @@ to settled rows (`data-model.md`). The view boundary and the trigger condition s
 the same thing in two places on purpose: whichever arm a reviewer checks, the
 answer is the same.
 
-### Settled: my-search **does** show disabled notes
+### Settled and ratified: my-search **does** show disabled notes
 
-Decided. My-search applies **no `is_enabled` / `is_forced` predicate at all** —
-forced, searchable and disabled notes are all returned. Only the `user_id`
-predicate applies.
+Decided, and now **ratified by `docs/product/`**. My-search applies **no
+`is_enabled` / `is_forced` predicate at all** — forced, searchable and disabled
+notes are all returned. Only the `user_id` predicate applies.
 
-The reasoning, in two parts:
+**US-137 is the ratification.** This was recorded here as a requirements gap
+resolved at the architecture layer, flagged for `/product-spec` to ratify into
+FEAT-017's acceptance criteria. It has: **US-137.AC-1** states that a disabled or
+not-forced memo is returned like any other and that **note state never filters
+results**, and **US-137.AC-2** that a returned memo which is currently disabled
+is **shown as disabled**. Both halves of what this doc decided are now product,
+so FEAT-017's plan binds to the criteria rather than to this doc alone, and the
+flagged-for-another-owner note that stood at the end of this section is removed.
+
+The reasoning is unchanged and is kept because it is still the reasoning:
 
 - **R3 constrains the assistant, not the owner.** "Reaches the assistant by no
   path" is a statement about ACT-004's inbound surfaces: context assembly,
@@ -364,24 +448,21 @@ The reasoning, in two parts:
   for finding it. A search surface that cannot find the thing whose only route back
   is being found is a dead end.
 
-**A disabled hit is visibly marked as disabled** in the result list, so the
-roleplayer is not misled into thinking the assistant can see it. The note wall
-already renders both flags in place (UC-075, `workspace-shell.md`). `_TBD: the
-exact presentation of a disabled hit in the my-search result row — a badge, a
-muted row, a state column — is not specified; nothing in docs/product/ describes
-the result row's anatomy beyond UC-059's grouping and UC-060's navigability._`
+**A disabled hit is visibly marked as disabled** (US-137.AC-2), so the roleplayer
+is not misled into thinking the assistant can see it. The note wall already
+renders both flags in place (UC-075, `workspace-shell.md`).
+
+**How it is marked stays open, and survives the ratification.** `_TBD: the exact
+presentation of a disabled hit in the my-search result row — a badge, a muted
+row, a state column — is not specified. US-137.AC-2 requires the fact to be
+shown and says nothing about its anatomy, and nothing in docs/product/ describes
+the result row beyond UC-059's grouping and UC-060's navigability. A
+presentation question, not a behavioural one._`
 
 **What does not change:** a note with `is_enabled = false` remains absent from
 `memo_search`, from `session_search` and from context assembly, and the negative
 tests for those three stand exactly as R3 states them. Showing a note to its owner
 is not a path to the assistant.
-
-**This is a requirements gap resolved at the architecture layer.**
-`docs/product/` does not state either way — UC-058 says my-search reaches the
-roleplayer's own memos and says nothing about reach flags, and FEAT-017's
-acceptance criteria are silent. **`/product-spec` should ratify it into FEAT-017's
-acceptance criteria**; until it does, FEAT-017's plan binds to this doc and this
-doc is the only record of the choice.
 
 ---
 
@@ -407,6 +488,8 @@ write that made them stale:
 | a settled message's text edited (UC-078, US-110) | the session's `session_vec` row |
 | re-open (R11) | the session's `session_vec` row |
 | a current-zone message written or edited | **nothing** — the zone is not record (US-115) |
+| **a character's persona edited (UC-018, US-021)** | **every `session_vec` row under that character** — the fan-out (US-138) |
+| **a setup's text edited (FEAT-007)** | **every `session_vec` row for sessions using that setup** (US-138) |
 
 The two "nothing" rows for the reach flags are the payoff of the store decision,
 stated plainly: because the filters live in relational columns in the same
@@ -451,6 +534,7 @@ What differs is what the **write** paths do with that error:
 | Write | Embedding unavailable |
 |---|---|
 | memo create / body edit | **fails the transaction** — nothing is stored |
+| **character persona edit, setup text edit** | **fails the transaction** — nothing is stored |
 | message edit, settle, re-open (`session_vec`) | **succeeds, degraded** — the row is stored and the response says search coverage is incomplete (US-112) |
 
 **This reverses, for one of the two paths, what this doc previously stated for
@@ -466,6 +550,24 @@ They are right for different reasons:
   administrator's omission block a roleplayer's own record-keeping, which US-112
   rules out in exactly those terms: the edit saves, and the roleplayer is told
   search coverage is incomplete (UC-078's exception flow).
+
+**Character and setup writes join the fail-hard side, and that extends the
+asymmetry rather than contradicting it.** With no embedding model designated, a
+persona edit **fails entirely** — nothing is stored — which is the memo rule, not
+the message rule. The line the asymmetry has always been drawn along is not
+"which table" but **what kind of act the write is**:
+
+| | Authoring act | Record-keeping |
+|---|---|---|
+| Writes | memo create/edit, **persona edit, setup edit** | settle, re-open, settled-text edit |
+| On no embedding model | **fails** | **succeeds, degraded** |
+| Why | the roleplayer is composing material *in order for it to be retrieved*; storing it unindexed produces something that silently does nothing | US-112: an instance-level omission must never block the record of what happened in the roleplay |
+
+A persona edit is a deliberate authoring act like a memo edit — the roleplayer is
+writing the material that the assistant and `session_search` will later reach —
+and US-138 has just made it *literally* an input to an index. A settle is
+record-keeping, and **the record must never be blocked** (US-112). Same rule,
+applied to a new write, not a new rule.
 
 Consequences to hold:
 
@@ -511,10 +613,27 @@ administrator — the report is counts and completion only (UC-066, R5). No per-
 breakdown, no sample, no progress line naming a character. The administrator
 learns that the index was rebuilt, not what is in it.
 
-Changing the designated embedding model requires a rebuild rather than taking
-effect silently, because pre-existing vectors came from the old model and are not
-comparable with new ones. `_TBD: docs/product/ does not say whether changing the
-designation should force, prompt for, or merely permit a rebuild (UC-013 and
-UC-016 are separate use cases with no stated linkage). Until it does, the two stay
-separate operations and the semantic tools may return degraded results in
-between — recorded as a known consequence rather than resolved by invention._`
+### Changing the embedding designation neither forces nor prompts a rebuild
+
+**Decided by product; the `_TBD:` this section carried is closed.** It asked
+whether changing the designation should force, prompt for, or merely permit a
+rebuild. **UC-013's postcondition answers it: neither.** Changing the designation
+"neither forces nor prompts a rebuild"; the two stay separate operations, and the
+remedy is UC-016, **always available**.
+
+**The sharp edge, recorded plainly because it is sharp.** Existing vectors were
+produced by the **superseded** model and are **not comparable** with vectors the
+new one produces — and **nothing indicates this**. There is no staleness marker,
+no banner, no warning on the designation screen and no degradation the semantic
+tools can detect: `memo_search` and `session_search` keep answering, confidently,
+from an index built against a model that is no longer in use. `docs/product/`
+records this as an accepted consequence (FEAT-018's sibling list of accepted
+consequences: "nothing indicates that the vector index was built by a superseded
+embedding model; semantic results degrade silently until the rebuild is run"), so
+the architecture does **not** invent a marker to soften it.
+
+The remedy is the Database page's rebuild (UC-016), which is **always available
+to the administrator with no precondition beyond authentication**
+(`admin-surfaces.md`). An administrator who changes the designation and does not
+rebuild has a working search over a stale index, and the only thing standing
+between that state and a correct one is knowing to press the button.

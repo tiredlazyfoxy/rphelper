@@ -62,6 +62,11 @@ Current lengths, recorded honestly rather than implied:
 
 These counts are a snapshot taken at one pass and drift with every one after it,
 so a reader who needs the real number opens the file rather than trusting the row.
+**They are known to be stale after the logging + product-delta pass** — every doc
+grew, several substantially — and were deliberately not re-counted, because the
+row's own instruction is to open the file. **The two split candidates below both
+grew again and neither split is authorized**; that is the part of this section
+that still binds.
 
 The four deliberate exceptions, each with the reason it stays whole:
 
@@ -113,7 +118,7 @@ registry of record** — the sole canonical list of every `ACT-###`, `FEAT-###`,
 quoted in a design doc or a briefing: a range goes stale the moment a feature
 lands, and a range that spans ids owned by several features is how a citation ends
 up attributed to the wrong one. (Current as of this writing: FEAT-001..020,
-UC-001..084, US-001..131 — treat as a sanity check, not as the source.) Rules:
+UC-001..086, US-001..139 — treat as a sanity check, not as the source.) Rules:
 
 - **Cite, do not copy.** If a reader needs the behavioural detail, they open the
   product doc. Architecture states the *mechanism* that satisfies the

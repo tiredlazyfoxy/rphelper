@@ -407,12 +407,33 @@ alert **without opening the models list**. The result is recorded on
 (`data-model.md`), and per UC-011 registration is unaffected either way: a failed
 test never blocks or removes a registration.
 
-Proposed result taxonomy: `reachable`, `unreachable`, `auth_failed`,
-`model_list_empty`. `_TBD: docs/product/ states no result taxonomy for UC-011 —
-it asks only that the administrator can test a connection. The four values above
-are a design proposal sized to what the probe can actually distinguish; FEAT-004's
-plan may narrow or extend them, but the route must return a typed value rather
-than a free-text message the UI has to parse._`
+**Result taxonomy — a recorded design decision that deliberately exceeds the
+requirement. This is no longer a `_TBD:`.**
+
+```
+reachable | unreachable | auth_failed | model_list_empty
+```
+
+The four values stand. What changed is their **status**: they were carried as an
+open question because no acceptance criterion specified a taxonomy, and
+`docs/product/` has now spoken. **UC-011's amended postcondition commits the
+product to two outcomes only — reachable / unreachable — and states explicitly
+that "a finer distinction is a design choice, not a requirement."** That is an
+authorization, not a contradiction: the product fixes the floor and hands the
+ceiling to design.
+
+So the four-value taxonomy is **an authorized design proposal that exceeds the
+requirement on purpose**, kept for the reason it was proposed: `auth_failed` and
+`model_list_empty` are things the probe **can actually distinguish**, and
+collapsing them into `unreachable` would make the UI tell an administrator with a
+wrong API key to check their base URL. The two extra values map onto the
+product's two: both are kinds of not-reachable, so a consumer that only
+understands reachable/unreachable is never wrong, only less specific.
+
+Two constraints survive from the `_TBD:`: the route returns a **typed value**,
+never a free-text message the UI has to parse; and **FEAT-004's plan may narrow
+the set to the product's two** without breaking anything, since nothing depends
+on the extra values but the wording of a badge.
 
 **Cross-references that belong on this page, because this is where the mistakes
 get made:**
@@ -450,13 +471,39 @@ Page-level actions:
 |---|---|---|
 | Export | download the whole-database export | FEAT-018, UC-061 |
 | Import | file picker, then upload | FEAT-018, UC-002 |
-| Rebuild index | re-embed everything; returns an **indexed-row count**; **fails when no embedding provider is designated** | FEAT-005, UC-016 |
+| Rebuild index | re-embed everything; returns an **indexed-row count** | FEAT-005, UC-016 |
 
-Rebuild's failure mode is `no_embedding_model` (R4,
-`search-and-retrieval.md`), and its report is **counts and completion only** — no
-per-user breakdown, no sample, no progress line naming a character (UC-066, R5).
-Rebuild is expensive and touches every user's content, so it takes the confirm
-step below.
+**Rebuild is always available, with no precondition beyond authentication.**
+UC-016's postcondition says so in those words, and it is the remedy for **any**
+embedding problem — including a changed embedding designation (UC-013), whose
+stale vectors nothing else indicates or repairs (`search-and-retrieval.md`). The
+button is therefore:
+
+- **never gated on drift state** — a drifted or in-sync report does not enable or
+  disable it, and the two are independent operations on this page
+  (`data-model.md`: remediation fixes structure, rebuild recomputes content);
+- **never gated on an embedding model being designated.** The earlier phrasing of
+  this row — "fails when no embedding provider is designated" — read as a
+  precondition and is corrected. **Availability and outcome are different
+  things**: the action is always offered, and with no designation it **runs and
+  fails** with `no_embedding_model` (R4, `search-and-retrieval.md`'s rebuild step
+  1), which is a reported failure the administrator can act on rather than a
+  disabled control that explains nothing.
+
+Its report is **counts and completion only** — no per-user breakdown, no sample,
+no progress line naming a character (UC-066, R5). Rebuild is expensive and
+touches every user's content, so it takes the **confirm step** below. The confirm
+is a **designed addition required by no acceptance criterion**
+(`ui-conventions.md`) and it **may stay** — a confirm is not a precondition: it
+does not gate availability, it asks about an expensive action the administrator
+has already chosen.
+
+**There is no CLI alternative.** A standalone recalc-vectors script was
+considered and declined: this button is the single surface, so there is one
+implementation and one place the privacy rules above are enforced. The
+operational consequence is recorded in `deployment.md` — the remedy requires a
+running application, and is therefore unavailable exactly when the app will not
+start.
 
 **Scope discipline — do not silently expand this page.** BookWriter's report
 carries **four** statuses (`ok` / `drift` / `missing` / `seed-missing`) with
@@ -522,7 +569,12 @@ short list, so a reader of this doc knows what shape to expect:
 - **`@mantine/form` is not used.** Every modal has a hand-rolled MobX **draft
   class** in a same-named `*Draft.ts` sibling, and the effectful submit is an
   external function, never a method.
-- **No toasts.** Success is implicit: the modal closes and the list refreshes.
+- **No *success* toasts.** Success is implicit: the modal closes and the list
+  refreshes. `@mantine/notifications` **is** a dependency now, used for transient
+  **failure reasons only** and only where a failure has no in-page place to
+  render — which on these three pages it always has (the inline `Alert` above the
+  table, or a field error in a modal), so the admin area raises no notifications
+  in practice. The rule and its boundary are `ui-conventions.md`'s.
 - **Mutations are never optimistic** — re-load after every mutation.
 - **Confirm step** on destructive admin actions: disabling an account
   (FEAT-003), deleting an LLM connection (FEAT-004), rebuilding the vector index

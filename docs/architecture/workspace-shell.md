@@ -2,7 +2,8 @@
 
 **Realizes:** FEAT-020, FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012,
 FEAT-013, FEAT-017, UC-035, UC-069, UC-070, UC-071, UC-072, UC-073, UC-074,
-UC-075, UC-076, UC-077, UC-078, UC-080, UC-081, UC-082, UC-083, UC-084
+UC-075, UC-076, UC-077, UC-078, UC-080, UC-081, UC-082, UC-083, UC-084, UC-085,
+UC-086, US-132, US-133, US-134, US-135
 
 The `app` entry's one screen: three columns, a stream with a ruler through it, and
 a wall of notes. This doc holds the **shell** — geometry, the columns, the wall's
@@ -279,6 +280,13 @@ a set of rows, not a row, so there is nothing that can duplicate (R11,
 - A live assistant message streams into the zone through the SSE consumer
   (`frontend-structure.md`); an `error` frame leaves everything already in the zone
   intact (R10).
+- **A failed generation shows its reason as a transient notification and leaves a
+  persistent retry at the failed exchange** (US-044.AC-2, AC-3, AC-4). The split
+  is deliberate and `ui-conventions.md` owns it: the **reason** is what the
+  product says must not persist, so it goes to the ~5s notification; the
+  **retry** must remain available, so it sits in the stream at the exchange that
+  failed, which is also the only place that still knows what to re-send. Nothing
+  in the zone or the record is discarded on either path (R10).
 - With no enabled model the composer cannot send and says why (US-107). The typed
   error is R4's, surfaced here rather than swallowed.
 
@@ -319,6 +327,94 @@ consequential action in the product and is the primary button; Send is secondary
 This resolves the open `_TBD:` in `ui-conventions.md` that proposed
 `IconMessageCheck` and noted a label-bearing button might be right instead — the
 mockup settles it as a label.
+
+**Settle never requires an assistant answer** (US-135). A zone holding only the
+roleplayer's own message settles that text as-is; the button is not disabled
+while waiting for a reply that may never come, and there is no "wait for the
+assistant" state. Its only disabled condition is an empty zone (and the *partner*
+switch position, above). Stated here because a Settle greyed out until an
+assistant row exists is the obvious implementation and is exactly the trap
+US-134/US-135 were written to close.
+
+---
+
+## The stop control
+
+**Realizes:** FEAT-010, FEAT-011, UC-085, US-132, US-133
+
+An `IconPlayerStop` `IconButton` in the composer, reaching **any model work in
+flight** — a discussion generation, a tool call being waited on, or a partner-text
+translation (UC-085, US-133).
+
+**It replaces Send while a generation is streaming; it does not accompany it.**
+Send and stop occupy the same slot and are never both present. Reasoning, since
+both arrangements are defensible:
+
+- The two are **mutually exclusive in fact** — there is nothing to send while a
+  reply is streaming into the zone, and nothing to stop when none is. Rendering
+  both means one is always inert, and an inert primary-adjacent control is worse
+  than an absent one.
+- It matches the existing treatment of a control whose action does not currently
+  exist: `IconArrowBackUp` is **absent** rather than disabled once the zone is
+  non-empty (US-128), and the discard affordance below is absent rather than
+  disabled for the same reason.
+- The slot is stable, so the roleplayer's pointer does not have to move between
+  "send" and "stop" — which matters because stopping a runaway generation is an
+  urgent action and the loop has no iteration cap to stop it for them
+  (`llm-and-streaming.md`).
+
+**Settle is unaffected and stays exactly where it is.** It remains the primary
+labelled button beside the Send/stop slot, enabled or not on its own rules above
+— a generation in flight does not disable it, because the zone may already hold a
+message worth settling.
+
+What pressing it does, in one line each (`llm-and-streaming.md` and
+`frontend-structure.md` own the mechanism): it **aborts the in-flight `fetch()`**
+— there is no stop request — the server persists whatever assistant text had
+streamed as an ordinary zone message, and the client **reloads the zone** to pick
+it up. The partial text is then a candidate like any other: editable, promotable,
+settleable (US-132.AC-1). **No error is shown**, because nothing failed.
+
+Two consequences visible on this surface:
+
+- **A stop during a tool call ends the exchange** — no wrap-up, no final answer —
+  and the candidate left behind may be **empty** if nothing had streamed yet. The
+  zone is then an ordinary empty zone and is discardable below.
+- **A stopped translation leaves the original text showing** and the flicker
+  un-flicked, exactly as a failed translation does (R8).
+
+---
+
+## Discarding an empty current zone
+
+**Realizes:** UC-086, US-134, US-135
+
+An affordance beside the composer that **clears the unsent draft and resets the
+kind switch** — and nothing else, because there is nothing else to clear.
+
+**It is frontend-only. There is no route and no backend surface.** An empty
+current zone has **no rows at all** — R11 defines the zone as the rows matching
+`related_to IS NULL AND settled_at IS NULL`, so an empty one is an empty set. The
+server has nothing to discard, and **R11 is therefore unchanged**: raw `messages`
+is still touched by exactly two operations, settle and re-open. A planner who
+adds a discard route breaks that invariant for no gain, and this paragraph is
+here to be cited when one proposes it.
+
+**Visible only while the zone is empty; absent — not disabled — once anything has
+been sent** (US-134.AC-2). This follows the existing precedent exactly: re-open's
+`IconArrowBackUp` is **absent** rather than disabled once the zone is non-empty
+(US-128), on the principle that a control for an action that does not currently
+exist should not be drawn at all. A disabled discard button would also read as a
+promise — "you could throw this away if you fixed something" — which is precisely
+what US-134.AC-2 rules out.
+
+**US-134 and US-135 are a pair, and the pairing is the point.** Together they
+close an inescapable state: a zone holding text that could be neither discarded
+(US-134.AC-2) nor settled would trap the roleplayer with no way forward.
+US-135 is the escape — settling never requires an assistant answer — so *every*
+zone has at least one exit at all times: empty ones discard, non-empty ones
+settle. Neither rule is safe without the other, and removing either re-opens the
+trap.
 
 ---
 
@@ -470,9 +566,13 @@ R1 governs what the picker shows as current and R4 governs what happens when the
 chosen reference stops being enabled; neither is restated here. Two consequences
 for this surface specifically:
 
-- The picker's value is the **resolved reference** (R1), which for a session that
-  has composed at least once is the materialised `sessions.model_ref`
-  (`data-model.md`). It is not a blank waiting to be filled.
+- The picker's value is the **captured `sessions.model_ref`** — written at session
+  **creation** and never moved by anything but this control (R4,
+  `data-model.md`). It is not a blank waiting to be filled, and it is not
+  re-derived from the character on each open: **configuring the character with a
+  different model afterwards does not change what this picker shows for an
+  existing session** (US-139.AC-1). A picker that recomputed the chain on render
+  would display a model the session is not using.
 - With no enabled model at all the picker says so and the composer cannot send
   (US-107). It does not fall back and it does not hide.
 

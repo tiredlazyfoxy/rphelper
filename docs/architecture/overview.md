@@ -1,6 +1,7 @@
 # System overview
 
-**Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-019,
+**Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-009,
+FEAT-010, FEAT-017, FEAT-019, UC-086, US-134, US-135, US-137,
 ACT-001, ACT-002, ACT-003, ACT-004
 
 The system context, who reaches which surface, how it runs in dev and prod, every
@@ -159,9 +160,17 @@ wall that is a floating overlay in one mode and a real column in the other canno
 be expressed through `AppShell`'s navbar/main/aside model (`workspace-shell.md`,
 `admin-surfaces.md`). That asymmetry is deliberate and does not weaken the choice
 of Mantine — the shell was one reason among several, not the reason.
-Two of its packages are deliberately *not* used: **`@mantine/form`**, because forms
-go through the MobX draft convention in `ui-conventions.md`, and
-**`@mantine/notifications`**, because there is no toast system. No
+**`@mantine/form` is deliberately *not* used**, because forms go through the MobX
+draft convention in `ui-conventions.md`.
+**`@mantine/notifications` IS used, for one narrow purpose — this reverses the
+earlier "no toast system" note and the reversal is deliberate.** US-044.AC-4
+requires a failed generation to show its reason and requires **the reason not to
+persist once the notice has gone**, which an inline error above the stream cannot
+satisfy: an inline error either stays or is dismissed by hand. So the package is
+added for **transient failure reasons only**, `autoClose` 5000. The rule it
+replaces was always about *success* noise and that half is unchanged: there are
+still **no success toasts**. Full statement, the error codes it covers and the
+reviewable boundary are in `ui-conventions.md`. No
 Tailwind, no CSS modules, no styled-components — two small hand-written
 stylesheets and no more: `global.css` for resets, and `shell.css` for the
 workspace's layout rules alone (`frontend-structure.md`,
@@ -261,16 +270,25 @@ exact phrases that embeddings blur, and lexical-only search misses the
 when both indexes live in the same file.
 
 **Snowflake ids, minted in application code before the INSERT.** Every primary key
-is a 64-bit snowflake, not an `AUTOINCREMENT` rowid. Two product reasons, neither
-of them a preference: settle stamps the head row's own id onto
-`messages.related_to` for every row it buries, **inside one transaction** (R11), so
-the id has to exist before the row is durable; and FEAT-018's import wants ids that
-mean the same thing on two instances, which turns identity-on-import from a
-wholesale re-mapping problem into a collision check (UC-061..UC-064). A snowflake
-is also k-sortable, so `ORDER BY id` *is* the stream order and the schema carries
-no `position` column. The mechanism — bit layout, the fixed epoch, the node-id
-rule, the backwards-clock refusal, the cross-instance qualifier — is in
-`data-model.md`'s Identifiers section and is not restated here.
+is a 64-bit snowflake, not an `AUTOINCREMENT` rowid. The load-bearing product
+reason: settle stamps the head row's own id onto `messages.related_to` for every
+row it buries, **inside one transaction** (R11), so the id has to exist before the
+row is durable. A snowflake is also k-sortable, so `ORDER BY id` *is* the stream
+order and the schema carries no `position` column.
+
+**The second reason this decision used to give has been withdrawn, and is
+recorded as withdrawn rather than deleted.** It was that FEAT-018's import wants
+ids meaning the same thing on two instances, turning identity-on-import from a
+re-mapping problem into a collision check. **US-136.AC-2 rules that out**:
+imported material must arrive under fresh identity, so the importer mints new
+snowflakes and remaps the payload's internal references (`data-model.md`). The
+decision stands on the first reason alone, which was always the stronger one —
+and the withdrawal *simplifies* import rather than costing it anything, because
+there is no longer a collision case to detect.
+
+The mechanism — bit layout, the fixed epoch, the node-id rule, the
+backwards-clock refusal — is in `data-model.md`'s Identifiers section and is not
+restated here.
 
 The cost is one rule that has to hold at every boundary: **an id is an `int` in
 SQLite and Python and a decimal string in every JSON payload and every SSE
@@ -289,7 +307,8 @@ RPHelper ever runs more than one generator process — **a second uvicorn worker
 a second instance that syncs rather than imports** — both need re-examining before
 that change ships: a second worker left on the same node id mints a duplicate the
 first time two inserts land in the same millisecond, and a syncing pair has no
-import step at which a collision check could run.
+import step at which ids would be re-minted, so it inherits the collision risk
+that import itself no longer carries.
 
 **HttpOnly `SameSite=Lax` cookie session (FEAT-002).** Single origin in both
 topologies means no CORS configuration and no token plumbing in the SPA; HttpOnly
@@ -307,12 +326,23 @@ itself (over WebSockets) because the stream is one-directional
 server→client, and it survives the nginx hop with two directives rather than an
 upgrade dance.
 
+**`loguru` for logging, not stdlib `logging` + `dictConfig`.** Rotation and
+retention are built in, and the call site is one function rather than a
+`getLogger(__name__)` per module. The cost is the thing to know about it: loguru
+is a **parallel** logging system, so uvicorn's and SQLAlchemy's stdlib records
+reach it **only** through an `InterceptHandler` installed as the stdlib root
+handler — and if that bridge is missing, the rotating file is silently empty
+while the console still looks right. Two sinks (console `DEBUG`, rotating file
+`WARNING` under `data/logs/`), five `RPHELPER_LOG_*` settings, and an absolute
+redaction rule that FEAT-019 imposes at **every** level: full statement, flip
+condition and the forbidden/allowed lists in `deployment.md`.
+
 **`web_search`: seam now, adapter later.** FEAT-016 is last in the dependency
 graph (`features.md`). The tool seam, its switch in the configuration chain
 (FEAT-013/UC-048), and its failure behaviour are specified in
 `llm-and-streaming.md`; the provider adapter is not.
 
-### Five decisions taken after the first pass
+### Six decisions taken after the first pass
 
 These were open when the doc set was first written and are now settled. Each is
 recorded in full in the doc named beside it; the reasoning is repeated here
@@ -352,9 +382,13 @@ reasoning is unchanged. R3 constrains **the assistant's** reach, not the owner's
 own UI — and re-enabling a note (UC-044) requires being able to find it first, so
 hiding it would make it unreachable. A disabled hit is visibly marked as disabled
 in the result list. The absolute exclusion still holds for `memo_search`,
-`session_search` and context assembly. **This is a requirements gap resolved at
-the architecture layer: `/product-spec` should ratify it into FEAT-017's
-acceptance criteria.**
+`session_search` and context assembly. **Ratified.** This was recorded here as a
+requirements gap resolved at the architecture layer with a note that
+`/product-spec` should ratify it; it has — **US-137.AC-1** states that note state
+never filters a result out, and **US-137.AC-2** that a disabled hit is shown as
+disabled. The decision is now a read of the product rather than an architectural
+judgement standing in for one. Only the *presentation* of a disabled hit stays
+open (`search-and-retrieval.md`).
 
 **4. Destructive admin actions get a confirm step.**
 (`ui-conventions.md`.) A **deliberate addition** — the sibling project has no
@@ -376,11 +410,29 @@ server" with "what can it run". The **backend probe primitive is reused** — on
 implementation — but exposed as its own route with its own **typed** result, so the
 UI can report a bad base URL without opening a model picker.
 
+**6. Abandoning a current zone is resolved, and it is frontend-only.**
+(`workspace-shell.md`, `backend-structure.md`.) This was carried in the deferred
+list below as a **product gap**; UC-086, US-134 and US-135 close it. An empty
+current zone **has no rows at all** — R11 defines the zone as the rows matching
+`related_to IS NULL AND settled_at IS NULL`, so an empty one is an empty set and
+there is nothing for the server to discard. Abandoning therefore clears the
+unsent composer draft and the kind switch, **in the client, with no route and no
+backend surface**. That is the reason this option was chosen over a discard
+endpoint: **R11 is left exactly as it was** — raw `messages` is still touched by
+exactly two operations, settle and re-open — and a discard route would weaken
+that invariant while removing nothing, because there is nothing to remove. The
+paired half is US-135: settling never requires an assistant answer, so a zone
+holding only the roleplayer's own text can always be settled. **The two rules are
+a pair** — without US-135 a zone holding text could be neither discarded (US-134)
+nor settled, which is an inescapable state.
+
 ## Deliberately deferred, and known gaps
 
-Stated here so no reader mistakes an absence for an oversight. The first four are
-deferrals the architecture chose; the last is a product gap the architecture
-deliberately does **not** close.
+Stated here so no reader mistakes an absence for an oversight. The first two are
+deferrals the architecture chose; the third is a product non-goal it must not
+quietly mitigate; the last two are unspecified postures. **There is no longer a
+product-gap entry here** — the one that used to sit at the bottom, abandoning a
+current zone without settling, is **resolved** and is decision 6 above.
 
 - **FEAT-018's four export granularities in full detail.** The contract is
   *sketched* in `data-model.md` — envelope shape, granularity boundaries, the
@@ -388,27 +440,29 @@ deliberately does **not** close.
   to be shaped compatibly with it. Full field-level detail is written when the
   feature is planned. FEAT-018 is last but one in the dependency graph.
 - **FEAT-016's search-provider adapter.** Seam only, per above.
-- **Context compaction — an explicit non-goal, not a gap.** `vision.md` records
-  that session context grows forever with no ceiling, no warning and no pruning,
-  and that the user chose this knowingly over three bounded alternatives. The
-  architecture therefore contains no pruning, no summarisation and no token
-  budget. `_TBD: a long RP will eventually exceed what the model can hold, and
-  nothing warns the user first — carried forward from vision.md's non-goals and
-  FEAT-009/FEAT-010's own _TBD:. No mechanism in this doc set mitigates it._`
+- **Context compaction — an explicit non-goal, and no longer an open question.**
+  `vision.md` records that session context grows forever with no ceiling, no
+  warning and no pruning, and that the user chose this knowingly over three
+  bounded alternatives. The architecture therefore contains no pruning, no
+  summarisation and no token budget. **The `_TBD:` this bullet used to carry is
+  closed — downgraded to a recorded non-goal, not answered.** `vision.md`'s "No
+  context compaction" non-goal now states the consequence in its own words
+  ("a long RP will eventually exceed what the model can hold, nothing warns
+  first, and the refusal surfaces as an ordinary generation failure (US-044)
+  whose reason is shown"), and FEAT-009 and FEAT-010 both restate it as
+  deliberate. So the operational reality is **decided**, not unknown. It stays
+  written down because a planner still needs to see it: nothing in this doc set
+  mitigates it, a context-window refusal arrives as an ordinary provider failure
+  with no special handling, and US-044.AC-4's transient failure notice is the
+  only thing the roleplayer ever sees of it (`llm-and-streaming.md`,
+  `ui-conventions.md`).
 - **TLS.** The inherited posture is HTTP only — no `listen 443`, no certificates,
   anywhere. `_TBD: if the instance is ever reachable beyond a trusted LAN, TLS
   termination and cookie `Secure` flags must be designed; neither is specified
   today._` See `deployment.md`.
-- **Abandoning a current zone without settling — a known product gap, recorded as
-  a gap and not as a design decision.** `docs/product/` states it twice, on
-  FEAT-010 (challenge C22) and on UC-083 itself: nothing says how a roleplayer
-  walks away from what is in the zone without settling it. The architecture invents
-  no answer — `backend-structure.md`'s stream route table carries append, compose,
-  settle, re-open and a per-message edit and **no discard operation**, so the
-  omission stays visible to whoever plans FEAT-010. `_TBD: carried forward from
-  docs/product/ (features.md FEAT-010 challenge C22, use-cases/FEAT-010 UC-083).
-  Until it is resolved, no route removes a message from the zone and settle (R11)
-  is the only way the zone empties. Resolving it is a product decision._`
+- **Metrics and alerting.** Logging is now specified (`deployment.md`); metrics
+  and alerting are not, and `docs/product/` names neither. Recorded as an
+  absence rather than left implied by the logging section beside it.
 
 ## Non-functional posture
 

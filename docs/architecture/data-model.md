@@ -1,7 +1,8 @@
 # Data model
 
 **Realizes:** FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-006, FEAT-007,
-FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-018, FEAT-019
+FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-015, FEAT-018,
+FEAT-019, US-136, US-138, US-139
 
 One SQLite file under `data/`, holding relational rows, `sqlite-vec` vector
 tables and FTS5 full-text tables. Reasoning for one store is in `overview.md`;
@@ -22,8 +23,9 @@ Every primary key in this schema is a **snowflake id generated in application co
 before the INSERT**. There is no `AUTOINCREMENT` anywhere and no
 `INSERT`-then-`UPDATE` to learn an id. The reason is that several writes need the
 id *before* the row is durable — settle stamps `messages.related_to` with the head
-row's own id inside one transaction — and because the export/import contract wants
-ids that can mean the same thing on two instances.
+row's own id inside one transaction. (This sentence used to carry a second reason,
+that the export/import contract wants ids meaning the same thing on two instances;
+US-136 withdrew it — see the import bullet below and `overview.md`.)
 
 Layout — 64-bit signed, 63 usable bits:
 
@@ -57,16 +59,24 @@ Rules, each of which a plan must hold:
   deployment — one container, one uvicorn (`deployment.md`). Recorded as a
   **deployment guarantee**, not as an accident of the current topology.
 - **The node id comes from config** (default 0) so two instances can be given
-  different node ids. That is what makes ids minted on two instances
-  non-colliding, which matters for FEAT-018 import.
+  different node ids, which makes ids minted on two instances non-colliding.
+  **Its old justification is superseded and the setting survives it**: this
+  bullet used to say the node id mattered "for FEAT-018 import", and US-136 has
+  since made import mint fresh ids unconditionally (Export/import contract,
+  below), so import no longer depends on it. It stays configurable as scheme
+  hygiene — two instances writing to distinct databases should not be issuing the
+  same id values — and because the flip condition below is stated in terms of it.
 - **Ordering is free.** A snowflake is k-sortable, so `ORDER BY id` is
   chronological. This is why the schema below carries **no `position` column** on
   messages.
-- **Import (FEAT-018) can preserve ids** across instances rather than re-map them
-  wholesale, which reduces identity-on-import to a collision check. Not
-  overclaimed: cross-instance uniqueness holds **only while the two instances were
-  configured with different node ids.** Two instances left on the default node id
-  0 will collide, and the importer must detect that rather than assume it away.
+- **Import (FEAT-018) mints fresh ids** for every imported row and remaps the
+  payload's internal references — US-136.AC-2 requires imported material to
+  arrive under fresh identity, so this is a requirement rather than a mechanism
+  choice. See the Export/import contract below. **This reverses what this bullet
+  used to claim** (that import could *preserve* ids and reduce identity-on-import
+  to a collision check); the optimisation is ruled out by the product. The payoff
+  of the reversal is that the cross-instance node-id qualifier stops reaching
+  import at all — there is no collision to detect, because nothing is preserved.
 - **Ids are not secrets.** A snowflake leaks its creation time and is roughly
   sequential, so ids are guessable. That grants nothing: every read path is scoped
   by `user_id` at the query level (R5, FEAT-019), so a guessed id belonging to
@@ -122,10 +132,20 @@ the scope discussion below.
 | `is_enabled` | boolean; a disabled account cannot log in (FEAT-002) |
 | `rp_language` | user-level default (R1, UC-047) |
 | `preferred_language` | user-level default (R1, UC-047) |
-| `default_model_ref` | user-level default model **reference**, unvalidated (R4) |
-| `default_system_prompt` | user-level default |
-| `default_tools` | user-level tool switches |
 | `created_at`, `updated_at` | |
+
+**Correction — `users` carries no model, system-prompt or tools default, and the
+three columns that used to be listed here are removed.** This table previously
+declared `default_model_ref`, `default_system_prompt` and `default_tools`, which
+matched R1's old (wrong) three-level diagram. **UC-050's postcondition states
+there is no user-level default for model, system prompt or tools**, and UC-047
+step 2 says the user level carries "the RP language and the preferred language —
+the only two settings at the user level". The columns therefore had no
+requirement behind them, and their removal is enforcement of the same kind as
+`characters` having no language columns: **a column that exists will eventually
+be read**, and a resolver reading one here would produce exactly the user-level
+model default UC-050 says does not exist. Marked as a correction rather than
+silently dropped, because three deleted columns look like an editing slip.
 
 **`role` is a single enum column, not an `is_admin` boolean.** It carries the two
 rungs of the ladder in `domain-rules.md` — `roleplayer` = ACT-002,
@@ -150,9 +170,10 @@ outcome FEAT-003 rules out. See `auth_sessions` below, and the
 SQLAlchemy Core decision in `backend-structure.md` — explicit transaction scoping
 is one of the reasons for it.
 
-The five configuration defaults live on `users` rather than in a separate
-settings table because they are exactly one row per user and are read on every
-resolution (R1); a join would buy nothing.
+The two language defaults live on `users` rather than in a separate settings
+table because they are exactly one row per user and are read on every language
+resolution (R1); a join would buy nothing. (This paragraph used to say "five
+defaults" — see the correction above.)
 
 ### `auth_sessions`
 
@@ -284,23 +305,50 @@ column would invite one.
 reading-and-working signal (UC-026) while `updated_at` moves on any write; using
 one for the other makes list order jump for reasons the roleplayer did not cause.
 
-**`model_ref` is materialised, not only an override.** R1 resolves a model
-reference through `user → character → session`, and US-106 adds a floor: a
-character with no model configured resolves to "the first enabled model".
-Re-resolved dynamically on every request, that floor is **unstable** — an
-administrator enabling a model that sorts earlier would silently change the model
-a never-configured session has been using, which is precisely the silent
-substitution R4 forbids. So the resolved reference is **written onto
-`sessions.model_ref` the first time the session composes**, and the session keeps
-it. After that the session's model changes only when the roleplayer changes it
-(UC-077, US-105). See R4.
+**`model_ref` is captured at session CREATION, and it is the only thing that is
+captured.** R1 resolves a model reference through `character → session`, and
+US-106 adds a floor: a character with no model configured resolves to "the first
+enabled model". Re-resolved dynamically on every request, that floor is
+**unstable** — an administrator enabling a model that sorts earlier would
+silently change the model a never-configured session has been using, which is
+precisely the silent substitution R4 forbids. So the resolved reference is
+**written onto `sessions.model_ref` when the row is inserted**, in the same
+transaction as the rest of session creation, and the session keeps it. After that
+the session's model changes only when the roleplayer changes it (UC-077, US-105).
 
-`_TBD: docs/product/ does not state what happens to that materialised value when
-the character is configured with a model afterwards. This design keeps the
-session's own reference, because overwriting it would be the silent substitution
-R4 forbids — but the consequence (a session that never chose a model does not
-follow a later character-level change) is a product decision nobody has made.
-Raised for /product-spec._
+**Two corrections in one paragraph, both marked:** the chain is
+`character → session`, not `user → character → session` (see the `users`
+correction above and R1); and the moment is **creation**, not "the first time the
+session composes", which is what this doc used to say. `docs/product/` states
+creation in three places — UC-050's main flow step 2, US-059.AC-1 and US-139.
+
+**The capture applies to the MODEL ONLY, and the split is deliberate.** The
+`system_prompt` and `tools` columns on this table are **overrides, not
+captures**: they are consulted as one level of a chain that still resolves
+**live** on every request, against whatever the character holds today
+(US-059.AC-1, UC-050's postcondition). A session created under a character with
+no system prompt has NULL here and picks up a system prompt the character gains
+next week; a session created under a character with no model has the first
+enabled model **written into `model_ref`** and does not pick up a model the
+character gains next week (US-139.AC-1).
+
+Stated here as well as in R4 because this table is where somebody will try to
+tidy it. **Harmonising the three columns in either direction is a defect**:
+capture the system prompt too and a character-level prompt edit stops reaching
+existing sessions; stop capturing the model and a character-level model change
+moves a session mid-roleplay. It is examined and intended, not an inconsistency.
+
+**The `_TBD:` this section carried is closed.** It asked what happens to the
+materialised value when the character is configured with a model afterwards.
+**US-139 answers it: nothing happens — the session keeps its captured model**, and
+only sessions created from that point on capture the new one. R4 carried the same
+question and it is closed there too.
+
+What creation does when **no model is enabled at all** is a new and genuinely
+open question, raised and not answered in R4 (`domain-rules.md`) — whether
+creation is refused or the row is inserted with `model_ref` NULL and filled on
+the first successful resolution. The column is nullable either way, so the schema
+does not pre-empt the answer.
 
 ### `messages`
 
@@ -549,11 +597,37 @@ Identifiers on sparse rowids, which must be verified before FEAT-014 and FEAT-01
 are planned.
 
 `session_vec` embeds a session-level summary text rather than per-entry vectors,
-because FEAT-015's unit of result is a past session. `_TBD: docs/product/ does not
-specify what text represents a session for semantic matching (UC-053 says only
-"by meaning, for a similar person or situation"). The composition of that text is
-left to the plan that builds FEAT-015; note that per-entry embeddings are the
-flip condition recorded in overview.md's vector-store decision._`
+because FEAT-015's unit of result is a past session. Per-entry embeddings remain
+the flip condition recorded in `overview.md`'s vector-store decision.
+
+**What text composes it is now specified, and the `_TBD:` here is closed.**
+US-138 settles it: a match must consider a session's entries **together with its
+character's persona and setup**, so that a query describing a *person* finds the
+session even when its entries do not describe the query (US-138.AC-2). The
+composition is therefore three sources:
+
+```
+session_vec text  =  the session's settled entries          (settled_entries view,
+                                                             INCLUDING decisions —
+                                                             US-122.AC-2, unchanged)
+                  +  the character's persona                (characters.sheet)
+                  +  the setup text                         (setups.description,
+                                                             absent when setup_id IS NULL)
+```
+
+The two constraints that were already fixed are unchanged: it reads the
+**`settled_entries` view** and never raw `messages` (R11), and it **must include
+`kind='decision'` rows** (US-122.AC-2).
+
+**The invalidation edge this creates is a fan-out, and it is the first one in the
+system.** Until now every `session_vec` write was one session per relational
+write — settle, a settled-text edit, re-open. **Editing a character's persona, or
+a setup's text, now invalidates every session vector under that character.**
+`search-and-retrieval.md` owns the write policy, its cost, the deliberate
+fail-hard behaviour it puts character and setup writes under, and the flip
+condition; it is cited here rather than restated, but the schema consequence
+belongs on this page: `characters.sheet` and `setups.description` are now inputs
+to `session_vec`, so they are no longer purely relational columns.
 
 ## FTS5 tables
 
@@ -672,18 +746,39 @@ moving credentials, and a restored instance needs its environment supplied
 separately. Stated here because it is a visible operational consequence of the
 secret-pointer pattern.
 
-**Identity on import.** Snowflake ids change this from a re-mapping problem into a
-collision check: ids are globally meaningful, so the importer can **preserve**
-them and the `related_to` and `scope_id` references inside the payload stay valid
-untouched. The qualifier from the Identifiers section applies in full — that only
-holds while the exporting and importing instances were configured with different
-node ids, so the importer detects collisions rather than assuming there are none,
-and falls back to re-mapping when it finds one.
+**Import policy — decided; the `_TBD:` that stood here is closed.** US-136
+settles both halves of it:
 
-`_TBD: docs/product/ does not state whether import merges into existing data or
-requires an empty target (UC-062/UC-063/UC-064 say only "restores"). UC-002 is the
-one unambiguous case — whole-database import into an unconfigured instance.
-Collision policy for the other three granularities is left to FEAT-018's plan._`
+- **An import merges as new material.** It arrives alongside what is already
+  there and **nothing existing is overwritten or replaced** (US-136.AC-1). There
+  is no empty-target requirement, no "replace" mode and no merge-into-existing-row
+  behaviour to design.
+- **Imported material carrying ids that already exist arrives under fresh
+  identity** (US-136.AC-2). No existing row is reused or replaced.
+
+**Mechanism: mint new snowflakes on import and remap internal references within
+the imported payload.** Every row in the payload gets a freshly minted id, and
+every reference *inside* the payload — `related_to`, `scope_id`, `session_id`,
+`character_id`, `setup_id`, `message_id` — is rewritten to the new id of the row
+it points at. The remap table is local to the one import and is discarded after
+it commits.
+
+The interaction with the identifier scheme is worth stating, because it is why
+this mechanism costs almost nothing: **ids are minted in application code before
+the INSERT** (Identifiers, above), so an import uses **the same generator every
+other write uses** and the single-generator guarantee already covers it. There is
+no separate id space for imported rows, no "imported" flag, and no way for an
+import to mint an id that collides with a live one.
+
+**This supersedes the earlier preserve-ids-and-detect-collisions design recorded
+here, and the supersession is deliberate.** Preserving ids was an optimisation
+available *because* snowflakes are globally meaningful; US-136.AC-2 makes fresh
+identity a requirement rather than a fallback, so the collision check is no
+longer a branch — minting is unconditional. The cross-instance qualifier in the
+Identifiers section (two instances left on node id `0` collide) stops being an
+import concern entirely, which is a simplification, not a loss. The visible
+consequence, which `docs/product/` records as accepted: **importing the same
+export twice yields duplicates, and nothing warns about it** (FEAT-018).
 
 **Vectors are not exported.** They are derived data, re-computable by FEAT-005's
 rebuild (UC-016), and they are only valid for the embedding model that produced

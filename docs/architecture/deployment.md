@@ -1,10 +1,11 @@
 # Deployment
 
-**Realizes:** FEAT-001, FEAT-002, FEAT-009, FEAT-010, FEAT-018, FEAT-019,
-UC-003, UC-027, US-035.AC-1, US-035.AC-2
+**Realizes:** FEAT-001, FEAT-002, FEAT-005, FEAT-009, FEAT-010, FEAT-018,
+FEAT-019, UC-003, UC-016, UC-027, UC-061, US-035.AC-1, US-035.AC-2
 
-Ports, the dev and prod topologies, every nginx directive with its reason, and the
-configuration conventions. Build and test commands live in the root `CLAUDE.md`.
+Ports, the dev and prod topologies, every nginx directive with its reason, the
+configuration conventions, and the logging posture. Build and test commands live
+in the root `CLAUDE.md`.
 
 ---
 
@@ -195,10 +196,12 @@ What it forbids, stated concretely because the change looks routine:
   have to be re-examined before it ships.
 - **The node id comes from config** — `RPHELPER_NODE_ID`, default `0`
   (`backend-structure.md`'s `Settings`). It is deliberately configurable so two
-  *instances* can be given different node ids, which is what lets FEAT-018 import
-  preserve ids instead of re-mapping them. Two instances left on the default `0`
-  will collide, and `data-model.md` requires the importer to detect that rather
-  than assume it away — so an operator running a second instance should set it.
+  *instances* can be given different node ids, and an operator running a second
+  instance should set it. **The FEAT-018 justification this bullet used to give
+  is superseded**: import no longer preserves ids — US-136.AC-2 requires imported
+  material to arrive under fresh identity, so the importer mints new snowflakes
+  and remaps the payload's references (`data-model.md`). The setting survives as
+  scheme hygiene, not as an import prerequisite.
 
 The bit layout, the fixed epoch and the backwards-clock refusal are
 `data-model.md`'s Identifiers section and are not restated here.
@@ -353,16 +356,184 @@ requesting an asset bundle that no longer exists after a deploy. `no-cache`
   `data-model.md`: a restored whole-database export needs its environment supplied
   separately, because the export deliberately carries no credentials.
 
+---
+
+## Logging
+
+**Realizes:** FEAT-019, UC-065, UC-066
+
+**This closes the observability `_TBD:` this doc used to carry.** `docs/product/`
+still names no observability requirement; what follows is a technical decision
+taken on top of it, and FEAT-019 is what bounds it. Metrics and alerting remain
+unspecified and unbuilt — this section is logging only.
+
+### The library — `loguru`, and the one way it fails silently
+
+**`loguru`.** Chosen for two properties this project actually needs: **rotation
+and retention are built in** (no `RotatingFileHandler` plumbing, no
+`dictConfig`), and the call site is one function — `logger.info(...)` — with no
+per-module `getLogger(__name__)` ceremony.
+
+**The trade-off, stated plainly because it is the thing that can fail without
+anyone noticing.** loguru is a **parallel logging system**, not a configuration
+of the standard library's. `uvicorn.access`, `uvicorn.error`, SQLAlchemy and
+every third-party library emit through **stdlib `logging`**, and their records
+reach loguru only through an **`InterceptHandler`** installed as the stdlib root
+handler, which forwards each record into loguru's sinks.
+
+- **The `InterceptHandler` is load-bearing.** If it is missing, installed after
+  uvicorn has configured its own handlers, or wired to the wrong logger,
+  uvicorn's output **bypasses the rotating file entirely and nothing errors**.
+- **The defect is invisible in dev.** Everything still appears on the console,
+  because uvicorn's own default handler writes there. The symptom only appears
+  in prod, after an incident, as an empty or half-empty log file.
+- Recorded as a prohibition, not advice: a plan that adds loguru without
+  installing the `InterceptHandler`, and without a test that asserts a record
+  emitted through stdlib `logging` lands in loguru's sinks, has not finished the
+  work.
+
+**Flip condition.** If the `InterceptHandler` bridge proves fragile in practice,
+or if structured/machine-readable logs are ever needed, the fallback is stdlib
+`logging` + `dictConfig`. That was the runner-up for exactly the reason that
+makes the bridge necessary — **uvicorn already uses it**, so nothing would need
+bridging. The move is a rewrite of one module, not of any call site, provided
+call sites stay to plain `logger.<level>("message", ...)`.
+
+### Two sinks
+
+| Sink | Default level | Destination |
+|---|---|---|
+| Console | `DEBUG` | **stderr** — captured by `supervisord` in prod, the terminal in dev |
+| Rotating file | `WARNING` | `data/logs/rphelper.log` |
+
+Both levels are configurable (below). The console is deliberately the noisy one
+and the file the quiet one: the console is ephemeral and read while working, the
+file is durable and read after something went wrong.
+
+**Why `data/logs/`.** `data/` is the **only writable volume in prod** — the
+compose mount is `./data:/app/data`, and everything else in the container is
+rebuildable from the image. A log path anywhere else is lost on every redeploy.
+It is therefore the second directory under `data/`, beside the SQLite file, and
+the operational notes below carry the consequence.
+
+**Configuration happens once, at application startup, in one module** —
+`app/logging.py`, called from `main.py`'s app factory before routers are
+registered, so that a failure during registration is already captured. It sits
+beside `config.py`, `ids.py` and `secrets.py` as infrastructure, not under
+`services/` (`backend-structure.md`'s reasoning for `ids.py` applies unchanged).
+Nothing else in the codebase adds, removes or reconfigures a sink.
+
+### Settings
+
+Ordinary `pydantic-settings` fields on the one `Settings` model, with explicit
+`RPHELPER_` validation aliases like every other field. The model's full shape and
+the reasoning for the convention are in `backend-structure.md`; these are the
+five fields it gains:
+
+| Variable | Default |
+|---|---|
+| `RPHELPER_LOG_CONSOLE_LEVEL` | `DEBUG` |
+| `RPHELPER_LOG_FILE_LEVEL` | `WARNING` |
+| `RPHELPER_LOG_FILE_PATH` | `data/logs/rphelper.log` |
+| `RPHELPER_LOG_FILE_ROTATION` | `"10 MB"` |
+| `RPHELPER_LOG_FILE_RETENTION` | `5` |
+
+`rotation` and `retention` are passed to loguru's file sink as-is — a size string
+and a file count. They are settings rather than constants because a self-hosted
+operator with a small volume and one with a large one want different answers, and
+neither is a topology fact the way a port is.
+
+### The redaction rule — a prohibition, with no level exception
+
+**FEAT-019 constrains logging absolutely.** This is written as a prohibition
+rather than a guideline because it is enforceable only as one.
+
+**No log record, at ANY level including `DEBUG`, may contain:**
+
+- message text — settled, buried or current-zone alike;
+- memo bodies;
+- character persona / sheet text;
+- setup text;
+- session titles or partner labels;
+- translations;
+- LLM prompt payloads;
+- LLM completions;
+- API keys or resolved secret values.
+
+**Allowed, and sufficient to debug with:**
+
+- **snowflake ids**, written as decimal **strings** — the JSON id boundary
+  (`backend-structure.md`) does not formally reach a log line, but write them as
+  strings anyway so a line can be pasted straight into a query;
+- error codes from the typed error table (`backend-structure.md`);
+- model references and tool names;
+- token counts, row counts, durations, HTTP status.
+
+**Why there is no level exception.** A rule conditioned on level — "no message
+text above `DEBUG`" — is violated the first time somebody adds a log line without
+checking which level it is under, and the violation is invisible until a `DEBUG`
+console is turned on in prod or a file level is lowered during an incident. **A
+single unconditional rule is the only one that survives review.** The cost is
+real and is accepted: debugging is done by logging the **id** and opening the row
+in SQLite, not by logging the text.
+
+Concrete shapes, so a coder can pattern-match. **Allowed:**
+
+```
+compose start session=7250416938275332095 model=llamaswap/qwen3-30b
+tool_failed tool=memo_search code=no_embedding_model session=7250416938275332095
+settle session=7250416938275332095 rows=3 kind=turn
+translate cached=false message=7250416938275332096 status=200 ms=812
+```
+
+**Forbidden**, each an instance of the list above:
+
+```
+compose prompt=<the assembled system prompt>
+settle text="He turned away without answering."
+memo saved body="the innkeeper is calledВарда"
+llm request api_key=sk-...
+```
+
+**`detail` and log lines are bound by the same privacy rules.** R5 already
+forbids a `detail` carrying another user's data or a count derived from it, and
+R3 forbids memo body text for a note where `is_enabled` is false. A log line is
+the same kind of outbound surface and is bound the same way — more strictly, in
+fact, since the list above forbids *all* memo bodies rather than only disabled
+ones.
+
+### loguru's `diagnose` / backtrace must be off for the file sink
+
+loguru's exception formatting can print **local variable values** alongside a
+traceback. That would defeat the rule above the moment an exception is raised
+inside a function holding message text, a memo body or a resolved API key —
+which is most of the compose path. **`diagnose=False` on the file sink**, and the
+`backtrace` frame expansion is not what makes a traceback useful here anyway; the
+frames are.
+
+Named explicitly because `diagnose=True` is loguru's own default in several
+configurations and reads as a debugging convenience rather than as a data-leak
+path.
+
+---
+
 ## Operational notes
 
-- **Backup is a file copy.** One SQLite file under `data/`. The supported logical
-  path is FEAT-018's whole-database export (UC-061); a file-level copy of the
-  WAL-mode database should be taken with the application stopped, or via SQLite's
-  own backup mechanism, not with `cp` on a live file.
-- **The database file is the only state.** Everything else in the container is
-  rebuildable from the image, and vectors are re-derivable via FEAT-005's rebuild
-  (UC-016) — which is why they are not exported (`data-model.md`).
-- `_TBD: no logging, metrics or alerting posture is specified. docs/product/ names
-  no observability requirement, so none is designed; note that FEAT-019 constrains
-  whatever is eventually added — logs must not record memo bodies or message text,
-  settled, buried or current-zone alike._`
+- **Backup is a file copy, and `data/` now holds two things.** The SQLite file
+  and `data/logs/`. The supported logical path for the database is FEAT-018's
+  whole-database export (UC-061); a file-level copy of the WAL-mode database
+  should be taken with the application stopped, or via SQLite's own backup
+  mechanism, not with `cp` on a live file. **A whole-database export carries no
+  logs** — the export's payload is tables (`data-model.md`), so logs are backed
+  up only by copying the directory, and an export-based restore starts with an
+  empty log.
+- **The database file and the log directory are the only state.** Everything
+  else in the container is rebuildable from the image, and vectors are
+  re-derivable via FEAT-005's rebuild (UC-016) — which is why they are not
+  exported (`data-model.md`).
+- **The vector-rebuild remedy requires a running application.** UC-016's rebuild
+  is reachable only through the Database page's button (`admin-surfaces.md`);
+  there is **no standalone recalc-vectors CLI script**, considered and declined
+  so that one surface owns the operation rather than two that can diverge. The
+  consequence is worth stating because it is exactly backwards from when you
+  want it: the remedy is unavailable precisely when the app will not start.

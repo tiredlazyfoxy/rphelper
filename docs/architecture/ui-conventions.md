@@ -1,8 +1,9 @@
 # UI conventions
 
 **Realizes:** FEAT-006, FEAT-007, FEAT-008, FEAT-009, FEAT-010, FEAT-011,
-FEAT-012, FEAT-013, FEAT-017, FEAT-018, FEAT-020, UC-030, UC-035, UC-037,
-UC-043, UC-069, UC-070, UC-071, UC-072, UC-075, UC-082
+FEAT-012, FEAT-013, FEAT-017, FEAT-018, FEAT-020, UC-030, UC-032, UC-035,
+UC-037, UC-043, UC-069, UC-070, UC-071, UC-072, UC-075, UC-082, UC-085,
+US-044.AC-3, US-044.AC-4
 
 **The workspace shell lives in `workspace-shell.md`** — the three columns, all
 geometry, the note wall's two modes, layout persistence, and the anatomy of the
@@ -86,7 +87,7 @@ a row, and the overflow-menu rule exists to keep a *row* from collapsing.
 | Action | Icon | Feature |
 |---|---|---|
 | Send message in discussion | **labelled button**, not an icon | FEAT-010 |
-| Stop generation | `IconPlayerStop` | FEAT-010 |
+| Stop generation | `IconPlayerStop` | FEAT-010, UC-085 |
 | Settle | **labelled primary button**, not an icon | FEAT-010 |
 | **Copy settled turn out** | `IconCopy` | FEAT-009 |
 | Copy as plain text (composer) | `IconCopy` | FEAT-009 |
@@ -114,6 +115,7 @@ glyph maps onto one unambiguously; the rest are `_TBD:` rather than a guess.
 | Action | Icon | Realizes |
 |---|---|---|
 | Kind switch — *partner* / *my turn* | **two labelled segments**, no icons | US-120 |
+| Discard an **empty** current zone | `_TBD:` — the mockup predates UC-086 and draws no glyph; the control is **absent**, not disabled, once the zone holds anything (US-134.AC-2), on `IconArrowBackUp`'s precedent | UC-086, US-134 |
 | Collapse the tree | `_TBD:` — glyph is a left chevron against a right-hand bar | UC-070, US-090 |
 | Expand the tree from the rail | `IconMenu2` | UC-070, US-090 |
 | Expand / collapse a character in the tree | `IconChevronDown`, rotated `-90°` when collapsed | UC-069, US-088 |
@@ -234,8 +236,10 @@ scrolling._
 - **Loading** — a centered Mantine `Loader`, gated on an explicit
   idle/loading status field rather than on "data is still null". An explicit
   status distinguishes "not asked yet" from "asked, nothing came back".
-- **Errors** — an inline red `Text` or `Alert` **above** the table. Not a toast,
-  not a modal (see below).
+- **Errors** — an inline red `Text` or `Alert` **above** the table. Not a modal,
+  and **not also a notification**: a failure with a place to render in-page
+  renders there and nowhere else. The transient-notification channel below is for
+  failures that have no such place.
 - **Empty state** — the sibling project has **no empty-state component**: an
   empty list renders an empty table body, with headers and nothing under them.
   Flagged as a **weak spot RPHelper may improve**, not mandated: a first-run
@@ -334,17 +338,67 @@ draft and closing it discards one. **Not** a long-lived draft that is reset on
 close: a reset function is one more thing to keep in step with the field list, and
 a forgotten field is a stale value shown to the next user of the dialog.
 
-### Async feedback is inline — there is no toast system
+### Async feedback — no *success* toasts, and one narrow use of notifications
 
-**`@mantine/notifications` is not used and is not a dependency.** Feedback is
-inline, in the form or above the table.
+**This rule is rewritten, not deleted, and the change is narrow.** It used to
+read "there is no toast system" and to list `@mantine/notifications` as not a
+dependency. **US-044.AC-4 reverses half of it**: a failed generation must show
+its reason, and **the reason must not persist once the notice has gone**. An
+inline error above the stream cannot satisfy that — it either stays until
+something replaces it or waits for a manual dismissal, and "does not persist" is
+the criterion.
 
-**Success is implicit**: the modal closes and the list refreshes. That pairing is
-the success signal — a list that visibly contains the new row says more than a
-toast that says it was created. Kept deliberately, and recorded so it is not
-"improved": nothing in `docs/product/` asks for transient notifications, and a
-toast system introduces a second, timed, easily-missed channel for messages that
-the inline one already carries reliably.
+**The rule is now: no *success* toasts.**
+
+- **Success feedback is unchanged.** The modal closes and the list refreshes.
+  That pairing is the success signal — a list that visibly contains the new row
+  says more than a toast saying it was created. The original reasoning was always
+  about **success noise**, and that half holds exactly as written: nothing in
+  `docs/product/` asks for a transient success message, and adding one introduces
+  a second, timed, easily-missed channel for something the inline one already
+  carries reliably.
+- **`@mantine/notifications` IS a dependency**, added for **transient failure
+  reasons only**, with **`autoClose: 5000`**.
+
+**What it carries** — a failure's *reason*, for any typed failure that is not
+already rendered in place: `llm_unreachable`, `model_not_enabled`,
+`translation_failed`, `tool_failed`, and the rest of
+`backend-structure.md`'s error table on the same condition. A failure that
+already has a place to be rendered — a field error in a modal, the inline
+`Alert` above an admin table, the no-embedding-model banner above the stream
+(US-112) — keeps rendering there and does **not** also raise a notification.
+
+**The boundary a reviewer can check, stated as one line:**
+
+> **A notification whose message is a success is a defect.**
+
+That is the whole test. It is phrased that way because "no toasts, except…" is a
+rule nobody can apply, while "failures only" is a rule that is either satisfied
+or visibly broken at the call site.
+
+#### The tension with US-044.AC-3, and how it is resolved
+
+US-044.AC-3 requires that a retry is **possible** after a failure. US-044.AC-4
+requires the reason **not to persist**. Put both on the notification and they
+contradict: if the notice carries the only retry affordance and auto-dismisses
+after five seconds, the retry vanishes with it, and a roleplayer who looked away
+has lost the action rather than the message.
+
+**They are split, and the split is the design:**
+
+| Carries | Where | Lifetime |
+|---|---|---|
+| The **reason** the generation failed (US-044.AC-4) | the transient notification | ~5s, then gone |
+| The **retry** affordance (US-044.AC-3) | **in the stream, at the failed exchange** | persists until the exchange succeeds or is abandoned |
+
+The retry belongs where the failure happened, because that is the only place that
+still knows what to retry. The notification carries the reason precisely because
+the reason is the thing the product says must not persist — and a reason without
+its retry is a message, which is what a transient channel is for.
+
+Nothing in the record is discarded on either path (R10): the failure notice and
+the retry control are both additive to a zone and a settled record that survive
+intact.
 
 ### Mutations are never optimistic
 
@@ -451,12 +505,16 @@ Recorded here so `ui-conventions.md` is self-sufficient for someone building a
 screen:
 
 - **React 19**, TypeScript.
-- **Mantine 7** — `@mantine/core`, `@mantine/hooks`, `@mantine/tiptap`. No
-  Tailwind, no CSS modules, no styled-components; one small hand-written
-  `global.css` for resets. **`@mantine/form` is present as an inherited dependency
-  but is deliberately not used** — forms go through the MobX draft convention
-  above. **`@mantine/notifications` is not a dependency at all** — there is no
-  toast system.
+- **Mantine 7** — `@mantine/core`, `@mantine/hooks`, `@mantine/tiptap`,
+  `@mantine/notifications`. No Tailwind, no CSS modules, no styled-components;
+  two small hand-written stylesheets (`frontend-structure.md`).
+  **`@mantine/form` is present as an inherited dependency but is deliberately not
+  used** — forms go through the MobX draft convention above.
+  **`@mantine/notifications` IS a dependency and IS used**, for transient
+  **failure reasons only**, `autoClose` 5000 — this reverses the earlier "not a
+  dependency at all, there is no toast system" note, narrowly, on US-044.AC-4.
+  Success toasts remain forbidden; see the feedback section above for the
+  boundary.
 - **`@mantine/hooks` is used for non-stateful helpers only.** A custom hook must
   not hold reactive state (`admin-surfaces.md`'s shell-state note): reactive state
   lives in a MobX class instantiated with `useState(() => new X())`. This is why

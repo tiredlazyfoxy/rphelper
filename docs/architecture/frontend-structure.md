@@ -352,6 +352,10 @@ One module in `shared/`, used by every entry:
   `account_disabled`. **`discussion_not_resumable` is gone** — it named a table
   that no longer exists and a condition that has changed; `zone_not_empty` is its
   replacement and the rename is not cosmetic (`backend-structure.md`).
+  **Where a failure is not already rendered in place, its reason is shown as a
+  transient notification** (US-044.AC-4, `ui-conventions.md`) — the client throws
+  and renders exactly as before; what changed is only the surface some of these
+  codes land on.
 - A `401` triggers a document navigation to `/login`. A `403` does not — it is a
   genuine authorization failure and is rendered, not redirected.
 
@@ -364,7 +368,7 @@ because that is the silent fallback R4 forbids.
 
 ## The SSE consumer
 
-**Realizes:** FEAT-010, UC-032, UC-034, UC-083
+**Realizes:** FEAT-010, UC-032, UC-034, UC-083, UC-085, US-132, US-133
 
 One module in `shared/`, speaking to exactly one route:
 **`POST /api/sessions/{id}/zone/compose`** (`backend-structure.md`). The old
@@ -379,10 +383,12 @@ The request is a **POST with a JSON body**, so native `EventSource` (GET-only)
 cannot be used — the roleplayer's message would have to go into a URL. Instead:
 
 ```ts
+const controller = new AbortController();        // the stop control aborts this
 const res = await fetch(`/api/sessions/${sessionId}/zone/compose`, {   // id: string
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(payload),
+  signal: controller.signal,
 });
 const reader = res.body!.getReader();
 const decoder = new TextDecoder();
@@ -404,10 +410,40 @@ Four details that are all load-bearing:
   ASCII, so this is a routine case here, not an exotic one.
 - **Frames are split on `"\n\n"`** and the trailing fragment is kept in the
   buffer. A frame is not guaranteed to arrive whole.
-- **The consumer is cancellable** via an `AbortController`, which is what the stop
-  control (`IconPlayerStop`) uses.
-- **A stream that ends without a `done` frame is a failure**, surfaced as
-  `llm_unreachable`. Silence is not success.
+- **The consumer is cancellable** via an `AbortController`, and that abort **is**
+  the stop control (`IconPlayerStop`, UC-085). There is no stop route and nothing
+  to notify — the server detects the closed connection, persists the partial
+  assistant text as an ordinary zone row and unwinds
+  (`llm-and-streaming.md`, `backend-structure.md`). The controller is owned by
+  the same store that owns the in-flight message, so the control knows whether
+  there is anything to stop.
+- **A stream that ends without a `done` frame is a failure — unless this client
+  aborted it.** That qualifier is new and it is load-bearing: a stop is now a
+  fourth way a stream ends (`llm-and-streaming.md`'s termination table), and the
+  old blanket inference would render `llm_unreachable` for an action the
+  roleplayer just took deliberately.
+
+  **The distinction is made on the consumer's own state, never on the stream.**
+  The consumer records that it called `abort()` — equivalently, it catches the
+  `AbortError` the `fetch()`/`reader.read()` rejects with and checks
+  `controller.signal.aborted`. There is nothing in the bytes to inspect, which is
+  the point: to the server the three silent cases are identical, and the client
+  is the only party that knows which one happened.
+
+  ```
+  stream ends, no `done`  ──┬── signal.aborted  ──►  a stop: no error is shown
+                            └── otherwise       ──►  llm_unreachable
+  ```
+- **After a stop the consumer re-reads the zone** —
+  `GET /api/sessions/{id}/zone` — because no `done` frame arrived and therefore
+  no `message_id` names the persisted partial row (US-132.AC-1). This is
+  `ui-conventions.md`'s never-optimistic re-load rule applying to a mutation
+  whose result the client did not observe, not a special case; the same rule
+  already governs every other mutation in the product.
+- **The stop clears nothing.** R10's prohibition covers this path too: aborting
+  must not discard the in-flight assistant text already rendered, the roleplayer's
+  own zone messages, or the settled record — the reload replaces the in-flight
+  message with the persisted row, it does not empty the zone first.
 
 Frame handling maps onto the **current zone** store (`workspace-shell.md`):
 

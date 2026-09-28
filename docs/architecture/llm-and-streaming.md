@@ -2,7 +2,8 @@
 
 **Realizes:** FEAT-004, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013,
 FEAT-014, FEAT-015, FEAT-016, ACT-004, UC-010..UC-013, UC-032..UC-038, UC-045,
-UC-051, UC-053, UC-055..UC-057, UC-081, UC-083, UC-084
+UC-051, UC-053, UC-055..UC-057, UC-081, UC-083, UC-084, UC-085,
+US-132, US-133
 
 One client abstraction for every provider, the SSE frame protocol, the tool loop,
 what goes into context and — just as importantly — what must never go into it.
@@ -46,11 +47,22 @@ sees the last known state without re-probing on every page load.
 The request path for every generation is exactly three steps, in this order:
 
 ```
-1. resolve   config_resolver → a model REFERENCE (user → character → session)
-2. validate  llm_registry    → is that reference an enabled model right now?
-3. call      LlmClient       → chat_stream
+1. read      sessions.model_ref → the model REFERENCE captured at session creation
+2. validate  llm_registry       → is that reference an enabled model right now?
+3. call      LlmClient          → chat_stream
 ```
 
+- **Step 1 is a read, not a resolution.** The model reference was resolved once,
+  through `character → session`, **when the session was created**, and written
+  onto `sessions.model_ref` (R4, `data-model.md`). The request path does not
+  re-walk the chain, so a character configured with a different model afterwards
+  does not move an existing session (US-139.AC-1). **Note the chain is
+  `character → session` — there is no user level** (UC-050; R1 carries the
+  correction).
+- **The system prompt and the enabled tool set are different**: those *are*
+  resolved live on every request, through `character → session`, against whatever
+  the character holds today. The split is deliberate and R4 states why
+  harmonising it in either direction is a defect.
 - Step 1 **does not** consult the enabled-models registry and **does not** skip a
   level whose model is disabled. Skipping is the silent fallback UC-012 forbids.
 - Step 2 is where a dead reference is caught, and it raises
@@ -130,10 +142,12 @@ full**.
 
 Rules the protocol enforces:
 
-- **`done` is mandatory on success.** A stream that closes without it is treated as
-  `llm_unreachable` by the client. Silence is never success.
+- **`done` is mandatory on success.** A stream that closes without it means the
+  exchange did not complete — but **"did not complete" is no longer the same as
+  `llm_unreachable`**, because a stop is now a fourth way a stream can end. See
+  the termination table below.
 - **`error` and `done` are mutually exclusive and terminal.** Exactly one of them
-  ends every stream.
+  ends every stream that the *server* ends.
 - **`tool_fail` is not terminal.** This is the protocol expression of UC-051's and
   UC-053's exception flows: a failed tool does not end the exchange. It is a
   distinct event from `error` precisely so the client cannot conflate them.
@@ -146,6 +160,32 @@ Rules the protocol enforces:
   scoped for.
 - `X-Accel-Buffering: no` is set on the response by the application
   (`deployment.md`), independently of nginx's `proxy_buffering off`.
+
+### Four ways a stream ends — and no new frame for the fourth
+
+**No frame is added for the stop.** A stopped stream is a **fourth termination**,
+not a fifth event:
+
+| Termination | Server emitted | Client renders |
+|---|---|---|
+| Success | `done` | finalise on the assistant's row id |
+| Server-side failure | `error` | the typed failure, discarding nothing (R10) |
+| Unexpected close | nothing | `llm_unreachable` |
+| **Stop (UC-085)** | **nothing — the client closed the connection** | **nothing failed**; reload the zone |
+
+**The inference "a stream ending without `done` = `llm_unreachable`" is now wrong
+for one of the four cases, and this is the correction.** The client **knows
+whether it aborted**, because it is the party that called `abort()`. So:
+
+> **A client that initiated the stop must not surface `llm_unreachable` for it.**
+> The distinction is made on the client's own `AbortController` state, never by
+> inspecting the stream — there is nothing in the byte stream to inspect, which is
+> the point. `frontend-structure.md` owns the consumer half.
+
+This is the one place the protocol's "silence is never success" rule needs a
+qualifier: silence is never success, but it is also not always a failure. The
+server side genuinely cannot tell the three silent cases apart, and deliberately
+does not try — see the stop section below.
 
 ### Ordering guarantee that protects the roleplayer's text
 
@@ -186,6 +226,99 @@ by making one.
 
 ---
 
+## Stopping model work in flight — UC-085
+
+**Realizes:** FEAT-010, FEAT-011, FEAT-014, FEAT-015, FEAT-016, UC-085, US-132,
+US-133
+
+**The mechanism: the client calls `controller.abort()` on the existing
+`fetch()`.** That is the whole of it.
+
+- **No stop route.** There is no `POST /api/sessions/{id}/stop`.
+- **No in-process registry of in-flight work.** Nothing maps a session, a user or
+  a request id to a running generator.
+- The server **detects the disconnect inside its streaming generator**, persists
+  whatever assistant text was produced so far as an ordinary current-zone row,
+  and unwinds.
+
+Why this shape rather than a control route: a stop route needs a name for the
+work being stopped, and the work has no name — the current zone has no id (R11)
+and the exchange is a request, not an entity. Naming it would mean a registry,
+and a registry is server state that can outlive the thing it describes. Closing
+the socket needs no name and cannot leak.
+
+**Four consequences, chosen knowingly. They are written out because a planner who
+rediscovers the last two will otherwise conclude the design is wrong and quietly
+build something else.**
+
+**1. Partial text survives, as an ordinary candidate.** The partial assistant row
+is persisted on the way out, so it lands in the current zone as a normal,
+editable message the roleplayer can promote, rewrite or settle (US-132.AC-1).
+This is **R10's principle extended to the assistant's side**: R10 says a model
+failure loses none of the roleplayer's text; this says a stop loses none of the
+model's either. A coherent extension of an existing rule, not an ad-hoc addition —
+and the same reason applies, that the roleplayer's next action should never be
+retyping something the system already had.
+
+**2. The client gets no terminal frame and no row id, so it reloads the zone.**
+There is no `done`, so there is no `done.message_id` naming the persisted partial
+row. After a stop the client **re-reads `GET /api/sessions/{id}/zone`** and picks
+up the candidate from there.
+
+**This is not a compromise and must not be read as one.**
+`ui-conventions.md` already mandates **never-optimistic mutations with a re-load
+after every one**, and a stop is a mutation whose result the client did not
+observe. The reload is the house rule applying, not an exception to it. The only
+thing the abort costs is the round trip the `done` frame would have saved, which
+is the same round trip every other mutation in the product already pays.
+
+**3. A stop, a network drop and a closed tab are indistinguishable — and all
+three are handled identically.** The server sees one thing: the client is gone.
+It persists the partial row and unwinds, for all three.
+
+**Frame this as a benefit, because it is one.** A flaky connection now also
+preserves partial output, having previously produced nothing. And there is **no
+code path that needs to tell the three apart** — no heuristic, no "was this
+deliberate?" flag, no timeout that guesses. The only party that can distinguish
+them is the client, which needs to only for the one purpose in the termination
+table above: not showing `llm_unreachable` for its own stop.
+
+**4. Stopping mid-tool-call ends the exchange.** There is no wrap-up pass and no
+final answer, because **the connection the answer would stream over is the one
+that just closed**. The loop does not resume, does not re-enter with a "the tool
+was cancelled" message, and does not produce a closing sentence.
+
+The candidate left behind is whatever prose had already streamed — **which may be
+empty**, if the stop landed during the first tool call before any `token` frame.
+Recorded bluntly: an empty current zone after a stop is a correct outcome, not a
+lost row, and it is then abandonable under UC-086/US-134 like any other empty
+zone.
+
+### Named divergences from `docs/product/` — pending amendment
+
+Two acceptance criteria will **not** match what gets built. This is known and
+accepted, and it is recorded here rather than designed around, because designing
+to the AC as written would produce either a stop registry or a guarantee the
+transport cannot make.
+
+- **US-133.AC-1** — "Given the assistant is waiting on a tool call, when the
+  roleplayer stops it, then the discussion continues without that tool's result."
+  **It will not continue.** Consequence 4 above: the exchange ends, because the
+  stop closes the connection the continuation would have streamed over. The AC
+  reads the stop as behaving like a *failed* tool (R9, where the exchange genuinely
+  does continue); the two differ precisely in that a failed tool leaves the socket
+  open and a stop does not.
+- **US-133.AC-2** — "the original text stands and nothing is cached."
+  **"Nothing is cached" is best-effort only**, not a guarantee. See the
+  translation section below for the mechanism and why.
+
+**Both are pending amendment by `/product-spec`.** `docs/product/` is not edited
+here and neither AC is silently reinterpreted; a plan that binds to either as
+written will produce a test that cannot pass. Named by id so the amendment
+request is unambiguous.
+
+---
+
 ## The tool-calling loop
 
 **Realizes:** ACT-004, FEAT-013, FEAT-014, FEAT-015, FEAT-016
@@ -222,10 +355,12 @@ Rules:
   it is tested by making a tool fail and asserting the exchange still produces
   an answer.
 - **Tool availability comes from the resolved configuration** (FEAT-013's
-  `user → character → session` chain, R1). A disabled tool is **not offered to the
-  model** — it is absent from the tool list, not present-and-refused. A tool the
-  model cannot see cannot be attempted, which is a cheaper and more honest
-  enforcement than rejecting the call.
+  `character → session` chain, R1 — **not** `user → character → session`, which
+  is the corrected chain), resolved **live on every request** like the system
+  prompt and unlike the model. A disabled tool is **not offered to the model** —
+  it is absent from the tool list, not present-and-refused. A tool the model
+  cannot see cannot be attempted, which is a cheaper and more honest enforcement
+  than rejecting the call.
 - **Every tool dispatch is a scoped read** carrying the authenticated `user_id`,
   and `session_search` additionally carries `character_id` (UC-054). The assistant
   has no other database path (R9), which is what makes FEAT-019's isolation
@@ -235,11 +370,28 @@ Rules:
   the roleplayer may rewrite it in place, the assistant's text included (US-115),
   and must **settle** it for it to become record (US-126). The only other door
   into the record is a pasted partner block, which is born settled (US-121).
-- `_TBD: no iteration cap is stated in docs/product/. A bounded number of tool
-  rounds per exchange is an implementation necessity — an unbounded loop can spin —
-  but no limit is specified, so the plan that builds FEAT-010 must choose one and
-  record it. Note that a cap is a loop guard, not context compaction, which is a
-  non-goal (overview.md)._`
+- **There is no iteration cap, and the `_TBD:` that asked for one is closed.**
+  `docs/product/` decided: FEAT-010 states "there is no cap on tool iterations,
+  the stop is what bounds a runaway loop", and FEAT-014/015/016 each repeat
+  "there is no limit on how many times the assistant may call tools before
+  answering". So the loop has no round counter and no `max_iterations`.
+
+  **The rationale survives the abort mechanism intact, and the connection is the
+  whole reason no cap is needed.** The objection a cap answered was that an
+  unbounded loop can spin forever. It cannot, here: **the loop dies with the
+  socket.** The roleplayer watching `tool_start` frames repeat presses stop, the
+  `fetch()` aborts, the generator detects the disconnect and unwinds (above) —
+  so the bound is the roleplayer's patience, applied through a control the
+  product gives them, rather than a number nobody can choose correctly. A cap
+  would additionally have to fail *somehow* when it tripped, and every option
+  (silent truncation, an `error` frame, a forced final answer) is worse than the
+  roleplayer deciding.
+
+  The two facts that make this safe are worth keeping together: the loop is
+  bounded by the connection, and **a stopped exchange keeps its partial text**
+  (US-132), so aborting a runaway loop is cheap for the roleplayer rather than
+  destructive. A cap is a loop guard and was never context compaction, which
+  remains a separate non-goal (`overview.md`).
 
 ### `web_search` — seam now, adapter deferred
 
@@ -269,7 +421,9 @@ ACT-004 "consumes forced memos and the session's settled entries" (`actors.md`,
 R9). That is the whole list, and it is a closed list.
 
 ```
-system prompt  = resolved system_prompt (R1: user → character → session)
+system prompt  = resolved system_prompt (R1: character → session, LIVE —
+                   no user level exists; not captured at creation, unlike
+                   the model, which is read from sessions.model_ref)
                + character sheet
                + FORCED memos: is_enabled AND is_forced over the resolved chain
                  (R2/R3, UC-045), ordered — see below
@@ -428,16 +582,29 @@ Session context grows forever: no ceiling, no warning, no pruning. This is an
 explicit **non-goal** (`vision.md`), knowingly chosen by the user over three bounded
 alternatives, and nothing in the assembly above mitigates it.
 
-`_TBD: a long RP will eventually exceed what the model can hold, and nothing warns
-the roleplayer first — carried from vision.md's non-goals and FEAT-009/FEAT-010's
-own _TBD:. An enormous paste warns about context cost (US-035.AC-1) but the
-session's own accumulated size does not._`
+**The `_TBD:` this section carried is closed — downgraded to a recorded non-goal,
+not answered.** It asked what happens when a long RP exceeds what the model can
+hold with nothing warning first. `docs/product/` has since stated that outcome as
+the chosen one rather than as an unexamined gap: `vision.md`'s "No context
+compaction" non-goal now says in its own words that "a long RP will eventually
+exceed what the model can hold, nothing warns first, and the refusal surfaces as
+an ordinary generation failure (US-044) whose reason is shown", and **FEAT-009**
+and **FEAT-010** each restate it — "context is unbounded by choice — nothing warns
+the roleplayer as a session grows". So it is decided, not open.
 
-Note what this means concretely for anyone building FEAT-010: a provider error
-caused by exceeding the context window arrives as `llm_unreachable` or a
-provider-specific failure, and the design contains no special handling that
-distinguishes it. That is a consequence of the non-goal, recorded rather than
-quietly fixed.
+**The reasoning stays visible, because a planner still needs it.** What was a
+question is now a recorded operational reality:
+
+- A provider error caused by exceeding the context window arrives as
+  `llm_unreachable` or a provider-specific failure, and the design contains **no
+  special handling that distinguishes it**. Deliberate.
+- An enormous *paste* warns about context cost (US-035.AC-1); the session's **own
+  accumulated size never does**. The asymmetry is the product's, not an oversight
+  in assembly.
+- What the roleplayer sees at that point is US-044's failure notice with its
+  reason — transient, five seconds, gone (US-044.AC-4, `ui-conventions.md`). That
+  is the entire user-facing treatment of the ceiling, and it is enough only
+  because the product says nothing more is wanted.
 
 ---
 
@@ -466,3 +633,37 @@ the translation or shows the original.
 - A cached row is discarded when the message's text changes (US-111,
   `data-model.md`).
 - The translation never enters context (R8).
+
+### Stopping a translation — best-effort, and explicitly not a guarantee
+
+UC-085 and US-133 put a translation in flight within the stop's reach, and
+**translation is the one place where the abort mechanism cannot deliver what the
+AC asks for**. The reason is structural: translation is **not streamed** (above) —
+it is a plain JSON request — so aborting the `fetch()` stops the *client*
+waiting, while the server handler runs to completion, gets its result and writes
+the `translations` cache row. There is no open stream whose closure the handler is
+already watching.
+
+What is specified:
+
+- A **best-effort `await request.is_disconnected()` check immediately before the
+  cache write.** If the client is already gone, the row is not written and the
+  handler returns.
+- **It is best-effort and it is not a guarantee.** The check samples the
+  connection at one instant; the disconnect can land between the check and the
+  write, and the write still happens. Stated as a non-guarantee rather than
+  described in a way that reads like one.
+
+**US-133.AC-2's "nothing is cached" therefore holds usually and not always**, and
+that divergence is named above with the other one, pending amendment by
+`/product-spec`. The alternatives were considered and rejected: a transaction
+spanning the model call would hold a write lock on the single-writer SQLite file
+for the duration of a network round trip, and a delete-after-the-fact compensating
+write is a second code path to get a cache row into and back out of existence for
+a case the roleplayer will not notice — a stale cache entry for text they asked to
+translate and then stopped is, at worst, a translation they get instantly next
+time.
+
+The **user-visible** half of US-133.AC-2 does hold unconditionally: the original
+text stands. Nothing about the flicker's rendering depends on whether the row
+landed.

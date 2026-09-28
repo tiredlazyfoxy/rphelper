@@ -3,7 +3,7 @@
 **Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-008,
 FEAT-009, FEAT-010, FEAT-013, FEAT-018, FEAT-019, FEAT-020, UC-003, UC-012,
 UC-013, UC-027, UC-035, UC-037, UC-050, UC-065, UC-066, UC-071, UC-078, UC-080,
-UC-083, UC-084
+UC-083, UC-084, UC-085, UC-086, US-132, US-134, US-135
 
 FastAPI application layout, the routers/services split, the id and JSON
 boundaries, configuration and secrets, and the error model that carries typed
@@ -18,6 +18,8 @@ backend/
   app/
     main.py              # app factory, router registration, lifespan
     config.py            # pydantic-settings Settings + lru_cache accessor
+    logging.py           # loguru sink configuration + the InterceptHandler;
+                         #   called ONCE from main.py (deployment.md)
     ids.py               # the snowflake generator — see below
     secrets.py           # "$ENV_VAR" pointer resolution
     errors.py            # typed error hierarchy + exception handlers
@@ -275,8 +277,12 @@ The decisions behind that shape, each of which could have gone another way:
   creates the session and becomes the opening message of the turn being drafted.
   **US-117.AC-1 makes creating the session and seeding its zone a single
   outcome**, so they are a single `with conn.begin():` in
-  `services/sessions.py` — mint the session id, insert the `sessions` row, insert
-  the opening message as a current-zone row, commit together. The rejected
+  `services/sessions.py` — mint the session id, **resolve and capture
+  `model_ref`** (R4: the model is captured at creation, not on first compose),
+  insert the `sessions` row, insert the opening message as a current-zone row,
+  commit together. The capture belongs inside this transaction like everything
+  else in it; what creation does when **no model is enabled at all** is R4's open
+  `_TBD:`, and this route is one of the two places that will have to answer it. The rejected
   alternative was leaving the client to call a create route and then
   `POST /api/sessions/{id}/zone/messages`: two round trips that can fail between,
   stranding an empty session under the character that the roleplayer never asked
@@ -302,6 +308,18 @@ The decisions behind that shape, each of which could have gone another way:
   route once the session exists. If UC-080 is meant to open the exchange as well,
   the response media type changes — so FEAT-008's plan must settle it rather than
   discover it._
+- **The table has no discard operation, and that is now a decision rather than a
+  gap.** It used to be recorded as a carried-forward product gap ("nothing says
+  how a roleplayer walks away from the zone without settling"). UC-086, US-134
+  and US-135 close it, and the answer leaves this table exactly as it is: an
+  **empty** current zone has no rows, so abandoning it is a **frontend-only**
+  clearing of the composer draft and the kind switch — no route, no backend
+  surface (`workspace-shell.md`, R11). A zone that *holds* text is never
+  discardable; it is settled instead, and US-135 guarantees settling never
+  requires an assistant answer. **A discard route must not be added**: it would
+  make raw `messages` writable from a third operation, weakening R11's
+  two-operation invariant, in exchange for deleting rows that by definition do
+  not exist.
 
 ### The streaming route
 
@@ -322,6 +340,31 @@ rules belong here because they are route-level:
 2. **A domain error mid-stream becomes an `error` frame, not an HTTP status.**
    The status was already sent. The frame carries the same `{code, message,
    detail}` shape as the JSON error body so the SPA has one error renderer.
+3. **A client disconnect persists the partial assistant text and unwinds**
+   (UC-085, US-132). The streaming generator detects the disconnect, writes
+   whatever assistant text has accumulated as an **ordinary current-zone row**,
+   and returns. It emits no terminal frame — there is nobody left to read one.
+
+**The stop is a client disconnect and nothing else** (`llm-and-streaming.md`
+owns the mechanism and its consequences). Three route-level facts follow, each
+stated because the absent thing is what a reader will look for:
+
+- **There is no stop route.** No `POST /api/sessions/{id}/stop`, and none may be
+  added — the table above is complete.
+- **There is no registry of in-flight work.** Nothing on application state maps a
+  session, a user or a request to a running generator. The current zone has no id
+  (R11), so there is nothing to key such a registry on, and adding one would put
+  server state beside a request that may already be gone.
+- **The partial-row write is the same write the success path performs**, not a
+  special one: the assistant's row is a current-zone row either way, and the only
+  difference is that no `done` frame reports its id. The client re-reads
+  `GET /api/sessions/{id}/zone` to pick it up, which is
+  `ui-conventions.md`'s never-optimistic re-load rule applying normally.
+
+Because a stop, a network drop and a closed tab are the same event at this
+layer, **the handler makes no attempt to distinguish them** — there is one
+disconnect path, and a flaky connection gets the same partial-text preservation a
+deliberate stop does.
 
 ## Settle and re-open — one transaction each, one module
 
@@ -335,7 +378,13 @@ is a review finding, and every other reader goes through a view.
 **Settle**, entirely inside one `with conn.begin():`
 
 1. Read the zone through `current_zone`; take the last row by id (US-126). An
-   empty zone raises `zone_empty`.
+   empty zone raises `zone_empty`. **That is the only precondition.** In
+   particular there is **no requirement that the assistant has answered**: a zone
+   holding only the roleplayer's own message settles that text as-is (US-135,
+   UC-083 step 5 — "the last message in the current zone, **whoever wrote it**").
+   Confirmed rather than newly stated, because the rule already read correctly;
+   a check for an assistant row here would be a defect, and it is the kind of
+   check that arrives disguised as validation.
 2. Classify and strip through `services/parens.py` (R12): wholly parenthesised →
    `kind='decision'`, otherwise `kind='turn'` with any `(( ))` fragment removed
    from the head row's text.
@@ -406,6 +455,13 @@ class Settings(BaseSettings):
     node_id: int = Field(default=0, validation_alias="RPHELPER_NODE_ID")
     session_cookie_name: str = Field(default="rphelper_session", validation_alias="RPHELPER_SESSION_COOKIE_NAME")
     session_ttl_hours: int = Field(default=720, validation_alias="RPHELPER_SESSION_TTL_HOURS")
+
+    # logging — sinks and their thresholds (deployment.md owns the posture)
+    log_console_level: str  = Field(default="DEBUG",   validation_alias="RPHELPER_LOG_CONSOLE_LEVEL")
+    log_file_level: str     = Field(default="WARNING", validation_alias="RPHELPER_LOG_FILE_LEVEL")
+    log_file_path: Path     = Field(default=Path("data/logs/rphelper.log"), validation_alias="RPHELPER_LOG_FILE_PATH")
+    log_file_rotation: str  = Field(default="10 MB",   validation_alias="RPHELPER_LOG_FILE_ROTATION")
+    log_file_retention: int = Field(default=5,         validation_alias="RPHELPER_LOG_FILE_RETENTION")
     # ... one field per setting, each with an explicit RPHELPER_ alias
 
 @lru_cache
@@ -426,8 +482,38 @@ def get_settings() -> Settings:
   they are topology, and making them configurable would create a way for the Vite
   proxy target and the uvicorn bind to disagree.
 - **`node_id` is a setting** and is the one field the id generator reads. It is
-  configurable precisely because `data-model.md` requires two instances to be
-  given different node ids for FEAT-018 import to preserve ids.
+  configurable so two instances can be given different node ids. **Its earlier
+  justification — that FEAT-018 import preserves ids and therefore needs
+  non-colliding node ids — is superseded**: US-136.AC-2 makes import mint fresh
+  ids and remap the payload's internal references (`data-model.md`), so import
+  uses this same generator and needs no cross-instance guarantee at all.
+- **The five `log_*` fields** are the only configuration the logging module
+  reads. `log_file_path` defaults under `data/` because that is the one writable
+  volume in prod; `deployment.md` owns that reasoning and the redaction rule.
+
+### The logging call site — once, in the app factory
+
+**Realizes:** FEAT-019
+
+`app/logging.py` exposes one function, `configure_logging(settings)`, and it is
+called **exactly once, from `main.py`'s app factory, before any router is
+registered** — early enough that a failure during registration is already
+captured by both sinks. It does three things and nothing else:
+
+1. removes loguru's default stderr handler and adds the two configured sinks
+   (console at `log_console_level`; the rotating file at `log_file_level`, with
+   `rotation`, `retention` and **`diagnose=False`**);
+2. creates `log_file_path`'s parent directory if it does not exist;
+3. installs the **`InterceptHandler`** as the stdlib `logging` root handler and
+   clears `uvicorn`, `uvicorn.access`, `uvicorn.error` and `sqlalchemy`'s own
+   handlers so their records propagate into it.
+
+Step 3 is the load-bearing one and the one that fails silently —
+`deployment.md` records why, and the flip condition if the bridge proves
+fragile. No other module in the backend adds, removes or reconfigures a sink;
+call sites use `loguru.logger` directly and pass **ids, codes and counts, never
+text** (`deployment.md`'s redaction rule, which binds every log line in this
+codebase at every level).
 
 ## The `"$ENV_VAR"` secret-pointer pattern
 
@@ -486,7 +572,7 @@ The named errors the design requires:
 
 | `code` | Raised when | `detail` carries | Realizes |
 |---|---|---|---|
-| `model_not_enabled` | Use-time validation of a resolved model reference fails (R4) | the model reference, and **which level set it** (`user`/`character`/`session`) | FEAT-004, UC-012 |
+| `model_not_enabled` | Use-time validation of a resolved model reference fails (R4) | the model reference, and **which level set it** — `character` or `session`, **never `user`**: there is no user-level model default (UC-050, R1's correction) | FEAT-004, UC-012 |
 | `no_embedding_model` | An embedding is attempted with no designated embedding model, or the designation is gone (R4) | nothing user-scoped | FEAT-004, UC-013 |
 | `secret_ref_missing` | `"$ENV_VAR"` names an absent variable | the variable name | FEAT-004 |
 | `llm_unreachable` | Provider call fails or times out | provider-side message, no request body | FEAT-010, UC-032 |
@@ -523,8 +609,9 @@ preferences:
 `model_not_enabled` carrying *which level set the reference* is the one place the
 error model does real product work: UC-012 says the roleplayer resolves the
 situation "by choosing another model through FEAT-013's chain", and they can only
-do that if they are told whether the dead reference came from their account
-default, the character, or this session.
+do that if they are told whether the dead reference came from the character or
+from this session. (It used to say "their account default, the character, or this
+session" — there is **no account default for a model**; see R1's correction.)
 
 ## `/api/health`
 

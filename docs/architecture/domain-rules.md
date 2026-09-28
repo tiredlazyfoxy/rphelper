@@ -5,7 +5,7 @@ FEAT-011, FEAT-012, FEAT-013, FEAT-014, FEAT-015, FEAT-016, FEAT-019, UC-012,
 UC-021, UC-025, UC-029, UC-032, UC-035, UC-036, UC-037, UC-038, UC-039, UC-040,
 UC-041, UC-042, UC-044, UC-045, UC-046, UC-047, UC-048, UC-049, UC-050, UC-052,
 UC-065, UC-066, UC-067, UC-068, UC-075, UC-076, UC-077, UC-078, UC-081, UC-083,
-UC-084
+UC-084, UC-086
 
 Every feature in RPHelper binds to the rules below. They are collected in one
 place because each one is violated by the *obvious* implementation, and because
@@ -42,15 +42,30 @@ renamed to RPHelper's actor rather than re-purposed. Frontend route gating
 
 **Realizes:** FEAT-013, UC-047, UC-048, UC-049, UC-050
 
-Two resolution chains exist, and they are genuinely different lengths.
+Two resolution chains exist, and **they share no level at all**.
 
 ```
-model, system prompt, tool switches :   user ──► character ──► session
+model, system prompt, tool switches :          character ──► session
+                                        ▲
+                                   user is NOT a level —
+                                   no user-level default exists
+
 RP language, preferred language     :   user ─────────────────► session
                                                   ▲
                                           character is SKIPPED —
                                           the override does not exist
 ```
+
+> **Correction, marked so it is not "fixed" back.** This diagram previously read
+> `user ──► character ──► session` for model / system prompt / tools. **That was
+> wrong, and it was wrong from the first pass** — it predates the delta that
+> found it. UC-050's postcondition says, in the product's own words, that "there
+> is no user-level default for model, system prompt or tools", and UC-047's
+> postcondition says the same from the other side: the user level carries the two
+> languages and nothing else. The corrected statement is also the cleaner one —
+> **two chains that share no level whatever**, rather than two chains of
+> different lengths that overlap at the top. Anything in a plan or a doc still
+> resolving a model through a user-level default is reading the old diagram.
 
 **This asymmetry is deliberate, stated here so it is not "fixed" later.** The
 reason is in the domain, not in the code: a character is a persona reused across
@@ -66,11 +81,16 @@ Architectural consequences that must hold:
   `preferred_language` column. The asymmetry is enforced by the schema's shape,
   not by a resolver that politely declines to read a column. A column that exists
   will eventually be read.
+- **Symmetrically, `users` carries no model, system-prompt or tools default.**
+  This is the schema half of the correction above and it is enforced the same
+  way: the columns do not exist, so no resolver can read one
+  (`data-model.md`, which records the removal). The user level holds exactly the
+  two languages (UC-047 step 2).
 - The resolver exposes two functions, not one parameterised one, so a caller
-  cannot accidentally ask for a language through the three-level chain.
-- UC-050's postcondition — "a character-level language override does not exist
-  and is never consulted" — is a testable claim about the schema. It is not
-  satisfied by a null column.
+  cannot accidentally ask for a language through the character level, or a model
+  through the user level.
+- UC-050's postcondition — the two chains share no level — is a testable claim
+  about the schema on both sides. It is not satisfied by a null column on either.
 
 Resolution semantics for both chains: the **lowest level that has a non-null
 value wins**; a level that has no value is transparent, not a value of "empty".
@@ -206,8 +226,19 @@ The product rule, in three parts:
 
 1. An administrator disabling a model **is never refused** on account of sessions
    depending on it. The disable always proceeds.
-2. There is **no silent fallback** up the `user → character → session` chain. A
-   session never quietly changes model.
+2. There is **no silent fallback** up the configuration chain. A session never
+   quietly changes model.
+
+   > **Flagged, not resolved here.** UC-012's exception flow states this as "no
+   > silent fallback up the `user → character → session` chain", which names a
+   > **user level for the model that UC-050 and UC-047 say does not exist**.
+   > `docs/product/` is inconsistent between those use cases. This doc follows
+   > **UC-050**, which is the use case that owns resolution and whose
+   > postcondition is explicit ("there is no user-level default for model, system
+   > prompt or tools"), and reads UC-012's phrasing as stale wording of the same
+   > prohibition rather than as a third level. **The prohibition itself is
+   > identical either way** — nothing walks up anything — so no behaviour turns on
+   > which reading is right. Raised for `/product-spec` to reconcile.
 3. The next time that session tries to use the model, it **shows an error**, and
    the roleplayer resolves it by choosing another model through FEAT-013's chain.
 
@@ -240,16 +271,76 @@ violates this rule from the other end: an administrator enabling a model that
 sorts earlier would silently change the model a never-configured session has been
 using — no error, no notice, a different voice in the next reply. "First enabled"
 is a *bootstrap* answer, not a standing one. So the resolved reference is
-**materialised onto `sessions.model_ref` the first time the session composes**
-(`data-model.md`), after which the enabled-model set can change all it likes
-without moving an existing session's model. Validation still happens at use time,
-so a materialised reference that is later disabled produces the same loud typed
-error as any other.
+**materialised onto `sessions.model_ref`** (`data-model.md`), after which the
+enabled-model set can change all it likes without moving an existing session's
+model. Validation still happens at use time, so a materialised reference that is
+later disabled produces the same loud typed error as any other.
 
-`_TBD: docs/product/ does not state what happens to that materialised value if
-the character is configured with a model afterwards — the session keeps its own,
-because overwriting it is the silent substitution this rule forbids, but that
-consequence has not been ruled on. Raised for /product-spec._
+### The model is captured at session CREATION, and the capture applies to the model alone
+
+**The moment of materialisation moved, and the reasoning above did not.** This
+doc previously said the reference was written "the first time the session
+composes". `docs/product/` now states **session creation** in three places —
+UC-050's main flow step 2, US-059.AC-1 and US-139 — and it is creation.
+
+The rule, in two halves that behave differently:
+
+| What | When it resolves | Against what |
+|---|---|---|
+| **MODEL** | **once, at session creation** — captured onto `sessions.model_ref` | the character's model *as configured at that instant*; if the character has none, the **first enabled model** (US-106's floor, now a creation-time answer rather than a per-request one) |
+| **SYSTEM PROMPT**, **ENABLED TOOLS** | **live, on every request** | whatever the character holds *today*, through `character → session` |
+
+Consequences of the model half, each stated because the obvious implementation
+gets one of them wrong:
+
+- **Configuring a character with a model afterwards reaches only sessions created
+  from that point on** (US-139.AC-1, US-139.AC-2). An existing session keeps what
+  it captured. Nothing walks existing sessions to update them, and a job that did
+  would be the silent substitution this rule forbids.
+- The capture is the **resolved reference, still unvalidated**. Creation does not
+  consult the enabled-models registry to approve it; validation stays at use time
+  (above), so a captured reference whose model is later disabled raises
+  `model_not_enabled` exactly like any other.
+- The roleplayer changes it the one way the product provides: the session-level
+  override from the stream header (UC-077, US-105).
+
+**This is a deliberate split inside what reads like one chain, and it is examined
+and intended rather than an inconsistency.** Say it that way to anyone who spots
+it, because "harmonising" it is a defect in **either** direction:
+
+- harmonise *upwards* (make the system prompt captured at creation too) and
+  editing a character's system prompt stops reaching its existing sessions,
+  which US-059.AC-1 and UC-050's postcondition both require it to do;
+- harmonise *downwards* (make the model resolve live again) and configuring a
+  character's model changes a session mid-roleplay, which is exactly what
+  US-139 forbids and what the unstable-default corollary above was written to
+  prevent.
+
+The reason the two differ is in the domain, not the code: a model is the *voice*
+a session was started in and swapping it mid-roleplay changes the prose the
+roleplayer has been building on, while a system prompt and a tool switch are
+standing instructions the roleplayer edits precisely in order to change how the
+assistant behaves from now on, in every session.
+
+**The `_TBD:` this rule used to carry is closed.** It asked what happens to the
+materialised value if the character is configured with a model afterwards.
+US-139 answers it: **nothing happens — the session keeps its captured model.**
+`data-model.md` carried the same question and it is closed there too.
+
+**A new consequence, and it is open.** Materialising at creation means **session
+creation is now the moment that can fail when no model is enabled at all**.
+Previously the null window meant a session could exist before any model question
+arose; now creation is the first thing that has to answer it.
+
+`_TBD: docs/product/ does not state what session creation does when the enabled-
+model set is empty. FEAT-013/US-107 says the roleplayer "cannot send a message
+and is told why" — that is about SENDING, not about CREATING, and the two are now
+different moments. The open question is precisely: is session creation REFUSED,
+or is the session created with a NULL model_ref that is filled on the first
+successful resolution? Nothing here chooses, because either answer is a product
+decision with a visible behavioural consequence — the first blocks UC-080's
+start-a-session-by-writing outright, the second reintroduces a window in which
+the capture has not happened. Raised for /product-spec._
 
 Why the product accepts a loud failure over a helpful substitution: refusing the
 admin's disable would require telling the administrator that *other users'
@@ -465,7 +556,7 @@ product guarantee into a 413.
 
 ## R11 — The ruler: settle is the only door into the record
 
-**Realizes:** FEAT-009, FEAT-010, UC-035, UC-037, UC-083
+**Realizes:** FEAT-009, FEAT-010, UC-035, UC-037, UC-083, UC-086, US-134, US-135
 
 A session is a **stream**: settled record above a ruler, and below it exactly one
 **current zone** (US-125, UC-083). The rule, in four parts:
@@ -475,6 +566,25 @@ A session is a **stream**: settled record above a ruler, and below it exactly on
   nothing to compose for text the roleplayer did not write (US-121). No other
   path may create a settled row — not an assistant reply, not an autosave, not a
   background tidy-up.
+- **Settling never requires an assistant answer** (US-135). Settle takes *the
+  last message in the zone, whoever wrote it* — which already covers a zone
+  holding only the roleplayer's own message: that text settles as-is, and the
+  absence of an assistant reply is not a precondition failure. UC-083 step 5 says
+  the same thing in the product's words ("the last message in the current zone,
+  **whoever wrote it**"), so this is a confirmation that the rule already reads
+  correctly, not a new clause. The only refusal settle has is an **empty** zone
+  (`zone_empty`).
+- **Abandoning an empty current zone is frontend-only, and this rule is
+  unchanged by it** (UC-086, US-134). An empty zone has **no rows** — it is the
+  empty set of the predicate above — so there is nothing for the server to
+  discard: abandoning clears the client's unsent composer draft and the kind
+  switch and touches no table. **No discard route exists and none may be added.**
+  That is why this option was chosen: a discard endpoint would make raw
+  `messages` writable from a third operation, weakening the two-operation
+  invariant below, in exchange for deleting rows that by definition are not
+  there. A zone that *holds* text is never discardable (US-134.AC-2) — it is
+  settled, which US-135 guarantees is always possible. The two rules are a pair:
+  without US-135, a zone holding text could be neither discarded nor settled.
 - **The current zone is structurally unique**, not uniquely-constrained. It is not
   a row but the set of a session's messages matching
   `related_to IS NULL AND settled_at IS NULL` (`data-model.md`). A set cannot be
@@ -550,7 +660,28 @@ row's text is the text, and an edit to it (UC-029, US-110) is taken literally �
 re-running the parser on a later edit would silently delete a roleplayer's
 deliberately parenthesised prose long after they wrote it.
 
-`_TBD: carried forward from docs/product/ (features.md FEAT-010, US-130,
-challenge C21) — nothing states what happens when RP prose itself legitimately
-contains double parentheses. A draft could silently lose text at settle. Not
-resolved here; resolving it is a product decision._
+### The assumption R12 rests on — a recorded constraint, no longer a `_TBD:`
+
+**This was a `_TBD:` and it is closed, as a constraint rather than as an
+answer.** The question was what happens when RP prose itself legitimately
+contains double parentheses. `docs/product/` has now examined it and held:
+**US-130's `Constraint:` line** (and FEAT-010's note) state that the `(( ))`
+convention **assumes double parentheses never occur in the roleplayer's own RP
+prose**, and record that the roleplayer confirmed this never happens in their
+writing. Examined and confirmed, not an unexamined assumption.
+
+So it is not an open question; it is a **stated assumption the design rests on**,
+and the provenance is what makes it usable — a design resting on a confirmed
+statement is different from one resting on nobody having asked.
+
+**Flip condition, kept visible because this is the assumption most likely to be
+violated by a different user.** If a roleplayer ever legitimately writes double
+parentheses inside RP prose, R12's parse-once-at-settle rule **silently drops
+it**: the fragment is stripped from the head row in the same transaction, the
+pre-strip text is not preserved (above), and the loss is discovered only when the
+turn is read back. At that point an **escape mechanism becomes necessary** — an
+escape sequence, a per-session switch, or a preview the roleplayer must confirm.
+None is designed now, because designing one against a confirmed non-occurrence
+would be inventing a requirement. The client-side preview
+(`workspace-shell.md`) is the only thing standing between the assumption and the
+loss today, and it is explicitly non-authoritative.

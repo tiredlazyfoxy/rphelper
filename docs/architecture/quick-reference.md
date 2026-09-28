@@ -10,18 +10,18 @@ named beside it. **Where this file and another doc disagree, the other doc wins.
 
 | Doc | Read it when you need |
 |---|---|
-| `overview.md` | System context, actor→surface map, the admin surface list, dev/prod topology, **the full stack decision list with rationale** (including the five post-first-pass decisions), the deferred list |
+| `overview.md` | System context, actor→surface map, the admin surface list, dev/prod topology, **the full stack decision list with rationale** (including the six post-first-pass decisions), the deferred list |
 | `quick-reference.md` | This file — the index |
-| `data-model.md` | Tables and columns, **snowflake identifiers**, ownership/isolation columns, `users.role`, `auth_sessions`, the merged `messages` table + its two views, archive semantics, `vec0` + FTS5 tables, drift registry, the export/import contract sketch |
+| `data-model.md` | Tables and columns, **snowflake identifiers**, ownership/isolation columns, `users.role`, `auth_sessions`, the merged `messages` table + its two views, **`sessions.model_ref` captured at creation**, archive semantics, `vec0` + FTS5 tables (**`session_vec`'s three sources**), drift registry, the export/import contract sketch + **the import policy** |
 | `domain-rules.md` | **The role ladder + R1–R12, the cross-cutting invariants.** Read before touching any feature |
-| `backend-structure.md` | FastAPI layout, routers/services split, `require_role`, **SQLAlchemy Core**, `pydantic-settings`, the `"$ENV_VAR"` secret pointer, `app/ids.py`, **the JSON id boundary**, the stream routes, settle/re-open, the `(( ))` seam, the typed error model, `/api/health`, `/api/me`, the connection probe's two routes, **schema evolution (registry + admin-applied Alembic batch DDL)** |
-| `frontend-structure.md` | Vite multi-entry, the `admin` entry's boot + async gate, per-page MobX stores, routing inside the `app` entry, **"ids are strings"**, the API client, the SSE consumer |
-| `workspace-shell.md` | The `app` entry's one screen: the three columns, **all geometry**, the note wall's two modes, **layout persistence**, the stream, the ruler and the current zone, the kind switch and settle, the wall's contents, the character page, the user menu, the model picker, and the reversal record for the deleted splitters |
-| `ui-conventions.md` | Everything that is **not** the shell: icons + the shared `IconButton` + the full icon table, the accessibility floor, tables, **the list/modal/MobX-draft/confirm CRUD conventions**, no-toasts, never-optimistic, page state |
+| `backend-structure.md` | FastAPI layout, routers/services split, `require_role`, **SQLAlchemy Core**, `pydantic-settings`, the `"$ENV_VAR"` secret pointer, `app/ids.py`, **the JSON id boundary**, the stream routes, settle/re-open, the `(( ))` seam, the typed error model, `/api/health`, `/api/me`, the connection probe's two routes, **schema evolution (registry + admin-applied Alembic batch DDL)**, the logging call site, **the disconnect/stop path** |
+| `frontend-structure.md` | Vite multi-entry, the `admin` entry's boot + async gate, per-page MobX stores, routing inside the `app` entry, **"ids are strings"**, the API client, the SSE consumer **and its abort path** |
+| `workspace-shell.md` | The `app` entry's one screen: the three columns, **all geometry**, the note wall's two modes, **layout persistence**, the stream, the ruler and the current zone, the kind switch and settle, **the stop control and the discard-empty-zone affordance**, the wall's contents, the character page, the user menu, the model picker, and the reversal record for the deleted splitters |
+| `ui-conventions.md` | Everything that is **not** the shell: icons + the shared `IconButton` + the full icon table, the accessibility floor, tables, **the list/modal/MobX-draft/confirm CRUD conventions**, **no *success* toasts + the transient failure-notification rule**, never-optimistic, page state |
 | `admin-surfaces.md` | The `admin` entry in full: 3 routes + 404, shell, the admin gate and why it deviates, the Users / LLM Servers / Database pages |
-| `llm-and-streaming.md` | The one LLM client, resolve→validate→call, the SSE frame protocol, the tool loop, context assembly and its exclusions, translation |
-| `search-and-retrieval.md` | Hybrid vec+FTS+RRF, `memo_search`, `session_search` (**vector arm only**), my-search (**applies no reach-flag predicate**), embedding lifecycle, rebuild |
-| `deployment.md` | Ports, `start.ps1`, nginx directives (and the five deliberate deviations), compose, the `supervisord` ordering window and the admin boot, the single-generator guarantee, config conventions |
+| `llm-and-streaming.md` | The one LLM client, resolve→validate→call, the SSE frame protocol, **the stop (UC-085) and its named divergences**, the tool loop (**no iteration cap**), context assembly and its exclusions, translation |
+| `search-and-retrieval.md` | Hybrid vec+FTS+RRF, `memo_search`, `session_search` (**vector arm only**; `session_vec` spans **three sources**), my-search (**applies no reach-flag predicate**), embedding lifecycle + **the persona-edit fan-out**, rebuild |
+| `deployment.md` | Ports, `start.ps1`, nginx directives (and the five deliberate deviations), compose, the `supervisord` ordering window and the admin boot, the single-generator guarantee, config conventions, **logging (loguru, two sinks, the redaction rule)** |
 
 Requirements are **not** here. They are in `docs/product/` and are cited by id.
 The id registry is `docs/product/quick-reference.md`.
@@ -76,9 +76,11 @@ backend/tests/                                pytest target
 backend/app/db/{schema,drift,sync}.py         registry / introspection / Alembic batch DDL
 frontend/src/{bootstrap,login,admin,app}/     the four Vite entries
 frontend/src/shared/                          api client, SSE consumer, IconButton
+backend/app/logging.py                        loguru sinks + the InterceptHandler; called ONCE from main.py
 frontend/src/global.css                       hand-written stylesheet 1 of 2 — resets only
 frontend/src/shell.css                        hand-written stylesheet 2 of 2 — workspace layout only, imported by the `app` entry alone
-data/rphelper.sqlite                          the only state; /app/data in prod
+data/rphelper.sqlite                          state 1 of 2; /app/data in prod
+data/logs/rphelper.log                        state 2 of 2 — the rotating log sink (data/ is the only writable volume)
 docs/product/                                 requirements — read-only
 docs/product/quick-reference.md               the id registry
 docs/architecture/                            this doc set
@@ -116,6 +118,10 @@ string     in TypeScript, end to end
   the provider's opaque tool-call identifier.
 - **Ids are not secrets**, and that grants nothing: every read path is scoped by
   `user_id` at the query level (R5).
+- **Import mints FRESH ids** and remaps the payload's internal references
+  (US-136.AC-2). It does **not** preserve them — that earlier claim, and the
+  collision check it implied, are withdrawn (`data-model.md`). Import uses the
+  same generator as every other write.
 
 **Flip condition:** the layout *and* the string boundary assume **exactly one
 generator process per node id** (one container, one uvicorn — `deployment.md`). A
@@ -127,9 +133,15 @@ FastAPI + `pydantic-settings` · **SQLAlchemy Core (not the ORM)** · SQLite (on
 file: rows + `sqlite-vec` `vec0` + FTS5) · **Alembic — batch DDL only, not a
 migration framework** (no `versions/`, no version table, no startup upgrade;
 `db/schema.py` is the source of truth and the admin drift page applies —
-`overview.md`, `backend-structure.md`) · React 19 + TS + Vite multi-entry ·
-Mantine 7 (`core`/`hooks`/`tiptap`; **`form` present but unused, `notifications`
-absent**; **`AppShell` in the `admin` entry only** — the `app` workspace is a
+`overview.md`, `backend-structure.md`) · **`loguru`** (two sinks: console `DEBUG`
++ rotating file `WARNING` at `data/logs/`; the **`InterceptHandler` is
+load-bearing** — without it uvicorn's output never reaches the file and nothing
+errors; **absolute redaction rule at every level** — `deployment.md`) ·
+React 19 + TS + Vite multi-entry ·
+Mantine 7 (`core`/`hooks`/`tiptap`/**`notifications`**; **`form` present but
+unused**; **`notifications` IS used — transient FAILURE reasons only,
+`autoClose` 5000, no success toasts** (US-044.AC-4, reversing the old "absent"
+note); **`AppShell` in the `admin` entry only** — the `app` workspace is a
 hand-written CSS grid)
 · MobX 6 + `mobx-react-lite` · `react-router-dom` 7 · `@tabler/icons-react` `^3.40`
 · TipTap + `tiptap-markdown` (edit) + `react-markdown` (render) · **`@dnd-kit`
@@ -218,8 +230,7 @@ US-104, US-109, US-110, US-115) and the character **draft page** (UC-074, US-097
 fields, `serverErrors`, `submitStatus`, `clientErrors`/`errors`/`canSubmit`
 getters) with an **external** `submitX(draft, …, onSaved, signal?)`, never a method
 · fresh draft per open via conditional mount · modal open/target flags are
-component-local `useState` (view state, not domain state) · **no toasts**
-(`@mantine/notifications` absent) — success = modal closes + list refreshes ·
+component-local `useState` (view state, not domain state) · **no *success* toasts** — success = modal closes + list refreshes; **`@mantine/notifications` IS a dependency and IS used, for transient FAILURE reasons only** (`autoClose` 5000: `llm_unreachable`, `model_not_enabled`, `translation_failed`, `tool_failed` and the rest of the typed table, **only where the failure is not already rendered in place**). **Reviewable boundary: a notification whose message is a success is a defect.** US-044.AC-3's **retry lives in the stream at the failed exchange**, not in the notice, which auto-dismisses ·
 **never optimistic** — re-load after every mutation, `void` + non-rethrowing catch
 (the workspace narrows the re-load to the edited row, same intent) · **confirm
 step** on disable account / delete LLM connection / rebuild index (designed, not
@@ -235,7 +246,16 @@ early-return on abort, driven from `useEffect` + `AbortController`.
   US-093), and sign-out.
 - **Two** routes over **one** probe primitive: list-available-models (UC-012/013)
   and **test connection** (UC-011, own typed result). Test writes
-  `llm_servers.last_test_*`; a failed test never blocks registration.
+  `llm_servers.last_test_*`; a failed test never blocks registration. **Taxonomy
+  `reachable`/`unreachable`/`auth_failed`/`model_list_empty` is no longer a
+  `_TBD:`** — UC-011 now commits the product to two outcomes and says a finer
+  distinction is "a design choice, not a requirement", which **authorizes** the
+  four values as a design decision that deliberately exceeds the requirement.
+- **Rebuild index (UC-016) is ALWAYS available** — no precondition beyond
+  authentication, never gated on drift state or on an embedding model being
+  designated. With no designation it **runs and fails** `no_embedding_model`;
+  availability and outcome are different things. The confirm step may stay. **No
+  CLI script** — so the remedy needs a running app (`deployment.md`).
 - API key is **never returned**. Edit semantics: empty/untouched = **leave
   unchanged**; explicit empty string = **clear**. Value must start with `$`
   (secret pointer) or it is rejected on write.
@@ -251,18 +271,18 @@ not act on these one-liners alone.**
 
 | # | Invariant |
 |---|---|
-| **R1** | Config inherits `user → character → session` for model / system prompt / tools; RP language + preferred language inherit `user → session`, **skipping character**. `characters` has no language columns — schema-enforced, deliberate (FEAT-013, UC-048, UC-050) |
+| **R1** | **The two chains share NO level.** Model / system prompt / tools inherit **`character → session`** — there is **no user-level default** (UC-050's postcondition); RP language + preferred language inherit `user → session`, **skipping character**. **Corrected:** this line and R1's diagram previously read `user → character → session` for the first chain, which was always wrong. Schema-enforced on both sides — `characters` has no language columns, `users` has no model/prompt/tools columns (FEAT-013, UC-047, UC-048, UC-050) |
 | **R2** | Memo chain is a **union** over user + character + setup? + session. With no setup it degrades to user+character+session **with no gap** — same query, one fewer OR-term. No sentinel setup row (FEAT-007, UC-046) |
 | **R3** | A note's reach is **two independent booleans, `is_enabled` and `is_forced`** — not one three-valued column. Defaults `is_enabled = true`, `is_forced = false`. Disabling **preserves** `is_forced`, so re-enabling restores the mode (US-101). **`is_enabled` gates first; `is_forced` is consulted only afterwards** — selecting on `is_forced` alone prompts a disabled forced note, the exact leak the split made expressible. `NOT is_enabled` reaches the assistant by **NO path** — not context, not tools, not error payloads. **Constrains the assistant only: my-search applies neither flag.** Order is a third axis (`sort_key`, within a level). Memos never archive (FEAT-012, UC-042, UC-044, UC-045, UC-052, UC-075) |
-| **R4** | **No silent model fallback.** Resolution yields a model *reference*, unvalidated; validation happens at **use time** against enabled models and raises typed `model_not_enabled` carrying which level set it. Never skip a disabled level and keep walking. US-106's "first enabled model" floor is **materialised onto `sessions.model_ref` on first compose**, so it cannot drift. Same for the embedding designation → `no_embedding_model` (FEAT-004, FEAT-013, UC-012, UC-050) |
+| **R4** | **No silent model fallback.** Resolution yields a model *reference*, unvalidated; validation happens at **use time** against enabled models and raises typed `model_not_enabled` carrying which level set it. Never skip a disabled level and keep walking. **The MODEL is captured at session CREATION** onto `sessions.model_ref` (UC-050 step 2, US-059.AC-1, US-139) — **not on first compose**, which is what this line used to say — and a character configured with a model afterwards reaches **only sessions created from then on** (US-139.AC-1/AC-2). US-106's "first enabled model" floor is resolved at creation. **The SYSTEM PROMPT and TOOLS keep resolving LIVE** `character → session` for every session, old or new. **The split is deliberate — harmonising it either way is a defect.** Same no-fallback rule for the embedding designation → `no_embedding_model` (FEAT-004, FEAT-013, UC-012, UC-050) |
 | **R5** | **A `model → dependent sessions` query must not exist** on any admin surface — answering it discloses other users' sessions. "Are you sure? N sessions use this model" is a forbidden UI pattern, and **the LLM Servers page's confirm dialog is where it will be attempted**. Every read path scoped by owner **in the query** (FEAT-019, UC-012, UC-065, UC-066) |
 | **R6** | Archive = out of the working list, never destroyed, always restorable. `archived_at` nullable, **no delete path** for characters/setups/sessions. No "finished" state. Memos are the contrast: they do not archive (UC-025, UC-067, UC-068) |
 | **R7** | Settling **buries** the group under the settled head; re-open is allowed **only while the current zone below is empty**; a buried group **never reaches the assistant again**, then or later. Deliberate asymmetry: a settled turn is editable forever and the assistant reads the current version (UC-029, UC-036, UC-037, UC-038, UC-078) |
 | **R8** | Translations are a success-only cache keyed `(message, target language)`, in their own table, and **never enter context**. Only settled rows are translatable — in practice only `kind='partner'` (FEAT-011, UC-039, UC-041) |
 | **R9** | The assistant's reach is **exactly three tools**. A failed tool is a tool *result* — the exchange continues. The assistant never files anything into the record (ACT-004, UC-051, UC-053) |
 | **R10** | The roleplayer's text is committed **before** any model call; a model failure loses nothing, and the `accepted` frame makes that observable. An enormous paste warns but is **never refused** (UC-032, US-035.AC-2) |
-| **R11** | **The ruler: settle is the only door into the record**, with one exception — a pasted partner block, born settled (US-121). The **current zone is a set, not a row** (`related_to IS NULL AND settled_at IS NULL`), so US-125 needs no constraint. Re-open is settle's exact inverse, gated on an empty zone, and applies only to a head that **has** a buried group — otherwise `nothing_to_reopen`. **Raw `messages` is touched by exactly two operations, settle and re-open**; every other reader goes through the `settled_entries` / `current_zone` views (FEAT-009, FEAT-010, UC-035, UC-037, UC-083) |
-| **R12** | `(( ))` is **parsed once, at settle, and stored text is never re-parsed.** Wholly parenthesised → `kind='decision'`; a fragment inside a draft is stripped from the head row in the same transaction and is not preserved. **Partner text gets no special treatment.** Three layers: server decides, system prompt instructs the model, client previews and is never authoritative (UC-081, UC-084, US-129, US-130, US-131) |
+| **R11** | **The ruler: settle is the only door into the record**, with one exception — a pasted partner block, born settled (US-121). The **current zone is a set, not a row** (`related_to IS NULL AND settled_at IS NULL`), so US-125 needs no constraint. Re-open is settle's exact inverse, gated on an empty zone, and applies only to a head that **has** a buried group — otherwise `nothing_to_reopen`. **Raw `messages` is touched by exactly two operations, settle and re-open**; every other reader goes through the `settled_entries` / `current_zone` views. **Settling never requires an assistant answer** (US-135) and **abandoning an empty zone is frontend-only — no route, no backend surface, R11 unchanged** (UC-086, US-134); the two are a pair closing an inescapable state (FEAT-009, FEAT-010, UC-035, UC-037, UC-083, UC-086) |
+| **R12** | `(( ))` is **parsed once, at settle, and stored text is never re-parsed.** Wholly parenthesised → `kind='decision'`; a fragment inside a draft is stripped from the head row in the same transaction and is not preserved. **Partner text gets no special treatment.** Three layers: server decides, system prompt instructs the model, client previews and is never authoritative. **Recorded constraint, no longer a `_TBD:`**: the convention assumes double parentheses never occur in the roleplayer's own RP prose — examined and confirmed by the roleplayer (US-130's `Constraint:` line). Flip condition: if one ever does, settle silently drops it and an escape mechanism becomes necessary (UC-081, UC-084, US-129, US-130, US-131) |
 
 ## SSE frame protocol
 
@@ -274,9 +294,21 @@ accepted | token | tool_start | tool_result | tool_fail | error | done
   **roleplayer's** committed zone row id — so an in-place edit of a just-sent
   message can `PATCH` without waiting for a reload (US-115). It makes R10's
   ordering observable and arrives on the failure path too.
-- `done` mandatory on success and carries the **assistant's** row id; a stream
-  ending without it = `llm_unreachable`. **Both ids are decimal strings.**
-- `error` and `done` mutually exclusive and terminal.
+- `done` mandatory on success and carries the **assistant's** row id. **Both ids
+  are decimal strings.**
+- **A stream ending without `done` is NOT always `llm_unreachable` — corrected.**
+  A stop (UC-085) is a **fourth** way a stream ends, beside `done`, `error` and an
+  unexpected close, and the server emits nothing for it. **The client knows it
+  aborted** (its own `AbortController`), so it must **not** surface
+  `llm_unreachable` for a stop it initiated; it reloads the zone instead. The
+  server cannot tell a stop, a network drop and a closed tab apart and
+  deliberately does not try (`llm-and-streaming.md`, `frontend-structure.md`).
+- **The stop is `controller.abort()` on the existing `fetch()`. No stop route, no
+  registry of in-flight work. No new frame.** The server persists the partial
+  assistant text as an ordinary current-zone row and unwinds (US-132.AC-1);
+  stopping mid-tool-call **ends the exchange** and the candidate may be empty.
+- `error` and `done` mutually exclusive and terminal — of the terminations the
+  *server* produces.
 - **`tool_fail` is NOT terminal** (R9).
 - `error` carries the same `{code, message, detail}` shape as JSON errors.
 - `tool_result` carries a **summary**, never raw retrieved content.
@@ -286,6 +318,15 @@ accepted | token | tool_start | tool_result | tool_fail | error | done
   call and returns JSON.
 - POST + JSON body → client uses `fetch()` + `body.getReader()` + `TextDecoder({stream:true})`, split on `"\n\n"`, keep the trailing partial frame. **Not `EventSource`** (GET-only).
 - App sets `X-Accel-Buffering: no`; nginx also sets `proxy_buffering off`.
+- **No tool-iteration cap** (FEAT-010, FEAT-014/015/016) — the stop bounds a
+  runaway loop, because the loop dies with the socket. That earlier `_TBD:` is
+  closed.
+- **Two named divergences from `docs/product/`, pending amendment:**
+  **US-133.AC-1** (a stopped tool call will **not** let the discussion continue —
+  the exchange ends) and **US-133.AC-2** ("nothing is cached" on a stopped
+  translation is **best-effort only** — one `await request.is_disconnected()`
+  check before the cache write, not a guarantee). Do not design to either as
+  written (`llm-and-streaming.md`).
 
 ## Context assembly — what is in, what is out
 
@@ -310,8 +351,8 @@ defect. Messages and forced memos are read **live**; nothing is cached.
 | Surface | Arms | Scope | Notes |
 |---|---|---|---|
 | `memo_search` (FEAT-014) | vec + FTS, RRF | `user_id`, `is_enabled AND NOT is_forced`, the 4-level chain | `is_enabled` gates first; works with no setup (one fewer OR-term, not a second code path) |
-| `session_search` (FEAT-015) | **vec only — no BM25, no RRF step** | `user_id` **and** `character_id`, excl. current | semantic-only is a product decision (challenge C5); BM25 over `session_fts` (`title`, `partner_label`) would be a partner-name matcher — do not turn the FTS arm on. `session_fts` is kept for my-search. Reversible at low cost; flip condition in `overview.md`. `session_vec` composes from `settled_entries` and **must include decisions** (US-122.AC-2) |
-| my-search (FEAT-017) | vec + FTS, RRF **within each kind** | `user_id`; 5 corpora (characters, setups, sessions, entries, memos) | ACT-002 UI, **not** a tool; grouped by kind, each hit jumps to its target. **Applies no `is_enabled`/`is_forced` predicate at all** (R3 binds the assistant, not the owner) — mark disabled hits visibly. Its entry corpus is the **`settled_entries`** view |
+| `session_search` (FEAT-015) | **vec only — no BM25, no RRF step** | `user_id` **and** `character_id`, excl. current | semantic-only is a product decision (challenge C5); BM25 over `session_fts` (`title`, `partner_label`) would be a partner-name matcher — do not turn the FTS arm on. `session_fts` is kept for my-search. Reversible at low cost; flip condition in `overview.md`. **`session_vec` spans THREE sources (US-138): settled entries (`settled_entries`, still including decisions — US-122.AC-2) + the character's persona + the setup text.** That earlier `_TBD:` is closed |
+| my-search (FEAT-017) | vec + FTS, RRF **within each kind** | `user_id`; 5 corpora (characters, setups, sessions, entries, memos) | ACT-002 UI, **not** a tool; grouped by kind, each hit jumps to its target. **Applies no `is_enabled`/`is_forced` predicate at all** (R3 binds the assistant, not the owner) — **ratified by US-137**, no longer an architecture-layer gap. A disabled hit is marked as disabled (US-137.AC-2); **how** it is marked stays open. Its entry corpus is the **`settled_entries`** view |
 
 Filter first (relational), then rank. `sqlite-vec` KNN is **exact** — no recall
 tuning. RRF with `k = 60`, ranks only, no score normalisation. All three go through
@@ -330,10 +371,25 @@ Embeddings are written in the **same transaction** as the relational write. A
 **reach-flag change or a reorder re-embeds nothing** — that is the payoff of one
 store. `session_vec` refreshes on settle, a settled-text edit, and re-open.
 
-**The deliberate write asymmetry:** a memo create/body edit with no embedding
-model **fails the whole transaction**; a message edit / settle / re-open
-**succeeds, degraded** (US-112 — the record must not be blocked by an
-instance-level omission). Do not harmonise the two.
+**NEW — the persona-edit fan-out, the system's first one-to-many invalidation.**
+Because `session_vec` now includes the persona and the setup (US-138), **editing
+a character's persona (or a setup) invalidates EVERY session vector under that
+character**. It is **re-embedded inline, in the same transaction**, so search is
+never stale — at a cost stated honestly: **N sessions = N embedding calls inside
+one request**, and the edit is as slow as that takes. **Flip condition:**
+mark-stale-plus-rebuild (a staleness marker + UC-016), one decision away.
+
+**The deliberate write asymmetry, now with a third member on the fail-hard
+side:** a memo create/body edit **and a character persona / setup edit** with no
+embedding model **fail the whole transaction**; a message edit / settle /
+re-open **succeeds, degraded** (US-112 — the record must not be blocked by an
+instance-level omission). The line is **authoring act vs record-keeping**, not
+which table. Do not harmonise the two.
+
+**Changing the embedding designation neither forces nor prompts a rebuild**
+(UC-013's postcondition) — existing vectors came from the superseded model, are
+not comparable, and **nothing indicates this**. Remedy: UC-016, always available.
+That earlier `_TBD:` is closed.
 
 ## Typed errors
 
@@ -430,7 +486,12 @@ row (`workspace-shell.md`).
   text, never markdown** (US-124); a `kind='decision'` entry offers **no copy at
   all** (US-123).
 - `IconArrowBackUp` for re-open — an undo for a mis-click, **absent** rather than
-  disabled once the zone is non-empty (US-128).
+  disabled once the zone is non-empty (US-128). **The discard-empty-zone
+  affordance (UC-086, US-134) follows the same precedent** — absent, not
+  disabled, once the zone holds anything; glyph `_TBD:`.
+- **`IconPlayerStop` REPLACES Send while a generation streams** — same slot,
+  never both, because one is always inert otherwise (UC-085,
+  `workspace-shell.md`). Settle is unaffected and stays put.
 - **Hover-revealed actions must also reveal on `:focus-within`**, and note
   reordering must have a keyboard path.
 
@@ -465,30 +526,68 @@ Kept from BookWriter: `proxy_buffering off`, `proxy_cache off`,
 
 - FEAT-018's four export granularities in full detail — contract sketched in `data-model.md`.
 - FEAT-016's `web_search` provider adapter — **seam only**.
-- **Context compaction — an explicit non-goal** (`vision.md`), not an oversight.
-  Context grows forever; nothing warns first.
+- **Context compaction — an explicit non-goal, and no longer a `_TBD:`**
+  (`vision.md`, restated in FEAT-009 and FEAT-010). Context grows forever;
+  nothing warns first; a context-window refusal arrives as an ordinary generation
+  failure whose reason is shown (US-044). Decided, not open — the reasoning stays
+  visible in `overview.md` and `llm-and-streaming.md` because a planner still
+  needs it.
 - **TLS** — HTTP-only posture inherited.
-- **Abandoning a current zone without settling** — a **product gap carried as a
-  gap**, not a design decision: no route removes a message from the zone, so
-  settle is the only way it empties (`overview.md`, `backend-structure.md`).
+- **Metrics and alerting** — unspecified. Logging **is** specified
+  (`deployment.md`).
+- **Abandoning a current zone is NO LONGER here.** It is **resolved** — UC-086 /
+  US-134 / US-135, frontend-only, no route, R11 unchanged. See `overview.md`'s
+  decision 6, `workspace-shell.md` and `backend-structure.md`.
 
 ## Open `_TBD:` items across the doc set
 
 | Where | What |
 |---|---|
-| `overview.md` | long RP eventually exceeds model capacity, unwarned (from `vision.md`); TLS if exposed beyond a LAN; **abandoning a current zone without settling** (carried from FEAT-010 C22 / UC-083); no concurrency target stated |
-| `data-model.md` | **whether `vec0` handles sparse snowflake rowids as efficiently as dense ones — verify before FEAT-014/FEAT-015 are planned**; what happens to a materialised `sessions.model_ref` if the character is configured with a model afterwards; whether editing a non-partner settled message discards its cached translation (design deletes; inference beyond US-111); what text represents a session for `session_vec`; whether characters/setups get FTS tables; import collision / merge-vs-empty-target policy |
-| `domain-rules.md` | R4 — the materialised `model_ref` question above, raised for `/product-spec`; R12 — **what happens when RP prose itself legitimately contains double parentheses** (carried from FEAT-010 C21 / US-130); a draft could silently lose text at settle |
+| `overview.md` | TLS if exposed beyond a LAN; no concurrency target stated; metrics and alerting unspecified |
+| `data-model.md` | **whether `vec0` handles sparse snowflake rowids as efficiently as dense ones — verify before FEAT-014/FEAT-015 are planned**; whether editing a non-partner settled message discards its cached translation (design deletes; inference beyond US-111); whether characters/setups get FTS tables |
+| `domain-rules.md` | **R4 — what session creation does when NO model is enabled at all: refused, or created with a NULL `model_ref` filled on first successful resolution. NEW, raised for `/product-spec`** (US-107 covers *sending*, not *creating*) |
 | `backend-structure.md` | whether UC-080's first message should also draw an assistant reply (changes the response media type — FEAT-008's plan must settle it) |
 | `frontend-structure.md` | where the archive toggle sits now that the character and session lists are gone (placement, not design) |
 | `workspace-shell.md` | whether the character page's composer carries the kind switch or a setup choice (UC-080/US-117 decide neither); US-120's product `_TBD:` on what a settled **decision** does to the kind switch's alternating default, carried forward |
-| `ui-conventions.md` | the wall pin and a note's "forced" flag are drawn with the **same pin glyph** for two unrelated meanings on one screen; the enabled/disabled note toggle's glyphs map onto no Tabler icon; `IconLanguage` toggle-state presentation unspecified; no wider accessibility target stated; **no sorting/filtering/pagination assumes small cardinality — revisit on a large account or list count** |
-| `admin-surfaces.md` | **connection-test result taxonomy is a proposal** (`reachable`/`unreachable`/`auth_failed`/`model_list_empty`) — no AC specifies one; **Seed** exists in the inherited drift report and is **required by no UC** — RPHelper has no seed data at all, so it is recorded as prior art and not written up as a requirement (**Sync is no longer open** — it is Decision A's mechanism) |
-| `llm-and-streaming.md` | no tool-iteration cap stated (a loop guard, not compaction); no `web_search` provider chosen; context grows forever with no warning |
-| `search-and-retrieval.md` | RRF `k` / candidate depth / result count unmeasured; what text composes `session_vec` beyond its two fixed constraints; **how a disabled memo hit is marked in my-search results**; the **cost** of the per-write `session_vec` refresh on a long session; whether a per-session staleness marker earns a column; whether changing the embedding designation forces a rebuild |
-| `deployment.md` | TLS / exposure model; `64m` body limit is a judgement; no logging/metrics/alerting posture |
+| `ui-conventions.md` | the wall pin and a note's "forced" flag are drawn with the **same pin glyph** for two unrelated meanings on one screen; the enabled/disabled note toggle's glyphs map onto no Tabler icon; the discard-empty-zone glyph; `IconLanguage` toggle-state presentation unspecified; no wider accessibility target stated; **no sorting/filtering/pagination assumes small cardinality — revisit on a large account or list count** |
+| `admin-surfaces.md` | **Seed** exists in the inherited drift report and is **required by no UC** — RPHelper has no seed data at all, so it is recorded as prior art and not written up as a requirement (**Sync is no longer open** — it is Decision A's mechanism; **the connection-test taxonomy is no longer open either** — see the closed list) |
+| `llm-and-streaming.md` | no `web_search` provider chosen |
+| `search-and-retrieval.md` | RRF `k` / candidate depth / result count unmeasured; **how a disabled memo hit is marked in my-search results** (presentation only — the behaviour is ratified by US-137); **NEW — whether ARCHIVED sessions participate in the persona-edit re-embed fan-out, or are skipped and reconciled on restore**; **NEW — whether a persona edit touching many sessions needs a progress surface**; the **cost** of the per-write `session_vec` refresh on a long session; whether a per-session staleness marker earns a column |
+| `deployment.md` | TLS / exposure model; `64m` body limit is a judgement |
 
-**Closed in this delta — do not re-open or re-list:** the `session_vec` refresh
+### Closed in THIS pass — do not re-open, do not re-list
+
+Each item below was an open `_TBD:` (or a flagged-for-another-owner note) in this
+doc set and is now **closed**. Re-adding any of them to the table above is a
+regression, and a plan that treats one as unanswered is reading a stale copy.
+
+| Was open | Now |
+|---|---|
+| **Observability posture** — no logging/metrics/alerting specified (`deployment.md`) | **Logging is specified**: `loguru`, two sinks, five `RPHELPER_LOG_*` settings, an absolute redaction rule at every level, `diagnose=False` on the file sink, and a recorded flip condition. *Metrics and alerting remain deliberately unspecified and are listed as an absence, not as this `_TBD:`.* |
+| **`sessions.model_ref` after the character is configured with a model** (`data-model.md`, R4) | **Nothing happens — the session keeps its captured model** (US-139). Only sessions created from that point on capture the new one |
+| **Tool-iteration cap** (`llm-and-streaming.md`) | **No cap** (FEAT-010, FEAT-014/015/016). The stop bounds a runaway loop — the loop dies with the socket |
+| **Unbounded context growth, unwarned** (`overview.md`, `llm-and-streaming.md`) | **A recorded non-goal, not a question** (`vision.md`, FEAT-009, FEAT-010). Downgraded, not answered; the operational reality stays written down |
+| **Abandoning a current zone without settling** (`overview.md`, `backend-structure.md`) | **Resolved: frontend-only** (UC-086, US-134, US-135). No route, no backend surface, **R11 unchanged** |
+| **What text composes `session_vec`** (`data-model.md`, `search-and-retrieval.md`) | **Three sources** (US-138): settled entries incl. decisions + the character's persona + the setup text |
+| **Import collision / merge-vs-empty-target policy** (`data-model.md`) | **Merges as new material; nothing existing is overwritten; imported ids arrive under fresh identity** (US-136). Mint new snowflakes, remap the payload's internal references |
+| **Whether changing the embedding designation forces a rebuild** (`search-and-retrieval.md`) | **Neither forces nor prompts one** (UC-013). Stale vectors are not comparable and **nothing indicates it**; remedy is UC-016 |
+| **R12 — double parentheses in RP prose** (`domain-rules.md`) | **A recorded constraint with its provenance** (US-130's `Constraint:` line): the convention assumes they never occur, confirmed by the roleplayer. Flip condition kept visible |
+| **UC-011's connection-test taxonomy** (`admin-surfaces.md`) | **An authorized design proposal**, not an open question: UC-011 commits to two outcomes and calls a finer distinction "a design choice, not a requirement". The four values stay |
+| **Whether my-search shows disabled memos** (`search-and-retrieval.md`, `overview.md`) | **Ratified by US-137** — it was already decided here and flagged for `/product-spec`; the flag is discharged. *How* a disabled hit is marked stays open |
+
+**Newly open after this pass**, listed so they are found rather than rediscovered:
+session creation with **no enabled model** (R4) · **archived sessions** in the
+persona-edit re-embed fan-out · a **progress surface** for a long persona edit ·
+(pre-existing, still open) how a disabled memo hit is marked in my-search.
+
+**One product inconsistency flagged, not resolved:** **UC-012**'s exception flow
+still says "no silent fallback up the `user → character → session` chain", naming
+a user level for the model that **UC-050** and **UC-047** say does not exist. The
+doc set follows UC-050 (the use case that owns resolution). No behaviour turns on
+it — the prohibition is identical either way — but `/product-spec` should
+reconcile the wording. Recorded in `domain-rules.md` R4.
+
+**Closed in the previous delta — also do not re-open:** the `session_vec` refresh
 *policy* (→ refreshed in the same transaction as settle, settled-text edit and
 re-open; US-110.AC-2 requires it — only its *cost* stays open); whether `@dnd-kit`
 gets a reorder interaction (→ yes, US-102); the absence of a frame carrying the
@@ -504,8 +603,15 @@ history and no startup upgrade; flip condition in `overview.md`); **where the
 shell's layout CSS lives** (→ `src/shell.css`, a second hand-written stylesheet
 beside `global.css`).
 
-Not `_TBD:` but flagged for another owner: the my-search/disabled-note decision is
-a **requirements gap resolved at the architecture layer** and **`/product-spec`
-should ratify it into FEAT-017's ACs**. The **confirm step** on destructive admin
-actions is required by **no acceptance criterion** and FEAT-003/004/005's planners
-may revisit it.
+Not `_TBD:` but flagged for another owner:
+
+- **Two named divergences from `docs/product/`, pending amendment by
+  `/product-spec`** — **US-133.AC-1** (a stopped tool call ends the exchange; it
+  does **not** continue) and **US-133.AC-2** ("nothing is cached" is best-effort,
+  not a guarantee). Recorded in `llm-and-streaming.md`. **Do not design to either
+  AC as written.**
+- The **confirm step** on destructive admin actions is required by **no
+  acceptance criterion** and FEAT-003/004/005's planners may revisit it.
+
+*(The my-search/disabled-note flag that stood here is discharged — US-137
+ratified it. See the closed table above.)*
