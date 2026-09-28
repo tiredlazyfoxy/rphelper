@@ -22,4 +22,12 @@
   - **US-069.AC-1** — Given the assistant calls `session_search`, when results are returned, then no session belonging to a different character is ever included.
   - **US-069.AC-2** — Given the assistant calls `session_search`, when results are returned, then no session belonging to a different user is ever included.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 5.
+
+### US-138 — `session_search` matches entries plus the character's persona and setup
+- **Actor:** ACT-002, ACT-004 · **Feature:** FEAT-015 · **Exercises:** UC-053
+- **Story:** As a roleplayer, I want session search to consider who a session was with, not just what happened in it, so that it can find a session by the person, not only the situation.
+- **Acceptance criteria:**
+  - **US-138.AC-1** — Given the assistant searches past sessions by meaning, when a past session is matched, then the match considers the session's entries together with its character's persona and setup.
+  - **US-138.AC-2** — Given a query describing a similar person rather than a similar situation, when the search runs, then a session whose character matches is found even if its entries do not describe the query.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
 <!-- product-spec:end -->

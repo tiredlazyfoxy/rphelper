@@ -23,8 +23,8 @@
   3. Instance reports the connection reachable.
 - **Alternate flows:**
   - Connection unreachable — instance reports the failure; connection stays registered for retry.
-- **Postconditions:** Reachability outcome shown; registration unaffected either way.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7.
+- **Postconditions:** Reachability outcome shown; registration unaffected either way. The product commits to reachable / unreachable only — no richer result taxonomy is required; a finer distinction is a design choice, not a requirement.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7; 2026-09-28, gap-closure round.
 
 ### UC-012 — Enable and disable specific models
 - **Actor:** ACT-001
@@ -49,6 +49,6 @@
   1. Administrator opens embedding configuration.
   2. Administrator designates which registered connection and model serve as the embedding model.
   3. Instance saves the designation.
-- **Postconditions:** The designated model is the one the assistant's semantic tools (FEAT-014, FEAT-015) rely on.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7.
+- **Postconditions:** The designated model is the one the assistant's semantic tools (FEAT-014, FEAT-015) rely on. Changing the designation neither forces nor prompts a rebuild — existing vectors were produced by the superseded model and are not comparable, and nothing indicates this; the remedy is UC-016, always available.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7; 2026-09-28, gap-closure round.
 <!-- product-spec:end -->

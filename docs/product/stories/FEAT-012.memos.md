@@ -109,8 +109,7 @@
 - **Acceptance criteria:**
   - **US-103.AC-1** — Given notes exist at more than one level, when forced notes enter the system prompt, then they appear ordered user, then character, then session (setup ordered between character and session when present).
   - **US-103.AC-2** — Given the roleplayer drags a note toward a different level's group on the wall, when the drag ends, then the note remains at its original level.
-- **_TBD:** the position of a setup's notes inside the wall's level order was inferred, not confirmed — the roleplayer named user, character and session only.
-- **Source:** `[inferred]` basis: round 12 named three levels while dragging a fourth, setup, into the position matching FEAT-012's existing four-level resolution order (UC-046); interview 2026-09-27, round 12.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 12; 2026-09-28, gap-closure round.
 
 ### US-104 — A note's text is edited where it sits and is saved when focus leaves it
 - **Actor:** ACT-002 · **Feature:** FEAT-012 · **Exercises:** UC-075

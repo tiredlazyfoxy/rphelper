@@ -56,6 +56,7 @@
   2. Roleplayer writes a message in the composer there.
   3. Instance creates a new session under the character.
   4. Instance opens a first turn in drafting, and the written message becomes the opening message of that turn's discussion (FEAT-010).
-- **Postconditions:** Session exists with its first turn already being drafted; the partner's block, if any, is pasted afterward as a separate entry.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 15.
+  5. Assistant answers the message immediately, exactly as it would any other discussion message.
+- **Postconditions:** Session exists with its first turn already being drafted; the partner's block, if any, is pasted afterward as a separate entry. The composer offers neither the kind switch nor a setup choice — the kind is already a turn, and FEAT-007 forbids forcing a setup choice, so the session starts with none.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 15; 2026-09-28, gap-closure round.
 <!-- product-spec:end -->

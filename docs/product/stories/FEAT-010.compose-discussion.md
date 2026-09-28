@@ -68,7 +68,8 @@
   - **US-044.AC-1** — Given a discussion is open and the roleplayer has typed text, when the LLM becomes unreachable mid-discussion, then the entry and discussion survive intact with nothing the roleplayer typed lost.
   - **US-044.AC-2** — Given the LLM was unreachable mid-discussion, when the failure occurs, then it is shown to the roleplayer visibly.
   - **US-044.AC-3** — Given the LLM was unreachable mid-discussion, when the roleplayer acts on the visible failure, then a retry is possible.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4, round 9.
+  - **US-044.AC-4** — Given a generation failed for any reason, when the failure is shown, then it states the reason, and the reason does not persist once the notice has gone.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4, round 9; 2026-09-28, gap-closure round, challenge C23.
 
 ### US-113 — A discussion appears beneath its answer in the same stream, and collapses there when the answer is settled
 - **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-079
@@ -147,8 +148,8 @@
 - **Acceptance criteria:**
   - **US-130.AC-1** — Given a draft contains a double-parenthesised fragment alongside ordinary prose, when the roleplayer settles it as a turn, then the fragment is absent from the settled turn's text.
   - **US-130.AC-2** — Given a draft contained a double-parenthesised fragment, when the assistant produces the next candidate, then it does not reproduce the fragment's text in the prose.
-- **_TBD:** nothing states what happens when RP prose itself contains double parentheses — a draft could silently lose text.
-- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+- **Constraint:** The `(( ))` convention assumes double parentheses never occur in the roleplayer's RP prose itself. Examined and held, not an oversight — the roleplayer confirmed this never happens in their RP.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17, challenge C24.
 
 ### US-131 — OOC messages are in the preferred language; the assistant answers OOC in kind, while candidates stay in the RP language
 - **Actor:** ACT-002, ACT-004 · **Feature:** FEAT-010 · **Exercises:** UC-084
@@ -158,4 +159,35 @@
   - **US-131.AC-2** — Given the roleplayer writes an OOC message, when the assistant replies, then the reply is in the preferred language.
   - **US-131.AC-3** — Given an OOC exchange is underway, when the assistant produces a candidate reply, then the candidate is in the RP language regardless.
 - **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+
+### US-132 — Stopping keeps the partial text as a usable candidate
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-085
+- **Story:** As a roleplayer, I want to stop a generation and keep what it produced so far, so that a runaway or unwanted reply doesn't cost me the work already done.
+- **Acceptance criteria:**
+  - **US-132.AC-1** — Given a generation has streamed partial text, when the roleplayer stops it, then the text produced so far remains as a candidate they can use or edit.
+  - **US-132.AC-2** — Given the roleplayer stopped a generation, when they look at the discussion, then nothing is waiting on the model.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
+
+### US-133 — The stop reaches any model work
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-085
+- **Story:** As a roleplayer, I want the stop to reach a tool call or a translation, not only a discussion reply, so that any runaway model work can be cut off the same way.
+- **Acceptance criteria:**
+  - **US-133.AC-1** — Given the assistant is waiting on a tool call, when the roleplayer stops it, then the discussion continues without that tool's result.
+  - **US-133.AC-2** — Given a partner-text translation is in flight, when the roleplayer stops it, then the original text stands and nothing is cached.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
+
+### US-134 — An empty zone is discarded; one holding text must be settled
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-086
+- **Story:** As a roleplayer, I want to discard an empty current zone I opened by mistake, but never lose text I actually wrote, so that abandoning is safe and never a trap.
+- **Acceptance criteria:**
+  - **US-134.AC-1** — Given a current zone with nothing written in it, when the roleplayer abandons it, then it is discarded and the entry returns to how it was.
+  - **US-134.AC-2** — Given a current zone holding text, when the roleplayer looks for a way to abandon it, then none is offered — the zone can only be settled.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
+
+### US-135 — Settling with no assistant answer settles the roleplayer's own text
+- **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-086
+- **Story:** As a roleplayer, I want to settle a zone that only holds my own message, so that I'm never stuck waiting on the assistant to be able to move on.
+- **Acceptance criteria:**
+  - **US-135.AC-1** — Given a current zone holds only the roleplayer's own message and the assistant has not answered, when the roleplayer settles, then their own text is settled as-is and nothing is lost.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
 <!-- product-spec:end -->

@@ -31,6 +31,6 @@
   1. Administrator requests a vector-index rebuild.
   2. Instance rebuilds it.
   3. Instance reports completion.
-- **Postconditions:** Semantic tools (FEAT-014, FEAT-015) work against the rebuilt index.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
+- **Postconditions:** Semantic tools (FEAT-014, FEAT-015) work against the rebuilt index. Always available to the administrator with no precondition beyond authentication, and is the remedy for any embedding problem, including a changed embedding designation (UC-013).
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 7; 2026-09-28, gap-closure round.
 <!-- product-spec:end -->

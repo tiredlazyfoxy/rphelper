@@ -12,9 +12,9 @@
 - **Actor:** ACT-002 · **Feature:** FEAT-013 · **Exercises:** UC-048
 - **Story:** As a roleplayer, I want to override model, system prompt or tools at the character level, so that a character can differ from other characters of mine.
 - **Acceptance criteria:**
-  - **US-059.AC-1** — Given a character has no override set, when a session under it resolves configuration, then no character-level value is applied to model, system prompt or tools (the resulting model default is US-106).
+  - **US-059.AC-1** — Given a character has no override set, when a session is created under it, then no character-level value is applied to model, system prompt or tools for that session (the resulting model default is US-106); the model this captures at creation does not change afterwards, while the character's system prompt and tools keep resolving live.
   - **US-059.AC-2** — Given the roleplayer overrides model, system prompt or enabled tools at the character level, when a session under that character resolves configuration, then it uses the character-level override.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 5, round 10, round 13, round 14.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 5, round 10, round 13, round 14; 2026-09-28, gap-closure round, challenge C25, challenge C26.
 
 ### US-060 — Session overrides character
 - **Actor:** ACT-002 · **Feature:** FEAT-013 · **Exercises:** UC-049
@@ -70,4 +70,12 @@
   - **US-108.AC-1** — Given a session with no model, system prompt or tools override, when it resolves configuration, then it uses the character-level value for each, or the first enabled model if the character has none.
   - **US-108.AC-2** — Given a session with no RP-language or preferred-language override, when it resolves configuration, then it uses the user-level default for each, never a character-level value.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 13, round 14.
+
+### US-139 — Configuring a character's model does not reach existing sessions
+- **Actor:** ACT-002 · **Feature:** FEAT-013 · **Exercises:** UC-050
+- **Story:** As a roleplayer, I want a character's model change to leave my existing sessions alone, so that a session I'm mid-way through never switches models under me.
+- **Acceptance criteria:**
+  - **US-139.AC-1** — Given a session was created while its character had no model configured, when the character is afterwards configured with a model, then the session keeps the model it captured at creation.
+  - **US-139.AC-2** — Given the same character, when a new session is created under it, then that session captures the character's configured model.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round, challenge C25, challenge C26.
 <!-- product-spec:end -->

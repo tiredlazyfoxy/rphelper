@@ -34,10 +34,10 @@ cover a feature that isn't one of these three:
 - **S1** — Starting a new session with an existing character requires zero
   re-typing of persona, notes or history. `[confirmed: user]` interview
   2026-09-27, round 3.
-- **S2** — A reply takes minutes rather than tens of minutes. Today a good
-  reply can take 20–40 minutes; the target is under 10. `_TBD: this is the
-  user's own estimate of the 20–40 minute status quo, not a measurement._`
-  `[confirmed: user]` interview 2026-09-27, round 3, round 4.
+- **S2** — A reply takes a fraction of the time the workarounds take. This is
+  the roleplayer's own judgement, not a measurement — nothing in the product
+  records how long a reply took. `[confirmed: user]` interview 2026-09-27,
+  round 3, round 4; 2026-09-28, gap-closure round, challenge C28.
 - **S3** — The user stops using ChatGPT / translators / local chat apps for
   RP. `[confirmed: user]` interview 2026-09-27, round 3.
 
@@ -63,10 +63,13 @@ reason:
   `[confirmed: user]` interview 2026-09-27, round 1.
 - **No context compaction.** Session context grows forever with no ceiling,
   no warning and no pruning. The user knowingly chose this over three
-  bounded alternatives and named compaction as a future request. `_TBD: a
-  long RP will eventually exceed what the model can hold, and nothing warns
-  the user first._` `[confirmed: user]` interview 2026-09-27, round 6, round
-  8, challenge C3.
+  bounded alternatives and named compaction as a future request. Asked
+  directly whether a session should warn as its context grows, the
+  roleplayer chose no warning at all: a long RP will eventually exceed what
+  the model can hold, nothing warns first, and the refusal surfaces as an
+  ordinary generation failure (US-044) whose reason is shown.
+  `[confirmed: user]` interview 2026-09-27, round 6, round 8, challenge C3;
+  2026-09-28, gap-closure round, challenge C23.
 - **No cross-user visibility of any kind**, including for the administrator.
   `[confirmed: user]` interview 2026-09-27, round 1, round 2.
 <!-- product-spec:end -->

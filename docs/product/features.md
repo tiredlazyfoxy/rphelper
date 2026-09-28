@@ -128,12 +128,12 @@ dependency graph below, not from priority (challenge C4, rejected).
   cached translation, so the next flick re-translates the new text. With no
   embedding model configured, an edit still saves and the roleplayer is told
   search coverage is incomplete, never refused. Copying a settled turn
-  yields plain text, never markdown.
-- **_TBD:** session context grows forever with no ceiling (challenge C3, see
-  `vision.md` and FEAT-010) — entries accumulate without limit and nothing
-  warns the roleplayer as a session's own size grows.
+  yields plain text, never markdown. Context is unbounded by choice — nothing
+  warns the roleplayer as a session's own size grows; see `vision.md`'s "No
+  context compaction" non-goal and FEAT-010.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 4, round 6,
-  round 7, round 9, round 12, round 13; 2026-09-28, round 17.
+  round 7, round 9, round 12, round 13; 2026-09-28, round 17, gap-closure
+  round.
 
 ### FEAT-010 — Compose discussion
 - **Purpose:** The discussion attached to an answer entry, where the
@@ -141,9 +141,10 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
 - **Status:** proposed
 - **Realized by:** UC-032, UC-033, UC-034, UC-035, UC-036, UC-037, UC-038,
-  UC-079, UC-083, UC-084, US-036, US-037, US-038, US-039, US-040, US-041,
-  US-042, US-043, US-044, US-113, US-114, US-115, US-116, US-125, US-126,
-  US-127, US-128, US-129, US-130, US-131
+  UC-079, UC-083, UC-084, UC-085, UC-086, US-036, US-037, US-038, US-039,
+  US-040, US-041, US-042, US-043, US-044, US-113, US-114, US-115, US-116,
+  US-125, US-126, US-127, US-128, US-129, US-130, US-131, US-132, US-133,
+  US-134, US-135
 - **Note:** Three paths into one current-zone message: the assistant
   produces a candidate, the roleplayer writes from scratch, or edits a
   candidate. Settle takes the last message in the current zone, whoever
@@ -163,31 +164,36 @@ dependency graph below, not from priority (challenge C4, rejected).
   assistant does not reproduce it in the prose. OOC messages are in the
   preferred language; the assistant answers OOC in kind, while candidates
   stay in the RP language. A partner block gets no `(( ))` treatment — it
-  is just text. Collapse rule: settling collapses the discussion in place; a
-  collapsed discussion stays readable but is re-openable only while the
-  current zone below it is still empty — an undo for a mis-click, not a
-  workflow. Once the current zone below it holds something, it is
-  permanently non-resumable, and a settled discussion never reaches the
-  assistant again. Deliberate asymmetry, stated so it is not "fixed" later:
-  a settled turn (FEAT-009) is editable forever, while its discussion is
-  re-openable only until the current zone below it is no longer empty.
+  is just text. The `(( ))` convention assumes double parentheses never
+  occur in the roleplayer's own fiction — examined and confirmed by the
+  roleplayer, not an unexamined assumption. Collapse rule: settling
+  collapses the discussion in place; a collapsed discussion stays readable
+  but is re-openable only while the current zone below it is still empty —
+  an undo for a mis-click, not a workflow. Once the current zone below it
+  holds something, it is permanently non-resumable, and a settled discussion
+  never reaches the assistant again. Deliberate asymmetry, stated so it is
+  not "fixed" later: a settled turn (FEAT-009) is editable forever, while
+  its discussion is re-openable only until the current zone below it is no
+  longer empty. An empty current zone can be abandoned and discarded; a
+  zone holding text cannot be discarded at all and must be settled —
+  settling never requires an assistant answer, so the zone can never trap
+  the roleplayer (UC-086). Context is unbounded by choice — nothing warns
+  the roleplayer as a session grows; see `vision.md`'s "No context
+  compaction" non-goal and FEAT-009. The roleplayer can stop any model work
+  in flight — a discussion generation, a tool call being waited on, or a
+  partner-text translation — and whatever text was produced stays as a
+  usable candidate; there is no cap on tool iterations, the stop is what
+  bounds a runaway loop (UC-085). FEAT-010 owns the stop even where it
+  interrupts a FEAT-011 translation or a FEAT-014/015/016 tool call.
   Exception flows: the LLM going away mid-discussion loses none of the
   roleplayer's text — the entry and discussion survive intact, the failure
   is visible, retry is possible; a failed tool does not end the discussion —
-  the assistant is told the tool failed and carries on without it.
-- **_TBD:** unbounded session context (challenge C3). Context grows forever
-  with no ceiling, no warning and no pruning; a long RP will eventually
-  exceed what the model can hold and nothing warns the roleplayer first.
-  Context compaction is named as a future capability, deliberately out of
-  this spec.
-- **_TBD:** nothing states what happens when RP prose itself contains double
-  parentheses — a draft could silently lose text (challenge C21).
-- **_TBD:** nothing states how a current zone is abandoned without settling
-  anything (challenge C22) — predates this delta; the existing spec had no
-  discard path either.
+  the assistant is told the tool failed and carries on without it; a failed
+  generation of any kind shows its reason, and the reason does not persist
+  once the notice has gone.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4,
   round 7, round 8, round 9, round 11, round 12, round 14; 2026-09-28,
-  round 17.
+  round 17, gap-closure round.
 
 ### FEAT-011 — Partner-text translation
 - **Purpose:** A read-only flicker that translates a pasted partner entry
@@ -199,9 +205,11 @@ dependency graph below, not from priority (challenge C4, rejected).
   is cached after first use so the second look is instant and costs nothing.
   A translation never enters session context — context holds only the RP
   language. Exception flow: a failed translation falls back to the original
-  text with a visible error, and nothing is cached.
+  text with a visible error, and nothing is cached. A translation in flight
+  can be stopped (FEAT-010) — the original text stands and nothing is
+  cached, the same as a failed translation.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 2,
-  round 4, round 9.
+  round 4, round 9; 2026-09-28, gap-closure round.
 
 ### FEAT-012 — Memos
 - **Purpose:** Standing memos (the roleplayer's word: notes) at four levels
@@ -233,13 +241,14 @@ dependency graph below, not from priority (challenge C4, rejected).
   round 6, round 11, round 12, round 16.
 
 ### FEAT-013 — Session configuration & inheritance
-- **Purpose:** Model, system prompt and tool switches, resolved
-  `character → session`; the RP language and the preferred language,
-  resolved `user → session`.
+- **Purpose:** The model is captured once, when a session is created, and
+  never changes afterwards; system prompt and tool switches resolve live
+  `character → session`; the RP language and the preferred language resolve
+  live `user → session`.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** proposed
 - **Realized by:** UC-047, UC-048, UC-049, UC-050, UC-077, US-058, US-059,
-  US-060, US-061, US-062, US-105, US-106, US-107, US-108
+  US-060, US-061, US-062, US-105, US-106, US-107, US-108, US-139
 - **Note:** Two languages: the **RP language** is what the roleplay is
   conducted in — the partner's text arrives in it, the final answer is
   written in it, and it is the only language the session's model context
@@ -252,14 +261,21 @@ dependency graph below, not from priority (challenge C4, rejected).
   inherit `user → session`, skipping the character. The two chains now share
   no level at all. Choosing a model from the session's header sets the
   session-level override and it persists — no per-turn transient override.
-  A character with no model configured resolves to the first enabled model:
-  a **default for a level that was never configured**, never a fallback for
-  a configured model that has since been disabled — a session whose
-  configured model is disabled still shows an error (UC-012). With no
-  enabled model at all, the roleplayer cannot send a message and is told
-  why.
+  A character with no model configured resolves to the first enabled model
+  **at the moment a session is created**: a **default for a level that was
+  never configured**, never a fallback for a configured model that has since
+  been disabled — a session whose configured model is disabled still shows
+  an error (UC-012). With no enabled model at all, the roleplayer cannot
+  send a message and is told why. **Resolution split, deliberate, one chain
+  and two behaviours:** the MODEL is captured once, at session creation, and
+  never changes afterwards — configuring a character with a model
+  afterwards reaches only sessions created from that point on, never a
+  session that already exists (US-139). The SYSTEM PROMPT and ENABLED TOOLS
+  keep resolving live through `character → session` for every session, old
+  or new, whatever the character is configured with today.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 2, round 5,
-  round 10, round 11, round 13, round 14, round 15.
+  round 10, round 11, round 13, round 14, round 15; 2026-09-28, gap-closure
+  round.
 
 ### FEAT-014 — `memo_search` tool
 - **Purpose:** The assistant searches searchable memos across the session's
@@ -271,22 +287,29 @@ dependency graph below, not from priority (challenge C4, rejected).
   disabled memos are excluded because they reach the assistant by no path.
   Works correctly with no setup level present (FEAT-007). Exception flow: a
   failed tool does not end the discussion — the assistant is told and
-  carries on.
+  carries on. A tool call being waited on can be stopped (FEAT-010); there
+  is no limit on how many times the assistant may call tools before
+  answering.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 5,
-  round 9.
+  round 9; 2026-09-28, gap-closure round.
 
 ### FEAT-015 — `session_search` tool
 - **Purpose:** The assistant finds past sessions under the same character by
   meaning.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
 - **Status:** proposed
-- **Realized by:** UC-053, UC-054, US-067, US-068, US-069
+- **Realized by:** UC-053, UC-054, US-067, US-068, US-069, US-138
 - **Note:** Semantic only — no structured matching on partner name or setup,
   because the partner is free text and the setup is optional (challenge C5).
   Semantic search is what keeps the "same person or situation" promise true
   when neither is present. Results never cross a character or user boundary.
+  A match considers a session's entries together with its character's
+  persona and setup — this is what lets a query about a similar person, not
+  just a similar situation, find the right session. A tool call being
+  waited on can be stopped (FEAT-010); there is no limit on how many times
+  the assistant may call tools before answering.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 5, challenge
-  C5.
+  C5; 2026-09-28, gap-closure round.
 
 ### FEAT-016 — `web_search` tool
 - **Purpose:** The assistant looks up real-world information on the
@@ -297,16 +320,19 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Note:** Three justified uses (challenge C2): a real-world fact (a place,
   a weapon, a procedure, a period detail); an idiom or naturalness check
   (does this phrasing sound natural); a direct, roleplayer-initiated lookup.
-  Disabled by the configuration chain (FEAT-013) like any other tool.
+  Disabled by the configuration chain (FEAT-013) like any other tool. A tool
+  call being waited on can be stopped (FEAT-010); there is no limit on how
+  many times the assistant may call tools before answering.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 5, round 6,
-  challenge C2.
+  challenge C2; 2026-09-28, gap-closure round.
 
 ### FEAT-017 — My search
 - **Purpose:** One search box reaching everything the roleplayer owns, from
   any screen.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** proposed
-- **Realized by:** UC-058, UC-059, UC-060, US-074, US-075, US-076, US-118
+- **Realized by:** UC-058, UC-059, UC-060, US-074, US-075, US-076, US-118,
+  US-137
 - **Note:** Distinct from FEAT-014/FEAT-015, not an overlap (challenge C7,
   rejected by the user: "tool search is the content search, my search is on
   user level UI to find the sessions i did. Totally different
@@ -314,9 +340,11 @@ dependency graph below, not from priority (challenge C4, rejected).
   assistant mid-discussion; this is a user-level UI for finding sessions the
   roleplayer ran. Results grouped by kind; never include another user's
   material. Reachable whether the workspace shell's left column (FEAT-020)
-  is expanded or collapsed.
+  is expanded or collapsed. My-search returns memos regardless of their
+  enabled or forced state — note state never filters a result out — and a
+  result that is currently disabled is shown as disabled.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7, round 8,
-  round 14, challenge C7.
+  round 14, challenge C7; 2026-09-28, gap-closure round.
 
 ### FEAT-018 — Export & import
 - **Purpose:** Move or restore data at four granularities — whole database,
@@ -324,20 +352,23 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Actors:** ACT-001, ACT-002 · **Priority:** must
 - **Status:** proposed
 - **Realized by:** UC-061, UC-062, UC-063, UC-064, US-077, US-078, US-079,
-  US-080, US-081, US-082
+  US-080, US-081, US-082, US-136
 - **Note:** Owns export/import at every granularity — see the Relationships
   boundary below against FEAT-005, which owns drift, remediation and
   vector-index rebuild. The whole-database export is opaque to the
   administrator: the product offers no viewer, no search, no rendering of
   another user's content; the export exists to move or restore an instance.
   This is how challenge C1's conflict with FEAT-019's privacy guarantee was
-  settled.
+  settled. Import merges as new items alongside what is already there and
+  never reuses an id — imported material always arrives under fresh
+  identity, and can never overwrite or merge into an existing row. Importing
+  the same export twice yields duplicates, and nothing warns about it.
 - **_TBD:** a single-session export carries only that session's own memos
   (challenge C12), so an imported session arrives without the character
   persona and setup that gave it meaning. Accepted knowingly, recorded here
   as a known consequence, not a defect.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 2,
-  challenge C12.
+  challenge C12; 2026-09-28, gap-closure round, challenge C29.
 
 ### FEAT-019 — Privacy & isolation
 - **Purpose:** No screen, search, tool or export view ever shows another
@@ -400,6 +431,12 @@ FEAT-012, FEAT-017. No cycles.
 - FEAT-009 (decision entries) × FEAT-012 (session notes) — a decision is
   positioned in time and everything before it still reads the old way; a
   note is standing context, true throughout the session.
+- FEAT-010 (stop) × FEAT-011 (translation) — FEAT-010 owns the stop and
+  what survives it; FEAT-011 owns what a translation is.
+- FEAT-010 (stop) × FEAT-014/015/016 (tools) — FEAT-010 owns stopping a
+  tool wait in progress; the tool features own what each tool does and what
+  a failed tool means. A stopped tool is the roleplayer's choice; a failed
+  tool is the tool's own.
 
 **Boundary:** FEAT-018 owns export/import at every granularity; FEAT-005
 owns drift, remediation and vector-index rebuild.
@@ -413,7 +450,20 @@ tool switches inherit `character → session` only, with no user-level
 default; the RP language and the preferred language inherit `user →
 session`, skipping the character. The two chains now share no level at all.
 
-**Conflicts:** None open in `docs/product/`. Six items conflict with
+**Accepted consequences (gap-closure round, 2026-09-28):**
+- Configuring a character's model does not reach sessions that already
+  exist (US-139).
+- A session that captured a model later disabled by the administrator falls
+  under US-107 — told why, never silently substituted.
+- An overflow retry always fails, and the reason for any failure is
+  transient — nothing persists after the notice fades.
+- Nothing indicates that the vector index was built by a superseded
+  embedding model; semantic results degrade silently until the rebuild
+  (UC-016) is run.
+- Importing the same export twice yields duplicates, with no warning.
+
+**Conflicts:** None open in `docs/product/`. Dependency edges and the build
+order are unchanged by this round. Five items conflict with
 `docs/architecture/` and are routed to `/architect` — they are architecture
 decisions, not product conflicts.
 <!-- product-spec:end -->

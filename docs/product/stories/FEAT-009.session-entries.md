@@ -83,8 +83,8 @@
 - **Acceptance criteria:**
   - **US-120.AC-1** — Given the last partner-or-turn entry in the session was the roleplayer's own turn, when the roleplayer opens the current zone, then the switch defaults to partner.
   - **US-120.AC-2** — Given the last partner-or-turn entry in the session was a partner block, when the roleplayer opens the current zone, then the switch defaults to my turn.
-- **_TBD:** what a settled decision does to the switch's alternating default was inferred, not confirmed.
-- **Source:** `[inferred]` basis: round 17 states the default follows the last partner-or-turn entry, skipping decisions, but does not confirm a decision's own effect on the default; interview 2026-09-28, round 17.
+  - **US-120.AC-3** — Given settled decisions lie between the current zone and the last partner-or-turn entry, when the roleplayer opens the current zone, then the decisions have no effect on the default — the switch still alternates from that last partner-or-turn entry.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17, gap-closure round.
 
 ### US-121 — A pasted partner block files itself immediately; double parentheses in partner text get no special treatment
 - **Actor:** ACT-002 · **Feature:** FEAT-009 · **Exercises:** UC-027, UC-083

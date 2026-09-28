@@ -107,9 +107,37 @@
 - **Alternate flows:**
   - The current zone's kind switch is set to partner — pasting text files a partner entry immediately with no Settle press (US-121).
   - The last message settled is wholly wrapped in double parentheses — the entry files as a decision, not a turn (UC-081).
+  - The current zone is empty — the roleplayer abandons it; the instance discards it and the entry returns to how it was (UC-086).
+  - The current zone holds text — abandoning is not offered; the roleplayer settles instead, and settling never requires an assistant answer (UC-086).
 - **Postconditions:** A settled block is re-openable only while the current zone below it is still empty (US-128).
-- **_TBD:** nothing states how a current zone is abandoned without settling anything — predates this delta; the existing spec had no discard path either.
-- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17, gap-closure round.
+
+### UC-085 — Stop model work in flight
+- **Actor:** ACT-002
+- **Feature:** FEAT-010
+- **Preconditions:** Model work is in flight — a discussion generation, a tool call being waited on, or a partner-text translation.
+- **Main flow:**
+  1. Roleplayer stops the work in flight.
+  2. Instance ends the work.
+  3. Instance keeps whatever text was produced so far as a usable candidate.
+- **Alternate flows:**
+  - A tool call is stopped — the discussion continues without that tool's result, as it does for a failed tool.
+  - A translation is stopped — the original text stands, nothing is cached.
+- **Postconditions:** Nothing is waiting on the model; partial output is kept and usable.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
+
+### UC-086 — Abandon a current zone without settling
+- **Actor:** ACT-002
+- **Feature:** FEAT-010
+- **Preconditions:** A current zone is open.
+- **Main flow:**
+  1. The current zone is empty.
+  2. Roleplayer abandons it.
+  3. Instance discards it and the entry returns to how it was.
+- **Alternate flows:**
+  - The zone holds text — abandoning is not available; the roleplayer settles instead, and settling never requires an assistant answer.
+- **Postconditions:** Nothing the roleplayer wrote is ever discarded by abandoning.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
 
 ### UC-084 — Give the assistant a fast instruction inside a draft
 - **Actor:** ACT-002 (+ ACT-004)

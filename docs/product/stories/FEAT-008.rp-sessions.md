@@ -37,5 +37,7 @@
 - **Acceptance criteria:**
   - **US-117.AC-1** — Given a character's page with no session yet started from it, when the roleplayer writes a message in its composer, then the instance creates a new session under that character with a turn being drafted.
   - **US-117.AC-2** — Given the session was just created this way, when the roleplayer views the drafted turn, then the written message is the opening message of that turn's discussion.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 15.
+  - **US-117.AC-3** — Given the roleplayer writes the first message on a character's page, when the session is created, then the assistant answers that message as it would any other discussion message.
+  - **US-117.AC-4** — Given the character page's composer, when the roleplayer looks at it before writing, then it offers neither the kind switch nor a setup choice.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 15; 2026-09-28, gap-closure round.
 <!-- product-spec:end -->

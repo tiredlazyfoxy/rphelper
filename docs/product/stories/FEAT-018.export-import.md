@@ -48,4 +48,12 @@
   - **US-082.AC-1** — Given a single-session export is imported, when the import completes, then the imported session carries no character persona.
   - **US-082.AC-2** — Given a single-session export is imported, when the import completes, then the imported session carries no setup.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 2, challenge C12.
+
+### US-136 — Import merges as new items and never reuses an id
+- **Actor:** ACT-002 · **Feature:** FEAT-018 · **Exercises:** UC-062, UC-063, UC-064
+- **Story:** As a roleplayer, I want an import to arrive as new material rather than overwrite what's already there, so that importing is never a way to accidentally destroy existing data.
+- **Acceptance criteria:**
+  - **US-136.AC-1** — Given an instance that already holds data, when material is imported, then it arrives alongside what is there and nothing existing is overwritten or replaced.
+  - **US-136.AC-2** — Given imported material carries ids that already exist in the instance, when it is imported, then it arrives under fresh identity so no existing row is reused or replaced.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round, challenge C29.
 <!-- product-spec:end -->

@@ -40,10 +40,10 @@
 - **Preconditions:** Session is open.
 - **Main flow:**
   1. Roleplayer opens a session.
-  2. Instance resolves model, system prompt and enabled tools through `character → session`; a character with no model configured resolves to the first enabled model.
+  2. Instance resolves the session's configuration: the MODEL is the value captured when the session was created — a character configured with a model afterwards does not change it — while the SYSTEM PROMPT and ENABLED TOOLS resolve live through `character → session`. At session creation, a character with no model configured resolves to the first enabled model, captured onto the new session.
   3. Instance resolves RP language and preferred language through `user → session`, skipping the character.
-- **Postconditions:** The two chains share no level — there is no user-level default for model, system prompt or tools, and no character-level override for either language.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 10, round 13, round 14.
+- **Postconditions:** The two chains share no level — there is no user-level default for model, system prompt or tools, and no character-level override for either language. The model/system-prompt/tools chain itself splits deliberately: the model is captured once at creation, while the system prompt and tools keep resolving live for every session, old or new.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 10, round 13, round 14; 2026-09-28, gap-closure round.
 
 ### UC-077 — Choose the session's model from the stream's header
 - **Actor:** ACT-002

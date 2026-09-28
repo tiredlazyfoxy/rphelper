@@ -18,8 +18,8 @@ renumbered, never reused; gaps stay if a number is ever withdrawn or skipped.
 | `vision.md` | Problem, who has it, what happens without it, 3 success signals, scope & non-goals |
 | `actors.md` | ACT-001..ACT-004 blocks, plus 2 named non-actors |
 | `features.md` | FEAT-001..FEAT-020 blocks + `## Relationships` (dependency graph, overlaps, boundary, conflicts). Never a registry, never splits. |
-| `use-cases/<FEAT-###>.<slug>.md` | UC-001..UC-084, one file per feature |
-| `stories/<FEAT-###>.<slug>.md` | US-001..US-131 with `US-###.AC-#` criteria, one file per feature |
+| `use-cases/<FEAT-###>.<slug>.md` | UC-001..UC-086, one file per feature |
+| `stories/<FEAT-###>.<slug>.md` | US-001..US-139 with `US-###.AC-#` criteria, one file per feature |
 | `glossary.md` | Domain terms, one line each |
 | `quick-reference.md` (this file) | The id registry |
 
@@ -77,15 +77,15 @@ dependency graph below, not from priority.
 | FEAT-007 | Setups | ACT-002 | UC-020–022, UC-068 | US-023–025, US-087 |
 | FEAT-008 | RP sessions | ACT-002 | UC-023–026, UC-080 | US-026–029, US-117 |
 | FEAT-009 | Session entries & the RP flow | ACT-002 | UC-027–031, UC-078, UC-081–082 | US-030–035, US-109–112, US-120–124 |
-| FEAT-010 | Compose discussion | ACT-002, ACT-004 | UC-032–038, UC-079, UC-083–084 | US-036–044, US-113–116, US-125–131 |
+| FEAT-010 | Compose discussion | ACT-002, ACT-004 | UC-032–038, UC-079, UC-083–086 | US-036–044, US-113–116, US-125–135 |
 | FEAT-011 | Partner-text translation | ACT-002 | UC-039–041 | US-045–048 |
 | FEAT-012 | Memos | ACT-002, ACT-004 | UC-042–046, UC-075–076 | US-049–057, US-098–104, US-119 |
-| FEAT-013 | Session configuration & inheritance | ACT-002 | UC-047–050, UC-077 | US-058–062, US-105–108 |
+| FEAT-013 | Session configuration & inheritance | ACT-002 | UC-047–050, UC-077 | US-058–062, US-105–108, US-139 |
 | FEAT-014 | `memo_search` tool | ACT-002, ACT-004 | UC-051–052 | US-063–066 |
-| FEAT-015 | `session_search` tool | ACT-002, ACT-004 | UC-053–054 | US-067–069 |
+| FEAT-015 | `session_search` tool | ACT-002, ACT-004 | UC-053–054 | US-067–069, US-138 |
 | FEAT-016 | `web_search` tool | ACT-002, ACT-004 | UC-055–057 | US-070–073 |
-| FEAT-017 | My search | ACT-002 | UC-058–060 | US-074–076, US-118 |
-| FEAT-018 | Export & import | ACT-001, ACT-002 | UC-061–064 | US-077–082 |
+| FEAT-017 | My search | ACT-002 | UC-058–060 | US-074–076, US-118, US-137 |
+| FEAT-018 | Export & import | ACT-001, ACT-002 | UC-061–064 | US-077–082, US-136 |
 | FEAT-019 | Privacy & isolation | ACT-001, ACT-002 | UC-065–066 | US-083–085 |
 | FEAT-020 | Workspace shell & navigation | ACT-002 (primary), ACT-001 (admin entry point only) | UC-069–074 | US-088–097 |
 
@@ -103,7 +103,7 @@ above is `must`, so priority carries no sequencing information on its own.
 
 ## Use cases
 
-UC-001..UC-084, grouped by owning feature, id order. One-liners are the use
+UC-001..UC-086, grouped by owning feature, id order. One-liners are the use
 case's own heading text, verbatim. Every UC below is `Status: proposed`.
 
 **FEAT-001**
@@ -172,6 +172,8 @@ case's own heading text, verbatim. Every UC below is `Status: proposed`.
 - UC-079 — Follow a live discussion inline beneath the answer it belongs to
 - UC-083 — Work in the current zone below the ruler
 - UC-084 — Give the assistant a fast instruction inside a draft
+- UC-085 — Stop model work in flight
+- UC-086 — Abandon a current zone without settling
 
 **FEAT-011**
 - UC-039 — Flick a partner entry into my preferred language
@@ -230,11 +232,11 @@ case's own heading text, verbatim. Every UC below is `Status: proposed`.
 - UC-073 — Work on a character's page — persona, notes, setups, settings, sessions
 - UC-074 — Create a character from a draft page
 
-Total: 84, UC-001..UC-084, no gaps.
+Total: 86, UC-001..UC-086, no gaps.
 
 ## Stories
 
-US-001..US-131, grouped by owning feature, id order. `ACs` is the count of
+US-001..US-139, grouped by owning feature, id order. `ACs` is the count of
 `US-###.AC-#` criteria on that story. One-liners are the story's own heading
 text, verbatim. Every US below is `Status: proposed`.
 
@@ -284,7 +286,7 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-027 — Archive then restore and resume (ACs: 3)
 - US-028 — List ordered by last use (ACs: 1)
 - US-029 — Sessions are mine alone (ACs: 1)
-- US-117 — Writing the first message on a character's page creates the session (ACs: 2)
+- US-117 — Writing the first message on a character's page creates the session (ACs: 4)
 
 **FEAT-009**
 - US-030 — Paste a partner block (ACs: 1)
@@ -297,7 +299,7 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-110 — Any settled entry is edited in place and saved when focus leaves it; search reflects the new text (ACs: 2)
 - US-111 — Editing a partner block discards its cached translation (ACs: 2)
 - US-112 — With no embedding model configured, an edit still saves, and the roleplayer is told search coverage is incomplete (ACs: 2)
-- US-120 — The current zone's kind switch has two positions with an alternating default (ACs: 2) — `[inferred]`
+- US-120 — The current zone's kind switch has two positions with an alternating default (ACs: 3)
 - US-121 — A pasted partner block files itself immediately; double parentheses in partner text get no special treatment (ACs: 2)
 - US-122 — A settled decision sits in the record, reaches the assistant as context, and is found by session search (ACs: 2)
 - US-123 — A settled decision offers no copy-out (ACs: 1)
@@ -312,7 +314,7 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-041 — Re-open succeeds while it is last (ACs: 1)
 - US-042 — Re-open is refused once another entry exists (ACs: 1)
 - US-043 — Only the settled answer enters session context (ACs: 2)
-- US-044 — The LLM going away mid-discussion loses none of my text (ACs: 3)
+- US-044 — The LLM going away mid-discussion loses none of my text (ACs: 4)
 - US-113 — A discussion appears beneath its answer in the same stream, and collapses there when the answer is settled (ACs: 2)
 - US-114 — The assistant's tool calls and thinking are visible while it works and are tucked away once it finishes (ACs: 3)
 - US-115 — Any message in the current zone is edited in place, the assistant's included, not findable by session search, with no new reply (ACs: 3)
@@ -324,6 +326,10 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-129 — A wholly-parenthesised message is out-of-character; settling one files a decision, not a turn (ACs: 1)
 - US-130 — A double-parenthesised fragment inside a draft is an instruction that never appears in the settled turn (ACs: 2)
 - US-131 — OOC messages are in the preferred language; the assistant answers OOC in kind, while candidates stay in the RP language (ACs: 3, AC-1 withdrawn)
+- US-132 — Stopping keeps the partial text as a usable candidate (ACs: 2)
+- US-133 — The stop reaches any model work (ACs: 2)
+- US-134 — An empty zone is discarded; one holding text must be settled (ACs: 2)
+- US-135 — Settling with no assistant answer settles the roleplayer's own text (ACs: 1)
 
 **FEAT-011**
 - US-045 — First flick translates into my preferred language (ACs: 1)
@@ -346,7 +352,7 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-100 — A disabled note reaches the assistant by no path, whatever its forced flag says (ACs: 2)
 - US-101 — Re-enabling a note restores the forced state it had when it was disabled (ACs: 2)
 - US-102 — Forced notes enter the system prompt in the roleplayer's arranged order within their level (ACs: 1)
-- US-103 — Levels keep a fixed order and a note cannot move between levels by dragging (ACs: 2) — `[inferred]`
+- US-103 — Levels keep a fixed order and a note cannot move between levels by dragging (ACs: 2)
 - US-104 — A note's text is edited where it sits and is saved when focus leaves it (ACs: 1)
 - US-119 — A note is one body of text, with no title, name or header field (ACs: 1)
 
@@ -360,6 +366,7 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-106 — A character with no model configured resolves to the first enabled model (ACs: 1)
 - US-107 — With no enabled model at all, the roleplayer cannot send a message and is told why (ACs: 2)
 - US-108 — Model, system prompt and tool switches inherit character → session; the two languages inherit user → session (ACs: 2)
+- US-139 — Configuring a character's model does not reach existing sessions (ACs: 2)
 
 **FEAT-014**
 - US-063 — Returns searchable memos from all four levels (ACs: 1)
@@ -371,6 +378,7 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-067 — Finds a past session with a similar person or situation (ACs: 1)
 - US-068 — Purely semantic — works with no setup and no partner field (ACs: 1)
 - US-069 — Never crosses a character or user boundary (ACs: 2)
+- US-138 — `session_search` matches entries plus the character's persona and setup (ACs: 2)
 
 **FEAT-016**
 - US-070 — Real-world fact lookup (ACs: 1)
@@ -383,6 +391,7 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-075 — Results grouped by kind (ACs: 1)
 - US-076 — Results never include another user's material (ACs: 1)
 - US-118 — My search is reachable whether the left column is expanded or collapsed (ACs: 2)
+- US-137 — My-search returns disabled memos, marked as disabled (ACs: 2)
 
 **FEAT-018**
 - US-077 — Admin exports the whole database (ACs: 2)
@@ -391,6 +400,7 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-080 — Character export and import (ACs: 2)
 - US-081 — A session export carries only its own memos (ACs: 1)
 - US-082 — An imported session arrives without character or setup context (ACs: 2)
+- US-136 — Import merges as new items and never reuses an id (ACs: 2)
 
 **FEAT-019**
 - US-083 — No screen shows another user's characters, sessions or memos (ACs: 1)
@@ -409,36 +419,27 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-096 — A character's page shows its persona, its notes, its setups, its configuration and its sessions in one place (ACs: 1)
 - US-097 — Creating a character opens a draft page; nothing is persisted until the roleplayer enters something (ACs: 2)
 
-Total: 131, US-001..US-131, no gaps. Total numbered ACs across all stories:
-211, of which 210 are active and 1 (`US-131.AC-1`) is withdrawn.
+Total: 139, US-001..US-139, no gaps. Total numbered ACs across all stories:
+230, of which 229 are active and 1 (`US-131.AC-1`) is withdrawn.
 
 ## Open `_TBD:` items
 
-Every `_TBD:` currently in `docs/product/`, by file and id:
+Every `_TBD:` currently in `docs/product/`, by file and id. The gap-closure
+round (2026-09-28) closed nine; exactly one survives, by choice — it was not
+revisited this round and remains an accepted consequence.
 
-- `features.md`, FEAT-009 — session context grows forever with no ceiling (challenge C3); entries accumulate without limit and nothing warns the roleplayer as a session's own size grows.
-- `features.md`, FEAT-010 — unbounded session context (challenge C3): grows forever, no ceiling, no warning, no pruning; context compaction is named as a future capability, deliberately out of this spec.
-- `features.md`, FEAT-010 — nothing states what happens when RP prose itself contains double parentheses — a draft could silently lose text (challenge C21).
-- `features.md`, FEAT-010 — nothing states how a current zone is abandoned without settling anything (challenge C22) — predates this delta.
 - `features.md`, FEAT-018 — a single-session export carries only that session's own memos (challenge C12), so an imported session arrives without the character persona and setup that gave it meaning; accepted knowingly, recorded as a known consequence, not a defect.
-- `use-cases/FEAT-010.compose-discussion.md`, UC-083 — nothing states how a current zone is abandoned without settling anything (same gap as the FEAT-010 block above, restated on the use case).
-- `stories/FEAT-009.session-entries.md`, US-120 — what a settled decision does to the switch's alternating default was inferred, not confirmed (paired with `[inferred]`, below).
-- `stories/FEAT-010.compose-discussion.md`, US-130 — nothing states what happens when RP prose itself contains double parentheses (same gap as the FEAT-010 block above, restated on the story).
-- `stories/FEAT-012.memos.md`, US-103 — the position of a setup's notes inside the wall's level order was inferred, not confirmed (paired with `[inferred]`, below).
-- `vision.md`, success signal S2 — the 20–40 minute status quo is the user's own estimate, not a measurement.
-- `vision.md`, non-goal "No context compaction" — a long RP will eventually exceed what the model can hold, and nothing warns the user first.
 
 ## `[inferred]` requirements
 
-Exactly two, both in the delta:
-
-- **US-120** (FEAT-009) — the current zone's kind-switch default (partner / my turn) is stated to follow the last partner-or-turn entry, skipping decisions; a settled decision's own effect on that default was never separately confirmed.
-- **US-103** (FEAT-012) — a setup's position in the note wall's fixed level order was inferred to sit between character and session, matching FEAT-012's four-level memo-chain resolution order (UC-046); the interview named only user, character and session when describing the wall's level order.
+None. The gap-closure round (2026-09-28) confirmed both requirements that
+carried the tag (US-120, US-103) directly with the user; `docs/product/`
+carries no inferred requirement.
 
 ## Next free ids
 
 - `ACT-005`
 - `FEAT-021`
-- `UC-085`
-- `US-132`
+- `UC-087`
+- `US-140`
 <!-- product-spec:end -->
