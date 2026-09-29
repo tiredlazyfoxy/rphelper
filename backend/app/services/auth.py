@@ -115,13 +115,18 @@ def open_session(
         "expires_at": _format_timestamp(expires_at),
         "revoked_at": None,
     }
+    # The account's last login is the same instant as the new row's `created_at`; its
+    # `updated_at` is not touched (feature `005`, D2).
+    stamp_last_login = users.update().where(users.c.id == user_id).values(last_login_at=values["created_at"])
     if connection.in_transaction():
         # A caller that already holds a transaction (bootstrap's creation block, feature
         # `004` step 004) gets the insert inside it: created-and-signed-in, or nothing.
         connection.execute(auth_sessions.insert().values(id=generator.next_id(), **values))
+        connection.execute(stamp_last_login)
     else:
         with connection.begin():
             connection.execute(auth_sessions.insert().values(id=generator.next_id(), **values))
+            connection.execute(stamp_last_login)
     logger.info("session outcome=opened id={}", str(user_id))
     return OpenedSession(token=token, expires_at=expires_at)
 
@@ -162,6 +167,23 @@ def revoke_session(connection: Connection, token: str) -> None:
             )
             .values(revoked_at=now_text)
         )
+
+
+def revoke_user_sessions(connection: Connection, user_id: int) -> int:
+    """Set `revoked_at` on every live session of `user_id`; return how many rows it revoked.
+
+    Opens no transaction of its own — the caller's transaction is the boundary. Deletes
+    nothing, raises nothing; an unknown user id is zero rows.
+    """
+    now_text = _format_timestamp(_utc_now())
+    result = connection.execute(
+        auth_sessions.update()
+        .where(auth_sessions.c.user_id == user_id, auth_sessions.c.revoked_at.is_(None))
+        .values(revoked_at=now_text)
+    )
+    revoked = result.rowcount
+    logger.info("session outcome=revoked_all id={} count={}", str(user_id), revoked)
+    return revoked
 
 
 def _utc_now() -> datetime:

@@ -4,6 +4,10 @@
 // Entries are evaluated per the frozen recipe: vi.resetModules, a fresh <div id="root">,
 // history.pushState to the location under test, then `await act(async () => import(...))`.
 // BrowserRouter reads the real jsdom location — no MemoryRouter substitute.
+//
+// Feature 005, step 004 DoD-11 repairs the admin clauses only: `mountEntry("admin", …)` stubs
+// GET /api/me with an administrator identity and waits for the gated render. The bootstrap,
+// login and app clauses are unchanged.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { act, screen } from "@testing-library/react";
@@ -39,13 +43,46 @@ function mountElement(): HTMLElement {
   return root;
 }
 
+/**
+ * Feature 005, step 004 — DoD-11 (context.md D15): from 005/004 the admin entry awaits a
+ * GET /api/me gate before it creates a root, so its clauses of DoD-1..DoD-4 stub that request
+ * with an administrator identity and wait for the render. Other entries are untouched.
+ */
+function stubAdminIdentity(): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(raw, "http://localhost").pathname !== "/api/me") {
+        return Promise.reject(new TypeError("unexpected request in admin entry test"));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: "9007199254740993", username: "mira", role: "admin" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }),
+  );
+}
+
+async function settle(rounds = 6): Promise<void> {
+  for (let i = 0; i < rounds; i += 1) {
+    await act(async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+  }
+}
+
 async function mountEntry(entry: Entry, pathname: string): Promise<void> {
   vi.resetModules();
   document.body.innerHTML = '<div id="root"></div>';
   window.history.pushState({}, "", pathname);
+  if (entry === "admin") stubAdminIdentity(); // 005/004 DoD-11
   await act(async () => {
     await LOADERS[entry]();
   });
+  if (entry === "admin") await settle(); // 005/004 DoD-11: the gate resolves before the mount
 }
 
 function markersIn(container: ParentNode): string[] {
@@ -94,6 +131,7 @@ afterEach(async () => {
   document.body.innerHTML = "";
   window.history.pushState({}, "", "/");
   window.localStorage.clear();
+  vi.unstubAllGlobals(); // 005/004 DoD-11: drop the admin clauses' /api/me stub
 });
 
 // ---------------------------------------------------------------------------
@@ -145,6 +183,7 @@ describe("each entry renders inside AppProviders", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Each admin clause below runs behind the administrator /api/me stub (005/004 DoD-11).
 describe("the admin entry's basename is exactly /admin", () => {
   it("a location of /admin/users resolves against the basename — DoD-3", async () => {
     await mountEntry("admin", "/admin/users");

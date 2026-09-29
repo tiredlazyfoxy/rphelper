@@ -64,6 +64,7 @@ users = Table(
     Column("preferred_language", Text, nullable=True),
     Column("created_at", Text, nullable=False),
     Column("updated_at", Text, nullable=False),
+    Column("last_login_at", Text, nullable=True),
 )
 
 

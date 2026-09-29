@@ -19,6 +19,9 @@ from app.errors import (
     InvalidCredentialsError,
     NotAuthenticatedError,
     SecretRefError,
+    SelfRoleChangeRefusedError,
+    UsernameTakenError,
+    UserNotFoundError,
     register_exception_handlers,
 )
 
@@ -436,3 +439,95 @@ def test_insufficient_role_renders_no_role_name__S004_002_DoD4() -> None:
     rendered = str(InsufficientRoleError().to_wire()).lower()
     for role_name in ("roleplayer", "admin"):
         assert role_name not in rendered
+
+
+# ============================================================================
+# Feature 005, step 002 (``002.users-service-and-errors.md``) — DoD-1:
+# ``username_taken``/409, ``user_not_found``/404 and ``self_role_change_refused``/409 are
+# ``DomainError`` subclasses with an empty detail, rendered in the one wire shape through
+# the handler 001 already registers — no second handler.
+# ============================================================================
+
+ACCOUNT_ERRORS: list[tuple[type[DomainError], str, int]] = [
+    (UsernameTakenError, "username_taken", 409),
+    (UserNotFoundError, "user_not_found", 404),
+    (SelfRoleChangeRefusedError, "self_role_change_refused", 409),
+]
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), ACCOUNT_ERRORS)
+def test_account_error_is_a_domain_error_subclass__S005_002_DoD1(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """005/002 DoD-1: each account error follows the base's pattern as a subclass."""
+    assert issubclass(error_class, DomainError)
+    assert isinstance(error_class(), Exception)
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), ACCOUNT_ERRORS)
+def test_account_error_sets_code_and_status_as_class_attributes__S005_002_DoD1(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """005/002 DoD-1: the code and HTTP status are set on the subclass itself."""
+    assert "code" in vars(error_class)
+    assert "http_status" in vars(error_class)
+    assert error_class.code == code
+    assert error_class.http_status == status
+    error = error_class()
+    assert error.code == code
+    assert error.http_status == status
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), ACCOUNT_ERRORS)
+def test_account_error_detail_is_empty__S005_002_DoD1(error_class: type[DomainError], code: str, status: int) -> None:
+    """005/002 DoD-1: ``detail`` carries nothing."""
+    assert error_class().detail == {}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), ACCOUNT_ERRORS)
+def test_account_error_renders_the_one_wire_shape__S005_002_DoD1(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """005/002 DoD-1: the inherited render produces ``{"error": {code, message, detail}}``, detail empty."""
+    body = error_class().to_wire()
+    assert _is_wire_shape(body)
+    assert body["error"]["code"] == code
+    assert body["error"]["detail"] == {}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), ACCOUNT_ERRORS)
+def test_account_error_from_a_route_answers_its_status_in_the_wire_shape__S005_002_DoD1(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """005/002 DoD-1: through the handler 001 registers, the response is 409/404/409 + the wire body."""
+    app = _app_raising(error_class())
+    response = TestClient(app).get("/boom")
+    assert response.status_code == status
+    payload = response.json()
+    assert _is_wire_shape(payload)
+    assert payload["error"]["code"] == code
+    assert payload["error"]["detail"] == {}
+    assert payload == error_class().to_wire()
+
+
+def test_no_second_handler_is_registered_for_the_account_errors__S005_002_DoD1() -> None:
+    """005/002 DoD-1: the base-class handler covers all three; no handler keyed on any is added."""
+    app = FastAPI()
+    register_exception_handlers(app)
+    assert DomainError in app.exception_handlers
+    for error_class, _code, _status in ACCOUNT_ERRORS:
+        assert error_class not in app.exception_handlers
+
+
+def test_the_three_account_errors_are_distinct_codes__S005_002_DoD1() -> None:
+    """005/002 DoD-1: the two 409s stay distinguishable by code, and none reuses an existing code."""
+    codes = [error_class.code for error_class, _code, _status in ACCOUNT_ERRORS]
+    assert len(set(codes)) == 3
+    existing = {
+        SecretRefError.code,
+        AlreadyConfiguredError.code,
+        InvalidCredentialsError.code,
+        NotAuthenticatedError.code,
+        InsufficientRoleError.code,
+    }
+    assert not set(codes) & existing

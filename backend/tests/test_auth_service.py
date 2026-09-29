@@ -16,6 +16,7 @@ committed, and every post-condition is read on another fresh connection.
 
 import ast
 import inspect
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -35,6 +36,7 @@ from app.services.auth import (
     open_session,
     resolve_session,
     revoke_session,
+    revoke_user_sessions,
 )
 from app.services.passwords import hash_password
 
@@ -668,6 +670,437 @@ def test_entry_points_take_plain_arguments_and_no_request__DoD12(
     function: Callable[..., Any], expected_parameters: list[str]
 ) -> None:
     """DoD-12 — plain parameters only; no `Request`, no fastapi/starlette type in the contract."""
+    signature = inspect.signature(function)
+    assert list(signature.parameters) == expected_parameters
+    rendered = " ".join(str(parameter) for parameter in signature.parameters.values())
+    rendered = f"{rendered} {signature.return_annotation}"
+    assert "fastapi" not in rendered.lower()
+    assert "starlette" not in rendered.lower()
+    assert "Request" not in rendered
+    assert "Settings" not in rendered
+
+
+# ======================================================================================
+# Feature 005, step 001 (`docs/plans/005.admin-shell-and-users/001.last-login-and-session-revoke.md`)
+# — the `users.last_login_at` stamp in the open-session operation, and the bulk
+# revoke-every-session-for-one-user helper. Expected values come from that step's DoD-3..12,
+# `001.context.md` and feature `context.md` D2 / D4. Bindings come from `## Skeleton` →
+# `Step 001` in feature 005's `status.md`. Tests are suffixed `__S005_001_DoD<n>`.
+#
+# The bulk helper opens no transaction of its own, so every call here is made inside a
+# transaction the test owns (`engine.begin()` to commit, or an explicit rollback).
+# ======================================================================================
+
+UNKNOWN_USER_ID = 9_999_999_999
+
+
+def _user_row(engine: Engine, user_id: int) -> dict[str, Any]:
+    with engine.connect() as connection:
+        row = connection.execute(select(_users()).where(_users().c.id == user_id)).mappings().one()
+        return dict(row)
+
+
+def _rows_of(engine: Engine, user_id: int) -> list[dict[str, Any]]:
+    return [row for row in _session_rows(engine) if row["user_id"] == user_id]
+
+
+def _open_in_caller_transaction(engine: Engine, user_id: int, ttl_hours: int = TTL_HOURS) -> OpenedSession:
+    """Open a session inside a transaction the caller already holds (the bootstrap shape)."""
+    with engine.connect() as connection:
+        with connection.begin():
+            return open_session(connection, SnowflakeGenerator(node_id=1), user_id, ttl_hours)
+
+
+def _revoke_all(engine: Engine, user_id: int) -> int:
+    """Call the bulk helper inside a caller-owned transaction that commits."""
+    with engine.begin() as connection:
+        return revoke_user_sessions(connection, user_id)
+
+
+# --- 005/001 DoD-3: a freshly created account has `last_login_at` NULL ---------------
+
+
+@pytest.mark.parametrize("user_id", [ADMIN_ID, PLAYER_ID, DISABLED_ID])
+def test_fresh_account_has_null_last_login_at__S005_001_DoD3(engine: Engine, user_id: int) -> None:
+    """005/001 DoD-3 — a newly inserted account carries no last-login instant."""
+    assert _user_row(engine, user_id)["last_login_at"] is None
+
+
+def test_authentication_does_not_write_last_login_at__S005_001_DoD3(engine: Engine) -> None:
+    """005/001 DoD-3 — a successful or refused credential check is not a session opening."""
+    _authenticate(engine, PLAYER_NAME, PLAYER_PASSWORD)
+    with pytest.raises(InvalidCredentialsError):
+        _authenticate(engine, ADMIN_NAME, "definitely not the password")
+    assert _user_row(engine, PLAYER_ID)["last_login_at"] is None
+    assert _user_row(engine, ADMIN_ID)["last_login_at"] is None
+
+
+def test_other_operations_do_not_write_last_login_at__S005_001_DoD3(engine: Engine) -> None:
+    """005/001 DoD-3 — resolve, single revoke and bulk revoke of another user's sessions
+    leave an account that never opened a session at NULL; only opening writes it."""
+    opened = _open(engine, ADMIN_ID)
+    _resolve(engine, opened.token)
+    _revoke(engine, opened.token)
+    _revoke_all(engine, PLAYER_ID)
+    _revoke_all(engine, ADMIN_ID)
+    assert _user_row(engine, PLAYER_ID)["last_login_at"] is None
+    assert _user_row(engine, DISABLED_ID)["last_login_at"] is None
+
+
+# --- 005/001 DoD-4: opening a session stamps `last_login_at` = the row's `created_at` --
+
+
+@pytest.mark.parametrize("path", ["own_transaction", "caller_transaction"])
+def test_open_session_writes_last_login_at_equal_to_session_created_at__S005_001_DoD4(
+    engine: Engine, path: str
+) -> None:
+    """005/001 DoD-4 — the account's `last_login_at` is the same instant as the new
+    `auth_sessions` row's `created_at`, whether or not the caller already holds a transaction."""
+    if path == "own_transaction":
+        _open(engine, PLAYER_ID)
+    else:
+        _open_in_caller_transaction(engine, PLAYER_ID)
+    stamped = _user_row(engine, PLAYER_ID)["last_login_at"]
+    assert isinstance(stamped, str)
+    session_row = _row_for_user(engine, PLAYER_ID)
+    assert _parse_utc(stamped) == _parse_utc(session_row["created_at"])
+
+
+def test_last_login_at_is_a_current_utc_instant__S005_001_DoD4(engine: Engine) -> None:
+    """005/001 DoD-4 — the stamp is a UTC ISO-8601 instant taken at the time of the open."""
+    before = datetime.now(UTC)
+    _open(engine, PLAYER_ID)
+    after = datetime.now(UTC)
+    stamped = _parse_utc(_user_row(engine, PLAYER_ID)["last_login_at"])
+    assert stamped.utcoffset() == timedelta(0)
+    assert before - timedelta(seconds=1) <= stamped <= after + timedelta(seconds=1)
+
+
+def test_open_session_stamps_only_the_target_account__S005_001_DoD4(engine: Engine) -> None:
+    """005/001 DoD-4 — the stamp lands on the account the session was opened for, no other."""
+    _open(engine, PLAYER_ID)
+    assert _user_row(engine, PLAYER_ID)["last_login_at"] is not None
+    assert _user_row(engine, ADMIN_ID)["last_login_at"] is None
+    assert _user_row(engine, DISABLED_ID)["last_login_at"] is None
+
+
+# --- 005/001 DoD-5: opening a session leaves `updated_at` unchanged ------------------
+
+
+@pytest.mark.parametrize("path", ["own_transaction", "caller_transaction"])
+def test_open_session_leaves_updated_at_unchanged__S005_001_DoD5(engine: Engine, path: str) -> None:
+    """005/001 DoD-5 — the login stamp is not an account edit: `updated_at` stays put (D2)."""
+    before = _user_row(engine, PLAYER_ID)
+    assert before["updated_at"] == TIMESTAMP
+    if path == "own_transaction":
+        _open(engine, PLAYER_ID)
+    else:
+        _open_in_caller_transaction(engine, PLAYER_ID)
+    after = _user_row(engine, PLAYER_ID)
+    assert after["updated_at"] == TIMESTAMP
+    assert after["created_at"] == before["created_at"]
+
+
+def test_open_session_changes_nothing_on_the_account_but_last_login_at__S005_001_DoD5(
+    engine: Engine,
+) -> None:
+    """005/001 DoD-5 — every account column other than `last_login_at` is unchanged."""
+    before = _user_row(engine, PLAYER_ID)
+    _open(engine, PLAYER_ID)
+    after = _user_row(engine, PLAYER_ID)
+    before.pop("last_login_at")
+    after.pop("last_login_at")
+    assert after == before
+
+
+# --- 005/001 DoD-6: a second session advances the stamp, first row untouched ---------
+
+
+def test_second_session_advances_last_login_at__S005_001_DoD6(engine: Engine) -> None:
+    """005/001 DoD-6 — the second open moves `last_login_at` forward to its own creation instant."""
+    _open(engine, PLAYER_ID)
+    first_stamp = _user_row(engine, PLAYER_ID)["last_login_at"]
+    first_row = _row_for_user(engine, PLAYER_ID)
+    time.sleep(0.05)
+    _open(engine, PLAYER_ID)
+    second_stamp = _user_row(engine, PLAYER_ID)["last_login_at"]
+    assert _parse_utc(second_stamp) > _parse_utc(first_stamp)
+    second_row = next(row for row in _rows_of(engine, PLAYER_ID) if row["id"] != first_row["id"])
+    assert _parse_utc(second_stamp) == _parse_utc(second_row["created_at"])
+
+
+def test_second_session_leaves_the_first_session_row_untouched__S005_001_DoD6(engine: Engine) -> None:
+    """005/001 DoD-6 — opening again adds a row and does not modify the earlier one."""
+    first = _open(engine, PLAYER_ID)
+    first_row = _row_for_user(engine, PLAYER_ID)
+    time.sleep(0.05)
+    _open(engine, PLAYER_ID)
+    rows = _rows_of(engine, PLAYER_ID)
+    assert len(rows) == 2
+    assert [row for row in rows if row["id"] == first_row["id"]] == [first_row]
+    assert _resolve(engine, first.token) is not None
+
+
+# --- 005/001 DoD-7: the bulk revoke revokes every live row for the user --------------
+
+
+def test_bulk_revoke_sets_revoked_at_on_every_live_row__S005_001_DoD7(engine: Engine) -> None:
+    """005/001 DoD-7 — every live session of the user gains a `revoked_at` (US-009.AC-1)."""
+    for _ in range(3):
+        _open(engine, PLAYER_ID)
+    assert all(row["revoked_at"] is None for row in _rows_of(engine, PLAYER_ID))
+    _revoke_all(engine, PLAYER_ID)
+    rows = _rows_of(engine, PLAYER_ID)
+    assert len(rows) == 3
+    assert all(row["revoked_at"] is not None for row in rows)
+
+
+def test_bulk_revoke_stamps_the_current_utc_instant__S005_001_DoD7(engine: Engine) -> None:
+    """005/001 DoD-7 — `revoked_at` is set to the current UTC ISO-8601 instant."""
+    _open(engine, PLAYER_ID)
+    _open(engine, PLAYER_ID)
+    before = datetime.now(UTC)
+    _revoke_all(engine, PLAYER_ID)
+    after = datetime.now(UTC)
+    for row in _rows_of(engine, PLAYER_ID):
+        revoked = _parse_utc(row["revoked_at"])
+        assert revoked.utcoffset() == timedelta(0)
+        assert before - timedelta(seconds=1) <= revoked <= after + timedelta(seconds=1)
+
+
+def test_bulk_revoke_leaves_no_token_of_the_user_resolvable__S005_001_DoD7(engine: Engine) -> None:
+    """005/001 DoD-7 — none of the user's tokens resolve afterwards (US-009.AC-1)."""
+    tokens = [_open(engine, PLAYER_ID).token for _ in range(3)]
+    assert all(_resolve(engine, token) is not None for token in tokens)
+    _revoke_all(engine, PLAYER_ID)
+    assert all(_resolve(engine, token) is None for token in tokens)
+
+
+def test_bulk_revoke_returns_the_number_of_rows_it_revoked__S005_001_DoD7(engine: Engine) -> None:
+    """005/001 DoD-7 — the helper reports how many rows it revoked."""
+    for _ in range(3):
+        _open(engine, PLAYER_ID)
+    count = _revoke_all(engine, PLAYER_ID)
+    assert isinstance(count, int)
+    assert count == 3
+
+
+def test_bulk_revoke_includes_an_expired_but_unrevoked_row__S005_001_DoD7(engine: Engine) -> None:
+    """005/001 DoD-7 — "live" is `revoked_at IS NULL` alone: an expired, unrevoked row is
+    stamped too (001.context.md: the predicate is not filtered by `expires_at`)."""
+    _open(engine, PLAYER_ID)
+    _expire_row(engine, _row_for_user(engine, PLAYER_ID))
+    _open(engine, PLAYER_ID)
+    count = _revoke_all(engine, PLAYER_ID)
+    assert count == 2
+    assert all(row["revoked_at"] is not None for row in _rows_of(engine, PLAYER_ID))
+
+
+# --- 005/001 DoD-8: the bulk revoke deletes nothing and keeps old revocations --------
+
+
+def test_bulk_revoke_deletes_no_row__S005_001_DoD8(engine: Engine) -> None:
+    """005/001 DoD-8 — the same number of rows exists before and after, with the same ids."""
+    for _ in range(3):
+        _open(engine, PLAYER_ID)
+    _open(engine, ADMIN_ID)
+    before = _session_rows(engine)
+    _revoke_all(engine, PLAYER_ID)
+    after = _session_rows(engine)
+    assert _session_count(engine) == len(before) == 4
+    assert [row["id"] for row in after] == [row["id"] for row in before]
+    for old, new in zip(before, after, strict=True):
+        assert new["user_id"] == old["user_id"]
+        assert new["token_hash"] == old["token_hash"]
+        assert new["created_at"] == old["created_at"]
+        assert new["expires_at"] == old["expires_at"]
+
+
+def test_bulk_revoke_keeps_an_already_revoked_rows_timestamp__S005_001_DoD8(engine: Engine) -> None:
+    """005/001 DoD-8 — a row revoked earlier keeps its original `revoked_at`, not restamped."""
+    earlier = _open(engine, PLAYER_ID)
+    _revoke(engine, earlier.token)
+    earlier_row = _row_for_user(engine, PLAYER_ID)
+    original = earlier_row["revoked_at"]
+    assert original is not None
+    time.sleep(0.05)
+    _open(engine, PLAYER_ID)
+    count = _revoke_all(engine, PLAYER_ID)
+    assert count == 1
+    rows = {row["id"]: row for row in _rows_of(engine, PLAYER_ID)}
+    assert rows[earlier_row["id"]]["revoked_at"] == original
+    assert all(row["revoked_at"] is not None for row in rows.values())
+
+
+def test_bulk_revoke_keeps_a_historic_revoked_at_value_verbatim__S005_001_DoD8(engine: Engine) -> None:
+    """005/001 DoD-8 — a known, long-past `revoked_at` survives the bulk revoke unchanged."""
+    _open(engine, PLAYER_ID)
+    row = _row_for_user(engine, PLAYER_ID)
+    historic = _pushed_to_the_past(row["created_at"])
+    _update_session_row(engine, row["id"], revoked_at=historic)
+    count = _revoke_all(engine, PLAYER_ID)
+    assert count == 0
+    assert _row_for_user(engine, PLAYER_ID)["revoked_at"] == historic
+
+
+# --- 005/001 DoD-9: no other user's sessions are touched -----------------------------
+
+
+def test_bulk_revoke_touches_no_other_users_sessions__S005_001_DoD9(engine: Engine) -> None:
+    """005/001 DoD-9 — another user's rows are unchanged and their tokens still resolve."""
+    admin_tokens = [_open(engine, ADMIN_ID).token for _ in range(2)]
+    for _ in range(2):
+        _open(engine, PLAYER_ID)
+    admin_before = _rows_of(engine, ADMIN_ID)
+    count = _revoke_all(engine, PLAYER_ID)
+    assert count == 2
+    assert _rows_of(engine, ADMIN_ID) == admin_before
+    assert all(row["revoked_at"] is None for row in _rows_of(engine, ADMIN_ID))
+    for token in admin_tokens:
+        resolved = _resolve(engine, token)
+        assert resolved is not None
+        assert resolved.id == ADMIN_ID
+
+
+def test_bulk_revoke_does_not_change_any_account_row__S005_001_DoD9(engine: Engine) -> None:
+    """005/001 DoD-9 — the helper writes `auth_sessions` only; no `users` row changes."""
+    _open(engine, ADMIN_ID)
+    _open(engine, PLAYER_ID)
+    accounts_before = [_user_row(engine, uid) for uid in (ADMIN_ID, PLAYER_ID, DISABLED_ID)]
+    _revoke_all(engine, PLAYER_ID)
+    accounts_after = [_user_row(engine, uid) for uid in (ADMIN_ID, PLAYER_ID, DISABLED_ID)]
+    assert accounts_after == accounts_before
+
+
+# --- 005/001 DoD-10: idempotent and total --------------------------------------------
+
+
+def test_bulk_revoke_called_twice_reports_zero_the_second_time__S005_001_DoD10(engine: Engine) -> None:
+    """005/001 DoD-10 — a second call raises nothing, revokes nothing new and reports zero."""
+    for _ in range(2):
+        _open(engine, PLAYER_ID)
+    first = _revoke_all(engine, PLAYER_ID)
+    after_first = _session_rows(engine)
+    second = _revoke_all(engine, PLAYER_ID)
+    third = _revoke_all(engine, PLAYER_ID)
+    assert first == 2
+    assert second == 0
+    assert third == 0
+    assert _session_rows(engine) == after_first
+
+
+def test_bulk_revoke_for_a_user_with_no_sessions_is_zero__S005_001_DoD10(engine: Engine) -> None:
+    """005/001 DoD-10 — an account that never signed in is an ordinary zero, not an error."""
+    _open(engine, PLAYER_ID)
+    before = _session_rows(engine)
+    assert _revoke_all(engine, ADMIN_ID) == 0
+    assert _session_rows(engine) == before
+
+
+def test_bulk_revoke_for_an_unknown_user_id_is_zero__S005_001_DoD10(engine: Engine) -> None:
+    """005/001 DoD-10 — an id no account has raises nothing and reports zero."""
+    _open(engine, PLAYER_ID)
+    before = _session_rows(engine)
+    assert _revoke_all(engine, UNKNOWN_USER_ID) == 0
+    assert _revoke_all(engine, UNKNOWN_USER_ID) == 0
+    assert _session_rows(engine) == before
+
+
+def test_bulk_revoke_on_an_empty_table_is_zero__S005_001_DoD10(engine: Engine) -> None:
+    """005/001 DoD-10 — with no sessions at all, every call is a zero."""
+    assert _session_count(engine) == 0
+    assert _revoke_all(engine, PLAYER_ID) == 0
+    assert _revoke_all(engine, UNKNOWN_USER_ID) == 0
+    assert _session_count(engine) == 0
+
+
+# --- 005/001 DoD-11: the helper opens no transaction of its own ----------------------
+
+
+def test_bulk_revoke_writes_do_not_survive_a_caller_rollback__S005_001_DoD11(engine: Engine) -> None:
+    """005/001 DoD-11 — called inside a caller's transaction that is rolled back, none of its
+    writes persist: the caller's transaction is the boundary (context.md D4)."""
+    tokens = [_open(engine, PLAYER_ID).token for _ in range(2)]
+    before = _session_rows(engine)
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        count = revoke_user_sessions(connection, PLAYER_ID)
+        transaction.rollback()
+    assert count == 2
+    assert _session_rows(engine) == before
+    assert all(row["revoked_at"] is None for row in _rows_of(engine, PLAYER_ID))
+    assert all(_resolve(engine, token) is not None for token in tokens)
+
+
+def test_bulk_revoke_runs_inside_the_callers_open_transaction__S005_001_DoD11(engine: Engine) -> None:
+    """005/001 DoD-11 — the helper accepts a connection already inside a transaction, leaves
+    that transaction open, and its writes are visible to the caller before the caller decides."""
+    _open(engine, PLAYER_ID)
+    _open(engine, PLAYER_ID)
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        revoke_user_sessions(connection, PLAYER_ID)
+        assert connection.in_transaction()
+        assert transaction.is_active
+        seen = connection.execute(
+            select(_sessions().c.revoked_at).where(_sessions().c.user_id == PLAYER_ID)
+        ).scalars().all()
+        assert len(seen) == 2
+        assert all(value is not None for value in seen)
+        transaction.rollback()
+    assert all(row["revoked_at"] is None for row in _rows_of(engine, PLAYER_ID))
+
+
+def test_bulk_revoke_writes_commit_with_the_callers_other_writes__S005_001_DoD11(engine: Engine) -> None:
+    """005/001 DoD-11 — a caller's own write and the revocations commit, or roll back, together
+    (the one-transaction disable step 002 needs)."""
+    _open(engine, PLAYER_ID)
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        connection.execute(update(_users()).where(_users().c.id == PLAYER_ID).values(is_enabled=False))
+        revoke_user_sessions(connection, PLAYER_ID)
+        transaction.rollback()
+    assert _user_row(engine, PLAYER_ID)["is_enabled"] is True
+    assert _row_for_user(engine, PLAYER_ID)["revoked_at"] is None
+
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        connection.execute(update(_users()).where(_users().c.id == PLAYER_ID).values(is_enabled=False))
+        revoke_user_sessions(connection, PLAYER_ID)
+        transaction.commit()
+    assert _user_row(engine, PLAYER_ID)["is_enabled"] is False
+    assert _row_for_user(engine, PLAYER_ID)["revoked_at"] is not None
+
+
+# --- 005/001 DoD-12: the module stays free of fastapi, status codes, Request, settings --
+
+
+def test_module_purity_scans_still_hold_after_this_steps_additions__S005_001_DoD12() -> None:
+    """005/001 DoD-12 — 004/001 DoD-12's module-wide scans hold for the extended module."""
+    test_module_imports_no_fastapi_or_starlette__DoD12()
+    test_module_binds_no_fastapi_symbol__DoD12()
+    test_module_references_no_http_status_code__DoD12()
+    test_module_reads_no_settings__DoD12()
+
+
+def test_bulk_revoke_lives_in_the_auth_service_module__S005_001_DoD12() -> None:
+    """005/001 DoD-12 — the helper is defined in `services/auth.py`, so the scans above cover it."""
+    assert getattr(auth_module, "revoke_user_sessions", None) is revoke_user_sessions
+    assert revoke_user_sessions.__module__ == auth_module.__name__
+
+
+@pytest.mark.parametrize(
+    ("function", "expected_parameters"),
+    [
+        (open_session, ["connection", "generator", "user_id", "ttl_hours"]),
+        (revoke_user_sessions, ["connection", "user_id"]),
+    ],
+)
+def test_entry_points_take_plain_arguments_and_no_request__S005_001_DoD12(
+    function: Callable[..., Any], expected_parameters: list[str]
+) -> None:
+    """005/001 DoD-12 — the new helper and the edited open operation take plain arguments; no
+    `Request`, settings or fastapi/starlette type in either contract."""
     signature = inspect.signature(function)
     assert list(signature.parameters) == expected_parameters
     rendered = " ".join(str(parameter) for parameter in signature.parameters.values())

@@ -44,6 +44,9 @@ def test_registry_table_collection_is_enumerable_by_name__DoD7() -> None:
 
 # --- Feature 003 / step 001 -----------------------------------------------------------
 
+# 005/001 DoD-2 (feature 005 context.md D2): the 003/001 "exactly nine columns" set is
+# deliberately widened to ten by adding `last_login_at`. Nothing else in this file changes
+# because of it.
 USERS_COLUMNS = {
     "id",
     "username",
@@ -54,6 +57,7 @@ USERS_COLUMNS = {
     "preferred_language",
     "created_at",
     "updated_at",
+    "last_login_at",
 }
 
 TIMESTAMP = "2026-09-29T12:00:00+00:00"
@@ -103,7 +107,10 @@ def test_registry_exposes_a_users_table__DoD1() -> None:
 
 
 def test_users_table_has_exactly_the_data_model_columns__DoD1() -> None:
-    """003/001 DoD-1 — exactly the nine documented columns, and no others."""
+    """003/001 DoD-1 — exactly the documented columns, and no others.
+
+    005/001 DoD-2 — updated deliberately from nine to ten: `last_login_at` joins the set.
+    """
     names = [column.name for column in _users().columns]
     assert len(names) == len(set(names))
     assert set(names) == USERS_COLUMNS
@@ -119,7 +126,10 @@ def test_users_table_carries_no_removed_or_forbidden_column__DoD1() -> None:
 def test_users_table_created_in_a_real_database_has_exactly_the_columns__DoD1(
     users_connection: Connection,
 ) -> None:
-    """003/001 DoD-1 — the created table in SQLite carries exactly the nine columns."""
+    """003/001 DoD-1 — the created table in SQLite carries exactly the documented columns.
+
+    005/001 DoD-2 — ten since `last_login_at` was added.
+    """
     rows = users_connection.execute(text("PRAGMA table_info(users)")).all()
     assert {row[1] for row in rows} == USERS_COLUMNS
 
@@ -455,3 +465,107 @@ def test_user_id_index_exists_in_a_real_database__S004_001_DoD2(registry_connect
         by_columns[columns] = by_columns.get(columns, False) or unique
     assert ("user_id",) in by_columns
     assert by_columns.get(("token_hash",)) is True
+
+
+# ======================================================================================
+# Feature 005, step 001 (`001.last-login-and-session-revoke.md`) — `users.last_login_at`.
+# Expected values come from that step's DoD-1 / DoD-2 and `001.context.md`'s column list.
+# Tests are suffixed `__S005_001_DoD<n>`.
+# ======================================================================================
+
+# The nullability 003/001 asserted for the original nine, plus the new tenth column.
+USERS_NULLABILITY = {
+    "id": False,
+    "username": False,
+    "password_hash": False,
+    "role": False,
+    "is_enabled": False,
+    "rp_language": True,
+    "preferred_language": True,
+    "created_at": False,
+    "updated_at": False,
+    "last_login_at": True,
+}
+
+
+# --- 005/001 DoD-1: `last_login_at` exists and is nullable; the others keep theirs -----
+
+
+def test_users_table_carries_a_last_login_at_column__S005_001_DoD1() -> None:
+    """005/001 DoD-1 — the registry's `users` table has a `last_login_at` column."""
+    assert "last_login_at" in _users().c
+
+
+def test_last_login_at_is_nullable__S005_001_DoD1() -> None:
+    """005/001 DoD-1 — `last_login_at` is nullable."""
+    assert _users().c.last_login_at.nullable is True
+
+
+@pytest.mark.parametrize(("column", "nullable"), sorted(USERS_NULLABILITY.items()))
+def test_every_users_column_keeps_its_nullability__S005_001_DoD1(column: str, nullable: bool) -> None:
+    """005/001 DoD-1 — the other nine columns keep the nullability 003/001 asserted."""
+    assert _users().c[column].nullable is nullable
+
+
+def test_last_login_at_is_nullable_in_a_real_database__S005_001_DoD1(users_connection: Connection) -> None:
+    """005/001 DoD-1 — the created SQLite column carries no NOT NULL flag."""
+    rows = users_connection.execute(text("PRAGMA table_info(users)")).all()
+    notnull_by_name = {row[1]: bool(row[3]) for row in rows}
+    assert notnull_by_name["last_login_at"] is False
+
+
+def test_row_without_last_login_at_is_accepted_and_stores_null__S005_001_DoD1(
+    users_connection: Connection,
+) -> None:
+    """005/001 DoD-1 — an insert that names no `last_login_at` is accepted and stores NULL."""
+    users_connection.execute(RAW_INSERT, _raw_row())
+    stored = users_connection.execute(text("SELECT last_login_at FROM users")).scalar_one()
+    assert stored is None
+
+
+def test_last_login_at_holds_an_iso_8601_text_value__S005_001_DoD1(users_connection: Connection) -> None:
+    """005/001 DoD-1 — the column stores a UTC ISO-8601 instant as text, read back verbatim."""
+    users_connection.execute(RAW_INSERT, _raw_row())
+    users_connection.execute(
+        _users().update().where(_users().c.id == 1).values(last_login_at=TIMESTAMP)
+    )
+    stored = users_connection.execute(text("SELECT last_login_at FROM users")).scalar_one()
+    assert stored == TIMESTAMP
+
+
+# --- 005/001 DoD-2: the column set is now exactly ten ----------------------------------
+
+
+def test_users_table_has_exactly_ten_columns__S005_001_DoD2() -> None:
+    """005/001 DoD-2 — the 003/001 nine plus `last_login_at`, and no others."""
+    names = [column.name for column in _users().columns]
+    assert len(names) == 10
+    assert set(names) == USERS_COLUMNS
+    assert "last_login_at" in USERS_COLUMNS
+    assert USERS_COLUMNS - {"last_login_at"} == {
+        "id",
+        "username",
+        "password_hash",
+        "role",
+        "is_enabled",
+        "rp_language",
+        "preferred_language",
+        "created_at",
+        "updated_at",
+    }
+
+
+def test_users_created_in_a_real_database_has_exactly_ten_columns__S005_001_DoD2(
+    users_connection: Connection,
+) -> None:
+    """005/001 DoD-2 — the created SQLite `users` table has the same ten columns."""
+    rows = users_connection.execute(text("PRAGMA table_info(users)")).all()
+    names = [row[1] for row in rows]
+    assert len(names) == 10
+    assert set(names) == USERS_COLUMNS
+
+
+def test_auth_sessions_columns_are_unchanged_by_the_users_edit__S005_001_DoD2() -> None:
+    """005/001 DoD-2 — the `auth_sessions` column set from 004/001 is untouched."""
+    assert {column.name for column in _auth_sessions().columns} == AUTH_SESSIONS_COLUMNS
+    assert "last_login_at" not in _auth_sessions().c

@@ -146,6 +146,61 @@ class InsufficientRoleError(DomainError):
         super().__init__(message, detail)
 
 
+class UsernameTakenError(DomainError):
+    """An account create was refused because the username already belongs to an account.
+
+    Raised by `app.services.users.create_user` when the `users.username` unique index
+    rejects the insert (feature `005`). `detail` carries nothing: echoing the caller's own
+    input buys nothing, and naming the owning account would be a disclosure. The status is
+    409 — the request is well formed and refused by the instance's current state.
+    """
+
+    code = "username_taken"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; the fixed default names no username. An explicit
+        # message still wins.
+        if message is None:
+            message = "That username is already taken."
+        super().__init__(message, detail)
+
+
+class UserNotFoundError(DomainError):
+    """An id-addressed account operation named an id no account has.
+
+    Raised by `app.services.users` before any write (feature `005`). `detail` carries
+    nothing. The status is 404.
+    """
+
+    code = "user_not_found"
+    http_status = 404
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "That account does not exist."
+        super().__init__(message, detail)
+
+
+class SelfRoleChangeRefusedError(DomainError):
+    """A role change whose target is the acting administrator.
+
+    Raised by `app.services.users.set_user_role` before any write (feature `005`), so an
+    instance cannot lose its last administrator through one mis-click. `detail` carries
+    nothing. The status is 409, distinct from `insufficient_role`'s 403.
+    """
+
+    code = "self_role_change_refused"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "You cannot change your own role."
+        super().__init__(message, detail)
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later
