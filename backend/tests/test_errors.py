@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.errors import DomainError, SecretRefError, register_exception_handlers
+from app.errors import AlreadyConfiguredError, DomainError, SecretRefError, register_exception_handlers
 
 # From 003.context.md § "The http_status gap": this step chooses 500 for secret_ref_missing.
 EXPECTED_SECRET_REF_CODE = "secret_ref_missing"
@@ -180,3 +180,97 @@ def test_secret_pointer_error_code_is_secret_ref_missing__DoD5() -> None:
 def test_the_base_class_declares_no_value_for_the_subclass_attributes__DoD1(attribute: str) -> None:
     """DoD-1: ``code``/``http_status`` are the subclass's to set — the base declares no value."""
     assert attribute not in vars(DomainError)
+
+
+# ============================================================================
+# Feature 003, step 002 (``002.bootstrap-service-and-error.md``) — DoD-1:
+# ``already_configured`` is a ``DomainError`` subclass, code ``already_configured``,
+# HTTP 409 (feature context D2), empty detail, rendered through the one existing handler.
+# ============================================================================
+
+EXPECTED_ALREADY_CONFIGURED_CODE = "already_configured"
+EXPECTED_ALREADY_CONFIGURED_STATUS = 409
+
+
+def test_already_configured_is_a_domain_error_subclass__S002_DoD1() -> None:
+    """003/002 DoD-1: the new error follows the base's pattern as a subclass."""
+    assert issubclass(AlreadyConfiguredError, DomainError)
+    assert isinstance(AlreadyConfiguredError(), Exception)
+
+
+def test_already_configured_sets_code_and_status_as_class_attributes__S002_DoD1() -> None:
+    """003/002 DoD-1: code ``already_configured`` and status 409, set on the subclass itself."""
+    assert "code" in vars(AlreadyConfiguredError)
+    assert "http_status" in vars(AlreadyConfiguredError)
+    assert AlreadyConfiguredError.code == EXPECTED_ALREADY_CONFIGURED_CODE
+    assert AlreadyConfiguredError.http_status == EXPECTED_ALREADY_CONFIGURED_STATUS
+    error = AlreadyConfiguredError()
+    assert error.code == EXPECTED_ALREADY_CONFIGURED_CODE
+    assert error.http_status == EXPECTED_ALREADY_CONFIGURED_STATUS
+
+
+def test_already_configured_detail_is_empty__S002_DoD1() -> None:
+    """003/002 DoD-1: ``detail`` carries nothing."""
+    assert AlreadyConfiguredError().detail == {}
+
+
+def test_already_configured_renders_the_one_wire_shape__S002_DoD1() -> None:
+    """003/002 DoD-1: the inherited render produces the one wire shape with an empty detail."""
+    body = AlreadyConfiguredError().to_wire()
+    assert _is_wire_shape(body)
+    assert body["error"]["code"] == EXPECTED_ALREADY_CONFIGURED_CODE
+    assert body["error"]["detail"] == {}
+
+
+def test_already_configured_from_a_route_is_409_in_the_wire_shape__S002_DoD1() -> None:
+    """003/002 DoD-1: through the handler 001 already registers, the response is 409 + wire body."""
+    app = _app_raising(AlreadyConfiguredError())
+    response = TestClient(app).get("/boom")
+    assert response.status_code == EXPECTED_ALREADY_CONFIGURED_STATUS
+    payload = response.json()
+    assert _is_wire_shape(payload)
+    assert payload["error"]["code"] == EXPECTED_ALREADY_CONFIGURED_CODE
+    assert payload["error"]["detail"] == {}
+
+
+def test_no_second_handler_is_registered_for_already_configured__S002_DoD1() -> None:
+    """003/002 DoD-1: the base-class handler covers the subclass; no handler keyed on it is added."""
+    app = FastAPI()
+    register_exception_handlers(app)
+    assert DomainError in app.exception_handlers
+    assert AlreadyConfiguredError not in app.exception_handlers
+
+
+# 003/002 DoD-1 (extended): raised with no arguments, the error carries a non-empty,
+# human-readable message — never null. The wording is not a contract; only "a non-empty
+# string" is asserted.
+
+
+def _is_non_empty_text(value: Any) -> bool:
+    return isinstance(value, str) and value.strip() != ""
+
+
+def test_already_configured_without_arguments_has_a_non_empty_message__S002_DoD1() -> None:
+    """003/002 DoD-1: ``AlreadyConfiguredError()`` carries a non-empty string ``message`` on the instance."""
+    error = AlreadyConfiguredError()
+    assert error.message is not None
+    assert _is_non_empty_text(error.message)
+
+
+def test_already_configured_without_arguments_renders_a_non_empty_message__S002_DoD1() -> None:
+    """003/002 DoD-1: the rendered body's ``error.message`` is a non-empty string, not null."""
+    body = AlreadyConfiguredError().to_wire()
+    assert _is_wire_shape(body)
+    assert body["error"]["message"] is not None
+    assert _is_non_empty_text(body["error"]["message"])
+
+
+def test_already_configured_from_a_route_carries_a_non_empty_message__S002_DoD1() -> None:
+    """003/002 DoD-1: through the registered handler, the 409 body's ``message`` is a non-empty string."""
+    app = _app_raising(AlreadyConfiguredError())
+    response = TestClient(app).get("/boom")
+    assert response.status_code == EXPECTED_ALREADY_CONFIGURED_STATUS
+    payload = response.json()
+    assert _is_wire_shape(payload)
+    assert payload["error"]["message"] is not None
+    assert _is_non_empty_text(payload["error"]["message"])

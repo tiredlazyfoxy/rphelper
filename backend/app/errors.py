@@ -8,8 +8,9 @@ architecture tables twelve codes but assigns an HTTP status to none of them, so 
 status is decided by the feature that introduces the code.
 
 This module defines the base class, the single handler, the handler's registration
-entry point, and exactly one concrete subclass: `SecretRefError`. The remaining eleven
-codes arrive with the features that raise them.
+entry point, and the concrete subclasses introduced so far: `SecretRefError`
+(`secret_ref_missing`) and `AlreadyConfiguredError` (`already_configured`, feature
+`003`). The remaining codes arrive with the features that raise them.
 
 The handler logs the `code` and the HTTP status and nothing else — never `detail`,
 never the message text (`deployment.md`'s redaction rule).
@@ -65,6 +66,25 @@ class SecretRefError(DomainError):
 
     code = "secret_ref_missing"
     http_status = 500
+
+
+class AlreadyConfiguredError(DomainError):
+    """A bootstrap operation was attempted on an instance that is already configured.
+
+    `detail` carries nothing. The status is 409: the request conflicts with the
+    instance's current state — an administrator already exists (UC-003).
+    """
+
+    code = "already_configured"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments (the router's guard, the service's re-check), so the
+        # subclass supplies its own human-readable default; the base keeps none, so other
+        # errors' rendering is unchanged. An explicit message still wins.
+        if message is None:
+            message = "This instance is already configured: an administrator already exists."
+        super().__init__(message, detail)
 
 
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:

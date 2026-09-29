@@ -1,4 +1,5 @@
-// Feature 002, step 006 — convention guards over frontend/src (DoD-10, DoD-11, DoD-12).
+// Feature 002, step 006 — convention guards over frontend/src (DoD-11, DoD-12).
+// Feature 003, step 004 DoD-11 removed 002/006 DoD-10's pure-data-contract block.
 // Every file under frontend/src is read from disk, recursively. Comments are stripped
 // before matching so that prose about a rule is not mistaken for a breach of it.
 import { readdirSync, readFileSync } from "node:fs";
@@ -50,33 +51,15 @@ function scan(files: string[], rules: Array<[string, RegExp]>): string[] {
   return offences;
 }
 
-it("the scans see the source tree — DoD-10, DoD-11, DoD-12", () => {
+it("the scans see the source tree — DoD-11, DoD-12", () => {
   const files = codeFiles().map(relative);
   expect(files).toEqual(expect.arrayContaining(["src/shared/notifyFailure.ts", "src/app/main.tsx"]));
 });
 
-// ---------------------------------------------------------------------------
-describe("pure data contracts — this feature ships no store", () => {
-  it("no makeAutoObservable anywhere under frontend/src — DoD-10", () => {
-    expect(scan(codeFiles(), [["makeAutoObservable", /\bmakeAutoObservable\b/]])).toEqual([]);
-  });
-
-  it("no *Draft.ts module anywhere under frontend/src — DoD-10", () => {
-    const drafts = allFiles(SRC_ROOT)
-      .filter((file) => /Draft\.tsx?$/.test(path.basename(file)))
-      .map(relative);
-    expect(drafts).toEqual([]);
-  });
-
-  it("no page-store class anywhere under frontend/src — DoD-10", () => {
-    const rules: Array<[string, RegExp]> = [
-      ["store/state/draft class", /\bclass\s+\w*(?:State|Store|Draft)\b/],
-      ["observable class (makeObservable(this))", /\bmakeObservable\s*\(\s*this\b/],
-      ["page store instantiated in useState", /\buseState\s*\(\s*\(\s*\)\s*=>\s*new\s+\w*(?:State|Store|Draft)\b/],
-    ];
-    expect(scan(codeFiles(), rules)).toEqual([]);
-  });
-});
+// The pure-data-contract clause (002/006 DoD-10: no makeAutoObservable, no *Draft.ts module,
+// no page-store class) was deleted by feature 003, step 004 (DoD-11; 003 context.md D14):
+// 003 creates the project's first store. It is deliberately not replaced — from 003 on the
+// store convention is review-enforced. The styling and notification scans below stay.
 
 // ---------------------------------------------------------------------------
 describe("no forbidden styling mechanism", () => {

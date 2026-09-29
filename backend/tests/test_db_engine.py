@@ -302,3 +302,130 @@ def test_a_pooled_connection_is_usable_from_another_thread__DoD9(db_engine: Engi
 
     assert failures == []
     assert results == {"value": 7}
+
+
+# ====================================================================================
+# Feature 003, step 002 (``002.bootstrap-service-and-error.md``) — the engine runs
+# transactional DDL (DoD-15), and the 001/005 guarantees still hold with it on (DoD-16).
+# Appended only; every test above is unmodified and is DoD-16's regression gate.
+# ====================================================================================
+
+DDL_PROBE_TABLE = "s002_ddl_probe"
+
+
+class _AbortBlock(Exception):
+    """Raised inside a ``with conn.begin():`` block to make it exit by exception."""
+
+
+def _table_present_on(connection: Connection, name: str) -> bool:
+    count = connection.exec_driver_sql(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+    ).scalar_one()
+    return int(count) == 1
+
+
+# --- DoD-15: DDL commits or rolls back with the block --------------------------------
+
+
+def test_create_table_in_a_block_exiting_by_exception_is_absent_on_that_connection__S002_DoD15(
+    db_engine: Engine,
+) -> None:
+    """003/002 DoD-15 — a rolled-back ``CREATE TABLE`` leaves no table on the connection that ran it."""
+    with db_engine.connect() as connection:
+        with pytest.raises(_AbortBlock):
+            with connection.begin():
+                connection.exec_driver_sql(f"CREATE TABLE {DDL_PROBE_TABLE} (value INTEGER)")
+                raise _AbortBlock()
+        assert _table_present_on(connection, DDL_PROBE_TABLE) is False
+
+
+def test_create_table_in_a_block_exiting_by_exception_is_absent_on_a_fresh_connection__S002_DoD15(
+    db_engine: Engine,
+) -> None:
+    """003/002 DoD-15 — a freshly acquired connection sees no such table either."""
+    with db_engine.connect() as connection:
+        with pytest.raises(_AbortBlock):
+            with connection.begin():
+                connection.exec_driver_sql(f"CREATE TABLE {DDL_PROBE_TABLE} (value INTEGER)")
+                raise _AbortBlock()
+    with db_engine.connect() as fresh:
+        assert _table_present_on(fresh, DDL_PROBE_TABLE) is False
+
+
+def test_create_table_in_a_block_exiting_normally_persists__S002_DoD15(db_engine: Engine) -> None:
+    """003/002 DoD-15 — the same ``CREATE TABLE`` in a block that exits normally is present afterwards,
+    on that connection and on a fresh one."""
+    with db_engine.connect() as connection:
+        with connection.begin():
+            connection.exec_driver_sql(f"CREATE TABLE {DDL_PROBE_TABLE} (value INTEGER)")
+        assert _table_present_on(connection, DDL_PROBE_TABLE) is True
+    with db_engine.connect() as fresh:
+        assert _table_present_on(fresh, DDL_PROBE_TABLE) is True
+
+
+def test_rolled_back_create_table_can_be_run_again_and_committed__S002_DoD15(db_engine: Engine) -> None:
+    """003/002 DoD-15 — after the rollback the same statement succeeds in a normal block (no leftover table)."""
+    with db_engine.connect() as connection:
+        with pytest.raises(_AbortBlock):
+            with connection.begin():
+                connection.exec_driver_sql(f"CREATE TABLE {DDL_PROBE_TABLE} (value INTEGER)")
+                raise _AbortBlock()
+        with connection.begin():
+            connection.exec_driver_sql(f"CREATE TABLE {DDL_PROBE_TABLE} (value INTEGER)")
+    with db_engine.connect() as fresh:
+        assert _table_present_on(fresh, DDL_PROBE_TABLE) is True
+
+
+# --- DoD-16: the 001/005 guarantees with transactional DDL on ------------------------
+#
+# Already covered above (unmodified): foreign_keys on a first and a second connection,
+# WAL on one connection, sqlite-vec on a later connection, loud load failure. Added here
+# only what is not: WAL on *each* freshly acquired connection, and all three guarantees
+# still holding on fresh connections acquired after a transactional-DDL rollback/commit.
+
+
+def _assert_engine_guarantees(connection: Connection) -> None:
+    assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+    journal_mode = connection.exec_driver_sql("PRAGMA journal_mode").scalar()
+    assert isinstance(journal_mode, str)
+    assert journal_mode.lower() == "wal"
+    version = connection.exec_driver_sql("SELECT vec_version()").scalar()
+    assert isinstance(version, str)
+    assert version != ""
+
+
+def test_each_freshly_acquired_connection_has_the_engine_guarantees__S002_DoD16(db_engine: Engine) -> None:
+    """003/002 DoD-16 — two separately acquired connections, held at once, each report
+    foreign_keys on, journal_mode wal and a loaded sqlite-vec."""
+    with db_engine.connect() as first, db_engine.connect() as second:
+        _assert_engine_guarantees(first)
+        _assert_engine_guarantees(second)
+
+
+def test_engine_guarantees_hold_on_connections_after_transactional_ddl__S002_DoD16(db_engine: Engine) -> None:
+    """003/002 DoD-16 — after a DDL block rolled back and another committed, fresh connections
+    still report foreign_keys on, journal_mode wal and a loaded sqlite-vec."""
+    with db_engine.connect() as connection:
+        with pytest.raises(_AbortBlock):
+            with connection.begin():
+                connection.exec_driver_sql(f"CREATE TABLE {DDL_PROBE_TABLE} (value INTEGER)")
+                raise _AbortBlock()
+        with connection.begin():
+            connection.exec_driver_sql(f"CREATE TABLE {DDL_PROBE_TABLE} (value INTEGER)")
+        with db_engine.connect() as other:
+            _assert_engine_guarantees(other)
+    with db_engine.connect() as fresh:
+        _assert_engine_guarantees(fresh)
+
+
+def test_sqlite_vec_is_usable_inside_a_transaction_block__S002_DoD16(db_engine: Engine) -> None:
+    """003/002 DoD-16 — with transactional DDL on, a `vec0` table can still be created and
+    queried inside a ``with conn.begin():`` block on a fresh connection."""
+    with db_engine.connect() as connection:
+        with connection.begin():
+            connection.exec_driver_sql(f"CREATE VIRTUAL TABLE {THROWAWAY_VEC_TABLE} USING vec0(embedding float[4])")
+            connection.exec_driver_sql(
+                f"INSERT INTO {THROWAWAY_VEC_TABLE}(rowid, embedding) VALUES (1, '[1.0, 2.0, 3.0, 4.0]')"
+            )
+            rows = connection.exec_driver_sql(f"SELECT rowid FROM {THROWAWAY_VEC_TABLE}").fetchall()
+    assert [row[0] for row in rows] == [1]

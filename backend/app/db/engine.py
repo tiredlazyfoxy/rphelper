@@ -35,6 +35,21 @@ identity map, no `sqlalchemy.orm` import. `get_connection` opens **no transactio
 transaction boundaries are `with conn.begin():` blocks at the service's own level, which
 is one of the three reasons Core was chosen over the ORM. No DDL runs anywhere in this
 module, including at import.
+
+**Transactional DDL** (feature `003`, decision D8). Under the stdlib `sqlite3` driver's
+legacy transaction control, SQLAlchemy's `begin()` sends no `BEGIN`: the driver opens a
+transaction lazily, only before DML, so a `CREATE TABLE` issued first autocommits and
+survives a rollback. The engine therefore uses SQLAlchemy's documented pysqlite recipe:
+the driver's implicit transaction handling is switched off (`isolation_level=None` in
+the connect arguments, so the driver never begins or commits anything on its own), and a
+`begin` listener emits the real `BEGIN`. Every statement inside a `with conn.begin():`
+block — DDL included — then commits or rolls back with the block, and savepoints work.
+Python 3.12's PEP 249 mode (`autocommit=False`) is deliberately **not** used: it keeps a
+transaction open from connect onward, and `PRAGMA journal_mode = WAL` cannot be entered
+inside one. With implicit transactions off, the `connect` listener's PRAGMAs run in
+autocommit, outside any transaction. An autobegun read (a Core `Connection`'s first
+`execute` outside a block) also sends a real, deferred `BEGIN`; it is ended by the
+caller's `rollback()`/`commit()`, or by the pool's reset-on-return.
 """
 
 import sqlite3
@@ -97,6 +112,8 @@ def get_engine(settings: Settings) -> Engine:
     for a file database with `check_same_thread=False`, and registers the single
     `connect` listener that — on every new connection, in this order — loads
     `sqlite-vec`, sets `PRAGMA foreign_keys = ON` and sets `PRAGMA journal_mode = WAL`.
+    The driver's implicit transactions are off and a `begin` listener sends the real
+    `BEGIN`, so DDL inside a `with conn.begin():` block is transactional.
     """
     path = resolve_db_path(settings)
     cached = _engines.get(path)
@@ -105,7 +122,9 @@ def get_engine(settings: Settings) -> Engine:
 
     engine = create_engine(
         f"sqlite+pysqlite:///{path.as_posix()}",
-        connect_args={"check_same_thread": False},
+        # `isolation_level=None`: the driver's own implicit BEGIN/COMMIT handling is off;
+        # `_on_begin` below sends the real `BEGIN` (transactional DDL, see module doc).
+        connect_args={"check_same_thread": False, "isolation_level": None},
     )
 
     @event.listens_for(engine, "connect")
@@ -125,6 +144,13 @@ def get_engine(settings: Settings) -> Engine:
             cursor.execute("PRAGMA journal_mode = WAL")
         finally:
             cursor.close()
+
+    @event.listens_for(engine, "begin")
+    def _on_begin(connection: Connection) -> None:
+        # The driver no longer begins on its own, so SQLAlchemy's `begin` (explicit or
+        # autobegin) emits the real `BEGIN`; everything after it, DDL included, belongs
+        # to the transaction.
+        connection.exec_driver_sql("BEGIN")
 
     _engines[path] = engine
     return engine

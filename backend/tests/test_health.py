@@ -15,6 +15,11 @@ names the first-run account as the `admin` one.
 
 All DDL here is test-local: a throwaway `users` table and throwaway registry tables in
 throwaway `MetaData` objects. Nothing is added to `app/db/schema.py`'s registry.
+
+Feature 003, step 002 (`002.bootstrap-service-and-error.md`) extends this file with its
+DoD-9 (tests suffixed `S002_DoD9`): the fresh-database expectation is corrected per that
+feature's context D5, and a bootstrapped database (the production registry applied plus
+one administrator row) must report all-clear.
 """
 
 import dataclasses
@@ -26,7 +31,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Column, Connection, Engine, Integer, MetaData, Table
 
 from app.config import Settings, get_settings
+from app.db import schema
 from app.main import create_app
+from app.roles import Role
 from app.services.health import HealthProbeResult, probe_health
 
 ADMIN_ROLE = "admin"
@@ -121,22 +128,71 @@ def test_health_body_spells_the_schema_key_without_a_trailing_underscore__DoD1(h
     assert "schema_" not in body
 
 
-# --- DoD-2: the empty-registry answer (D3) ------------------------------------------
+# --- DoD-2: the fresh-database answer -----------------------------------------------
+#
+# Corrected by feature 003, step 002, DoD-9 (feature context D5): the production registry
+# now declares `users`, so a fresh database has a missing registry table. It therefore
+# reports `schema: "missing"`, `configured: false` and — by 001's unchanged precedence —
+# `status: "degraded"`. The 001-era "ok" / "unconfigured" expectations no longer hold.
 
 
-def test_empty_registry_database_reports_schema_ok__DoD2(health_client: TestClient) -> None:
-    """DoD-2 — against the fixture database and the empty registry, `schema` is `"ok"` (D3)."""
-    assert health_client.get("/api/health").json()["schema"] == "ok"
+def test_fresh_database_reports_schema_missing__DoD2__S002_DoD9(health_client: TestClient) -> None:
+    """003/002 DoD-9 — no `users` table exists yet, so a registry table is absent: `"missing"`."""
+    assert health_client.get("/api/health").json()["schema"] == "missing"
 
 
-def test_empty_registry_database_reports_configured_false__DoD2(health_client: TestClient) -> None:
-    """DoD-2 — no `users` table exists in this feature, so `configured` is `false`."""
+def test_fresh_database_reports_configured_false__DoD2__S002_DoD9(health_client: TestClient) -> None:
+    """003/002 DoD-9 — no `users` table exists, so `configured` is `false`."""
     assert health_client.get("/api/health").json()["configured"] is False
 
 
-def test_empty_registry_database_reports_status_unconfigured__DoD2(health_client: TestClient) -> None:
-    """DoD-2 — an `"ok"` schema with `configured` false rolls up to `"unconfigured"`."""
-    assert health_client.get("/api/health").json()["status"] == "unconfigured"
+def test_fresh_database_reports_status_degraded__DoD2__S002_DoD9(health_client: TestClient) -> None:
+    """003/002 DoD-9 — a `"missing"` schema rolls up to `"degraded"` (D5: the roll-up is not re-decided)."""
+    assert health_client.get("/api/health").json()["status"] == "degraded"
+
+
+# --- Feature 003, step 002, DoD-9: a bootstrapped database reports all-clear ---------
+
+
+def _bootstrap_production_schema_with_one_admin(engine: Engine) -> None:
+    """Create every table of the production registry and insert one administrator row."""
+    with engine.connect() as connection:
+        schema.metadata.create_all(connection)
+        connection.execute(
+            schema.users.insert().values(
+                id=1234567890123,
+                username="founder",
+                password_hash="not-a-real-hash",
+                role=Role.ADMIN,
+                is_enabled=True,
+                rp_language=None,
+                preferred_language=None,
+                created_at="2026-01-01T00:00:00+00:00",
+                updated_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        connection.commit()
+
+
+def test_bootstrapped_database_reports_configured_true__S002_DoD9(
+    health_client: TestClient, db_engine: Engine
+) -> None:
+    """003/002 DoD-9 — every registry table plus one administrator: `configured` is `true`."""
+    _bootstrap_production_schema_with_one_admin(db_engine)
+    assert health_client.get("/api/health").json()["configured"] is True
+
+
+def test_bootstrapped_database_reports_schema_ok__S002_DoD9(health_client: TestClient, db_engine: Engine) -> None:
+    """003/002 DoD-9 — every registry table present: `schema` is `"ok"`."""
+    _bootstrap_production_schema_with_one_admin(db_engine)
+    assert health_client.get("/api/health").json()["schema"] == "ok"
+
+
+def test_bootstrapped_database_reports_status_ok__S002_DoD9(health_client: TestClient, db_engine: Engine) -> None:
+    """003/002 DoD-9 — `"ok"` schema and `configured` true roll up to `"ok"`."""
+    _bootstrap_production_schema_with_one_admin(db_engine)
+    body = health_client.get("/api/health").json()
+    assert body == {"status": "ok", "configured": True, "schema": "ok"}
 
 
 # --- DoD-3: `schema` is a real `sqlite_master` read ----------------------------------

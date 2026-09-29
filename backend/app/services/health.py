@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from sqlalchemy import Connection, MetaData, text
 
 from app.models.health import HealthStatus, SchemaState
+from app.services.bootstrap import is_configured
 
 
 @dataclass(frozen=True)
@@ -64,12 +65,9 @@ def probe_health(connection: Connection, registry: MetaData) -> HealthProbeResul
         ).fetchall()
     }
 
-    configured = False
-    if "users" in present:
-        administrator = connection.execute(
-            text("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1")
-        ).first()
-        configured = administrator is not None
+    # The one definition of the fact lives in `services/bootstrap.py`; the probe and the
+    # bootstrap guard must never disagree, so this branch delegates rather than copies.
+    configured = is_configured(connection)
 
     declared = {table.name for table in registry.tables.values()}
     schema: SchemaState = "ok" if declared <= present else "missing"

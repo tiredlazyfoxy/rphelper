@@ -17,7 +17,8 @@ The factory's order is therefore fixed:
 4. `register_exception_handlers(app)` — step `003`'s entry point, which installs the one
    handler for `DomainError` so every subclass is covered by one registration;
 5. `app.include_router(health_router)` — the health router already carries its own
-   `/api` prefix.
+   `/api` prefix — then `app.include_router(bootstrap_router)`, which carries its own
+   `/api/bootstrap` prefix and its router-level `require_unconfigured` guard.
 
 **The lifespan runs no DDL.** No table creation, no upgrade, no schema check, and no
 create-if-missing convenience. Remediation is admin-triggered and belongs to feature
@@ -43,6 +44,7 @@ from app.config import get_settings
 from app.errors import register_exception_handlers
 from app.ids import build_id_generator
 from app.logging import configure_logging
+from app.routers.bootstrap import router as bootstrap_router
 from app.routers.health import router as health_router
 
 
@@ -64,7 +66,7 @@ def create_app() -> FastAPI:
     once and before any router is registered; construct the process's
     `SnowflakeGenerator` via `build_id_generator(settings)` and store that single
     instance on `app.state.id_generator`; `register_exception_handlers(app)`; then
-    `app.include_router(health_router)`.
+    `app.include_router(health_router)` and `app.include_router(bootstrap_router)`.
 
     Constructed with `FastAPI(lifespan=lifespan)`.
 
@@ -81,6 +83,7 @@ def create_app() -> FastAPI:
     app.state.id_generator = build_id_generator(settings)
     register_exception_handlers(app)
     app.include_router(health_router)
+    app.include_router(bootstrap_router)
     return app
 
 
