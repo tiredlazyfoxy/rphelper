@@ -87,6 +87,65 @@ class AlreadyConfiguredError(DomainError):
         super().__init__(message, detail)
 
 
+class InvalidCredentialsError(DomainError):
+    """A login was refused: unknown username, wrong password, or disabled account.
+
+    Raised **identically** for all three causes (feature `004`, D1): one code, one status,
+    one fixed message that names no cause, and a `detail` that carries nothing. The status
+    is 400, never 401, so the SPA's 401 hand-off to `/login` is not triggered on the login
+    screen itself (feature `004`, D2).
+    """
+
+    code = "invalid_credentials"
+    http_status = 400
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments by `app.services.auth.authenticate`, so the subclass
+        # supplies its one fixed, cause-free default message (D1). An explicit message wins.
+        if message is None:
+            message = "The username or password is incorrect."
+        super().__init__(message, detail)
+
+
+
+class NotAuthenticatedError(DomainError):
+    """The request carries no session cookie, or one that does not resolve to a live session.
+
+    Raised by `app.dependencies.require_user` for every such case alike (feature `004`,
+    D3, D7). `detail` carries nothing. The status is 401 — the client's cue to return to
+    the login screen (US-007.AC-2).
+    """
+
+    code = "not_authenticated"
+    http_status = 401
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments by `require_user`, so the subclass supplies its one fixed
+        # default message; an explicit message still wins.
+        if message is None:
+            message = "You are not signed in, or your session has ended."
+        super().__init__(message, detail)
+
+
+class InsufficientRoleError(DomainError):
+    """An authenticated, enabled caller's role is below the rung a route requires.
+
+    Raised by the callable `app.dependencies.require_role` returns (feature `004`, D3).
+    `detail` carries nothing and the message names neither the caller's role nor the
+    required one: a refusal that reports the policy teaches it. The status is 403.
+    """
+
+    code = "insufficient_role"
+    http_status = 403
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; the fixed default names no role, neither the caller's
+        # nor the required one (D3). An explicit message still wins.
+        if message is None:
+            message = "You do not have permission to perform this action."
+        super().__init__(message, detail)
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later

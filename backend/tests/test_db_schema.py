@@ -19,7 +19,6 @@ from sqlalchemy.dialects import sqlite
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.schema import CreateTable
 
-from app import roles
 from app.db import schema
 from app.roles import Role
 
@@ -268,17 +267,191 @@ def test_role_enum_class_carries_no_helper__DoD4() -> None:
     assert extras == []
 
 
-def test_roles_module_defines_nothing_but_the_enum__DoD4() -> None:
-    """003/001 DoD-4 — no ladder mapping, comparison helper or dependency factory in the module."""
-    public = {name: value for name, value in vars(roles).items() if not name.startswith("_")}
-    defined_here = [
-        name
-        for name, value in public.items()
-        if getattr(value, "__module__", None) == roles.__name__
-    ]
-    assert defined_here == ["Role"]
-    assert not any(isinstance(value, Mapping) for value in public.values())
-    assert not any(
-        callable(value) and getattr(value, "__module__", None) == roles.__name__ and value is not Role
-        for value in public.values()
-    )
+# 004/002 DoD-3 (feature 004 context.md D15, item 1): the 003/001 DoD-4 purity clause —
+# "`app/roles.py` defines nothing but the enum: no ladder mapping, no comparison helper" —
+# was deleted here deliberately, because step 004/002 adds `ROLE_LADDER` and the pure
+# comparison to that module. The two-members and member-value assertions above stay, and
+# the enum *class* still carries no helper (the ladder is module-level). The module's new
+# surface, and that it still exposes no dependency / `Request` / `fastapi` import, is
+# asserted in `test_dependencies.py` (`__DoD3`).
+
+
+# ======================================================================================
+# Feature 004, step 001 (`001.auth-sessions-and-service.md`) — the `auth_sessions` table.
+# Expected values come from that step's DoD-1 / DoD-2 and `data-model.md`'s column list
+# as the step file restates it. Tests are suffixed `__S004_001_DoD<n>` to keep them apart
+# from the 001/003 items above.
+# ======================================================================================
+
+AUTH_SESSIONS_COLUMNS = {"id", "user_id", "token_hash", "created_at", "expires_at", "revoked_at"}
+
+RAW_SESSION_INSERT = text(
+    "INSERT INTO auth_sessions (id, user_id, token_hash, created_at, expires_at, revoked_at) "
+    "VALUES (:id, :user_id, :token_hash, :created_at, :expires_at, :revoked_at)"
+)
+
+
+def _auth_sessions() -> Table:
+    return schema.metadata.tables["auth_sessions"]
+
+
+def _raw_session(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": 100,
+        "user_id": 1,
+        "token_hash": "digest-one",
+        "created_at": TIMESTAMP,
+        "expires_at": "2026-10-29T12:00:00+00:00",
+        "revoked_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.fixture
+def registry_connection(db_engine: Engine) -> Iterator[Connection]:
+    """A connection to a per-test SQLite file with the whole registry created, one user seeded."""
+    with db_engine.connect() as connection:
+        schema.metadata.create_all(connection)
+        connection.execute(RAW_INSERT, _raw_row(id=1, username="someone"))
+        connection.commit()
+        yield connection
+
+
+# --- 004/001 DoD-1: exactly the six columns, and their nullability ---------------------
+
+
+def test_registry_exposes_an_auth_sessions_table__S004_001_DoD1() -> None:
+    """004/001 DoD-1 — the registry carries a table named `auth_sessions`."""
+    assert "auth_sessions" in schema.metadata.tables
+    assert isinstance(_auth_sessions(), Table)
+    assert _auth_sessions().name == "auth_sessions"
+
+
+def test_auth_sessions_has_exactly_the_data_model_columns__S004_001_DoD1() -> None:
+    """004/001 DoD-1 — exactly id, user_id, token_hash, created_at, expires_at, revoked_at."""
+    names = [column.name for column in _auth_sessions().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == AUTH_SESSIONS_COLUMNS
+
+
+def test_auth_sessions_revoked_at_is_nullable__S004_001_DoD1() -> None:
+    """004/001 DoD-1 — `revoked_at` is nullable (NULL until revoked)."""
+    assert _auth_sessions().c.revoked_at.nullable is True
+
+
+@pytest.mark.parametrize("column", ["id", "user_id", "token_hash", "created_at", "expires_at"])
+def test_auth_sessions_other_columns_are_not_nullable__S004_001_DoD1(column: str) -> None:
+    """004/001 DoD-1 — every column but `revoked_at` is NOT NULL."""
+    assert _auth_sessions().c[column].nullable is False
+
+
+def test_auth_sessions_created_in_a_real_database_has_exactly_the_columns__S004_001_DoD1(
+    registry_connection: Connection,
+) -> None:
+    """004/001 DoD-1 — the created SQLite table carries exactly the six columns."""
+    rows = registry_connection.execute(text("PRAGMA table_info(auth_sessions)")).all()
+    assert {row[1] for row in rows} == AUTH_SESSIONS_COLUMNS
+
+
+def test_auth_sessions_row_without_revoked_at_is_accepted__S004_001_DoD1(
+    registry_connection: Connection,
+) -> None:
+    """004/001 DoD-1 — a fresh (unrevoked) row stores NULL in `revoked_at`."""
+    registry_connection.execute(RAW_SESSION_INSERT, _raw_session())
+    stored = registry_connection.execute(text("SELECT revoked_at FROM auth_sessions")).scalar_one()
+    assert stored is None
+
+
+@pytest.mark.parametrize("column", ["user_id", "token_hash", "created_at", "expires_at"])
+def test_auth_sessions_rejects_null_in_required_columns__S004_001_DoD1(
+    registry_connection: Connection, column: str
+) -> None:
+    """004/001 DoD-1 — SQLite itself refuses NULL in a NOT NULL column."""
+    with pytest.raises(IntegrityError):
+        registry_connection.execute(RAW_SESSION_INSERT, _raw_session(**{column: None}))
+
+
+def test_registry_still_contains_users_beside_auth_sessions__S004_001_DoD1() -> None:
+    """004/001 DoD-1 — adding the second table leaves `users` in the registry."""
+    assert {"users", "auth_sessions"} <= set(schema.metadata.tables)
+
+
+# --- 004/001 DoD-2: key, unique digest index, foreign key, user_id index ---------------
+
+
+def test_auth_sessions_id_is_the_sole_primary_key__S004_001_DoD2() -> None:
+    """004/001 DoD-2 — `id` is the primary key, alone."""
+    assert [column.name for column in _auth_sessions().primary_key.columns] == ["id"]
+
+
+def test_auth_sessions_id_does_not_autoincrement__S004_001_DoD2() -> None:
+    """004/001 DoD-2 — the id is a minted snowflake, never autoincremented."""
+    assert _auth_sessions().c.id.autoincrement is False
+
+
+def test_auth_sessions_ddl_contains_no_autoincrement__S004_001_DoD2() -> None:
+    """004/001 DoD-2 — the SQLite DDL for `auth_sessions` never says AUTOINCREMENT."""
+    ddl = str(CreateTable(_auth_sessions()).compile(dialect=sqlite.dialect()))
+    assert "AUTOINCREMENT" not in ddl.upper()
+
+
+def test_auth_sessions_explicit_64_bit_id_is_stored_as_given__S004_001_DoD2(
+    registry_connection: Connection,
+) -> None:
+    """004/001 DoD-2 — an application-minted 64-bit id is kept verbatim."""
+    minted = 2**62 + 54321
+    registry_connection.execute(RAW_SESSION_INSERT, _raw_session(id=minted))
+    stored = registry_connection.execute(text("SELECT id FROM auth_sessions")).scalar_one()
+    assert stored == minted
+
+
+def _single_column_indexes(table: Table, column: str) -> list[Any]:
+    return [index for index in table.indexes if [c.name for c in index.columns] == [column]]
+
+
+def test_token_hash_is_uniquely_indexed__S004_001_DoD2() -> None:
+    """004/001 DoD-2 — a unique index covers exactly `token_hash`."""
+    indexes = _single_column_indexes(_auth_sessions(), "token_hash")
+    assert any(index.unique for index in indexes)
+
+
+def test_duplicate_token_hash_is_rejected_by_the_database__S004_001_DoD2(
+    registry_connection: Connection,
+) -> None:
+    """004/001 DoD-2 — a second row with the same digest is refused by SQLite."""
+    registry_connection.execute(RAW_SESSION_INSERT, _raw_session(id=100, token_hash="same"))
+    with pytest.raises(IntegrityError):
+        registry_connection.execute(RAW_SESSION_INSERT, _raw_session(id=101, token_hash="same"))
+
+
+def test_user_id_declares_a_foreign_key_to_users_id__S004_001_DoD2() -> None:
+    """004/001 DoD-2 — `user_id` carries a declared foreign key targeting `users.id`."""
+    targets = {fk.target_fullname for fk in _auth_sessions().c.user_id.foreign_keys}
+    assert targets == {"users.id"}
+
+
+def test_user_id_foreign_key_is_enforced_in_a_real_database__S004_001_DoD2(
+    registry_connection: Connection,
+) -> None:
+    """004/001 DoD-2 — a row naming no existing user is refused (the engine turns FKs on)."""
+    with pytest.raises(IntegrityError):
+        registry_connection.execute(RAW_SESSION_INSERT, _raw_session(user_id=999_999))
+
+
+def test_user_id_is_indexed__S004_001_DoD2() -> None:
+    """004/001 DoD-2 — an index covers exactly `user_id`."""
+    assert _single_column_indexes(_auth_sessions(), "user_id") != []
+
+
+def test_user_id_index_exists_in_a_real_database__S004_001_DoD2(registry_connection: Connection) -> None:
+    """004/001 DoD-2 — the created table has an index on `user_id` and a unique one on `token_hash`."""
+    index_rows = registry_connection.execute(text("PRAGMA index_list(auth_sessions)")).all()
+    by_columns: dict[tuple[str, ...], bool] = {}
+    for row in index_rows:
+        name, unique = row[1], bool(row[2])
+        info = registry_connection.execute(text(f'PRAGMA index_info("{name}")')).all()
+        columns = tuple(info_row[2] for info_row in info)
+        by_columns[columns] = by_columns.get(columns, False) or unique
+    assert ("user_id",) in by_columns
+    assert by_columns.get(("token_hash",)) is True

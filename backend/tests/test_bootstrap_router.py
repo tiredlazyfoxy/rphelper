@@ -7,15 +7,21 @@ Every expected value comes from ``docs/plans/003.first-run-bootstrap/003.bootstr
 
 Covers step 003 DoD-1 .. DoD-9. DoD-10 .. DoD-13 are ``[manual/live]`` and carry no test.
 
+Feature 004 step 004 (``docs/plans/004.authentication-session/004.bootstrap-signs-in.md``)
+makes the 201 set the session cookie: 003 DoD-2's ``Set-Cookie`` half is deleted and the
+new tests (suffix ``__S004_004_DoD<n>``) cover 004/004 DoD-1, DoD-2, DoD-3, DoD-4, DoD-6.
+
 The application is always the real factory's (``create_app()``), pinned to the per-test
 database through ``dependency_overrides[get_settings]``. ``TestClient`` is not used as a
 context manager: the lifespan is irrelevant to these answers.
 """
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -27,11 +33,13 @@ from app.db.engine import get_connection, get_engine
 from app.main import create_app
 from app.roles import Role
 from app.routers.bootstrap import router as bootstrap_router
+from app.services.auth import resolve_session
 from app.services.bootstrap import is_configured
 from app.services.passwords import verify_password
 
 CREATE_PATH = "/api/bootstrap/create"
 HEALTH_PATH = "/api/health"
+ME_PATH = "/api/me"
 GUARD_PROBE_PATH = "/guard-probe"
 GUARD_PROBE_FULL_PATH = "/api/bootstrap/guard-probe"
 
@@ -217,13 +225,260 @@ def test_create_response_body_has_no_token_session_or_cookie_field__DoD2(client:
         assert "cookie" not in lowered
 
 
-def test_create_response_sets_no_cookie__DoD2(client: TestClient) -> None:
-    """DoD-2 — D9: no ``Set-Cookie`` header; the client holds no cookie afterwards."""
+# 004/004 DoD-4 (context.md D15 item 2): 003/003 DoD-2's ``Set-Cookie`` half —
+# ``test_create_response_sets_no_cookie__DoD2`` — is deleted here, deliberately, and replaced
+# by the opposite assertion (004/004 DoD-1, below). The body half above stays.
+
+
+# =====================================================================================
+# Feature 004, step 004 — the create route signs the operator in.
+# Expected values: 004.bootstrap-signs-in.md DoD-1..DoD-4, DoD-6 and 004/context.md D6,
+# D11. Bindings: ``## Skeleton`` → Step 004 (route), Step 003 (``GET /api/me``), Step 001
+# (``resolve_session``, the ``auth_sessions`` table).
+# =====================================================================================
+
+
+def _parse_set_cookie(header: str) -> tuple[str, str, dict[str, str | None]]:
+    """Split one ``Set-Cookie`` header into (name, value, lower-cased attribute map)."""
+    parts = [part.strip() for part in header.split(";")]
+    name, _, value = parts[0].partition("=")
+    attributes: dict[str, str | None] = {}
+    for part in parts[1:]:
+        if not part:
+            continue
+        key, sep, attr_value = part.partition("=")
+        attributes[key.strip().lower()] = attr_value.strip() if sep else None
+    return name.strip(), value.strip().strip('"'), attributes
+
+
+def _cookies_named(response: httpx.Response, name: str) -> list[tuple[str, dict[str, str | None]]]:
+    found = []
+    for header in response.headers.get_list("set-cookie"):
+        cookie_name, value, attributes = _parse_set_cookie(header)
+        if cookie_name == name:
+            found.append((value, attributes))
+    return found
+
+
+def _session_token(response: httpx.Response, settings: Settings) -> str:
+    cookies = _cookies_named(response, settings.session_cookie_name)
+    assert len(cookies) == 1
+    token = cookies[0][0]
+    assert token
+    return token
+
+
+def _session_rows(engine: Engine) -> list[dict[str, Any]]:
+    """Every ``auth_sessions`` row, ordered by id; empty when the table does not exist."""
+    with engine.connect() as connection:
+        present = connection.exec_driver_sql(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'auth_sessions'"
+        ).scalar_one()
+        if not present:
+            return []
+        query = select(schema.auth_sessions).order_by(schema.auth_sessions.c.id)
+        return [dict(row) for row in connection.execute(query).mappings().all()]
+
+
+def _parse_utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _with_ttl(application: FastAPI, settings: Settings, ttl_hours: int) -> Settings:
+    changed = settings.model_copy(update={"session_ttl_hours": ttl_hours})
+    application.dependency_overrides[get_settings] = lambda: changed
+    return changed
+
+
+# --- DoD-1: 201 plus the session cookie with D6's flags -------------------------------
+
+
+def test_create_answers_201_and_sets_the_configured_session_cookie__S004_004_DoD1(
+    client: TestClient, db_settings: Settings
+) -> None:
+    """DoD-1 — US-001.AC-2: the 201 carries one ``Set-Cookie`` for the configured cookie name."""
     response = _create(client)
     assert response.status_code == 201
-    assert "set-cookie" not in {name.lower() for name in response.headers.keys()}
+    cookies = _cookies_named(response, db_settings.session_cookie_name)
+    assert len(cookies) == 1
+    assert cookies[0][0] != ""
+
+
+def test_create_cookie_carries_the_d6_flags__S004_004_DoD1(client: TestClient, db_settings: Settings) -> None:
+    """DoD-1 — HttpOnly, SameSite=Lax, Path=/, no Secure, Max-Age = the TTL setting in seconds."""
+    response = _create(client)
+    assert response.status_code == 201
+    cookies = _cookies_named(response, db_settings.session_cookie_name)
+    assert len(cookies) == 1
+    _, attributes = cookies[0]
+    assert "httponly" in attributes
+    assert (attributes.get("samesite") or "").lower() == "lax"
+    assert attributes.get("path") == "/"
+    assert "secure" not in attributes
+    assert attributes.get("max-age") == str(db_settings.session_ttl_hours * 3600)
+
+
+@pytest.mark.parametrize("ttl_hours", [3, 96])
+def test_create_cookie_max_age_follows_the_ttl_setting__S004_004_DoD1(
+    application: FastAPI, db_settings: Settings, ttl_hours: int
+) -> None:
+    """DoD-1 — overriding ``session_ttl_hours`` changes the cookie's ``Max-Age`` to match."""
+    changed = _with_ttl(application, db_settings, ttl_hours)
+    response = _create(TestClient(application))
+    assert response.status_code == 201
+    cookies = _cookies_named(response, changed.session_cookie_name)
+    assert len(cookies) == 1
+    assert cookies[0][1].get("max-age") == str(ttl_hours * 3600)
+
+
+def test_create_cookie_uses_an_overridden_cookie_name__S004_004_DoD1(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-1 — the cookie is named by ``session_cookie_name``, never a literal."""
+    other_name = "another_session_cookie_name"
+    assert db_settings.session_cookie_name != other_name
+    renamed = db_settings.model_copy(update={"session_cookie_name": other_name})
+    application.dependency_overrides[get_settings] = lambda: renamed
+    response = _create(TestClient(application))
+    assert response.status_code == 201
+    assert len(_cookies_named(response, other_name)) == 1
+    assert _cookies_named(response, db_settings.session_cookie_name) == []
+
+
+# --- DoD-2: the cookie is a live session — /api/me answers with no login in between ---
+
+
+def test_create_cookie_is_accepted_by_me__S004_004_DoD2(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-2 — US-001.AC-2: ``GET /api/me`` with that cookie answers 200 naming the new admin."""
+    application.state.id_generator = _FixedIdGenerator(FIXED_MINTED_ID)
+    response = _create(TestClient(application))
+    assert response.status_code == 201
+    token = _session_token(response, db_settings)
+
+    fresh = TestClient(application)
+    fresh.cookies.set(db_settings.session_cookie_name, token)
+    me = fresh.get(ME_PATH)
+
+    assert me.status_code == 200
+    body = me.json()
+    assert body["id"] == str(FIXED_MINTED_ID)
+    assert body["username"] == USERNAME
+    assert body["role"] == "admin"
+
+
+def test_the_creating_client_is_signed_in_afterwards__S004_004_DoD2(client: TestClient) -> None:
+    """DoD-2 — the same client, with no login request, is recognised by ``GET /api/me``."""
+    created = _create(client)
+    assert created.status_code == 201
+    me = client.get(ME_PATH)
+    assert me.status_code == 200
+    assert me.json()["id"] == created.json()["id"]
+    assert me.json()["username"] == USERNAME
+    assert me.json()["role"] == "admin"
+
+
+def test_me_without_the_create_cookie_is_not_signed_in__S004_004_DoD2(application: FastAPI) -> None:
+    """DoD-2 — control: it is the cookie that signs in; a client without it answers 401."""
+    assert _create(TestClient(application)).status_code == 201
+    assert TestClient(application).get(ME_PATH).status_code == 401
+
+
+# --- DoD-3: exactly one live session row for the new admin; expiry = created + TTL ----
+
+
+def test_create_leaves_exactly_one_live_session_for_the_new_admin__S004_004_DoD3(
+    application: FastAPI, db_settings: Settings, db_engine: Engine
+) -> None:
+    """DoD-3 — one ``auth_sessions`` row, owned by the new admin, not revoked; the cookie resolves to it."""
+    application.state.id_generator = _FixedIdGenerator(FIXED_MINTED_ID)
+    response = _create(TestClient(application))
+    assert response.status_code == 201
+    rows = _session_rows(db_engine)
+    assert len(rows) == 1
+    assert rows[0]["user_id"] == FIXED_MINTED_ID
+    assert rows[0]["revoked_at"] is None
+    with db_engine.connect() as connection:
+        resolved = resolve_session(connection, _session_token(response, db_settings))
+    assert resolved is not None
+    assert resolved.id == FIXED_MINTED_ID
+    assert resolved.role == Role.ADMIN
+
+
+def test_create_session_expires_at_creation_plus_the_default_ttl__S004_004_DoD3(
+    client: TestClient, db_settings: Settings, db_engine: Engine
+) -> None:
+    """DoD-3 — ``expires_at`` is the row's creation instant plus ``Settings.session_ttl_hours``."""
+    before = datetime.now(UTC)
+    assert _create(client).status_code == 201
+    after = datetime.now(UTC)
+    row = _session_rows(db_engine)[0]
+    created = _parse_utc(row["created_at"])
+    assert _parse_utc(row["expires_at"]) - created == timedelta(hours=db_settings.session_ttl_hours)
+    assert before - timedelta(seconds=1) <= created <= after + timedelta(seconds=1)
+
+
+@pytest.mark.parametrize("ttl_hours", [3, 96])
+def test_create_session_expiry_follows_the_ttl_setting__S004_004_DoD3(
+    application: FastAPI, db_settings: Settings, db_engine: Engine, ttl_hours: int
+) -> None:
+    """DoD-3 — with ``session_ttl_hours`` overridden, the stored expiry follows it."""
+    _with_ttl(application, db_settings, ttl_hours)
+    assert _create(TestClient(application)).status_code == 201
+    rows = _session_rows(db_engine)
+    assert len(rows) == 1
+    assert _parse_utc(rows[0]["expires_at"]) - _parse_utc(rows[0]["created_at"]) == timedelta(hours=ttl_hours)
+
+
+# --- DoD-4: the body is exactly what 003 shipped — no token, session or expiry --------
+
+
+def test_create_body_is_exactly_id_username_and_role__S004_004_DoD4(
+    client: TestClient, db_settings: Settings
+) -> None:
+    """DoD-4 — only id (decimal string), username and role; the token appears nowhere in the body."""
+    response = _create(client)
+    assert response.status_code == 201
+    body = response.json()
+    assert set(body) == {"id", "username", "role"}
+    assert isinstance(body["id"], str) and body["id"].isdecimal()
+    for key in body:
+        lowered = key.lower()
+        for forbidden in ("token", "session", "expir", "cookie"):
+            assert forbidden not in lowered
+    assert _session_token(response, db_settings) not in response.text
+
+
+# --- DoD-6: the refusal path is untouched — 409, no session row, no cookie -----------
+
+
+def test_refused_create_answers_409_opens_no_session_and_sets_no_cookie__S004_004_DoD6(
+    client: TestClient, db_engine: Engine
+) -> None:
+    """DoD-6 — US-003.AC-1: configured instance → 409 ``already_configured``, no session, no cookie."""
+    _make_configured(db_engine)
+    response = _create(client)
+    assert response.status_code == 409
+    _assert_already_configured_wire_shape(response.json())
+    assert _session_rows(db_engine) == []
     assert response.headers.get_list("set-cookie") == []
     assert len(client.cookies) == 0
+
+
+def test_second_create_after_success_opens_no_second_session__S004_004_DoD6(
+    application: FastAPI, db_engine: Engine
+) -> None:
+    """DoD-6 — a repeat create on the now-configured instance is refused, adds no session, sets no cookie."""
+    assert _create(TestClient(application)).status_code == 201
+    second = _create(TestClient(application))
+    assert second.status_code == 409
+    _assert_already_configured_wire_shape(second.json())
+    assert second.headers.get_list("set-cookie") == []
+    assert len(_session_rows(db_engine)) == 1
 
 
 # --- DoD-3: configured instance → 409 already_configured, database untouched ---------

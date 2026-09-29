@@ -21,7 +21,7 @@ their own tables here; DDL only ever runs through `007`'s admin-triggered `Creat
 `Sync` actions (and `003`'s first-run `create_all`).
 """
 
-from sqlalchemy import BigInteger, Boolean, Column, Enum, Integer, MetaData, String, Table, Text
+from sqlalchemy import BigInteger, Boolean, Column, Enum, ForeignKey, Index, Integer, MetaData, String, Table, Text
 
 from app.roles import Role
 
@@ -64,4 +64,31 @@ users = Table(
     Column("preferred_language", Text, nullable=True),
     Column("created_at", Text, nullable=False),
     Column("updated_at", Text, nullable=False),
+)
+
+
+#: Server-side login sessions (`data-model.md` § `auth_sessions`). Exactly the six columns
+#: that section names. `id` is a snowflake minted before the INSERT, stored exactly as
+#: `users.id` is (rowid alias on SQLite, never auto-incrementing). `token_hash` holds the
+#: SHA-256 digest of the session token, never the token; `created_at` / `expires_at` are
+#: UTC ISO-8601 text; `revoked_at` is NULL until the row is revoked — rows are never
+#: deleted, so a revocation stays observable. `token_hash` is uniquely indexed (the lookup
+#: key on every authenticated request); `user_id` is indexed (FEAT-003's disable path
+#: revokes every row for one user in one transaction).
+auth_sessions = Table(
+    "auth_sessions",
+    metadata,
+    Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=False),
+    Column(
+        "user_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("users.id"),
+        nullable=False,
+    ),
+    Column("token_hash", Text, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Column("expires_at", Text, nullable=False),
+    Column("revoked_at", Text, nullable=True),
+    Index("ix_auth_sessions_token_hash", "token_hash", unique=True),
+    Index("ix_auth_sessions_user_id", "user_id"),
 )

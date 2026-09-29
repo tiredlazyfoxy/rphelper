@@ -14,7 +14,9 @@ The router translates no error by hand: `AlreadyConfiguredError` is a `DomainErr
 the one base-class handler registered by `app.errors.register_exception_handlers`
 renders it with its own `409`. No `try`/`except`, no `HTTPException`.
 
-`POST /create` answers **201**, sets **no cookie** and adds **no `Location` header**.
+`POST /create` answers **201**, sets the session cookie through
+`app.dependencies.set_session_cookie` from the token the service returned, and adds **no
+`Location` header**. The token never appears in the response body.
 
 The process's snowflake generator is the single instance the app factory holds on
 `app.state.id_generator`; `get_id_generator` reads it off the request's application
@@ -23,10 +25,12 @@ state (HTTP plumbing) and the handler passes it into the service as an argument.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import Connection
 
+from app.config import Settings, get_settings
 from app.db.engine import get_connection
+from app.dependencies import set_session_cookie
 from app.errors import AlreadyConfiguredError
 from app.ids import SnowflakeGenerator
 from app.models.bootstrap import BootstrapCreateRequest, BootstrapCreateResponse
@@ -59,14 +63,21 @@ router = APIRouter(
 @router.post("/create", status_code=201)
 def create_administrator(
     body: BootstrapCreateRequest,
+    response: Response,
     connection: Annotated[Connection, Depends(get_connection)],
+    settings: Annotated[Settings, Depends(get_settings)],
     generator: Annotated[SnowflakeGenerator, Depends(get_id_generator)],
 ) -> BootstrapCreateResponse:
-    """Create the first administrator and answer 201 with its id, username and role.
+    """Create the first administrator, sign them in, and answer 201 with id, username and role.
 
     Calls `app.services.bootstrap.create_first_administrator(connection, generator,
-    body.username, body.password)` and maps the `BootstrapResult` onto the response
-    model. Sets no cookie, adds no `Location` header, catches nothing.
+    body.username, body.password, settings.session_ttl_hours)`, sets the session cookie via
+    `set_session_cookie(response, result.token, settings.session_ttl_hours, settings)`, and
+    maps the `BootstrapResult` onto the response model (no token in the body). Adds no
+    `Location` header, catches nothing.
     """
-    result = create_first_administrator(connection, generator, body.username, body.password)
+    result = create_first_administrator(
+        connection, generator, body.username, body.password, settings.session_ttl_hours
+    )
+    set_session_cookie(response, result.token, settings.session_ttl_hours, settings)
     return BootstrapCreateResponse(id=result.id, username=result.username, role=result.role)

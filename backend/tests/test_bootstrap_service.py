@@ -9,6 +9,12 @@ Covers step 002 DoD-2, DoD-3, DoD-4, DoD-5, DoD-6, DoD-7, DoD-8, DoD-10 and DoD-
 DoD-1 lives in ``test_errors.py``, DoD-9 in ``test_health.py``, DoD-15/16 in
 ``test_db_engine.py``; DoD-12..14 and DoD-17 are ``[manual/live]``.
 
+Feature 004 step 004 (``docs/plans/004.authentication-session/004.bootstrap-signs-in.md``)
+widens the operation: it also opens a session in the same transaction, takes the session
+TTL in hours, and returns a token and an expiry. Every existing call gains the TTL; the new
+tests carry the ``__S004_004_DoD<n>`` suffix (DoD-3, DoD-5, DoD-6, DoD-7, DoD-8). 003/002
+DoD-13 ("mints no token") had no automated test here, so there is nothing to delete for it.
+
 Connection hygiene: the creation operation opens its own ``with conn.begin():`` block, so
 every setup write here is committed and every post-condition is read on a *fresh*
 connection — no test hands the operation a connection with a transaction already open.
@@ -17,6 +23,7 @@ connection — no test hands the operation a connection with a transaction alrea
 import ast
 import inspect
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -27,6 +34,7 @@ from app.errors import AlreadyConfiguredError
 from app.ids import EPOCH_MS, SnowflakeGenerator
 from app.roles import Role
 from app.services import bootstrap as bootstrap_module
+from app.services.auth import resolve_session
 from app.services.bootstrap import BootstrapResult, create_first_administrator, is_configured
 from app.services.health import probe_health
 from app.services.passwords import verify_password
@@ -36,6 +44,7 @@ PASSWORD = "correct horse battery staple"
 OTHER_PASSWORD = "not the password at all"
 TIMESTAMP = "2026-01-01T00:00:00+00:00"
 EXISTING_ADMIN_HASH = "pre-existing-admin-hash-sentinel"
+TTL_HOURS = 2  # 004/004: the session TTL handed to the creation operation as a plain argument
 
 
 class _FixedIdGenerator:
@@ -120,9 +129,16 @@ def _admin_row_count_on(connection: Connection) -> int:
     return int(count)
 
 
-def _bootstrap(engine: Engine, generator: Any, username: str = USERNAME, password: str = PASSWORD) -> BootstrapResult:
+def _bootstrap(
+    engine: Engine,
+    generator: Any,
+    username: str = USERNAME,
+    password: str = PASSWORD,
+    ttl_hours: int = TTL_HOURS,
+) -> BootstrapResult:
+    # 004/004 (S004_004): the operation now also takes the session TTL in hours.
     with engine.connect() as connection:
-        return create_first_administrator(connection, generator, username, password)
+        return create_first_administrator(connection, generator, username, password, ttl_hours)
 
 
 # --- DoD-2: false with no schema, false with an empty users table -------------------
@@ -304,7 +320,10 @@ def _seed_unconfigured_instance_with_username(engine: Engine, username: str) -> 
 def _attempt_colliding_bootstrap(connection: Connection, username: str) -> bool:
     """Run the operation with a username the table rejects; True when it raised."""
     try:
-        create_first_administrator(connection, _FixedIdGenerator(7_000_000_000_001), username, PASSWORD)
+        create_first_administrator(connection, _FixedIdGenerator(7_000_000_000_001), username, PASSWORD, TTL_HOURS)
+    except (TypeError, NotImplementedError):
+        # 004/004: a binding error or an unimplemented body is not "the table rejected it".
+        raise
     except Exception:
         return True
     return False
@@ -366,8 +385,10 @@ def _registry_tables_on(connection: Connection) -> set[str]:
 def _attempt_failing_mint(connection: Connection) -> bool:
     """Run the operation with a generator that fails; True when the operation raised."""
     try:
-        create_first_administrator(connection, _FailingIdGenerator(), USERNAME, PASSWORD)
-    except Exception:
+        create_first_administrator(connection, _FailingIdGenerator(), USERNAME, PASSWORD, TTL_HOURS)
+    except _MintFailure:
+        # 004/004: only the generator's own failure counts; a TypeError or
+        # NotImplementedError must not satisfy this lever.
         return True
     return False
 
@@ -406,7 +427,9 @@ def test_same_connection_still_creates_after_a_failed_mint__S002_DoD7(db_engine:
     """DoD-7 — afterwards the same connection is usable: a working generator's creation succeeds."""
     with db_engine.connect() as connection:
         assert _attempt_failing_mint(connection) is True
-        result = create_first_administrator(connection, _FixedIdGenerator(7_000_000_000_002), USERNAME, PASSWORD)
+        result = create_first_administrator(
+            connection, _FixedIdGenerator(7_000_000_000_002), USERNAME, PASSWORD, TTL_HOURS
+        )
     assert isinstance(result, BootstrapResult)
     assert result.id == 7_000_000_000_002
     assert result.username == USERNAME
@@ -545,9 +568,10 @@ def test_module_references_no_http_status_code__DoD11() -> None:
     ("function", "expected_parameters"),
     [
         pytest.param(is_configured, ["connection"], id="is_configured"),
+        # 004/004 DoD-8 (S004_004): widened by exactly one plain argument, the session TTL.
         pytest.param(
             create_first_administrator,
-            ["connection", "generator", "username", "password"],
+            ["connection", "generator", "username", "password", "ttl_hours"],
             id="create_first_administrator",
         ),
     ],
@@ -566,6 +590,277 @@ def test_entry_points_take_no_request__DoD11(function: Callable[..., Any], expec
 def test_creation_is_callable_with_a_connection_a_generator_and_two_strings__DoD11(db_engine: Engine) -> None:
     """DoD-11 — a plain Core connection, a generator and two `str`s are all it needs."""
     with db_engine.connect() as connection:
-        result = create_first_administrator(connection, _real_generator(node_id=3), "plain-name", "plain-secret")
+        result = create_first_administrator(connection, _real_generator(node_id=3), "plain-name", "plain-secret", 2)
     assert isinstance(result, BootstrapResult)
     assert result.username == "plain-name"
+
+
+# =====================================================================================
+# Feature 004, step 004 — the creation also opens a session, in the same transaction.
+# Expected values: 004.bootstrap-signs-in.md (Interface intent, DoD-3/5/6/7/8) and
+# 004/context.md D11, D15. Bindings: ``## Skeleton`` → Step 004 (+ Step 001's
+# ``resolve_session`` and the ``auth_sessions`` table).
+# =====================================================================================
+
+
+def _parse_utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _session_rows(engine: Engine) -> list[dict[str, Any]]:
+    with engine.connect() as connection:
+        query = select(schema.auth_sessions).order_by(schema.auth_sessions.c.id)
+        return [dict(row) for row in connection.execute(query).mappings().all()]
+
+
+def _session_row_count_on(connection: Connection) -> int:
+    """``auth_sessions`` rows visible on ``connection``; zero when the table is absent."""
+    present = connection.exec_driver_sql(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'auth_sessions'"
+    ).scalar_one()
+    if not present:
+        return 0
+    return int(connection.exec_driver_sql("SELECT COUNT(*) FROM auth_sessions").scalar_one())
+
+
+# --- DoD-3: exactly one live session for the new administrator, expiry = created + TTL
+
+
+def test_creation_leaves_exactly_one_session_row_for_the_new_administrator__S004_004_DoD3(
+    db_engine: Engine,
+) -> None:
+    """DoD-3 — US-001.AC-2: one ``auth_sessions`` row, belonging to the new admin, not revoked."""
+    result = _bootstrap(db_engine, _FixedIdGenerator(40_040_000_000_001))
+    rows = _session_rows(db_engine)
+    assert len(rows) == 1
+    assert rows[0]["user_id"] == result.id == 40_040_000_000_001
+    assert rows[0]["revoked_at"] is None
+
+
+@pytest.mark.parametrize("ttl_hours", [2, 48])
+def test_session_expiry_is_its_creation_plus_the_given_ttl__S004_004_DoD3(db_engine: Engine, ttl_hours: int) -> None:
+    """DoD-3 — the stored ``expires_at`` is the row's creation instant plus the TTL it was given."""
+    before = datetime.now(UTC)
+    _bootstrap(db_engine, _FixedIdGenerator(40_040_000_000_002), ttl_hours=ttl_hours)
+    after = datetime.now(UTC)
+    row = _session_rows(db_engine)[0]
+    created = _parse_utc(row["created_at"])
+    expires = _parse_utc(row["expires_at"])
+    assert expires - created == timedelta(hours=ttl_hours)
+    assert before - timedelta(seconds=1) <= created <= after + timedelta(seconds=1)
+
+
+# --- DoD-8 (and DoD-2's service half): the plain result carries a token and an expiry
+
+
+def test_result_token_resolves_to_the_new_administrator__S004_004_DoD8(db_engine: Engine) -> None:
+    """DoD-8 — the operation returns a token (not a cookie); that token is the live session's."""
+    result = _bootstrap(db_engine, _FixedIdGenerator(40_040_000_000_003))
+    assert isinstance(result.token, str)
+    assert result.token != ""
+    with db_engine.connect() as connection:
+        resolved = resolve_session(connection, result.token)
+    assert resolved is not None
+    assert resolved.id == result.id
+    assert resolved.username == USERNAME
+    assert resolved.role == Role.ADMIN
+
+
+def test_result_expiry_is_aware_utc_and_matches_the_stored_row__S004_004_DoD8(db_engine: Engine) -> None:
+    """DoD-8 / DoD-3 — the returned expiry is timezone-aware UTC, the TTL ahead, and is the row's."""
+    before = datetime.now(UTC)
+    result = _bootstrap(db_engine, _FixedIdGenerator(40_040_000_000_004), ttl_hours=TTL_HOURS)
+    after = datetime.now(UTC)
+    assert isinstance(result.expires_at, datetime)
+    assert result.expires_at.tzinfo is not None
+    assert result.expires_at.utcoffset() == timedelta(0)
+    lower = before + timedelta(hours=TTL_HOURS) - timedelta(seconds=1)
+    upper = after + timedelta(hours=TTL_HOURS) + timedelta(seconds=1)
+    assert lower <= result.expires_at <= upper
+    stored = _parse_utc(_session_rows(db_engine)[0]["expires_at"])
+    assert abs(stored - result.expires_at) < timedelta(seconds=1)
+
+
+def test_result_still_carries_id_username_and_role__S004_004_DoD7(db_engine: Engine) -> None:
+    """DoD-7 — the widened result still names the administrator exactly as 003 returned it."""
+    result = _bootstrap(db_engine, _FixedIdGenerator(40_040_000_000_005))
+    assert result.id == 40_040_000_000_005
+    assert result.username == USERNAME
+    assert result.role == Role.ADMIN
+    assert [row["id"] for row in _user_rows(db_engine)] == [result.id]
+
+
+# --- DoD-5: atomic across all three writes, failure provoked through the inputs -------
+#
+# Lever: the generator parameter. It mints the administrator's id normally and then fails
+# on the *next* mint — the session's id (step 001: the session row id comes from the
+# generator it is given, and the session is opened for the id just minted). So the failure
+# lands *after* the registry and the users insert, inside the one transaction. Expected:
+# the generator's own exception propagates, and neither an administrator row nor an
+# ``auth_sessions`` row survives. A control proves the same connection and inputs then
+# succeed with a working generator, creating both rows.
+
+
+class _SessionMintFailure(Exception):
+    """Raised by the second mint of the failing generator; unrelated to anything in the app."""
+
+
+class _FailsOnSecondMintGenerator:
+    """Answers one id on the first ``next_id()``, then fails on every later call."""
+
+    def __init__(self, first: int) -> None:
+        self.first = first
+        self.calls = 0
+
+    def next_id(self) -> int:
+        self.calls += 1
+        if self.calls == 1:
+            return self.first
+        raise _SessionMintFailure("simulated failure minting the session id")
+
+
+_START_STATES = [
+    pytest.param(False, id="no-schema"),
+    pytest.param(True, id="registry-applied"),
+]
+
+
+def _prepare(engine: Engine, registry_applied: bool) -> None:
+    if registry_applied:
+        _apply_registry(engine)
+
+
+@pytest.mark.parametrize("registry_applied", _START_STATES)
+def test_failure_after_the_admin_insert_propagates__S004_004_DoD5(db_engine: Engine, registry_applied: bool) -> None:
+    """DoD-5 — the operation cannot complete: the generator's own failure surfaces."""
+    _prepare(db_engine, registry_applied)
+    with db_engine.connect() as connection, pytest.raises(_SessionMintFailure):
+        create_first_administrator(
+            connection, _FailsOnSecondMintGenerator(50_050_000_000_001), USERNAME, PASSWORD, TTL_HOURS
+        )
+
+
+@pytest.mark.parametrize("registry_applied", _START_STATES)
+def test_failure_leaves_neither_admin_nor_session_on_the_same_connection__S004_004_DoD5(
+    db_engine: Engine, registry_applied: bool
+) -> None:
+    """DoD-5 — the connection the operation ran on holds no administrator and no session row."""
+    _prepare(db_engine, registry_applied)
+    with db_engine.connect() as connection:
+        with pytest.raises(_SessionMintFailure):
+            create_first_administrator(
+                connection, _FailsOnSecondMintGenerator(50_050_000_000_002), USERNAME, PASSWORD, TTL_HOURS
+            )
+        assert _admin_row_count_on(connection) == 0
+        assert _session_row_count_on(connection) == 0
+
+
+@pytest.mark.parametrize("registry_applied", _START_STATES)
+def test_failure_leaves_neither_admin_nor_session_in_the_database__S004_004_DoD5(
+    db_engine: Engine, registry_applied: bool
+) -> None:
+    """DoD-5 — a fresh connection sees no administrator, no session, and an unconfigured instance."""
+    _prepare(db_engine, registry_applied)
+    with db_engine.connect() as connection, pytest.raises(_SessionMintFailure):
+        create_first_administrator(
+            connection, _FailsOnSecondMintGenerator(50_050_000_000_003), USERNAME, PASSWORD, TTL_HOURS
+        )
+    with db_engine.connect() as fresh:
+        assert _admin_row_count_on(fresh) == 0
+        assert _session_row_count_on(fresh) == 0
+        assert is_configured(fresh) is False
+
+
+@pytest.mark.parametrize("registry_applied", _START_STATES)
+def test_same_connection_then_creates_admin_and_session_together__S004_004_DoD5(
+    db_engine: Engine, registry_applied: bool
+) -> None:
+    """DoD-5 — control: after the failure, the same connection and inputs succeed with both rows."""
+    _prepare(db_engine, registry_applied)
+    with db_engine.connect() as connection:
+        with pytest.raises(_SessionMintFailure):
+            create_first_administrator(
+                connection, _FailsOnSecondMintGenerator(50_050_000_000_004), USERNAME, PASSWORD, TTL_HOURS
+            )
+        result = create_first_administrator(
+            connection, _FixedIdGenerator(50_050_000_000_005), USERNAME, PASSWORD, TTL_HOURS
+        )
+    assert result.id == 50_050_000_000_005
+    assert [(row["id"], row["role"]) for row in _user_rows(db_engine)] == [(50_050_000_000_005, Role.ADMIN)]
+    sessions = _session_rows(db_engine)
+    assert len(sessions) == 1
+    assert sessions[0]["user_id"] == 50_050_000_000_005
+    assert sessions[0]["revoked_at"] is None
+
+
+# --- DoD-6 (service half): a refused creation opens no session ------------------------
+
+
+def test_refused_creation_opens_no_session__S004_004_DoD6(db_engine: Engine) -> None:
+    """DoD-6 — US-003.AC-1: ``already_configured`` is raised and no ``auth_sessions`` row appears."""
+    _seed_configured_instance(db_engine)
+    with pytest.raises(AlreadyConfiguredError):
+        _bootstrap(db_engine, _FixedIdGenerator(60_060_000_000_001), username="intruder")
+    assert _session_rows(db_engine) == []
+
+
+# --- DoD-7 / DoD-8: the service still declares no table, sets no cookie, reads no setting
+
+
+def _names_in_module() -> list[str]:
+    names: list[str] = []
+    for node in ast.walk(_module_tree()):
+        if isinstance(node, ast.Name):
+            names.append(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.append(node.attr)
+        elif isinstance(node, ast.alias):
+            names.append(node.asname or node.name)
+    return names
+
+
+def _imported_modules() -> list[str]:
+    imported: list[str] = []
+    for node in ast.walk(_module_tree()):
+        if isinstance(node, ast.Import):
+            imported.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported.append(node.module)
+    return imported
+
+
+def test_service_sets_no_cookie__S004_004_DoD8() -> None:
+    """DoD-8 / DoD-7 — the service returns a token; no cookie vocabulary and no response object."""
+    offenders = [name for name in _names_in_module() if "cookie" in name.lower() or name == "Response"]
+    assert offenders == []
+
+
+def test_service_reads_no_setting__S004_004_DoD7() -> None:
+    """DoD-7 — "adds no setting" stays true: the TTL arrives as an argument, settings are not read."""
+    assert "app.config" not in _imported_modules()
+    offenders = [name for name in _names_in_module() if name in {"Settings", "get_settings"}]
+    assert offenders == []
+
+
+def test_service_declares_no_table__S004_004_DoD7() -> None:
+    """DoD-7 — "declares no ``auth_sessions`` table" stays true: no ``Table(...)`` is built in the service."""
+    constructed: list[str] = []
+    for node in ast.walk(_module_tree()):
+        if isinstance(node, ast.Call):
+            func = node.func
+            called = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+            if called == "Table":
+                constructed.append(called)
+    assert constructed == []
+    # The one declaration lives in the registry, where step 001 put it.
+    assert schema.metadata.tables["auth_sessions"] is schema.auth_sessions
+
+
+def test_ttl_is_a_required_plain_parameter__S004_004_DoD8() -> None:
+    """DoD-8 — the TTL is one more plain argument; the operation still takes no ``Request``."""
+    parameter = inspect.signature(create_first_administrator).parameters["ttl_hours"]
+    assert parameter.default is inspect.Parameter.empty
+    assert "Request" not in str(parameter)

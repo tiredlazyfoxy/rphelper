@@ -12,7 +12,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.errors import AlreadyConfiguredError, DomainError, SecretRefError, register_exception_handlers
+from app.errors import (
+    AlreadyConfiguredError,
+    DomainError,
+    InsufficientRoleError,
+    InvalidCredentialsError,
+    NotAuthenticatedError,
+    SecretRefError,
+    register_exception_handlers,
+)
 
 # From 003.context.md § "The http_status gap": this step chooses 500 for secret_ref_missing.
 EXPECTED_SECRET_REF_CODE = "secret_ref_missing"
@@ -274,3 +282,157 @@ def test_already_configured_from_a_route_carries_a_non_empty_message__S002_DoD1(
     assert _is_wire_shape(payload)
     assert payload["error"]["message"] is not None
     assert _is_non_empty_text(payload["error"]["message"])
+
+
+# ============================================================================
+# Feature 004, step 001 (``001.auth-sessions-and-service.md``) — DoD-3:
+# ``invalid_credentials`` is a ``DomainError`` subclass, code ``invalid_credentials``,
+# HTTP 400 (feature context D2), empty detail, one fixed cause-free message, rendered in
+# the one wire shape through the handler 001 already registers — no second handler.
+# ============================================================================
+
+EXPECTED_INVALID_CREDENTIALS_CODE = "invalid_credentials"
+EXPECTED_INVALID_CREDENTIALS_STATUS = 400
+
+
+def test_invalid_credentials_is_a_domain_error_subclass__S004_001_DoD3() -> None:
+    """004/001 DoD-3: the refusal follows the base's pattern as a subclass."""
+    assert issubclass(InvalidCredentialsError, DomainError)
+    assert isinstance(InvalidCredentialsError(), Exception)
+
+
+def test_invalid_credentials_sets_code_and_status_as_class_attributes__S004_001_DoD3() -> None:
+    """004/001 DoD-3: code ``invalid_credentials`` and status 400, set on the subclass itself."""
+    assert "code" in vars(InvalidCredentialsError)
+    assert "http_status" in vars(InvalidCredentialsError)
+    assert InvalidCredentialsError.code == EXPECTED_INVALID_CREDENTIALS_CODE
+    assert InvalidCredentialsError.http_status == EXPECTED_INVALID_CREDENTIALS_STATUS
+    error = InvalidCredentialsError()
+    assert error.code == EXPECTED_INVALID_CREDENTIALS_CODE
+    assert error.http_status == EXPECTED_INVALID_CREDENTIALS_STATUS
+
+
+def test_invalid_credentials_detail_is_empty__S004_001_DoD3() -> None:
+    """004/001 DoD-3: ``detail`` carries nothing."""
+    assert InvalidCredentialsError().detail == {}
+
+
+def test_invalid_credentials_has_one_fixed_non_empty_message__S004_001_DoD3() -> None:
+    """004/001 DoD-3: raised with no arguments it carries a non-empty message, the same every time."""
+    first = InvalidCredentialsError()
+    second = InvalidCredentialsError()
+    assert _is_non_empty_text(first.message)
+    assert first.message == second.message
+
+
+def test_invalid_credentials_renders_the_one_wire_shape__S004_001_DoD3() -> None:
+    """004/001 DoD-3: the inherited render produces ``{"error": {code, message, detail}}``."""
+    body = InvalidCredentialsError().to_wire()
+    assert _is_wire_shape(body)
+    assert body["error"]["code"] == EXPECTED_INVALID_CREDENTIALS_CODE
+    assert _is_non_empty_text(body["error"]["message"])
+    assert body["error"]["detail"] == {}
+
+
+def test_invalid_credentials_from_a_route_is_400_in_the_wire_shape__S004_001_DoD3() -> None:
+    """004/001 DoD-3: through the handler 001 registers, the response is 400 + the wire body."""
+    app = _app_raising(InvalidCredentialsError())
+    response = TestClient(app).get("/boom")
+    assert response.status_code == EXPECTED_INVALID_CREDENTIALS_STATUS
+    payload = response.json()
+    assert _is_wire_shape(payload)
+    assert payload["error"]["code"] == EXPECTED_INVALID_CREDENTIALS_CODE
+    assert payload["error"]["message"] == InvalidCredentialsError().message
+    assert payload["error"]["detail"] == {}
+
+
+def test_no_second_handler_is_registered_for_invalid_credentials__S004_001_DoD3() -> None:
+    """004/001 DoD-3: the base-class handler covers the subclass; no handler keyed on it is added."""
+    app = FastAPI()
+    register_exception_handlers(app)
+    assert DomainError in app.exception_handlers
+    assert InvalidCredentialsError not in app.exception_handlers
+
+
+# ============================================================================
+# Feature 004, step 002 (``002.ladder-and-dependencies.md``) — DoD-4:
+# ``not_authenticated`` (401) and ``insufficient_role`` (403) are ``DomainError``
+# subclasses with an empty detail, rendered in the one wire shape through the handler 001
+# already registers — no second handler (feature context D3).
+# ============================================================================
+
+AUTH_GUARD_ERRORS: list[tuple[type[DomainError], str, int]] = [
+    (NotAuthenticatedError, "not_authenticated", 401),
+    (InsufficientRoleError, "insufficient_role", 403),
+]
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), AUTH_GUARD_ERRORS)
+def test_guard_error_is_a_domain_error_subclass__S004_002_DoD4(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """004/002 DoD-4: each guard error follows the base's pattern as a subclass."""
+    assert issubclass(error_class, DomainError)
+    assert isinstance(error_class(), Exception)
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), AUTH_GUARD_ERRORS)
+def test_guard_error_sets_code_and_status_as_class_attributes__S004_002_DoD4(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """004/002 DoD-4: ``not_authenticated``/401 and ``insufficient_role``/403, set on the subclass itself."""
+    assert "code" in vars(error_class)
+    assert "http_status" in vars(error_class)
+    assert error_class.code == code
+    assert error_class.http_status == status
+    error = error_class()
+    assert error.code == code
+    assert error.http_status == status
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), AUTH_GUARD_ERRORS)
+def test_guard_error_detail_is_empty__S004_002_DoD4(error_class: type[DomainError], code: str, status: int) -> None:
+    """004/002 DoD-4: ``detail`` carries nothing."""
+    assert error_class().detail == {}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), AUTH_GUARD_ERRORS)
+def test_guard_error_renders_the_one_wire_shape__S004_002_DoD4(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """004/002 DoD-4: the inherited render produces ``{"error": {code, message, detail}}``, detail empty."""
+    body = error_class().to_wire()
+    assert _is_wire_shape(body)
+    assert body["error"]["code"] == code
+    assert body["error"]["detail"] == {}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), AUTH_GUARD_ERRORS)
+def test_guard_error_from_a_route_answers_its_status_in_the_wire_shape__S004_002_DoD4(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """004/002 DoD-4: through the handler 001 registers, the response is 401/403 + the wire body."""
+    app = _app_raising(error_class())
+    response = TestClient(app).get("/boom")
+    assert response.status_code == status
+    payload = response.json()
+    assert _is_wire_shape(payload)
+    assert payload["error"]["code"] == code
+    assert payload["error"]["detail"] == {}
+    assert payload == error_class().to_wire()
+
+
+def test_no_second_handler_is_registered_for_the_guard_errors__S004_002_DoD4() -> None:
+    """004/002 DoD-4: the base-class handler covers both subclasses; no handler keyed on either is added."""
+    app = FastAPI()
+    register_exception_handlers(app)
+    assert DomainError in app.exception_handlers
+    assert NotAuthenticatedError not in app.exception_handlers
+    assert InsufficientRoleError not in app.exception_handlers
+
+
+def test_insufficient_role_renders_no_role_name__S004_002_DoD4() -> None:
+    """004/002 DoD-4 (with DoD-10): the refusal names neither the caller's role nor the required one."""
+    rendered = str(InsufficientRoleError().to_wire()).lower()
+    for role_name in ("roleplayer", "admin"):
+        assert role_name not in rendered

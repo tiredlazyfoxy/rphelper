@@ -9,10 +9,11 @@ configured": a `users` table is present and holds at least one administrator row
 `services/health.py` delegates to it rather than holding its own copy.
 
 `create_first_administrator` applies the registry, mints the id from the generator it is
-given, hashes the password and inserts the one `users` row — all inside a single
-`with conn.begin():` block. It sets no cookie, mints no token and writes no
-`auth_sessions` row. It logs at most the new id (as a decimal string) and the outcome;
-never the password, never the hash.
+given, hashes the password, inserts the one `users` row and opens the administrator's
+session through `app.services.auth.open_session` on the same connection — all inside a
+single `with conn.begin():` block. It returns the session token and expiry as plain data
+and sets no cookie; the router is what turns the token into a cookie. It logs at most the
+new id (as a decimal string) and the outcome; never the password, the hash or the token.
 """
 
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from app.db.schema import metadata, users
 from app.errors import AlreadyConfiguredError
 from app.ids import SnowflakeGenerator
 from app.roles import Role
+from app.services.auth import open_session
 from app.services.passwords import hash_password
 
 
@@ -35,6 +37,8 @@ class BootstrapResult:
     id: int
     username: str
     role: Role
+    token: str
+    expires_at: datetime
 
 
 def is_configured(connection: Connection) -> bool:
@@ -68,12 +72,15 @@ def create_first_administrator(
     generator: SnowflakeGenerator,
     username: str,
     password: str,
+    ttl_hours: int,
 ) -> BootstrapResult:
     """Create the schema and the first administrator in one transaction.
 
     Inside one `with connection.begin():` block: re-check `is_configured` and raise
     `AlreadyConfiguredError` if true; apply the registry (create-if-missing); mint the id
-    from `generator`; hash `password`; insert the `users` row with role `admin`.
+    from `generator`; hash `password`; insert the `users` row with role `admin`; open the
+    administrator's session via `open_session(connection, generator, new_id, ttl_hours)`.
+    Returns the id, username, role, session token and session expiry.
     """
     with connection.begin():
         if is_configured(connection):
@@ -99,5 +106,13 @@ def create_first_administrator(
             )
         )
 
+        session = open_session(connection, generator, new_id, ttl_hours)
+
     logger.info("bootstrap outcome=created id={}", str(new_id))
-    return BootstrapResult(id=new_id, username=username, role=Role.ADMIN)
+    return BootstrapResult(
+        id=new_id,
+        username=username,
+        role=Role.ADMIN,
+        token=session.token,
+        expires_at=session.expires_at,
+    )

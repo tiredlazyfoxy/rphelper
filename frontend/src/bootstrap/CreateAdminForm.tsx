@@ -17,7 +17,7 @@ import {
 export type CreateAdminFormProps = {
   state: BootstrapState;
   draft: CreateAdminDraft;
-  /** Cross-entry hand-off after "created", called once with "/login". Defaults to a document navigation. */
+  /** Cross-entry hand-off after "created", called once with "/". Defaults to a document navigation. */
   handOff?: (url: string) => void;
 };
 
@@ -65,7 +65,7 @@ export const CreateAdminForm = observer(function CreateAdminForm(
         return;
       }
       if (outcome === "created") {
-        handOff("/login");
+        handOff("/");
       } else if (outcome === "refused") {
         runInAction(() => {
           state.phase = "refusal";

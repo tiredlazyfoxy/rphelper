@@ -1,5 +1,14 @@
-// Feature 003, step 005 — the create-administrator form, its submit path, the hand-off to
-// `/login`, and the refusal flip on the page (DoD-3..DoD-10). DoD-11..DoD-13 are [manual/live].
+// Feature 003, step 005 — the create-administrator form, its submit path, the hand-off,
+// and the refusal flip on the page (DoD-3..DoD-10). DoD-11..DoD-13 are [manual/live].
+//
+// Feature 004, step 004 (docs/plans/004.authentication-session/004.bootstrap-signs-in.md):
+// - S004_004 DoD-9 — the hand-off target is corrected from `/login` to `/` (the two DoD-5
+//   tests and the DoD-7 re-submit test's target assertion); "runs, and runs once" unchanged.
+// - S004_004 DoD-10 — "nothing else in the form changes" is covered by the existing tests,
+//   left intact: the DoD-3 block (invalid draft cannot submit; a second activation in flight
+//   issues no second request), the DoD-4 tests (body is username + password only), the DoD-6
+//   block (already_configured flips to the refusal) and the DoD-7 block (every other failure
+//   renders in place).
 //
 // The form is rendered with its store and draft passed explicitly as props (context.md D13),
 // wrapped in AppProviders. `fetch` is stubbed per test; `notifyFailure` is mocked at file level.
@@ -235,6 +244,7 @@ async function clickSubmit(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// S004_004 DoD-10 (unchanged 003/005 DoD-3 coverage).
 describe("the submit control", () => {
   it("is disabled for an empty draft — DoD-3", () => {
     stubFetch(created);
@@ -304,6 +314,7 @@ describe("the submit control", () => {
 });
 
 // ---------------------------------------------------------------------------
+// S004_004 DoD-10 (unchanged 003/005 DoD-4 request-body coverage) and DoD-9 (target `/`).
 describe("a successful submit", () => {
   it("typing into the form and submitting posts exactly the username and password — DoD-4 (US-001.AC-1)", async () => {
     const fetchMock = stubFetch(created);
@@ -330,23 +341,27 @@ describe("a successful submit", () => {
     expect(keys.sort()).toEqual(["password", "username"]);
   });
 
-  it("runs the hand-off once, targeting /login — DoD-5", async () => {
+  // 004/004 DoD-9 (context.md D15 item 4): the hand-off target is corrected from /login to /.
+  // That it runs, and runs once, is 003/005 DoD-5's and unchanged.
+  it("runs the hand-off once, targeting / — DoD-5, S004_004 DoD-9 (US-001.AC-2)", async () => {
     stubFetch(created);
     const { handOff } = renderForm({ draft: validDraft() });
     await clickSubmit();
     await flush();
     expect(handOff).toHaveBeenCalledTimes(1);
-    expect(handOff).toHaveBeenCalledWith("/login");
+    expect(handOff).toHaveBeenCalledWith("/");
+    expect(handOff).not.toHaveBeenCalledWith("/login");
   });
 
-  it("without a hand-off prop the default is the document navigation to /login, once — DoD-5", async () => {
+  it("without a hand-off prop the default is the document navigation to /, once — DoD-5, S004_004 DoD-9 (US-001.AC-2)", async () => {
     const assignSpy = vi.spyOn(documentNavigation, "assign").mockImplementation(() => {});
     stubFetch(created);
     renderForm({ draft: validDraft(), handOff: null });
     await clickSubmit();
     await flush();
     expect(assignSpy).toHaveBeenCalledTimes(1);
-    expect(assignSpy).toHaveBeenCalledWith("/login");
+    expect(assignSpy).toHaveBeenCalledWith("/");
+    expect(assignSpy).not.toHaveBeenCalledWith("/login");
   });
 
   it("success does not flip the page to the refusal — DoD-5", async () => {
@@ -358,6 +373,7 @@ describe("a successful submit", () => {
 });
 
 // ---------------------------------------------------------------------------
+// S004_004 DoD-10 (unchanged 003/005 DoD-6 coverage).
 describe("an already_configured answer", () => {
   it("the form flips the store to the refusal phase and does not hand off — DoD-6 (US-003.AC-1)", async () => {
     stubFetch(alreadyConfigured);
@@ -402,6 +418,7 @@ describe("an already_configured answer", () => {
 });
 
 // ---------------------------------------------------------------------------
+// S004_004 DoD-10 (unchanged 003/005 DoD-7 coverage).
 describe("any other failure renders in place", () => {
   it.each<[string, () => Promise<Response>]>([
     ["a backend error envelope", backendFailure],
@@ -434,7 +451,8 @@ describe("any other failure renders in place", () => {
     await clickSubmit();
     expect(createCalls(fetchMock)).toHaveLength(2);
     expect(handOff).toHaveBeenCalledTimes(1);
-    expect(handOff).toHaveBeenCalledWith("/login");
+    // 004/004 DoD-9: the hand-off target on the eventual success is / (was /login).
+    expect(handOff).toHaveBeenCalledWith("/");
   });
 
   it("a general server error already on the draft renders as an inline alert — DoD-7", () => {
