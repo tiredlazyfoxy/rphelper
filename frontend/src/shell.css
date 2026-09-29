@@ -1,0 +1,11 @@
+/*
+ * shell.css — the `app` workspace's layout stylesheet, and nothing else.
+ *
+ * Imported by src/app/main.tsx alone; no other entry reaches it.
+ * Filled by feature 008 (workspace shell): the three-column grid, the 1px gap,
+ * the --navw rail-width custom property, the collapsed-rail class and the 820px
+ * media query. Intentionally empty until then.
+ *
+ * A rule that is neither a reset (global.css) nor workspace layout belongs in
+ * neither file — reach for a Mantine theme token (shared/theme.ts) instead.
+ */

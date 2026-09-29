@@ -1,0 +1,28 @@
+/*
+ * global.css — resets only. Imported once, by shared/AppProviders.tsx, so every
+ * entry receives it after Mantine's own stylesheets. Anything that is not a reset
+ * is a Mantine theme token (shared/theme.ts) or app workspace layout (shell.css).
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+#root {
+  height: 100%;
+}
+
+img,
+svg,
+video {
+  display: block;
+  max-width: 100%;
+}

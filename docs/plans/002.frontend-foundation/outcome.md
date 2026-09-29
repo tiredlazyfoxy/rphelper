@@ -4,12 +4,14 @@ Written by the planner before implementation; applied by `/architect` at finaliz
 Entries are grouped by target file. Nothing here is a product-layer change — this
 feature delivers no product ids and cites none.
 
-Three kinds of entry appear below and are marked so they are not confused:
+Four kinds of entry appear below and are marked so they are not confused:
 
 - **gap closure** — the docs left something unspecified and a plan had to choose;
 - **planner inference** — a decision the docs do not state and could not be read off
   them, recorded so it is not re-inferred differently;
-- **divergence resolution** — two docs disagreed and the user chose.
+- **divergence resolution** — two docs disagreed and the user chose;
+- **deviation** — the doc states something verbatim, and the build could not follow it
+  as written; the user chose the replacement.
 
 The first entry is the largest and is a real change to the design, not a note.
 
@@ -98,28 +100,58 @@ The doc already answers the first half and is silent on the second, which is whe
 mistake actually gets made: a store that re-decodes produces a second, divergent error
 shape.
 
+### § The multi-entry build — the `vite.config.ts` shape: `root`, `outDir` and the input values (**deviation — user decision 2026-09-29**)
+
+**Change.** Amend the `(shape)` block so that it matches what was built:
+
+- `root` is the `frontend/src` directory;
+- `build.outDir` is the `frontend/dist` directory (`../dist` relative to the root), and
+  `build.emptyOutDir` is `true`, because the output directory lies outside the root and
+  Vite otherwise neither empties it nor fails;
+- `build.rollupOptions.input` keeps its four keys (`bootstrap`, `login`, `admin`,
+  `app`), but each value is an **absolute path resolved from the config file's
+  directory** to `src/<entry>/index.html`, rather than the literal relative string
+  `src/<entry>/index.html` the block currently shows;
+- the Vitest `test` block sets its own root to the `frontend/` directory, so the tests
+  under `frontend/tests/` and the setup file are still found.
+
+Replace, rather than add to, any wording that says the input paths are relative to the
+package root.
+
+**Reason.** With the block as written — default `root` (the package directory) and
+inputs `src/<entry>/index.html` — Vite names each emitted document by its input's path
+relative to `root`, and the build emitted `dist/src/<entry>/index.html`. That does not
+match the emitted-layout contract below, nor `deployment.md`'s per-entry
+`location /<entry>/` blocks. The user chose to root the build at `src/` rather than
+rename or move output after the fact. Absolute input values keep entry resolution
+independent of the working directory once the root is no longer the package directory.
+
 ### § The multi-entry build — Vite specifics (**gap closure**)
 
 **Change.** Add to the `(shape)` block's surrounding prose: `@vitejs/plugin-react` is
-the plugin; `base` stays at its default; `root` stays at the package root, because the
-four input paths are given relative to it; `build.outDir` stays at Vite's default
-`dist/`, which is what `deployment.md` copies; `server.strictPort` is enabled so a busy
-8193 fails loudly rather than moving to 8194 where the proxy assumption silently stops
-holding; and there is **exactly one** proxy rule, matching `deployment.md`'s "one prefix
-only".
+the plugin; `base` stays at its default; `root`, `outDir` and `emptyOutDir` are as in
+the deviation entry above; `server.strictPort` is enabled so a busy 8193 fails loudly
+rather than moving to 8194 where the proxy assumption silently stops holding; and there
+is **exactly one** proxy rule, matching `deployment.md`'s "one prefix only". Note the
+knock-on of the root: Vite's `publicDir` defaults to `src/public`, which does not exist
+yet — a feature that adds static assets puts them there or sets `publicDir`
+explicitly.
 
 **Reason.** The doc marks its config block `(shape)` and is therefore partial by
-design; four of the five gaps are things a build cannot omit.
+design; these are things a build cannot omit.
 
 ### § The multi-entry build — the emitted layout nginx depends on (**gap closure**)
 
 **Change.** State the output contract: the build emits `dist/bootstrap/index.html`,
 `dist/login/index.html`, `dist/admin/index.html` and `dist/app/index.html`, which is
 precisely what `deployment.md`'s four per-entry `try_files` fallbacks resolve against.
+State that this layout is a consequence of the build's `root` being `src/` (see the
+deviation entry above), so a later change to `root` or to the input values must
+re-check it.
 
 **Reason.** It is the seam between the frontend build and the nginx configuration, and
-getting it wrong is invisible until deployment. See the `deployment.md` entry below for
-the half that is not this doc's.
+getting it wrong is invisible until deployment — as this feature's own first build
+showed. See the `deployment.md` entry below for the half that is not this doc's.
 
 ### § Navigation between entries / the `admin` entry — basename versus URL (**gap closure**)
 
@@ -318,11 +350,12 @@ re-derive why five packages the docs name are absent.
 **Change.** Add a compact block: one `frontend/package.json` carrying dependencies and
 the four scripts (`build`, `test`, `typecheck`, `dev`); `package-lock.json` committed;
 two tsconfigs; one `vite.config.ts` that also carries the Vitest block, so there is no
-`vitest.config.*`; **tests live under `frontend/tests/`, outside `src/`**, mirroring it;
-`frontend/tests/setup.ts` is harness source rather than a test. Note the two reasons
-tests are not co-located: the ids scan is scoped to `frontend/src` so no fixture can
-trip it and no exclusion list is needed, and the build's roots are inside `src/` so
-nothing test-only is reachable from a bundle.
+`vitest.config.*`; the build is rooted at `frontend/src` and emits to `frontend/dist`,
+while the Vitest block keeps `frontend/` as its root; **tests live under
+`frontend/tests/`, outside `src/`**, mirroring it; `frontend/tests/setup.ts` is harness
+source rather than a test. Note the two reasons tests are not co-located: the ids scan
+is scoped to `frontend/src` so no fixture can trip it and no exclusion list is needed,
+and the build's root is `src/` so nothing test-only is reachable from a bundle.
 
 **Reason.** Every later frontend feature adds a test and must know where it goes. The
 three commands themselves stay in the root `CLAUDE.md` and are not duplicated here.
@@ -357,14 +390,14 @@ and `frontend-structure.md` mounts the `app` entry's routes at the origin root w
 basename. State which mechanism bridges them — a copy in the image build, an nginx
 `root`/`alias`, or a fifth build input — and name the feature that owns it
 (`fast/001`'s nginx and image configuration). Record the dev-side consequence of leaving
-it unbridged: `http://localhost:8193/` does not resolve and the entries are reached at
-`/src/<entry>/index.html`.
+it unbridged: the dev server's root is `src/`, so `http://localhost:8193/` does not
+resolve and the entries are reached at `/<entry>/index.html`.
 
 **Reason.** This is the one place the plan found the docs genuinely incomplete rather
 than merely silent: as written, the four `try_files` rules and the four emitted files do
 not line up for the root case, and nothing in the doc set says who fixes it. Feature
-`002` deliberately did not create a root `frontend/index.html`, because that would be a
-fifth entry the architecture's input list does not have.
+`002` deliberately did not create a root HTML document, because that would be a fifth
+entry the architecture's input list does not have.
 
 ### Dev server — `strictPort`
 
@@ -392,3 +425,7 @@ backwards for a table whose whole job is telling an agent what it may reach for.
 ---
 
 _Nothing below this line is written by the planner._
+
+## Observations
+
+- Step 005: `notifyFailure` shows no title — only the reason as `message` — and falls back to the generic reason "Something went wrong. Please try again." for a non-`ApiError` value and for an `ApiError` whose message is empty. `ColorSchemeToggle` labels are "Switch to light theme" / "Switch to dark theme", and it passes `"dark"` as the computed-scheme fallback. Possible impact: record the generic-reason text and label wording in `ui-conventions.md` if they should be canonical.

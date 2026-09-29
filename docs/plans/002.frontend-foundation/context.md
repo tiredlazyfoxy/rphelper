@@ -60,9 +60,11 @@ directly; `start.ps1` belongs to `fast/001`, not to this feature.
   the per-entry nginx SPA fallbacks that the build's emitted layout must satisfy.
 
 Cited, never copied. Where a step needs a declaration the architecture already gives
-verbatim (the `rollupOptions.input` block, the `IconButtonProps` type, the icon sizing
-table), the step context points at the doc section and the skeleton agent reproduces
-it — this plan does not restate signatures.
+verbatim (the `IconButtonProps` type, the icon sizing table), the step context points at
+the doc section and the skeleton agent reproduces it — this plan does not restate
+signatures. The `rollupOptions.input` block is the one verbatim declaration this feature
+deliberately does **not** reproduce as written: its keys are kept, its values are not
+(D13).
 
 ## The layout every step writes into
 
@@ -72,9 +74,9 @@ frontend/
   package-lock.json       # generated, committed, never hand-edited
   tsconfig.json           # strict, covers src/ and tests/
   tsconfig.node.json      # covers vite.config.ts itself
-  vite.config.ts          # 4 rollup inputs + /api proxy + react plugin + vitest block
+  vite.config.ts          # 4 rollup inputs + root/outDir + /api proxy + react plugin + vitest block
   .gitignore
-  src/
+  src/                    # Vite's root (D13)
     global.css            # hand-written stylesheet 1 of 2: resets only
     shell.css             # hand-written stylesheet 2 of 2: declared empty here
     shared/
@@ -93,12 +95,13 @@ frontend/
   tests/
     setup.ts              # test-harness source, owned by the coder (see D12)
     ...                   # every *.test.ts / *.test.tsx
+  dist/                   # build output (D13), git-ignored
 ```
 
 **Not created here, and a step that creates one is out of scope:** any page component,
 any MobX store or `*Draft.ts`, the SSE consumer, an `AppShell`, an admin gate, the
 workspace grid's rules inside `shell.css`, a markdown editor, an ESLint config, a
-`postcss.config.*`, a root `frontend/index.html`.
+`postcss.config.*`, a root `frontend/index.html`, a `frontend/src/index.html`.
 
 ## Cross-cutting constraints every step holds
 
@@ -327,7 +330,7 @@ the ids scan.
 
 Not co-located. Two reasons, both structural: D5's scan is scoped to `frontend/src`, so
 keeping tests out of `src` means no test fixture can ever trip it and no exclusion list
-has to be maintained; and the Vite build's roots are inside `src/`, so keeping
+has to be maintained; and the Vite build's root is `src/` itself (D13), so keeping
 non-shipping code out of `src/` means nothing test-only is reachable from a bundle.
 The `tests/` tree mirrors `src/`.
 
@@ -341,12 +344,39 @@ coder from depending on a file outside their own scope.
 
 ### D13 — Vite specifics. *`base`, `root`, `outDir` and the plugin list are unspecified in the docs.*
 
+*Revised 2026-09-29 by user decision.* The original plan left `root` at its default
+(`frontend/`) on the reasoning that the architecture's input paths are written relative
+to it. That reasoning is what broke the build: Vite names each emitted HTML file by its
+input's path **relative to `root`**, so the input `src/app/index.html` emitted
+`dist/src/app/index.html`, while `deployment.md`'s per-entry `location /<entry>/` blocks
+and step `006` DoD-13 need `dist/app/index.html`. The user chose to move the root rather
+than rename output after the fact.
+
 - `@vitejs/plugin-react` is added; no doc names a plugin and a React build needs one.
-- `base` stays at its default `/`. `root` stays at its default (`frontend/`), because
-  the architecture gives the four input paths verbatim as `src/<entry>/index.html` and
-  those paths are relative to the root.
-- `build.outDir` stays at Vite's default `dist/`, which is what `deployment.md` copies
-  into nginx.
+- **`root` is `frontend/src`.** Each entry's HTML is then `<entry>/index.html` relative
+  to the root and is emitted at `dist/<entry>/index.html` — exactly
+  `dist/{bootstrap,login,admin,app}/index.html`, with no `src/` segment.
+- **`build.outDir` resolves to `frontend/dist`** — the same destination as before
+  (`../dist` relative to the new root), which is what `deployment.md` copies into nginx.
+- **`build.emptyOutDir` is `true`.** Vite only clears an output directory that lies
+  inside `root` by default, and warns and leaves it alone otherwise; with `dist` now
+  outside `src`, stale hashed bundles from earlier builds would accumulate without it.
+- **`build.rollupOptions.input` keeps its four keys** — `bootstrap`, `login`, `admin`,
+  `app` — and each value is an **absolute path**, resolved from the config file's own
+  directory, to `frontend/src/<entry>/index.html`. Absolute so that where an input
+  lands never depends on the working directory or on how a relative input is resolved
+  once `root` is no longer the package directory. This is a deliberate deviation from
+  `frontend-structure.md`'s verbatim `src/<entry>/index.html` values, recorded in
+  `outcome.md` for the architect. `root` and `outDir` are written the same way.
+- **Vitest keeps `frontend/` as its own root.** The `test` block sets its root to the
+  `frontend` directory, because otherwise Vitest inherits `src` and would resolve the
+  `tests/**` include and `./tests/setup.ts` under `src/`, finding nothing. The D11
+  layout — tests in `frontend/tests/`, the include matching nothing under `src/` — is
+  unchanged.
+- `base` stays at its default `/`.
+- A consequence to know: Vite's `publicDir` defaults to `<root>/public`, i.e.
+  `frontend/src/public`. None exists in this feature; a later feature that adds static
+  assets either puts them there or sets `publicDir` explicitly.
 - `server.strictPort` is **true**: a busy 8193 must fail loudly rather than silently
   move to 8194, where the dev proxy assumption quietly stops holding.
 - Exactly **one** proxy rule, `/api` → `http://localhost:8184`. `deployment.md` says
@@ -389,13 +419,15 @@ dependency then, with a call site.
 `deployment.md`'s nginx block ends with `location / { try_files $uri $uri/ /index.html; }`,
 and `frontend-structure.md` mounts the `app` entry's routes at `/`, `/sessions/:id`,
 `/characters/:id` and so on with **no basename**. The Vite build emits the app document
-at `dist/app/index.html` (its input path is `src/app/index.html`), so something must
-make it answer at `dist/index.html` too — a copy in the image build, or an nginx
-`root`/`alias` adjustment. **That mapping belongs to `fast/001`'s nginx and image
-configuration.** This feature deliberately does **not** create a fifth root
-`frontend/index.html`: that would be an entry the architecture's input list does not
-have. The consequence in dev is that `http://localhost:8193/` does not resolve and the
-entries are reached at `/src/<entry>/index.html`; that is a known wart on the same seam.
+at `dist/app/index.html` (D13), so something must make it answer at `dist/index.html`
+too — a copy in the image build, or an nginx `root`/`alias` adjustment. **That mapping
+belongs to `fast/001`'s nginx and image configuration.** This feature deliberately does
+**not** create a fifth root HTML document (`frontend/index.html` or
+`frontend/src/index.html`): that would be an entry the architecture's input list does
+not have. The consequence in dev is that `http://localhost:8193/` does not resolve; the
+dev server's root is `src/` (D13), so the entries are reached at `/<entry>/index.html`
+— for example `http://localhost:8193/admin/index.html`. That is a known wart on the
+same seam.
 
 Step `006` makes the emitted layout a Definition-of-done item precisely because this
 seam is invisible until deployment.
@@ -432,7 +464,7 @@ the entries come last because they integrate everything.
 
 | Step | Subject | Depends on |
 |------|---------|------------|
-| 001 | `package.json`, both tsconfigs, `vite.config.ts` (four inputs, `/api` proxy, react plugin, vitest block), the test setup file, `.gitignore` | — |
+| 001 | `package.json`, both tsconfigs, `vite.config.ts` (four inputs, `root`/`outDir`, `/api` proxy, react plugin, vitest block), the test setup file, `.gitignore` | — |
 | 002 | `global.css` resets, `shell.css` declared empty, `shared/theme.ts` | 001 |
 | 003 | `shared/IconButton.tsx` and the icon sizing convention | 001 |
 | 004 | `shared/apiError.ts` + `shared/api.ts` — the client, the decode, 401/403/5xx/transport | 001 |
