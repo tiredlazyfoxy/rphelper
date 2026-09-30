@@ -48,6 +48,7 @@ from app.config import get_settings
 from app.errors import register_exception_handlers
 from app.ids import build_id_generator
 from app.logging import configure_logging
+from app.routers.admin_llm import router as admin_llm_router
 from app.routers.admin_users import router as admin_users_router
 from app.routers.auth import router as auth_router
 from app.routers.bootstrap import router as bootstrap_router
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
     app.include_router(bootstrap_router)
     app.include_router(auth_router)
     app.include_router(admin_users_router)
+    app.include_router(admin_llm_router)
     return app
 
 

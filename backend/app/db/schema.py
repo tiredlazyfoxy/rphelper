@@ -21,7 +21,21 @@ their own tables here; DDL only ever runs through `007`'s admin-triggered `Creat
 `Sync` actions (and `003`'s first-run `create_all`).
 """
 
-from sqlalchemy import BigInteger, Boolean, Column, Enum, ForeignKey, Index, Integer, MetaData, String, Table, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    false,
+)
 
 from app.roles import Role
 
@@ -92,4 +106,54 @@ auth_sessions = Table(
     Column("revoked_at", Text, nullable=True),
     Index("ix_auth_sessions_token_hash", "token_hash", unique=True),
     Index("ix_auth_sessions_user_id", "user_id"),
+)
+
+
+#: Registered OpenAI-compatible servers (`data-model.md` § `llm_servers`). Exactly the ten
+#: columns that section names — deliberately **no** `active` column (feature `006`'s D1).
+#: `id` is a snowflake minted before the INSERT, stored exactly as `users.id` is. `kind` is
+#: plain text with no `CHECK`: its two values are a pydantic literal at the router boundary
+#: (D5). `api_key_ref` holds a `"$ENV_VAR"` **pointer**, never a credential, so the database
+#: never contains an API key. The three `last_test_*` columns record UC-011's outcome and are
+#: NULL until the first test; `last_test_error` stores the typed outcome value itself.
+#: Timestamps are UTC ISO-8601 text.
+llm_servers = Table(
+    "llm_servers",
+    metadata,
+    Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=False),
+    Column("name", Text, nullable=False),
+    Column("kind", Text, nullable=False),
+    Column("base_url", Text, nullable=False),
+    Column("api_key_ref", Text, nullable=True),
+    Column("last_test_at", Text, nullable=True),
+    Column("last_test_ok", Boolean, nullable=True),
+    Column("last_test_error", Text, nullable=True),
+    Column("created_at", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
+)
+
+
+#: Models known on a registered server (`data-model.md` § `models`). `server_id` is a
+#: foreign key to `llm_servers.id` declared `ON DELETE CASCADE` — the structural truth
+#: `db/drift.py` introspects; `006/003`'s delete also removes the rows explicitly so the
+#: behaviour holds regardless of `PRAGMA foreign_keys`. Unique on `(server_id,
+#: model_name)`. The two flags are non-nullable and default to false; `embedding_dim` is
+#: meaningful only on the designated row (`vec0` tables have a fixed dimension).
+models = Table(
+    "models",
+    metadata,
+    Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=False),
+    Column(
+        "server_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("llm_servers.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("model_name", Text, nullable=False),
+    Column("is_enabled", Boolean, nullable=False, default=False, server_default=false()),
+    Column("is_embedding_designated", Boolean, nullable=False, default=False, server_default=false()),
+    Column("embedding_dim", Integer, nullable=True),
+    Column("created_at", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    UniqueConstraint("server_id", "model_name", name="uq_models_server_id_model_name"),
 )

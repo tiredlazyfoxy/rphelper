@@ -17,6 +17,10 @@ from app.errors import (
     DomainError,
     InsufficientRoleError,
     InvalidCredentialsError,
+    LlmServerNotFoundError,
+    LlmUnreachableError,
+    ModelNotEnabledError,
+    NoEmbeddingModelError,
     NotAuthenticatedError,
     SecretRefError,
     SelfRoleChangeRefusedError,
@@ -531,3 +535,135 @@ def test_the_three_account_errors_are_distinct_codes__S005_002_DoD1() -> None:
         InsufficientRoleError.code,
     }
     assert not set(codes) & existing
+
+
+# ============================================================================
+# Feature 006, step 001 (``001.tables-errors-and-secret-ref.md``) — DoD-8 / DoD-9:
+# ``llm_unreachable``/502, ``no_embedding_model``/409, ``model_not_enabled``/409 and
+# ``llm_server_not_found``/404 (feature 006 ``context.md`` D7) are ``DomainError``
+# subclasses that keep the base constructor, render the one wire shape with the caller's
+# ``detail`` intact, and add no exception handler.
+# ============================================================================
+
+LLM_ERRORS: list[tuple[type[DomainError], str, int]] = [
+    (LlmUnreachableError, "llm_unreachable", 502),
+    (NoEmbeddingModelError, "no_embedding_model", 409),
+    (ModelNotEnabledError, "model_not_enabled", 409),
+    (LlmServerNotFoundError, "llm_server_not_found", 404),
+]
+
+# A caller-supplied detail with nested and mixed values; it must survive untouched.
+CALLER_DETAIL: dict[str, Any] = {
+    "server_id": "7312345678901234567",
+    "model_name": "qwen2.5-7b-instruct",
+    "level": "session",
+    "reason": "unreachable",
+    "nested": {"list": [1, "two", None], "flag": True},
+}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), LLM_ERRORS)
+def test_llm_error_is_a_domain_error_subclass__S006_001_DoD8(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """006/001 DoD-8: each new error is a ``DomainError`` subclass."""
+    assert issubclass(error_class, DomainError)
+    assert error_class is not DomainError
+    assert isinstance(error_class(), Exception)
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), LLM_ERRORS)
+def test_llm_error_sets_code_and_status_as_class_attributes__S006_001_DoD8(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """006/001 DoD-8: the code and HTTP status (D7) are set on the subclass itself."""
+    assert "code" in vars(error_class)
+    assert "http_status" in vars(error_class)
+    assert error_class.code == code
+    assert error_class.http_status == status
+    error = error_class()
+    assert error.code == code
+    assert error.http_status == status
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), LLM_ERRORS)
+def test_llm_error_keeps_the_base_message_and_detail_constructor__S006_001_DoD8(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """006/001 DoD-8: ``(message, detail)`` as the base takes them, positionally or by keyword."""
+    positional = error_class("the upstream said no", CALLER_DETAIL)
+    assert positional.message == "the upstream said no"
+    assert positional.detail == CALLER_DETAIL
+    by_keyword = error_class(message="by keyword", detail={"reason": "auth_failed"})
+    assert by_keyword.message == "by keyword"
+    assert by_keyword.detail == {"reason": "auth_failed"}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), LLM_ERRORS)
+def test_llm_error_hard_codes_nothing_into_detail__S006_001_DoD8(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """006/001 DoD-8: callers supply ``detail``; without one it is empty."""
+    assert error_class().detail == {}
+    assert error_class(detail={"only": "this"}).detail == {"only": "this"}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), LLM_ERRORS)
+def test_llm_error_renders_the_wire_shape_with_the_callers_detail__S006_001_DoD8(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """006/001 DoD-8: ``{"error": {code, message, detail}}`` with the caller's detail preserved intact."""
+    body = error_class("a message", CALLER_DETAIL).to_wire()
+    assert _is_wire_shape(body)
+    assert body == {"error": {"code": code, "message": "a message", "detail": CALLER_DETAIL}}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), LLM_ERRORS)
+def test_llm_error_from_a_route_answers_its_status_in_the_wire_shape__S006_001_DoD8(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """006/001 DoD-8: through the existing handler, the response is the D7 status + the wire body."""
+    app = _app_raising(error_class("a message", CALLER_DETAIL))
+    response = TestClient(app).get("/boom")
+    assert response.status_code == status
+    payload = response.json()
+    assert _is_wire_shape(payload)
+    assert payload == {"error": {"code": code, "message": "a message", "detail": CALLER_DETAIL}}
+
+
+def test_the_four_llm_errors_carry_distinct_new_codes__S006_001_DoD8() -> None:
+    """006/001 DoD-8: four distinct codes, none reusing a code that existed before this step."""
+    codes = [error_class.code for error_class, _code, _status in LLM_ERRORS]
+    assert len(set(codes)) == 4
+    existing = {
+        SecretRefError.code,
+        AlreadyConfiguredError.code,
+        InvalidCredentialsError.code,
+        NotAuthenticatedError.code,
+        InsufficientRoleError.code,
+        UsernameTakenError.code,
+        UserNotFoundError.code,
+        SelfRoleChangeRefusedError.code,
+    }
+    assert not set(codes) & existing
+
+
+def test_register_exception_handlers_installs_only_the_domain_error_handler__S006_001_DoD9() -> None:
+    """006/001 DoD-9: the handlers ``register_exception_handlers`` adds are exactly the one it added
+    before this step — the ``DomainError`` handler — and nothing keyed on a new class."""
+    app = FastAPI()
+    baseline = dict(app.exception_handlers)
+    register_exception_handlers(app)
+    added = {key for key in app.exception_handlers if key not in baseline}
+    assert added == {DomainError}
+    for key, handler in baseline.items():
+        assert app.exception_handlers[key] is handler
+
+
+def test_no_handler_is_keyed_on_any_llm_error__S006_001_DoD9() -> None:
+    """006/001 DoD-9: the base-class handler covers the four; no handler keyed on any is added."""
+    app = FastAPI()
+    register_exception_handlers(app)
+    assert DomainError in app.exception_handlers
+    for error_class, _code, _status in LLM_ERRORS:
+        assert error_class not in app.exception_handlers

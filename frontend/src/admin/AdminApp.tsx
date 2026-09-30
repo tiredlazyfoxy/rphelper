@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { AdminShell } from "./AdminShell";
 import { AdminShellState } from "./adminShellState";
+import { LlmServersRoute } from "./LlmServersPage";
 import { NotFoundPage } from "./NotFoundPage";
 import { UsersPage } from "./UsersPage";
 
@@ -15,7 +16,7 @@ export function AdminApp(): React.JSX.Element {
     <AdminShell shell={shell}>
       <Routes>
         <Route path="/" element={<UsersPage />} />
-        <Route path="/llm-servers" element={<NotFoundPage />} />
+        <Route path="/llm-servers" element={<LlmServersRoute />} />
         <Route path="/database" element={<NotFoundPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>

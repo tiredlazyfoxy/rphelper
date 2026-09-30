@@ -9,12 +9,14 @@ assertion now also requires `users`, and the `users` table (003/001 DoD-1..3) an
 enum (003/001 DoD-4) are covered below.
 """
 
+import importlib
+import sys
 from collections.abc import Iterator, Mapping
 from enum import Enum
 from typing import Any
 
 import pytest
-from sqlalchemy import Connection, Engine, MetaData, Table, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, Connection, Engine, MetaData, String, Table, UniqueConstraint, text
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.schema import CreateTable
@@ -569,3 +571,449 @@ def test_auth_sessions_columns_are_unchanged_by_the_users_edit__S005_001_DoD2() 
     """005/001 DoD-2 — the `auth_sessions` column set from 004/001 is untouched."""
     assert {column.name for column in _auth_sessions().columns} == AUTH_SESSIONS_COLUMNS
     assert "last_login_at" not in _auth_sessions().c
+
+
+# ======================================================================================
+# Feature 006, step 001 (`001.tables-errors-and-secret-ref.md`) — `llm_servers` + `models`.
+# Expected values come from that step's DoD-1..DoD-7, `data-model.md`'s `llm_servers` and
+# `models` sections, and feature 006 `context.md` D1 / D10. Tests are suffixed
+# `__S006_001_DoD<n>`.
+# ======================================================================================
+
+LLM_SERVERS_COLUMNS = {
+    "id",
+    "name",
+    "kind",
+    "base_url",
+    "api_key_ref",
+    "last_test_at",
+    "last_test_ok",
+    "last_test_error",
+    "created_at",
+    "updated_at",
+}
+
+MODELS_COLUMNS = {
+    "id",
+    "server_id",
+    "model_name",
+    "is_enabled",
+    "is_embedding_designated",
+    "embedding_dim",
+    "created_at",
+    "updated_at",
+}
+
+# The registry as it stood before this step (users: 003/001 + 005/001; auth_sessions: 004/001).
+PRE_006_TABLES = {"users", "auth_sessions"}
+NEW_006_TABLES = {"llm_servers", "models"}
+
+# context.md D1: the "active" switch admin-surfaces.md describes is deliberately dropped.
+FORBIDDEN_SERVER_FLAG_COLUMNS = ("active", "is_active", "enabled")
+
+
+def _llm_servers() -> Table:
+    return schema.metadata.tables["llm_servers"]
+
+
+def _models() -> Table:
+    return schema.metadata.tables["models"]
+
+
+def _server_values(server_id: int, name: str = "local") -> dict[str, Any]:
+    return {
+        "id": server_id,
+        "name": name,
+        "kind": "llamaswap",
+        "base_url": "http://127.0.0.1:8080/v1",
+        "api_key_ref": None,
+        "created_at": TIMESTAMP,
+        "updated_at": TIMESTAMP,
+    }
+
+
+def _model_values(model_id: int, server_id: int, model_name: str, **overrides: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "id": model_id,
+        "server_id": server_id,
+        "model_name": model_name,
+        "created_at": TIMESTAMP,
+        "updated_at": TIMESTAMP,
+    }
+    values.update(overrides)
+    return values
+
+
+def _insert_server(connection: Connection, server_id: int, name: str = "local") -> None:
+    connection.execute(_llm_servers().insert().values(**_server_values(server_id, name)))
+
+
+def _insert_model(connection: Connection, model_id: int, server_id: int, model_name: str, **overrides: Any) -> None:
+    connection.execute(_models().insert().values(**_model_values(model_id, server_id, model_name, **overrides)))
+
+
+def _created_table_names(connection: Connection) -> set[str]:
+    rows = connection.execute(text("SELECT name FROM sqlite_master WHERE type = 'table'")).all()
+    return {row[0] for row in rows if not str(row[0]).startswith("sqlite_")}
+
+
+@pytest.fixture
+def llm_connection(db_engine: Engine) -> Iterator[Connection]:
+    """A connection to a fresh per-test SQLite file with the whole registry created."""
+    with db_engine.connect() as connection:
+        schema.metadata.create_all(connection)
+        connection.commit()
+        yield connection
+
+
+# --- 006/001 DoD-1: `llm_servers` has exactly data-model.md's columns; big-int PK ------
+
+
+def test_registry_exposes_an_llm_servers_table__S006_001_DoD1() -> None:
+    """006/001 DoD-1 — the registry carries a table named `llm_servers`."""
+    assert "llm_servers" in schema.metadata.tables
+    assert isinstance(_llm_servers(), Table)
+    assert _llm_servers().name == "llm_servers"
+
+
+def test_llm_servers_has_exactly_the_data_model_columns__S006_001_DoD1() -> None:
+    """006/001 DoD-1 — exactly the columns `data-model.md` names, no more, no fewer."""
+    names = [column.name for column in _llm_servers().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == LLM_SERVERS_COLUMNS
+
+
+def test_llm_servers_id_is_the_sole_primary_key__S006_001_DoD1() -> None:
+    """006/001 DoD-1 — `id` is the primary key, alone."""
+    assert [column.name for column in _llm_servers().primary_key.columns] == ["id"]
+
+
+def test_llm_servers_id_is_a_big_integer__S006_001_DoD1() -> None:
+    """006/001 DoD-1 — the snowflake primary key is a big integer."""
+    assert isinstance(_llm_servers().c.id.type, BigInteger)
+
+
+def test_llm_servers_id_does_not_autoincrement__S006_001_DoD1() -> None:
+    """006/001 DoD-1 — the id is minted before the INSERT: not autoincrementing."""
+    assert _llm_servers().c.id.autoincrement is False
+
+
+def test_llm_servers_ddl_contains_no_autoincrement__S006_001_DoD1() -> None:
+    """006/001 DoD-1 — the SQLite DDL for `llm_servers` never says AUTOINCREMENT."""
+    ddl = str(CreateTable(_llm_servers()).compile(dialect=sqlite.dialect()))
+    assert "AUTOINCREMENT" not in ddl.upper()
+
+
+def test_llm_servers_explicit_64_bit_id_is_stored_as_given__S006_001_DoD1(llm_connection: Connection) -> None:
+    """006/001 DoD-1 — an application-minted 64-bit id is kept verbatim."""
+    minted = 2**62 + 777
+    _insert_server(llm_connection, minted)
+    stored = llm_connection.execute(text("SELECT id FROM llm_servers")).scalar_one()
+    assert stored == minted
+
+
+@pytest.mark.parametrize("column", ["api_key_ref", "last_test_at", "last_test_ok", "last_test_error"])
+def test_llm_servers_pointer_and_last_test_columns_are_nullable__S006_001_DoD1(column: str) -> None:
+    """006/001 DoD-1 — the API-key pointer and the three last-test columns are nullable."""
+    assert _llm_servers().c[column].nullable is True
+
+
+@pytest.mark.parametrize("column", ["last_test_at", "created_at", "updated_at"])
+def test_llm_servers_timestamps_are_text__S006_001_DoD1(column: str) -> None:
+    """006/001 DoD-1 — instants are UTC ISO-8601 text, matching the file's convention."""
+    assert isinstance(_llm_servers().c[column].type, String)
+
+
+def test_llm_servers_last_test_ok_is_a_boolean__S006_001_DoD1() -> None:
+    """006/001 DoD-1 — the last-test outcome flag is a boolean."""
+    assert isinstance(_llm_servers().c.last_test_ok.type, Boolean)
+
+
+def test_llm_servers_created_in_a_real_database_has_exactly_the_columns__S006_001_DoD1(
+    llm_connection: Connection,
+) -> None:
+    """006/001 DoD-1 — the created SQLite table carries exactly the documented columns."""
+    rows = llm_connection.execute(text("PRAGMA table_info(llm_servers)")).all()
+    assert {row[1] for row in rows} == LLM_SERVERS_COLUMNS
+
+
+def test_llm_servers_row_without_pointer_or_test_result_stores_nulls__S006_001_DoD1(
+    llm_connection: Connection,
+) -> None:
+    """006/001 DoD-1 — a never-tested registration with no pointer is accepted with NULLs there."""
+    _insert_server(llm_connection, 1)
+    row = llm_connection.execute(
+        text("SELECT api_key_ref, last_test_at, last_test_ok, last_test_error FROM llm_servers")
+    ).one()
+    assert tuple(row) == (None, None, None, None)
+
+
+# --- 006/001 DoD-2: no active flag on a server (context.md D1) --------------------------
+
+
+@pytest.mark.parametrize("column", FORBIDDEN_SERVER_FLAG_COLUMNS)
+def test_llm_servers_declares_no_active_flag__S006_001_DoD2(column: str) -> None:
+    """006/001 DoD-2 — no `active` / `is_active` / `enabled` column on `llm_servers`."""
+    assert column not in {c.name for c in _llm_servers().columns}
+
+
+def test_llm_servers_created_in_a_real_database_has_no_active_flag__S006_001_DoD2(
+    llm_connection: Connection,
+) -> None:
+    """006/001 DoD-2 — the created SQLite table carries none of the forbidden flag columns."""
+    rows = llm_connection.execute(text("PRAGMA table_info(llm_servers)")).all()
+    names = {row[1] for row in rows}
+    for column in FORBIDDEN_SERVER_FLAG_COLUMNS:
+        assert column not in names
+
+
+# --- 006/001 DoD-3: `models` columns; `server_id` FK -> llm_servers.id ON DELETE CASCADE -
+
+
+def test_registry_exposes_a_models_table__S006_001_DoD3() -> None:
+    """006/001 DoD-3 — the registry carries a table named `models`."""
+    assert "models" in schema.metadata.tables
+    assert isinstance(_models(), Table)
+    assert _models().name == "models"
+
+
+def test_models_has_exactly_the_data_model_columns__S006_001_DoD3() -> None:
+    """006/001 DoD-3 — the columns `data-model.md` names, including `embedding_dim`."""
+    names = [column.name for column in _models().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == MODELS_COLUMNS
+
+
+def test_models_id_is_a_non_autoincrementing_big_integer_primary_key__S006_001_DoD3() -> None:
+    """006/001 DoD-3 — the snowflake primary key, alone, big integer, never autoincremented."""
+    assert [column.name for column in _models().primary_key.columns] == ["id"]
+    assert isinstance(_models().c.id.type, BigInteger)
+    assert _models().c.id.autoincrement is False
+    ddl = str(CreateTable(_models()).compile(dialect=sqlite.dialect()))
+    assert "AUTOINCREMENT" not in ddl.upper()
+
+
+def test_models_embedding_dim_is_nullable__S006_001_DoD3() -> None:
+    """006/001 DoD-3 — `embedding_dim` is nullable (meaningful only on the designated row)."""
+    assert _models().c.embedding_dim.nullable is True
+
+
+def test_models_server_id_is_a_foreign_key_to_llm_servers_id__S006_001_DoD3() -> None:
+    """006/001 DoD-3 — `server_id` carries exactly one declared FK, targeting `llm_servers.id`."""
+    foreign_keys = list(_models().c.server_id.foreign_keys)
+    assert len(foreign_keys) == 1
+    assert foreign_keys[0].target_fullname == "llm_servers.id"
+
+
+def test_models_server_id_foreign_key_declares_on_delete_cascade__S006_001_DoD3() -> None:
+    """006/001 DoD-3 — the FK is declared `ON DELETE CASCADE` (what feature 007 introspects)."""
+    foreign_key = next(iter(_models().c.server_id.foreign_keys))
+    assert foreign_key.ondelete is not None
+    assert foreign_key.ondelete.upper() == "CASCADE"
+
+
+def test_models_cascade_is_present_in_a_real_database__S006_001_DoD3(llm_connection: Connection) -> None:
+    """006/001 DoD-3 — the created SQLite table reports the FK to llm_servers(id) with CASCADE."""
+    rows = llm_connection.execute(text("PRAGMA foreign_key_list(models)")).all()
+    # PRAGMA foreign_key_list columns: id, seq, table, from, to, on_update, on_delete, match
+    matching = [row for row in rows if row[2] == "llm_servers" and row[3] == "server_id"]
+    assert len(matching) == 1
+    assert matching[0][4] == "id"
+    assert str(matching[0][6]).upper() == "CASCADE"
+
+
+def test_models_created_in_a_real_database_has_exactly_the_columns__S006_001_DoD3(
+    llm_connection: Connection,
+) -> None:
+    """006/001 DoD-3 — the created SQLite table carries exactly the documented columns."""
+    rows = llm_connection.execute(text("PRAGMA table_info(models)")).all()
+    assert {row[1] for row in rows} == MODELS_COLUMNS
+
+
+def test_models_row_without_embedding_dim_stores_null__S006_001_DoD3(llm_connection: Connection) -> None:
+    """006/001 DoD-3 — a row that names no dimension is accepted and stores NULL there."""
+    _insert_server(llm_connection, 1)
+    _insert_model(llm_connection, 10, 1, "qwen")
+    stored = llm_connection.execute(text("SELECT embedding_dim FROM models")).scalar_one()
+    assert stored is None
+
+
+# --- 006/001 DoD-4: unique (server_id, model_name); non-null flags defaulting to false --
+
+
+def _has_unique_pair(table: Table, columns: set[str]) -> bool:
+    for constraint in table.constraints:
+        if isinstance(constraint, UniqueConstraint) and {c.name for c in constraint.columns} == columns:
+            return True
+    return any(index.unique and {c.name for c in index.columns} == columns for index in table.indexes)
+
+
+def test_models_declares_a_unique_constraint_on_server_and_model_name__S006_001_DoD4() -> None:
+    """006/001 DoD-4 — a uniqueness declaration covers exactly the (server id, model name) pair."""
+    assert _has_unique_pair(_models(), {"server_id", "model_name"})
+
+
+def test_models_does_not_make_model_name_unique_on_its_own__S006_001_DoD4() -> None:
+    """006/001 DoD-4 — uniqueness is on the pair, not on the model name alone."""
+    assert _models().c.model_name.unique is not True
+    assert not _has_unique_pair(_models(), {"model_name"})
+
+
+@pytest.mark.parametrize("column", ["is_enabled", "is_embedding_designated"])
+def test_models_flags_are_non_nullable_booleans__S006_001_DoD4(column: str) -> None:
+    """006/001 DoD-4 — the enabled and designation flags are non-nullable booleans."""
+    assert _models().c[column].nullable is False
+    assert isinstance(_models().c[column].type, Boolean)
+
+
+def test_models_flags_default_to_false_when_not_supplied__S006_001_DoD4(llm_connection: Connection) -> None:
+    """006/001 DoD-4 — a row inserted without either flag reads back false for both."""
+    _insert_server(llm_connection, 1)
+    _insert_model(llm_connection, 10, 1, "qwen")
+    row = llm_connection.execute(
+        _models().select().where(_models().c.id == 10)
+    ).one()
+    assert row.is_enabled is False
+    assert row.is_embedding_designated is False
+    raw = llm_connection.execute(
+        text("SELECT is_enabled, is_embedding_designated FROM models WHERE id = 10")
+    ).one()
+    assert tuple(raw) == (0, 0)
+
+
+# --- 006/001 DoD-5: create_all adds exactly the two tables; the pair is enforced ---------
+
+
+def test_registry_gains_exactly_the_two_new_tables__S006_001_DoD5() -> None:
+    """006/001 DoD-5 — beside the tables that pre-date this step, only the two new ones exist."""
+    assert set(schema.metadata.tables) - PRE_006_TABLES == NEW_006_TABLES
+
+
+def test_create_all_on_a_fresh_file_database_creates_both_tables__S006_001_DoD5(
+    llm_connection: Connection,
+) -> None:
+    """006/001 DoD-5 — `create_all` against a fresh file creates both, and no other new table."""
+    created = _created_table_names(llm_connection)
+    assert NEW_006_TABLES <= created
+    assert created - PRE_006_TABLES == NEW_006_TABLES
+
+
+def test_duplicate_server_and_model_name_pair_is_refused__S006_001_DoD5(llm_connection: Connection) -> None:
+    """006/001 DoD-5 — a second row with the same (server id, model name) is refused by SQLite."""
+    _insert_server(llm_connection, 1)
+    _insert_model(llm_connection, 10, 1, "qwen")
+    with pytest.raises(IntegrityError):
+        _insert_model(llm_connection, 11, 1, "qwen")
+
+
+def test_same_model_name_under_two_servers_is_accepted__S006_001_DoD5(llm_connection: Connection) -> None:
+    """006/001 DoD-5 — the same model name under two different servers is two legal rows."""
+    _insert_server(llm_connection, 1, "first")
+    _insert_server(llm_connection, 2, "second")
+    _insert_model(llm_connection, 10, 1, "gpt-4o")
+    _insert_model(llm_connection, 11, 2, "gpt-4o")
+    rows = llm_connection.execute(
+        text("SELECT server_id FROM models WHERE model_name = 'gpt-4o' ORDER BY server_id")
+    ).all()
+    assert [row[0] for row in rows] == [1, 2]
+
+
+def test_two_different_model_names_under_one_server_are_accepted__S006_001_DoD5(
+    llm_connection: Connection,
+) -> None:
+    """006/001 DoD-5 — the constraint is on the pair: distinct names under one server coexist."""
+    _insert_server(llm_connection, 1)
+    _insert_model(llm_connection, 10, 1, "qwen")
+    _insert_model(llm_connection, 11, 1, "llama")
+    count = llm_connection.execute(text("SELECT COUNT(*) FROM models WHERE server_id = 1")).scalar_one()
+    assert count == 2
+
+
+# --- 006/001 DoD-6: deleting a server cascades to its models rows only -------------------
+
+
+def test_deleting_a_server_removes_only_its_models_rows__S006_001_DoD6(db_engine: Engine) -> None:
+    """006/001 DoD-6 — with `PRAGMA foreign_keys = ON`, deleting a server removes its `models`
+    rows and leaves every other server's rows untouched."""
+    with db_engine.connect() as setup:
+        schema.metadata.create_all(setup)
+        setup.commit()
+
+    with db_engine.connect() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+        assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+
+        _insert_server(connection, 1, "doomed")
+        _insert_server(connection, 2, "kept")
+        _insert_server(connection, 3, "also-kept")
+        _insert_model(connection, 10, 1, "qwen")
+        _insert_model(connection, 11, 1, "llama")
+        _insert_model(connection, 20, 2, "qwen")
+        _insert_model(connection, 21, 2, "embed", is_embedding_designated=True, embedding_dim=768)
+        _insert_model(connection, 30, 3, "llama", is_enabled=True)
+        connection.commit()
+
+        connection.execute(_llm_servers().delete().where(_llm_servers().c.id == 1))
+        connection.commit()
+
+        servers = connection.execute(text("SELECT id FROM llm_servers ORDER BY id")).all()
+        assert [row[0] for row in servers] == [2, 3]
+
+        remaining = connection.execute(
+            text(
+                "SELECT id, server_id, model_name, is_enabled, is_embedding_designated, embedding_dim "
+                "FROM models ORDER BY id"
+            )
+        ).all()
+        assert [tuple(row) for row in remaining] == [
+            (20, 2, "qwen", 0, 0, None),
+            (21, 2, "embed", 0, 1, 768),
+            (30, 3, "llama", 1, 0, None),
+        ]
+        orphaned = connection.execute(text("SELECT COUNT(*) FROM models WHERE server_id = 1")).scalar_one()
+        assert orphaned == 0
+
+
+# --- 006/001 DoD-7: one shared metadata; no import-side-effect registration --------------
+
+
+def test_every_registry_table_uses_the_one_shared_metadata__S006_001_DoD7() -> None:
+    """006/001 DoD-7 — every table in the registry, the two new ones included, is bound to `metadata`."""
+    tables = schema.metadata.tables
+    assert NEW_006_TABLES <= set(tables)
+    for table in tables.values():
+        assert table.metadata is schema.metadata
+
+
+def test_every_registry_table_is_a_literal_in_the_schema_module__S006_001_DoD7() -> None:
+    """006/001 DoD-7 — each registered table is a `Table` object bound in `app.db.schema` itself."""
+    module_tables = [value for value in vars(schema).values() if isinstance(value, Table)]
+    for table in schema.metadata.tables.values():
+        assert any(candidate is table for candidate in module_tables), table.name
+    for table in module_tables:
+        assert table.metadata is schema.metadata
+
+
+def test_importing_this_steps_modules_registers_no_table__S006_001_DoD7() -> None:
+    """006/001 DoD-7 — importing the step's other modules adds nothing to the registry."""
+    before = set(schema.metadata.tables)
+    for module_name in ("app.errors", "app.config", "app.models.secret_ref", "app.models"):
+        importlib.import_module(module_name)
+    assert set(schema.metadata.tables) == before
+
+
+def test_no_other_app_module_defines_its_own_table__S006_001_DoD7() -> None:
+    """006/001 DoD-7 — no loaded `app.*` module holds a `Table` that is not one of the registry's
+    own objects, and no `app.*` module defines a second `MetaData`."""
+    importlib.import_module("app.models.secret_ref")
+    registry_tables = list(schema.metadata.tables.values())
+    for module_name, module in list(sys.modules.items()):
+        if module is None or not (module_name == "app" or module_name.startswith("app.")):
+            continue
+        if module_name == "app.db.schema":
+            continue
+        for value in list(vars(module).values()):
+            if isinstance(value, Table):
+                assert any(value is table for table in registry_tables), (module_name, value.name)
+            if isinstance(value, MetaData):
+                assert value is schema.metadata, module_name

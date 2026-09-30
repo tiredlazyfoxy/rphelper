@@ -201,6 +201,50 @@ class SelfRoleChangeRefusedError(DomainError):
         super().__init__(message, detail)
 
 
+
+class LlmUnreachableError(DomainError):
+    """An outbound call to a registered LLM server failed upstream of this instance.
+
+    Feature `006` (`context.md` D7): a transport failure, a timeout or a non-2xx answer.
+    502, because the fault is upstream, not in the caller's request. Callers supply
+    `detail`; nothing is hard-coded into it.
+    """
+
+    code = "llm_unreachable"
+    http_status = 502
+
+
+class NoEmbeddingModelError(DomainError):
+    """An operation needs the designated embedding model and none is designated.
+
+    Feature `006` (`context.md` D7): a configuration conflict, hence 409.
+    """
+
+    code = "no_embedding_model"
+    http_status = 409
+
+
+class ModelNotEnabledError(DomainError):
+    """A model reference names a model that is not enabled at the level asked for.
+
+    Feature `006` (`context.md` D7): a configuration conflict, hence 409. `detail` is
+    free to carry the model name and the level; the handler never logs it.
+    """
+
+    code = "model_not_enabled"
+    http_status = 409
+
+
+class LlmServerNotFoundError(DomainError):
+    """An id-addressed LLM-server operation names no existing registration.
+
+    Feature `006` (`context.md` D7): the sibling of `user_not_found`, 404.
+    """
+
+    code = "llm_server_not_found"
+    http_status = 404
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later
