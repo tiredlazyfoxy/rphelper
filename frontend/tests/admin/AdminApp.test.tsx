@@ -481,10 +481,11 @@ describe("the route table is flat and the shell sits above it", () => {
 });
 
 // ===========================================================================
-describe("the declared-but-unbuilt rows and unknown paths render the 404", () => {
-  // Feature 006 step 006 (DoD-18) has since built `/llm-servers`; it is no longer an unbuilt
-  // row, so only `/database` and unmatched paths remain on the 404 here.
-  it.each(["/database", "/nope", "/deeply/nested/unknown"])(
+describe("unknown paths render the 404", () => {
+  // Feature 006 step 006 (DoD-18) has since built `/llm-servers`, and feature 007 step 005
+  // (DoD-13) has since built `/database`; neither is an unbuilt row any more, so only
+  // unmatched paths remain on the 404 here.
+  it.each(["/nope", "/deeply/nested/unknown"])(
     "%s renders the 404 element — DoD-10",
     (pathname) => {
       renderApp(pathname);
@@ -498,6 +499,12 @@ describe("the declared-but-unbuilt rows and unknown paths render the 404", () =>
     expect(mainRegion().textContent ?? "").not.toMatch(NOT_FOUND_TEXT);
   });
 
+  it("/database no longer renders the 404 element — DoD-10 (superseded by 007/005 DoD-13)", () => {
+    // The page's own contents are 007's tests' concern; its requests stay unsettled here.
+    renderApp("/database");
+    expect(mainRegion().textContent ?? "").not.toMatch(NOT_FOUND_TEXT);
+  });
+
   it("/ renders the Users placeholder, not the 404 — DoD-10", () => {
     renderApp("/");
     const text = mainRegion().textContent ?? "";
@@ -505,20 +512,26 @@ describe("the declared-but-unbuilt rows and unknown paths render the 404", () =>
     expect(text).not.toMatch(NOT_FOUND_TEXT);
   });
 
-  it("the nav still lists the two unbuilt rows while they render the 404 — DoD-10", () => {
+  it("the nav lists the LLM Servers and Database rows and highlights Database at /database — DoD-10", () => {
     renderApp("/database");
     expect(navLink("LLM Servers")).toBeInTheDocument();
     expect(navLink("Database")).toBeInTheDocument();
     expect(isHighlighted(navLink("Database"))).toBe(true);
   });
 
-  it.each(["/admin/database", "/admin/nope"])(
+  it.each(["/admin/nope"])(
     "in the booted entry, %s renders the 404 element — DoD-10",
     async (pathname) => {
       await bootAdmin(pathname);
       expect(mainRegion().textContent ?? "").toMatch(NOT_FOUND_TEXT);
     },
   );
+
+  it("in the booted entry, /admin/database no longer renders the 404 element — DoD-10 (superseded by 007/005 DoD-13)", async () => {
+    // The page's own contents are 007's tests' concern; its requests stay unsettled here.
+    await bootAdmin("/admin/database");
+    expect(mainRegion().textContent ?? "").not.toMatch(NOT_FOUND_TEXT);
+  });
 });
 
 // ===========================================================================

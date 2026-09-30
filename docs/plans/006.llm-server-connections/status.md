@@ -297,6 +297,9 @@ All appended to `backend/app/services/llm_registry.py` (step 003's symbols untou
 - Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓, DoD-9 ✓, DoD-10 ✓, DoD-11 ✓, DoD-12 ✓, DoD-13 ✓, DoD-14 ✓, DoD-15 ✓, DoD-16 ✓, DoD-17 [manual/live, no test], DoD-18 [manual/live, no test]
 - Note: the table has no designation column (step 006 / D1), so "the row shows the designation" (DoD-3/4/5/8) is asserted on the page store's re-loaded rows plus the Clear Embedding item moving with it. The frozen props give the modal only the designated name, so union/failed-probe fixtures keep `enabled_model_names` equal to `[designated]` or `[]`.
 
+### Step 006 — repro test (2026-09-30)
+- `frontend/tests/admin/llmServersPage.test.tsx` — covers DoD-18 (superseded in part by 007/005 DoD-13) — reproduces: a stale DoD-18 case still expected `/database` (MemoryRouter) to render the 404 after feature 007 step 005 built the Database page (no code defect; stale-test correction). `/database` is dropped from the "%s still renders the 404 element" list, which keeps `/nope`. Added one light case: `/database` is not the LLM Servers page, meaning no request goes to the LLM list path `/api/admin/llm-servers`. It asserts none of the Database page's internals, and the route block's existing fetch stub leaves any `/api/admin/database/...` request unsettled. Every other assertion is unchanged, including the flat-`<Routes>` source scan for the four paths `*`, `/`, `/database`, `/llm-servers`, and so are its tags and expected values.
+
 ## Notes & Issues
 
 - Step 001: `ruff check .` from `backend/` reports 4 findings, all in test files (UP047 in `tests/test_llm_client.py`, `tests/test_llm_registry_models.py`, `tests/test_llm_registry_servers.py`; E501 in `tests/test_llm_registry_models.py:1370`). `ruff check app` is clean. Test-coder's domain.

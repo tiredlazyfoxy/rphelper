@@ -1468,9 +1468,17 @@ describe("the /llm-servers route", () => {
     expect(seen(mock).some((call) => call.path === LIST_PATH)).toBe(false);
   });
 
-  it.each(["/database", "/nope"])("%s still renders the 404 element — DoD-18", async (pathname) => {
+  // /database was the 404 when DoD-18 was written; 007/005 DoD-13 has since built it.
+  // Its own content is 007's to assert — here only "it is not the LLM Servers page".
+  it.each(["/nope"])("%s still renders the 404 element — DoD-18", async (pathname) => {
     const mock = await renderApp(pathname);
     expect(mainText()).toMatch(NOT_FOUND_TEXT);
+    expect(seen(mock).some((call) => call.path === LIST_PATH)).toBe(false);
+  });
+
+  it("/database is not the LLM Servers page — DoD-18 (superseded in part by 007/005 DoD-13)", async () => {
+    // answerRoutes leaves any /api/admin/database/... request unsettled, so nothing errors.
+    const mock = await renderApp("/database");
     expect(seen(mock).some((call) => call.path === LIST_PATH)).toBe(false);
   });
 
