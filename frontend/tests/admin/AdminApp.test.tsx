@@ -482,13 +482,21 @@ describe("the route table is flat and the shell sits above it", () => {
 
 // ===========================================================================
 describe("the declared-but-unbuilt rows and unknown paths render the 404", () => {
-  it.each(["/llm-servers", "/database", "/nope", "/deeply/nested/unknown"])(
+  // Feature 006 step 006 (DoD-18) has since built `/llm-servers`; it is no longer an unbuilt
+  // row, so only `/database` and unmatched paths remain on the 404 here.
+  it.each(["/database", "/nope", "/deeply/nested/unknown"])(
     "%s renders the 404 element — DoD-10",
     (pathname) => {
       renderApp(pathname);
       expect(mainRegion().textContent ?? "").toMatch(NOT_FOUND_TEXT);
     },
   );
+
+  it("/llm-servers no longer renders the 404 element — DoD-10 (superseded by 006 DoD-18)", () => {
+    // The page's own contents are 006's tests' concern; its requests stay unsettled here.
+    renderApp("/llm-servers");
+    expect(mainRegion().textContent ?? "").not.toMatch(NOT_FOUND_TEXT);
+  });
 
   it("/ renders the Users placeholder, not the 404 — DoD-10", () => {
     renderApp("/");
@@ -504,7 +512,7 @@ describe("the declared-but-unbuilt rows and unknown paths render the 404", () =>
     expect(isHighlighted(navLink("Database"))).toBe(true);
   });
 
-  it.each(["/admin/llm-servers", "/admin/database", "/admin/nope"])(
+  it.each(["/admin/database", "/admin/nope"])(
     "in the booted entry, %s renders the 404 element — DoD-10",
     async (pathname) => {
       await bootAdmin(pathname);
