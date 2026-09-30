@@ -22,8 +22,10 @@ from app.errors import (
     ModelNotEnabledError,
     NoEmbeddingModelError,
     NotAuthenticatedError,
+    SchemaApplyFailedError,
     SecretRefError,
     SelfRoleChangeRefusedError,
+    UnknownTableError,
     UsernameTakenError,
     UserNotFoundError,
     register_exception_handlers,
@@ -667,3 +669,142 @@ def test_no_handler_is_keyed_on_any_llm_error__S006_001_DoD9() -> None:
     assert DomainError in app.exception_handlers
     for error_class, _code, _status in LLM_ERRORS:
         assert error_class not in app.exception_handlers
+
+
+# ============================================================================
+# Feature 007, step 003 (``003.batch-ddl-executor-and-errors.md``) — DoD-16:
+# ``unknown_table``/404 and ``schema_apply_failed``/500 (feature 007 ``context.md`` D9) are
+# ``DomainError`` subclasses carrying only ``code`` and ``http_status``, render through the
+# already registered handler as ``{"error": {"code", "message", "detail"}}``, and
+# ``register_exception_handlers`` gains no second handler.
+# ============================================================================
+
+SCHEMA_ERRORS: list[tuple[type[DomainError], str, int]] = [
+    (UnknownTableError, "unknown_table", 404),
+    (SchemaApplyFailedError, "schema_apply_failed", 500),
+]
+
+# The detail each is raised with (D9): the table name; the table name plus the operation.
+SCHEMA_ERROR_DETAILS: dict[type[DomainError], dict[str, Any]] = {
+    UnknownTableError: {"table_name": "notes"},
+    SchemaApplyFailedError: {"table_name": "notes", "operation": "sync"},
+}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), SCHEMA_ERRORS)
+def test_schema_error_is_a_domain_error_subclass__S007_003_DoD16(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """007/003 DoD-16: each new error is a ``DomainError`` subclass."""
+    assert issubclass(error_class, DomainError)
+    assert error_class is not DomainError
+    assert isinstance(error_class(), Exception)
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), SCHEMA_ERRORS)
+def test_schema_error_sets_code_and_status_as_class_attributes__S007_003_DoD16(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """007/003 DoD-16: ``unknown_table``/404 and ``schema_apply_failed``/500, set on the subclass itself."""
+    assert "code" in vars(error_class)
+    assert "http_status" in vars(error_class)
+    assert error_class.code == code
+    assert error_class.http_status == status
+    error = error_class()
+    assert error.code == code
+    assert error.http_status == status
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), SCHEMA_ERRORS)
+def test_schema_error_carries_only_code_and_http_status__S007_003_DoD16(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """007/003 DoD-16: the subclass body is ``code`` and ``http_status`` and nothing else — no extra
+    attribute, method or constructor of its own."""
+    own = {name for name in vars(error_class) if not (name.startswith("__") and name.endswith("__"))}
+    assert own == {"code", "http_status"}
+    assert "__init__" not in vars(error_class)
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), SCHEMA_ERRORS)
+def test_schema_error_keeps_the_callers_detail__S007_003_DoD16(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """007/003 DoD-16: the raiser supplies ``detail`` through the base constructor, kept intact."""
+    detail = SCHEMA_ERROR_DETAILS[error_class]
+    assert error_class(detail=detail).detail == detail
+    assert error_class().detail == {}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), SCHEMA_ERRORS)
+def test_schema_error_renders_the_one_wire_shape__S007_003_DoD16(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """007/003 DoD-16: ``{"error": {code, message, detail}}`` with the raiser's detail."""
+    detail = SCHEMA_ERROR_DETAILS[error_class]
+    body = error_class("a message", detail).to_wire()
+    assert _is_wire_shape(body)
+    assert body == {"error": {"code": code, "message": "a message", "detail": detail}}
+    assert _is_wire_shape(error_class(detail=detail).to_wire())
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), SCHEMA_ERRORS)
+def test_schema_error_from_a_route_answers_its_status_in_the_wire_shape__S007_003_DoD16(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """007/003 DoD-16: through the already registered handler the response is 404/500 + the wire body."""
+    detail = SCHEMA_ERROR_DETAILS[error_class]
+    app = _app_raising(error_class("a message", detail))
+    response = TestClient(app).get("/boom")
+    assert response.status_code == status
+    payload = response.json()
+    assert _is_wire_shape(payload)
+    assert payload == {"error": {"code": code, "message": "a message", "detail": detail}}
+
+
+@pytest.mark.parametrize(("error_class", "code", "status"), SCHEMA_ERRORS)
+def test_schema_error_without_a_message_still_renders_the_wire_shape__S007_003_DoD16(
+    error_class: type[DomainError], code: str, status: int
+) -> None:
+    """007/003 DoD-16: raised as the executor raises it (detail only), the route answers the status
+    and the three-key body with that detail."""
+    detail = SCHEMA_ERROR_DETAILS[error_class]
+    response = TestClient(_app_raising(error_class(detail=detail))).get("/boom")
+    assert response.status_code == status
+    payload = response.json()
+    assert _is_wire_shape(payload)
+    assert payload["error"]["code"] == code
+    assert payload["error"]["detail"] == detail
+
+
+def test_no_second_handler_is_registered_for_the_schema_errors__S007_003_DoD16() -> None:
+    """007/003 DoD-16: ``register_exception_handlers`` still adds exactly the ``DomainError`` handler
+    and nothing keyed on either new class."""
+    app = FastAPI()
+    baseline = dict(app.exception_handlers)
+    register_exception_handlers(app)
+    added = {key for key in app.exception_handlers if key not in baseline}
+    assert added == {DomainError}
+    for error_class, _code, _status in SCHEMA_ERRORS:
+        assert error_class not in app.exception_handlers
+
+
+def test_the_two_schema_errors_carry_distinct_new_codes__S007_003_DoD16() -> None:
+    """007/003 DoD-16: two distinct codes, neither reusing a code that existed before this step."""
+    codes = [error_class.code for error_class, _code, _status in SCHEMA_ERRORS]
+    assert len(set(codes)) == 2
+    existing = {
+        SecretRefError.code,
+        AlreadyConfiguredError.code,
+        InvalidCredentialsError.code,
+        NotAuthenticatedError.code,
+        InsufficientRoleError.code,
+        UsernameTakenError.code,
+        UserNotFoundError.code,
+        SelfRoleChangeRefusedError.code,
+        LlmUnreachableError.code,
+        NoEmbeddingModelError.code,
+        ModelNotEnabledError.code,
+        LlmServerNotFoundError.code,
+    }
+    assert not set(codes) & existing

@@ -22,7 +22,10 @@ The factory's order is therefore fixed:
    `app.include_router(auth_router)` (feature `004`), which carries its own `/api` prefix
    and declares `POST /api/auth/login`, `POST /api/auth/logout` and `GET /api/me`, then
    `app.include_router(admin_users_router)` (feature `005`), which carries its own
-   `/api/admin/users` prefix and its router-level `require_role(Role.ADMIN)` guard.
+   `/api/admin/users` prefix and its router-level `require_role(Role.ADMIN)` guard, then
+   `app.include_router(admin_llm_router)` (feature `006`, `/api/admin/llm-servers`), then
+   `app.include_router(admin_db_router)` (feature `007`, `/api/admin/database`) — each with
+   the same router-level admin guard.
 
 **The lifespan runs no DDL.** No table creation, no upgrade, no schema check, and no
 create-if-missing convenience. Remediation is admin-triggered and belongs to feature
@@ -48,6 +51,7 @@ from app.config import get_settings
 from app.errors import register_exception_handlers
 from app.ids import build_id_generator
 from app.logging import configure_logging
+from app.routers.admin_db import router as admin_db_router
 from app.routers.admin_llm import router as admin_llm_router
 from app.routers.admin_users import router as admin_users_router
 from app.routers.auth import router as auth_router
@@ -74,7 +78,8 @@ def create_app() -> FastAPI:
     `SnowflakeGenerator` via `build_id_generator(settings)` and store that single
     instance on `app.state.id_generator`; `register_exception_handlers(app)`; then
     `app.include_router(health_router)`, `app.include_router(bootstrap_router)`,
-    `app.include_router(auth_router)` and `app.include_router(admin_users_router)`.
+    `app.include_router(auth_router)`, `app.include_router(admin_users_router)`,
+    `app.include_router(admin_llm_router)` and `app.include_router(admin_db_router)`.
 
     Constructed with `FastAPI(lifespan=lifespan)`.
 
@@ -95,6 +100,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(admin_users_router)
     app.include_router(admin_llm_router)
+    app.include_router(admin_db_router)
     return app
 
 

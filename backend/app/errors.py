@@ -245,6 +245,30 @@ class LlmServerNotFoundError(DomainError):
     http_status = 404
 
 
+class UnknownTableError(DomainError):
+    """A schema apply named a table the registry does not declare.
+
+    Feature `007` (`context.md` D9): raised by `app.db.sync` before any DDL, including for
+    a name that exists in the live database but not in the registry. `detail` carries the
+    name under `"table_name"`. 404.
+    """
+
+    code = "unknown_table"
+    http_status = 404
+
+
+class SchemaApplyFailedError(DomainError):
+    """A Create or a Sync could not be applied and was rolled back.
+
+    Feature `007` (`context.md` D9): a driver error, a failed cast, or a
+    `foreign_key_check` violation. `detail` carries `"table_name"` and `"operation"`
+    (`"create"` or `"sync"`) and never the driver's message. 500.
+    """
+
+    code = "schema_apply_failed"
+    http_status = 500
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later

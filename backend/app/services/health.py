@@ -14,8 +14,9 @@ The registry arrives as a **parameter, not a module import**: that is what makes
 `"missing"` branch reachable in a test today, before any table exists. Do not add
 `from app.db.schema import metadata` here — the router passes it in.
 
-The probe does the cheap `sqlite_master` read the architecture insists on — "a health
-check that cannot fail tells an operator nothing" — and answers honestly (decision D3).
+The probe touches the database as the architecture insists — "a health check that
+cannot fail tells an operator nothing" — and answers honestly (decision D3). Since
+feature `007` its `schema` answer is `db/drift.py`'s report over the registry, uncached.
 Against this feature's empty registry `schema` is trivially `"ok"`, which is correct and
 not a stub: the probe answers the question it was asked, "is every declared table
 present?", and with nothing declared the answer is yes. Feature `003` sharpens
@@ -25,8 +26,9 @@ function, not rewrites of it.
 
 from dataclasses import dataclass
 
-from sqlalchemy import Connection, MetaData, text
+from sqlalchemy import Connection, MetaData
 
+from app.db.drift import build_drift_report, report_has_drift, report_has_missing
 from app.models.health import HealthStatus, SchemaState
 from app.services.bootstrap import is_configured
 
@@ -45,32 +47,33 @@ class HealthProbeResult:
 
 
 def probe_health(connection: Connection, registry: MetaData) -> HealthProbeResult:
-    """Read `sqlite_master` and report what actually exists.
+    """Report what actually exists, reading the registry's drift report.
 
     - `configured` is true only once a `users` table is present **and** holds at least
       one row whose role is administrator. A present-but-empty `users` table is false.
-    - `schema` is `"missing"` when any table in `registry` is absent from
-      `sqlite_master`, and `"ok"` when every one is present. An empty registry is
-      trivially `"ok"`.
+    - `schema` is `"missing"` when any table in `registry` is absent, `"drift"` when
+      every one is present and at least one differs from its declaration, and `"ok"`
+      otherwise (feature 007, D10). An empty registry is trivially `"ok"`. The answer
+      is one word and names no table.
     - `status` rolls the two up, in this precedence: a `schema` other than `"ok"` gives
       `"degraded"`; otherwise `configured` being false gives `"unconfigured"`;
       otherwise `"ok"`.
 
     Opens no transaction of its own beyond what the reads need, and writes nothing.
     """
-    present = {
-        str(row[0])
-        for row in connection.execute(
-            text("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")
-        ).fetchall()
-    }
-
     # The one definition of the fact lives in `services/bootstrap.py`; the probe and the
     # bootstrap guard must never disagree, so this branch delegates rather than copies.
     configured = is_configured(connection)
 
-    declared = {table.name for table in registry.tables.values()}
-    schema: SchemaState = "ok" if declared <= present else "missing"
+    # Missing outranks drift: a table that does not exist fails every query against it.
+    report = build_drift_report(connection, registry)
+    schema: SchemaState
+    if report_has_missing(report):
+        schema = "missing"
+    elif report_has_drift(report):
+        schema = "drift"
+    else:
+        schema = "ok"
 
     if schema != "ok":
         status: HealthStatus = "degraded"
