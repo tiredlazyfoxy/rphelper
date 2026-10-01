@@ -3,7 +3,7 @@
 **Realizes:** FEAT-003, FEAT-004, FEAT-005, FEAT-018, FEAT-019,
 FEAT-020 (the admin entry point only), ACT-001,
 UC-006, UC-007, UC-008, UC-009, UC-010, UC-011, UC-012, UC-013, UC-014, UC-015,
-UC-016, UC-061, UC-065, UC-066, UC-071
+UC-016, UC-061, UC-065, UC-066, UC-071, UC-087
 
 The `admin` Vite entry in full: its routes, its shell, its access gate, and the
 three pages ACT-001 works in. Entry-level build reasoning is in
@@ -105,12 +105,19 @@ single custom property — neither survives `AppShell`'s navbar/main/aside
 computation. Recorded so nobody harmonises the two entries in either direction.
 
 **Header.** On mobile, a `Burger` bound to the shell state; then a
-`Title order={4}`. On the right, a **real `<a href="/">`** back-to-app link and a
-user menu. The plain anchor is deliberate and is *not* a router `Link`: the app
-area is a **different document** (`frontend-structure.md`), so a router link
-would be wrong anyway — and an anchor is what makes middle-click and
-ctrl-click open a new tab, which is exactly how an administrator flips between
-the admin area and their own app view.
+`Title order={4}`. On the right, a **real `<a href="/">`** back-to-app link. The
+plain anchor is deliberate and is *not* a router `Link`: the app area is a
+**different document** (`frontend-structure.md`), so a router link would be wrong
+anyway — and an anchor is what makes middle-click and ctrl-click open a new tab,
+which is exactly how an administrator flips between the admin area and their own
+app view.
+
+**No user menu, as built by FEAT-003 (plan 005).** This header used to promise
+one. Its contents are US-091 / US-092 / US-093, all specified for the `app`
+entry's menu and all owned by feature `008`. The consequence is worth stating
+plainly: **there is no sign-out control in the admin area** — the way out is the
+back-to-app link. **`ColorSchemeToggle` is deliberately not mounted here** (user
+decision), leaving `008` free to place it.
 
 **No breadcrumbs.** Three flat pages, each one click from the navbar; a
 breadcrumb trail would always be one segment long.
@@ -148,6 +155,10 @@ The navbar is a **static declaration table** mapped to Mantine `NavLink`s:
 | Users | `/` | `IconUsers` | yes |
 | LLM Servers | `/llm-servers` | `IconServer2` | no |
 | Database | `/database` | `IconDatabase` | no |
+
+**All three rows have been declared since FEAT-003 (plan 005).** `/llm-servers`
+and `/database` rendered the 404 element until features `006` and `007` shipped
+their pages — a deliberate interim state, not a broken link. Both pages now exist.
 
 Active state comes from a **pure** function, not from react-router:
 
@@ -280,18 +291,31 @@ previously called `require_admin`; see that doc for how it sits alongside
 
 ## Users page — FEAT-003
 
-**Realizes:** FEAT-003, FEAT-019, UC-006, UC-007, UC-008, UC-009, UC-066
+**Realizes:** FEAT-003, FEAT-019, UC-006, UC-007, UC-008, UC-009, UC-066,
+UC-087, US-010.AC-3, US-140
 
 A table of accounts. Columns: **username**, **role** (badge), **last login**,
 **active**. Row overflow menu (`IconDots`, `ui-conventions.md`): Set Password,
 Change Role, Disable, **Re-enable**. A header **Create user** button.
 
+**Last login** is backed by **`users.last_login_at`** (`data-model.md`), added by
+FEAT-003 (plan 005) because this column was specified with no backing column. It
+is nullable and renders as an **em dash** when the account has never logged in.
+
 **Create modal.** Fields: username, password, password confirmation, role
 select. Client validation: username required, password at or above a minimum
-length, confirmation must match. Server errors are mapped **by status**: a
-conflict becomes "username taken" on the username field, a bad request becomes a
-password-policy message on the password field. Mapping by status rather than by
-parsing a message keeps the UI from breaking when the backend's prose changes.
+length, confirmation must match. Server errors are mapped **by status**, never by
+parsing a message, which keeps the UI from breaking when the backend's prose
+changes. **As built (plan 005) the mapping is half-built, deliberately:**
+
+- **Built:** a conflict (`username_taken`, 409) becomes "username taken" on the
+  username field.
+- **Pending a password policy, not missing:** "a bad request becomes a
+  password-policy message on the password field". No password policy exists —
+  none was invented beyond non-empty (plan 003), enforced as a pydantic
+  constraint and answered by FastAPI's own 422 — so there is no source error to
+  map, and implementing the mapping would require parsing prose.
+- **Everything that is not a 409 lands on the general key.**
 
 **Set Password.** An administrator-initiated reset: **no current password is
 required**, and the new password travels as plaintext in the request body to the
@@ -299,11 +323,24 @@ admin endpoint. There is **no email flow and no reset link** — the product has
 mail transport and `docs/product/` asks for none. Recorded explicitly so the
 absence is not read as a missing feature.
 
-**Change Role.** A `Select` over the ladder. The **backend refuses a
-self-targeted role change** — an administrator cannot demote themselves, which is
-what keeps an instance from ending up with zero administrators through a single
-mis-click. The check belongs on the server; the UI may also hide the action on
-one's own row, but that is cosmetic.
+**A reset does not end the target's sessions** — **US-010.AC-3** requires the
+user's live sessions to stay active. Plan 005 first took this as a design
+decision (signing someone out mid-roleplay is the *disable*'s behaviour, not the
+reset's); `docs/product/` has since made it a requirement. **Flip condition:** a
+product change to US-010 — for example a reset framed as a compromise response —
+would reuse the disable's revoke helper (`data-model.md`'s `auth_sessions`) in the
+same transaction.
+
+**Change Role** (UC-087, US-140). A `Select` over the ladder. The **backend
+refuses a self-targeted role change** with `self_role_change_refused` (409,
+US-140.AC-2) — an administrator cannot demote themselves, which is what keeps an
+instance from ending up with zero administrators through a single mis-click. The
+check belongs on the server. **The UI does not hide the action on one's own row**
+— hiding it would be cosmetic — and the 409 renders on the modal's **general
+key**. The new role takes effect on the target's next request without a new
+login (US-140.AC-3), because `require_user` reads the role live
+(`backend-structure.md`). This action used to be recorded as realizing no product
+id; UC-087 / US-140 now specify it.
 
 **DEVIATION — re-enable must be added.** BookWriter's admin API has
 `disableUser` and **no `enableUser`, and no delete at all**. FEAT-003 explicitly
@@ -332,12 +369,18 @@ it is forbidden.
 
 ## LLM Servers page — FEAT-004
 
-**Realizes:** FEAT-004, FEAT-019, UC-010, UC-011, UC-012, UC-013
+**Realizes:** FEAT-004, FEAT-019, UC-010, UC-011, UC-012, UC-013,
+US-015.AC-2, US-015.AC-3, US-015.AC-4
 
 A table of registered servers. Columns: **name**, **backend type** (badge),
-**base URL**, **has API key**, **enabled-model count**, **active** (badge). Row
-overflow menu: Edit, Select Models, Set Embedding, Clear Embedding
-(conditional), Delete, **Test connection**.
+**base URL**, **has API key**, **enabled-model count**, a **last-test badge**, and
+the trailing action column. Row overflow menu: Edit, Select Models, Set
+Embedding, Clear Embedding (conditional), Delete, **Test connection**.
+
+**There is no "active" column and no active switch** (plan 006, user decision).
+This page used to list both; `data-model.md`'s `llm_servers` declares no such
+column, no UC or US asks for one, and of the two contradicting docs the page spec
+was the wrong one.
 
 The enabled-model count is a count of *models on this server*, which is
 administrative data. It is not a count of anything user-owned — see the R5 note
@@ -345,7 +388,7 @@ at the end of this section.
 
 **Server form modal.** Name, backend type `Select` (`llamaswap` | `OpenAI`,
 matching `llm_servers.kind` in `data-model.md`), base URL, API key as a
-`PasswordInput`, active switch.
+`PasswordInput`. No active switch (above).
 
 **The API-key round-trip rule — inherited, and the single easiest thing to get
 wrong.** The key is **never returned by the server**. Therefore, on edit:
@@ -370,7 +413,10 @@ secret** — the literal text `$OPENAI_API_KEY`. So
   description says so;
 - "has API key" in the table means **a pointer is recorded**, not that it
   resolves — a pointer naming an absent variable fails later as
-  `secret_ref_missing` at call time, by design;
+  `secret_ref_missing` at call time, by design. Reached through **Test
+  connection**, it answers **500**, renders as a **failure panel** rather than a
+  field error, and records nothing on the row — `backend-structure.md`'s "500
+  posture", decided at the finalization of plans 001..007;
 - a `PasswordInput` is still the right control even though the contents are not a
   secret, because the field sits where an operator expects to paste a key and
   masking it discourages exactly that mistake.
@@ -385,14 +431,34 @@ administrator cannot see, let alone clear, a stale enablement.
 available list**, but **must not disturb the existing selection**. Stated as a
 requirement because the naive implementation — set `available = []` and derive
 the checkboxes from it — silently presents "nothing enabled" and saves that.
+As built (plan 006) it holds **by construction**: the already-enabled set arrives
+with the page's list payload, and the probe writes only the *available* list
+(`ui-conventions.md`).
+
+**Saving an enabled-model set is deliberately NOT confirmed** — it is fully
+reversible, and it has no permissible informative consequence sentence under R5.
 
 **Embedding modal (UC-013).** The same probe-on-open shape, but **single**
 select: at most one model is designated across the whole table
-(`models.is_embedding_designated`, `data-model.md`). Plus a page-level
-**Clear embedding** action. Clearing is not a no-op: with no designation, every
-semantic path fails as `no_embedding_model` rather than substituting a model
-(R4), because vectors from a different model are not comparable with the stored
-ones (`search-and-retrieval.md`).
+(`models.is_embedding_designated`, `data-model.md`).
+
+**Designation measures the dimension with one real embeddings call** (plan 006,
+user decision). Designating embeds one short fixed string against the chosen
+model, measures the returned vector's length and writes it to
+`models.embedding_dim`. A failed or non-embedding response **blocks the
+designation** with a typed error, and nothing is saved — the previous designation,
+if any, stands (US-015.AC-3, US-015.AC-4). The dimension is not discoverable
+from a models listing on either provider kind, which is why `LlmClient.embed`
+exists in FEAT-004 rather than only in FEAT-017's feature, and the modal's copy
+says so.
+
+**Clear Embedding is confirmed** (US-015.AC-2). It is offered in the **row menu,
+conditionally**, and no duplicate page-header action is built. Clearing is not a
+no-op: with no designation, every semantic path fails as `no_embedding_model`
+rather than substituting a model (R4), because vectors from a different model
+are not comparable with the stored ones (`search-and-retrieval.md`) — and
+re-designating requires a fresh measuring call. Designation is independent of
+`is_enabled` (`data-model.md`'s `models`).
 
 **DEVIATION — Test connection is its own endpoint and its own action.** See
 decision 5 in `overview.md`. BookWriter tests a connection by reusing the
@@ -431,9 +497,19 @@ product's two: both are kinds of not-reachable, so a consumer that only
 understands reachable/unreachable is never wrong, only less specific.
 
 Two constraints survive from the `_TBD:`: the route returns a **typed value**,
-never a free-text message the UI has to parse; and **FEAT-004's plan may narrow
-the set to the product's two** without breaking anything, since nothing depends
-on the extra values but the wording of a badge.
+never a free-text message the UI has to parse; and FEAT-004's plan could have
+narrowed the set to the product's two.
+
+**FEAT-004's plan (006) kept all four, and fixed what the doc left open:**
+
+- **The ok mapping:** `reachable` is ok; each of the other three is not ok,
+  because both extra values are kinds of not-reachable.
+- **`llm_servers.last_test_error` stores the typed outcome value itself** — never
+  a provider message and never prose. The **last-test badge** on the page renders
+  from it.
+- **The closed value set is declared once**, in `services/llm/client.py`, and
+  reused by the registry, the router model and the frontend row type — so three
+  layers do not each re-decide it.
 
 **Cross-references that belong on this page, because this is where the mistakes
 get made:**
@@ -456,7 +532,7 @@ get made:**
 ## Database page — FEAT-005 + FEAT-018's admin half
 
 **Realizes:** FEAT-005, FEAT-018, FEAT-019, UC-014, UC-015, UC-016, UC-061,
-UC-066
+UC-066, US-018.AC-3..AC-7
 
 A **per-table drift report**: one row per table, a coloured status badge, and a
 summary of missing and extra columns. It is rendered from the `PRAGMA`-based
@@ -465,7 +541,70 @@ introspection of `db/drift.py` against the `db/schema.py` registry
 single introspectable source of truth and why the ORM decision below was
 constrained by it.
 
-Page-level actions:
+### As delivered by FEAT-005 (plan 007) — the report and its row actions only
+
+**The page ships with the report table and its per-row Create and Sync, and
+nothing else.** **Rebuild index (UC-016 / US-019) is deferred to
+`fast/002.vector-index-rebuild`**, which has no vectors to rebuild until stage
+004 creates the `vec0` tables; **Export** and **Import** belong to features `030`
+and `031`. **No disabled placeholder is built for any of the three.** The
+page-level actions table further down is the design those features build to; it
+is not what this page shows today. (Plan 006's `context.md` calls UC-016 "feature
+`007`'s"; that cross-reference is stale — `007`'s `brief.md` defers it to
+`fast/002`.)
+
+**Three statuses, fixed: in sync, missing, drifted.** Declared once in
+`db/drift.py` and reused by the router model and the frontend row type. The
+fourth, `seed-missing`, and the `Seed` action were looked at by FEAT-005's plan
+and **declined**, for the reason the Seed `_TBD:` below gives. The `_TBD:` stays
+open.
+
+**What a row compares — the granularity is the administrator's whole signal**
+(user decision, plan 007):
+
+- **Compared:** the table's **column set**; each surviving column's **declared
+  SQLite type** and **NOT NULL** flag; its **index set keyed on (column list,
+  uniqueness)**, not on index name.
+- **Deliberately NOT compared:** server defaults, `CHECK` constraint text and
+  foreign-key clauses. SQLite stores them as raw SQL text that does not
+  round-trip against a SQLAlchemy declaration, and a false `drifted` row invites a
+  destructive rebuild that fixes nothing.
+- **Two normalisations, without which a correct database reports drift
+  forever:** the declared type is compiled **through the SQLite dialect** (so a
+  `BigInteger().with_variant(Integer(), "sqlite")` matches a live `INTEGER`), and
+  the indexes SQLite creates implicitly for a `UNIQUE` constraint or a `PRIMARY
+  KEY` are **not** counted as live indexes.
+- **The per-table report carries no row count, no byte size and no timestamp.**
+
+**The status badge's colours:** **in sync → `green`, drifted → `yellow`, missing
+→ `red`.** No document specified them before. The order matches `/api/health`'s
+severity precedence (missing outranks drift — `backend-structure.md`), so the
+page and the roll-up cannot disagree about which state is worse: `red` because
+nothing works against a table that is not there, `yellow` because a drifted table
+works, just not as declared. **The badge renders the status word as text, and
+colour is redundant to it** — a colour-only status column fails
+`ui-conventions.md`'s accessibility floor. The mapping is one pure helper, so the
+component maps nothing.
+
+**Two recorded gaps — views and virtual tables.** The report walks
+**`metadata.tables` only**, so the two SQL views (`settled_entries`,
+`current_zone`) and the `vec0` / FTS5 virtual tables are **outside it**. This is a
+known gap, not an oversight: **none of them exists yet**, and a `kind`
+discriminator with one reachable value, or a virtual-table comparison designed
+against zero examples, is worse than the gap. **Ownership:** whichever feature
+introduces the views (FEAT-009 / FEAT-010's plans, `011` / `012`) and whichever
+introduces the vector and FTS tables (stage 004) **owns extending the report**,
+each adding the case with its first real instance.
+
+**The views gap has a second edge, with the same owner.** Once the views exist, a
+Sync rebuild of a table a view references may fail at the rename step, because
+SQLite re-parses views on `ALTER TABLE … RENAME`. The failure is safe — rollback
+plus `schema_apply_failed` — but the table is **un-syncable** until the
+views-introducing feature handles views around the rebuild.
+
+### The page's full design — page-level actions, Create/Sync, scope
+
+Page-level actions — **the design, not yet delivered** (above):
 
 | Action | Behaviour | Realizes |
 |---|---|---|
@@ -527,13 +666,55 @@ Both are per-row actions, as in the inherited pattern. Their executor is
 `db/sync.py` — Alembic's batch operations, because SQLite cannot drop or retype
 a column in place, and nothing else Alembic offers.
 
+**Create and Sync, defined by postcondition** (plan 007). Both are **idempotent
+and total** over a table's current state:
+
+- **Create** guarantees the table exists with the declared shape and **never
+  drops anything in any state** — it does nothing when the table already exists.
+- **Sync** guarantees the table matches the declared shape — creating it when
+  absent, rebuilding it when drifted, doing nothing when in sync.
+
+So there is **no state precondition and no "wrong state" error code** on either
+route. Sync is a superset of Create; Create exists separately because UC-015
+names creating missing tables as its own thing and because **only one of the two
+can lose data**. The page **offers each action only in the state it applies to —
+absent rather than disabled** — and an **in-sync row renders no action trigger at
+all**, rather than a menu of no-ops.
+
+**What the administrator agrees to when pressing Sync on a drifted table.** The
+execution shape is the user's own — *"create a temporal table, move data,
+re-create table, move data back"* — i.e. Alembic's `batch_alter_table` in
+**recreate mode**:
+
+- **Data in every column that survives the rebuild is preserved**; only columns
+  the registry no longer declares lose theirs (US-018.AC-5).
+- **A lossy Sync — one that drops at least one undeclared column — names those
+  columns and needs a confirm** (US-018.AC-3, US-018.AC-4); a Sync with nothing
+  to drop applies directly. The confirm's wording rules are `ui-conventions.md`'s.
+- **A rebuild that cannot complete completes not at all.** A failed cast or a
+  nullability tightening over existing NULLs rolls the transaction back, leaves
+  the table byte-for-byte as it was, leaves no `_alembic_tmp_*` table behind and
+  raises `schema_apply_failed` (US-018.AC-6, US-018.AC-7). A best-effort partial
+  apply is rejected because a half-rebuilt table is a worse state than a drifted
+  one.
+- **"A value that will not cast" is a post-copy type probe**, applied only when a
+  column's type changes to an `INTEGER` / `REAL` / `NUMERIC` / `DECIMAL` /
+  `BOOLEAN` declaration. `DATE` / `TIME` / `JSON` and text targets are never
+  refused.
+- **The failure renders as a failure panel**, not a field error:
+  `schema_apply_failed` is a **500** by the shared posture in
+  `backend-structure.md` ("The 500 posture") — nothing about the request was
+  malformed; the instance failed to do what it offered — and its `detail` names
+  the table and the operation, never the driver's message.
+
 `_TBD: Seed alone remains unrequired. It exists in the inherited pattern —
 BookWriter's fourth per-row status is seed-missing — and RPHelper has no seed
 data in docs/product/ at all, so there is nothing for the action to insert. It is
 recorded here as available prior art and deliberately NOT written up as a
 requirement; inventing a use for it is not the architect's call. The report's
-status set is correspondingly three values, not BookWriter's four, unless
-FEAT-005's plan finds a seed to need._`
+status set is correspondingly three values, not BookWriter's four. FEAT-005's
+plan (007) looked and declined, for this reason; it did not resolve the question,
+so it stays open here._`
 
 **Export/import here is the whole-database granularity only.** FEAT-018's
 per-user, per-character and per-session exports are **roleplayer-side** (ACT-002,
@@ -576,8 +757,11 @@ short list, so a reader of this doc knows what shape to expect:
   table, or a field error in a modal), so the admin area raises no notifications
   in practice. The rule and its boundary are `ui-conventions.md`'s.
 - **Mutations are never optimistic** — re-load after every mutation.
-- **Confirm step** on destructive admin actions: disabling an account
-  (FEAT-003), deleting an LLM connection (FEAT-004), rebuilding the vector index
-  (FEAT-005).
+- **Confirm step** on destructive admin actions, through the shared
+  `shared/ConfirmModal.tsx`: disabling an account (FEAT-003), deleting an LLM
+  connection and clearing the embedding designation (FEAT-004), a **lossy** Sync
+  (FEAT-005, conditional on data loss), and rebuilding the vector index (FEAT-005,
+  not yet realized). Re-enable, saving an enabled-model set and `Create` are
+  deliberately **not** confirmed.
 - **Page state** — one `makeAutoObservable` class with **no methods**, driven by
   free functions from a page-level `useEffect` with an `AbortController`.

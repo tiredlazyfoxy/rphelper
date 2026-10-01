@@ -288,3 +288,9 @@ Grouped by target file. The coder appends `## Observations` at the bottom.
   chain" are only half-realizable by FEAT-004 — the registry half. The consuming half
   belongs to FEAT-013's feature and to the session surface. The plan's `context.md` says so
   rather than claiming full coverage.
+
+---
+Status: Applied 2026-10-01 — /architect finalization (with /product-spec finalization the same day)
+Applied items: 17 (A1–A4, B1–B5, D1–D3, L1–L2, U1–U2, Q1; A3, A4 and B4 with modification)
+Rejected items: 0
+Notes: A3 cites US-015.AC-2 for Clear Embedding; A4 cites US-015.AC-3/AC-4 for the blocked designation. B4's open question on `secret_ref_missing`'s 500 was held (H1) and resolved by the user: 500 kept, recorded once as a shared posture with `schema_apply_failed` in `backend-structure.md`'s error model and referenced from `admin-surfaces.md`. The `docs/product/` gap note is closed by `/product-spec` (US-014 / US-016 partially delivered); no architecture change beyond L2.

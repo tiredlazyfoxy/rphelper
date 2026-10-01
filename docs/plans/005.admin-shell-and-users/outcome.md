@@ -260,3 +260,9 @@ Grouped by target file. The coder appends `## Observations` at the bottom.
 - **`_TBD:` carried, not resolved:** `ui-conventions.md`'s no-pagination `_TBD:` (it
   assumes a small account count). This feature's Users page is the first list it applies
   to and it holds comfortably; the flip condition in that doc is unchanged.
+
+---
+Status: Applied 2026-10-01 — /architect finalization (with /product-spec finalization the same day)
+Applied items: 18 (D1–D3, B1–B4, A1–A6, F1–F2, U1–U2, Q1; A2 and A4 with modification)
+Rejected items: 0
+Notes: A2 modified — the reset-keeps-sessions decision is now cited as US-010.AC-3, flip condition "a product change to US-010". A4 modified — Change Role now realizes UC-087 / US-140 (added to the Users page's Realizes line; `self_role_change_refused` cites them too); "UI does not hide the action on one's own row" and "409 on the general key" kept. A6 written in the past tense (both pages have since shipped). U1 was already present in `ui-conventions.md` from batch 1 — no further change. F1 also turns `frontend-structure.md`'s not-ready forward rule into fact. Notes for the architect: no doc changes.

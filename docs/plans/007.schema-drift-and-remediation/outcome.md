@@ -352,3 +352,9 @@ Grouped by target file. The coder appends `## Observations` at the bottom.
   as an open question and the **user decided** it (warn and confirm, plan `context.md` D7).
   Recorded as a design decision under `ui-conventions.md`'s explicit invitation, not as a
   discovered requirement.
+
+---
+Status: Applied 2026-10-01 — /architect finalization (with /product-spec finalization the same day)
+Applied items: 18 (A1–A6, B1–B7, C1–C2, D1–D2, E1; A1, B4, B6 and D1 with modification)
+Rejected items: 0
+Notes: A1 — the "same posture as `secret_ref_missing`" sentence was held (H1) and is now written as the user-decided shared 500 posture in `backend-structure.md`'s error model. D1 cites US-018.AC-3..AC-5 — the lossy-Sync confirm is now a product requirement, which closes the Notes' `docs/product/` gap line. B6 additionally records (status.md, step 003) that once views exist a Sync of a view-referenced table may fail safely at the rename until the views feature handles it. B4 additionally records the post-copy cast probe (INTEGER/REAL/NUMERIC/DECIMAL/BOOLEAN targets only). A6 was largely present from batch 1 (precedence); the cost, flip condition and caching rejection were added.

@@ -146,6 +146,12 @@ protocol needs. Typed models matter more than usual here because the error model
 no longer enabled" — all the way to the SPA without being flattened into a
 string.
 
+**uv as the backend package and environment manager** (plan 001). One PEP 621
+`backend/pyproject.toml`, a `backend/.venv` created by `uv venv`, dependencies
+installed with `uv sync`, and a committed `backend/uv.lock`. Reason: a committed
+lock is the only way the container build and a developer machine resolve the same
+dependency tree. The packaging convention in full is in `quick-reference.md`.
+
 **React 19 + TypeScript + Vite, multi-entry.** Four entries because four actor
 surfaces with genuinely disjoint code exist (table above). Vite because
 multi-entry via `build.rollupOptions.input` is a first-class feature, and its dev
@@ -159,6 +165,42 @@ past it — most dangerously past the "ids are strings" rule below, which only t
 type system can hold. A tool that only ships a JavaScript config is configured in a
 `.ts` file or not adopted. (The backend is Python; this rule has no backend half.)
 
+**Vitest + Testing Library + jsdom as the frontend test stack** (plan 002).
+Vitest because it reuses `vite.config.ts`, so there is no second build pipeline,
+no second resolver and no second alias set to keep in step. Testing Library +
+jsdom because tests then bind to **rendered behaviour** rather than to
+implementation details — which is what the pipeline's test-coder, who never reads
+source, must bind to. `npm test` runs once and exits. Before this, the doc set
+named no test tooling anywhere.
+
+**No ESLint, and no JavaScript linter at all** (plan 002). `npm run typecheck`
+(`tsc --noEmit`) is the static gate. Because there is no linter, `tsconfig.json`
+carries the compiler's lint-shaped flags: `noUnusedLocals`, `noUnusedParameters`,
+`noFallthroughCasesInSwitch`. **`exactOptionalPropertyTypes` and
+`noUncheckedIndexedAccess` are deliberately OFF** — both fight Mantine's prop
+types at every call site and neither catches a defect this project has — so they
+are not to be turned on as a tidy-up, nor assumed forgotten. A rule a linter would
+have enforced by grep becomes a Vitest test instead (the "ids are strings" scan in
+`frontend-structure.md` is the first).
+
+**The TypeScript configuration layout** (plan 002): a root
+`frontend/tsconfig.json` with `strict`, covering `src/` and `tests/`, plus
+`frontend/tsconfig.node.json` covering `vite.config.ts` itself. Two files because
+the config runs in Node while everything under `src/` runs in a browser, and one
+`lib` setting cannot honestly describe both. **No `paths` aliases** — four entries
+and one `shared/` folder do not need them, and nothing asks for one.
+
+**Both colour schemes, dark by default** (plan 002). The choice is persisted by
+Mantine's own `localStorageColorSchemeManager` under the key
+**`rphelper.color-scheme`**, and is deliberately **not** folded into
+`rphelper.workspace-layout`: that record is the `app` entry's alone, while the
+colour scheme applies to all four entries — folding it in would make the login
+page's scheme depend on a workspace record. **Standing constraint: every feature
+must be correct in both schemes.** A component that only looks right in one is a
+defect, not a polish item. Before this, no doc stated a colour-scheme posture at
+all, and "dark only" versus "both" is a constraint every later feature inherits
+whether or not it is written down.
+
 **Mantine 7 as the component library.** The product needs a markdown editor with
 live preview (UC-043), forms, tables, modals and a large set of icon actions.
 Mantine ships `Table`, `Modal` and `@mantine/tiptap` as one coherent set, so none
@@ -168,8 +210,8 @@ wall that is a floating overlay in one mode and a real column in the other canno
 be expressed through `AppShell`'s navbar/main/aside model (`workspace-shell.md`,
 `admin-surfaces.md`). That asymmetry is deliberate and does not weaken the choice
 of Mantine — the shell was one reason among several, not the reason.
-**`@mantine/form` is deliberately *not* used**, because forms go through the MobX
-draft convention in `ui-conventions.md`.
+**`@mantine/form` is not a dependency**, because forms go through the MobX
+draft convention in `ui-conventions.md`, which forbids using it.
 **`@mantine/notifications` IS used, for one narrow purpose — this reverses the
 earlier "no toast system" note and the reversal is deliberate.** US-044.AC-4
 requires a failed generation to show its reason and requires **the reason not to
@@ -324,6 +366,30 @@ keeps the session out of reach of any script. This was the decisive reason the
 four-entry frontend split is safe: cross-entry document navigation carries the
 cookie automatically, so the entries need share no auth code.
 
+**Server-side sessions behind that cookie (plan 004).** Sessions are rows in
+`auth_sessions`; the cookie carries an **opaque 32-byte random token**, stored
+server-side only as a **SHA-256 digest**, with an **absolute 720-hour expiry**
+that is never extended. Server-side because FEAT-003's disable must end live
+sessions, which a stateless token cannot do. The reasoning for the lifetime (no
+sliding — every read would become a write on a single-writer database), the
+digest (deliberately not Argon2) and each cookie flag is in
+`backend-structure.md`'s authentication section and is not repeated here.
+
+**Argon2id via `argon2-cffi` for password hashing (plan 003).** A memory-hard,
+salted KDF whose parameters travel **inside** the stored encoded string
+(`$argon2id$v=19$m=...`), so a parameter change is a rehash-on-verify concern and
+never a schema change. **The parameters are the library's own current defaults,
+deliberately not hand-picked**, so the project tracks a maintained baseline
+instead of pinning a guess. The algorithm sits behind one module,
+`app/services/passwords.py`, exposing a hash and a verify operation, so it is
+swappable in one file and FEAT-002's login verifies through the same seam
+(`backend-structure.md`). No doc fixed an algorithm before plan 003; its brief
+recorded it as an open question and the user settled it. **Flip condition:** if
+`argon2-cffi` stops being maintained, or a deployment target cannot supply its
+native build, the seam module is the whole change surface — and the moment the
+defaults are raised, a **rehash-on-verify** path becomes necessary in the login
+flow, which no feature has built (see the deferred list).
+
 **SSE for streaming, consumed with `fetch()` + `body.getReader()` +
 `TextDecoder`, splitting frames on `"\n\n"` — not native `EventSource`.** The
 reason is concrete: composing in the current zone is a **POST with a JSON body**
@@ -436,8 +502,8 @@ nor settled, which is an inescapable state.
 
 ## Deliberately deferred, and known gaps
 
-Stated here so no reader mistakes an absence for an oversight. The first two are
-deferrals the architecture chose; the third is a product non-goal it must not
+Stated here so no reader mistakes an absence for an oversight. The first four
+are deferrals the architecture chose; the fifth is a product non-goal it must not
 quietly mitigate; the last two are unspecified postures. **There is no longer a
 product-gap entry here** — the one that used to sit at the bottom, abandoning a
 current zone without settling, is **resolved** and is decision 6 above.
@@ -448,6 +514,37 @@ current zone without settling, is **resolved** and is decision 6 above.
   to be shaped compatibly with it. Full field-level detail is written when the
   feature is planned. FEAT-018 is last but one in the dependency graph.
 - **FEAT-016's search-provider adapter.** Seam only, per above.
+- **Frontend dependencies the foundation deliberately does not install** (plan
+  002), each owned by the feature that first needs it: TipTap, `tiptap-markdown`
+  and `@mantine/tiptap` (the markdown editor, plan `015`); `react-markdown` (plan
+  `015`); `@dnd-kit` (note reordering, plan `008` — and no doc names a sub-package
+  or version, so that feature chooses). **`postcss-preset-mantine` is not
+  installed** either: it is needed only to author CSS with Mantine's mixins, and
+  with `global.css` holding resets and `shell.css` empty there is no call site;
+  plan `008` adds it if the workspace grid wants the mixins. **`mobx` and
+  `mobx-react-lite` ARE installed** although the foundation ships no store,
+  because the MobX conventions are the foundation's to fix. Reason for the rest:
+  an unused dependency in a foundation is a version pinned against no call site
+  and a bundle weighed down for nothing — and without this list the next planner
+  re-derives why five packages the docs name are absent. These are deferrals of
+  *installation*, not of the stack choices above, which stand.
+- **What FEAT-002 deliberately does not build** (plan 004), each the first thing
+  a reviewer of an authentication feature looks for:
+  - **no session refresh and no sliding expiry** — every read would become a
+    write on a single-writer database (`backend-structure.md`, with its flip
+    condition);
+  - **no rate limiting, lockout or attempt counting** — nothing in
+    `docs/product/` asks for one, and a self-hosted instance on a trusted LAN is
+    not the threat model `deployment.md` describes; recorded so it is a decision
+    rather than an oversight;
+  - **no "remember me"** — not built; listed so its absence is not read as an
+    oversight;
+  - **no password reset or change-password path** in FEAT-002 — that is
+    FEAT-003's;
+  - **no rehash-on-verify** — the standing consequence of the Argon2id decision's
+    flip condition above, still unbuilt and **owned by no feature**;
+  - **no session-listing or sign-out-everywhere surface** — logout revokes the
+    calling session only.
 - **Context compaction — an explicit non-goal, and no longer an open question.**
   `vision.md` records that session context grows forever with no ceiling, no
   warning and no pruning, and that the user chose this knowingly over three
@@ -466,8 +563,9 @@ current zone without settling, is **resolved** and is decision 6 above.
   `ui-conventions.md`).
 - **TLS.** The inherited posture is HTTP only — no `listen 443`, no certificates,
   anywhere. `_TBD: if the instance is ever reachable beyond a trusted LAN, TLS
-  termination and cookie `Secure` flags must be designed; neither is specified
-  today._` See `deployment.md`.
+  termination must be designed, and the session cookie's `Secure` flag — shipped
+  OFF by FEAT-002 with that flip condition attached — must be turned on._` See
+  `deployment.md`.
 - **Metrics and alerting.** Logging is now specified (`deployment.md`); metrics
   and alerting are not, and `docs/product/` names neither. Recorded as an
   absence rather than left implied by the logging section beside it.

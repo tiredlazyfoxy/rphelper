@@ -9,11 +9,28 @@ tables and FTS5 full-text tables. Reasoning for one store is in `overview.md`;
 the retrieval mechanics are in `search-and-retrieval.md`.
 
 Conventions: **snowflake primary keys**, minted in application code (next
-section); `created_at` / `updated_at` as UTC ISO-8601 text; every timestamp
-column named `*_at`; foreign keys declared and `PRAGMA foreign_keys = ON`. Column
-lists below are the *shape* the design requires, not a migration script — a plan
-may add bookkeeping columns, but not remove or re-scope one named here without an
-architecture change.
+section); every timestamp column named `*_at`; foreign keys declared and
+`PRAGMA foreign_keys = ON`. Column lists below are the *shape* the design
+requires, not a migration script — a plan may add bookkeeping columns, but not
+remove or re-scope one named here without an architecture change.
+
+**Timestamps — one fixed-width text form, everywhere.** Every stored timestamp
+is UTC ISO-8601 **text** in exactly one form: **microsecond precision and an
+explicit `+00:00` offset** (`YYYY-MM-DDTHH:MM:SS.ffffff+00:00`) — the form
+`auth_sessions` and `users.last_login_at` already write. One fixed-width form
+because these columns are compared **as text** (`expires_at` against "now" on
+every authenticated request), and text comparison of mixed forms is silently
+wrong: a value that drops its microseconds when they are zero sorts against a
+six-digit fraction by the character that happens to sit there, not by time.
+Decided at the finalization of plans 001..007 (user decision H2), resolving plan
+004's observation.
+
+**Known deviation, not yet fixed:** `users.created_at` and `users.updated_at`, as
+written by plan 003's first-administrator insert, use the plain `isoformat()`
+form, which **drops the microseconds when they are zero** — so they do not share
+the fixed width. Owned by a **`/bug-fixer` pass against plan 003**. Until it
+lands, nothing may compare those two columns as text against a fixed-width
+value.
 
 ## Identifiers — snowflake ids, minted before the INSERT
 
@@ -121,18 +138,52 @@ the scope discussion below.
 
 ### `users`
 
-**Realizes:** FEAT-002, FEAT-003, UC-004..UC-009
+**Realizes:** FEAT-002, FEAT-003, UC-004..UC-009, UC-087
 
 | Column | Notes |
 |---|---|
 | `id` | PK |
 | `username` | unique |
-| `password_hash` | never a reversible form |
+| `password_hash` | never a reversible form — `argon2-cffi`'s own self-describing encoded string (below) |
 | `role` | `'roleplayer'` \| `'admin'`; the first-run account is created `admin` (UC-001) |
 | `is_enabled` | boolean; a disabled account cannot log in (FEAT-002) |
-| `rp_language` | user-level default (R1, UC-047) |
-| `preferred_language` | user-level default (R1, UC-047) |
-| `created_at`, `updated_at` | |
+| `rp_language` | user-level default (R1, UC-047); **nullable** |
+| `preferred_language` | user-level default (R1, UC-047); **nullable** |
+| `last_login_at` | **nullable**; the fixed-width timestamp form (Conventions, above); the instant the account's most recent session was opened; NULL until the account logs in for the first time. Added by FEAT-003 (plan 005) — below |
+| `created_at`, `updated_at` | see the timestamp convention's known deviation, above |
+
+**As built by FEAT-001 (plan 003).** The whole column list is declared even
+though bootstrap writes only part of it: the registry is the single source of
+truth, and a partial table would be drift FEAT-005 reports against itself.
+`rp_language` and `preferred_language` are **left NULL** by the first-run insert,
+because they are FEAT-013/UC-047's and bootstrap offers no field for them.
+`username` is unique, but FEAT-001 has **no duplicate-username path** —
+`require_unconfigured` makes a second creation unreachable; the first such path
+arrived with FEAT-003's account creation (plan 005), answered as
+`username_taken` (`backend-structure.md`).
+
+**`last_login_at` — added by FEAT-003 (plan 005), by user decision.**
+`admin-surfaces.md`'s Users page specifies a **last login** column and no backing
+column existed; plan 003 had declared exactly nine. The preamble above authorises
+it — a plan may add bookkeeping columns — and it is bookkeeping **about an
+account, not user content**, so R5 is untouched.
+
+- **It is stamped by the open-session operation in `services/auth.py`**, inside
+  the same `with conn.begin():` that inserts the `auth_sessions` row, with the
+  **same instant** that row's `created_at` carries. So the first administrator,
+  created and signed in by FEAT-001's bootstrap transaction, is stamped too. Two
+  alternatives were rejected: the credential-authentication path is
+  deliberately read-only and opens no transaction, and a separate write from the
+  router would break the routers-versus-services split. Recorded here because it
+  is a cross-feature edit to code FEAT-002 owns.
+- **`updated_at` is deliberately NOT bumped by a login.** A column that moves on
+  every sign-in stops meaning "the account record changed".
+
+**`password_hash` stores a self-describing encoded string**
+(`$argon2id$v=19$m=...`): the algorithm, version and parameters live **in the
+value** and no schema column records them. That is why a hashing-parameter change
+is not a migration, and why there is no `hash_algorithm` column to add later
+(`overview.md`, `backend-structure.md`).
 
 **Correction — `users` carries no model, system-prompt or tools default, and the
 three columns that used to be listed here are removed.** This table previously
@@ -154,8 +205,9 @@ numerically (`backend-structure.md`). An enum rather than a boolean because the
 authorization check the product needs is "at least this rung", so a third rung
 would be one enum value and one ladder entry instead of a second boolean plus an
 audit of every route's flag conjunction. It is also what the admin Users page
-renders as a role badge and changes through UC-008 (`admin-surfaces.md`), where
-the backend refuses a self-targeted change so an instance cannot lose its last
+renders as a role badge and changes through UC-087 / US-140 (`admin-surfaces.md`;
+this sentence used to cite UC-008, which is the password reset), where the
+backend refuses a self-targeted change so an instance cannot lose its last
 administrator.
 
 `is_enabled` is a flag rather than a deletion because FEAT-003 requires disable
@@ -194,11 +246,35 @@ The linkage, stated explicitly because two other designs depend on it:
 - **The disable path revokes rows here, in the same transaction as the flag flip**
   (see `users` above). `revoked_at` is what "ended" means; the row is not deleted,
   so a revocation is observable.
+- **Where the bulk revocation lives** (plan 005): a **connection-taking helper in
+  `services/auth.py` that opens no transaction of its own**, called by
+  `services/users.py`'s disable inside the single `with conn.begin():` that also
+  flips `users.is_enabled`. It sets `revoked_at` where it is NULL, deletes
+  nothing, is idempotent, and returns a count used for logging only. The
+  placement is load-bearing rather than organisational: a helper that opened its
+  own block would make the one-transaction requirement unimplementable.
+- **A password reset revokes nothing here** — US-010.AC-3 requires the user's
+  live sessions to stay active (`admin-surfaces.md`).
 - **Every authenticated request resolves through this table**, which is why
   `GET /api/me` answers 401 for a disabled account and why the admin entry's
   pre-mount gate is a server round-trip rather than a client-side token decode
   (`backend-structure.md`, `admin-surfaces.md`). A JWT-based gate could not
   satisfy FEAT-003 at all — not as an implementation detail, but as a capability.
+
+**As built by FEAT-002 (plan 004):**
+
+| Column | Notes |
+|---|---|
+| `id` | PK |
+| `user_id` | **declared foreign key → `users.id`, indexed** — FEAT-003's disable path revokes every row for one user in one transaction |
+| `token_hash` | **unique index** — the lookup key on every authenticated request; holds a SHA-256 digest, never the token (`backend-structure.md`) |
+| `created_at`, `expires_at` | the fixed-width timestamp form (Conventions, above) — `expires_at` is compared as text on every request; written once, never moved |
+| `revoked_at` | **nullable, NULL until revoked**; the row is never deleted, so a revocation stays observable |
+
+The table is created by **FEAT-001's bootstrap `create_all`** — the registry is
+the single source of truth and there is no DDL at startup. An instance
+bootstrapped **before** FEAT-002 shipped would lack it; that is FEAT-005's drift
+surface (`Create`), not FEAT-002's problem.
 
 ### `llm_servers`
 
@@ -220,6 +296,17 @@ matters here: **the database never contains an API key**, so the whole-database
 export (FEAT-018/UC-061) does not exfiltrate credentials, and a drift report
 (FEAT-005) can be read without redaction.
 
+**As built by FEAT-004 (plan 006):**
+
+- **`kind` is plain text with no `CHECK`.** The two-member constraint lives at the
+  pydantic boundary. A database `CHECK` would make a third provider a schema
+  change, which contradicts "a label, not a dispatch key"
+  (`llm-and-streaming.md`).
+- **`last_test_error` stores the typed probe outcome value itself** — never a
+  provider message and never prose (`admin-surfaces.md`'s result taxonomy).
+- There is **no `active` column**, and the LLM Servers page carries no active
+  switch (`admin-surfaces.md`).
+
 ### `models`
 
 **Realizes:** FEAT-004, UC-012, UC-013
@@ -237,6 +324,24 @@ export (FEAT-018/UC-061) does not exfiltrate credentials, and a drift report
 Unique on `(server_id, model_name)`. Disabling a model is a flag flip and is
 **never refused** on account of dependent sessions (UC-012, R5); no reverse-lookup
 index or view from `models` to `sessions` exists, and none may be added.
+
+**As built by FEAT-004 (plan 006)** — three properties later features rely on:
+
+- **`server_id` is declared `ON DELETE CASCADE`**, and the delete operation
+  **also** removes the child rows explicitly inside its own transaction, so the
+  behaviour does not depend on a connection pragma.
+- **`models` rows are never deleted by an enable or a disable.** That is what
+  makes the models modal's `available ∪ already-enabled` union work
+  (`admin-surfaces.md`).
+- **Designation is independent of `is_enabled`** (user decision, plan 006,
+  resolving the brief's first open question). Disabling a model **never** clears a
+  designation and is never refused; designating does **not** enable. The
+  use-time embedding validator requires the designated model to be **both
+  designated and enabled**, raising `no_embedding_model` otherwise. There is **no
+  cross-table cascade** between the two flags.
+- **`embedding_dim` is measured, not read from metadata**: designating embeds one
+  short fixed string against the chosen model and records the returned vector's
+  length (`admin-surfaces.md`, US-015.AC-3/AC-4).
 
 `embedding_dim` is recorded because `vec0` tables are declared with a fixed
 dimension. Changing the designated embedding model to one with a different
@@ -349,6 +454,14 @@ open question, raised and not answered in R4 (`domain-rules.md`) — whether
 creation is refused or the row is inserted with `model_ref` NULL and filled on
 the first successful resolution. The column is nullable either way, so the schema
 does not pre-empt the answer.
+
+`_TBD: the ENCODING of model_ref is not fixed anywhere. A bare model name is
+ambiguous across two registered servers that offer the same name, since models is
+unique on the (server_id, model_name) pair. FEAT-004's use-time validator
+deliberately takes the server id and the model name as two plain arguments (plan
+006), so the encoding decision stays with the feature that writes this column —
+FEAT-008's / FEAT-013's plans. The gap is invisible while nothing reads the
+column and becomes a silent ambiguity the moment two servers are registered._`
 
 ### `messages`
 
@@ -542,8 +655,17 @@ rather than four separate tables. Reasons, in order of weight:
 The cost is that referential integrity for `scope_id` is not expressible as a
 single foreign key. That is accepted, and the mitigation is explicit: memo
 creation goes through a service that validates the target level exists and belongs
-to the same user, and FEAT-005's drift report includes an orphan-scope check.
+to the same user, plus an orphan-scope check over `(scope, scope_id)`.
 Recorded as a trade rather than hidden.
+
+**The orphan-scope check is NOT part of FEAT-005's drift report, and is not
+built yet.** This paragraph used to say the drift report included it. FEAT-005's
+feature (plan 007) shipped without it, for two reasons: `memos` does not exist
+until FEAT-012's feature (`015`), so there was nothing to check; and the check is
+a **content** check over `(scope, scope_id)`, not a structural one, so it does not
+belong in the structural per-table report at all. **Owner: the feature that
+creates `memos`**, as its own admin-facing check or as a widening of the Database
+page, whichever that plan chooses.
 
 There is **no archived state and no `archived_at`** on this table (R3, R6). Memos
 do not archive; the column must not appear here, and `is_enabled` is not a
@@ -699,6 +821,34 @@ kept separate because a rebuild re-embeds every memo and session against the
 designated embedding model and therefore costs real time and real LLM calls,
 while remediation is a DDL operation. Conflating them would make a cheap fix
 expensive and an expensive one look routine.
+
+### As built by FEAT-005 (plan 007)
+
+**Realizes:** FEAT-005, UC-014, UC-015, US-018.AC-3..AC-7
+
+- **Three statuses, fixed: in sync, missing, drifted.** Declared once in
+  `db/drift.py` and reused by the router model and the frontend row type.
+  BookWriter's fourth (`seed-missing`) was looked at and declined
+  (`admin-surfaces.md`'s Seed `_TBD:`, still open).
+- **What is compared:** a table's **column set**, each surviving column's
+  **declared SQLite type** and **NOT NULL** flag, and its **index set keyed on
+  (column list, uniqueness)**, not on index name. **Deliberately not compared:**
+  server defaults, `CHECK` constraint text and foreign-key clauses — SQLite stores
+  them as raw SQL text that does not round-trip against a SQLAlchemy declaration,
+  and a false `drifted` row invites a destructive rebuild that fixes nothing.
+  The two normalisations, the type compiled through the SQLite dialect and the
+  implicit `UNIQUE`/`PRIMARY KEY` indexes excluded, are in `admin-surfaces.md`.
+- **The walk covers `metadata.tables` only.** The two SQL views and the `vec0` /
+  FTS5 virtual tables are outside the report, a recorded gap with named owners
+  (`admin-surfaces.md`). None of them exists yet.
+- **A Sync rebuild preserves every surviving column's data**; only columns the
+  registry no longer declares lose theirs, and a rebuild that cannot complete
+  rolls back completely (`admin-surfaces.md`, `backend-structure.md`).
+- **Only the structural half shipped.** UC-016's rebuild is
+  `fast/002.vector-index-rebuild`'s.
+- **`db/schema.py` was not edited by FEAT-005's feature**: the registry gained no
+  table and no column. This is what "the registry stays the truth" looks like in
+  practice.
 
 ## Export / import contract — sketch
 

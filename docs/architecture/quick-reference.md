@@ -12,16 +12,16 @@ named beside it. **Where this file and another doc disagree, the other doc wins.
 |---|---|
 | `overview.md` | System context, actor→surface map, the admin surface list, dev/prod topology, **the full stack decision list with rationale** (including the six post-first-pass decisions), the deferred list |
 | `quick-reference.md` | This file — the index |
-| `data-model.md` | Tables and columns, **snowflake identifiers**, ownership/isolation columns, `users.role`, `auth_sessions`, the merged `messages` table + its two views, **`sessions.model_ref` captured at creation**, archive semantics, `vec0` + FTS5 tables (**`session_vec`'s three sources**), drift registry, the export/import contract sketch + **the import policy** |
+| `data-model.md` | Tables and columns, **snowflake identifiers**, **the one fixed-width timestamp form (+ its known `users` deviation)**, ownership/isolation columns, `users.role` + `users` as built (**+ `last_login_at`, stamped at session open**), `auth_sessions` as built (**+ where the bulk revoke lives**), **`llm_servers` / `models` as built (cascade, no `kind` CHECK, designation independent of `is_enabled`)**, **`sessions.model_ref` encoding `_TBD:`**, **drift as built by FEAT-005**, the merged `messages` table + its two views, **`sessions.model_ref` captured at creation**, archive semantics, `vec0` + FTS5 tables (**`session_vec`'s three sources**), drift registry, the export/import contract sketch + **the import policy** |
 | `domain-rules.md` | **The role ladder + R1–R12, the cross-cutting invariants.** Read before touching any feature |
-| `backend-structure.md` | FastAPI layout, routers/services split, `require_role`, **SQLAlchemy Core**, `pydantic-settings`, the `"$ENV_VAR"` secret pointer, `app/ids.py`, **the JSON id boundary**, the stream routes, settle/re-open, the `(( ))` seam, the typed error model, `/api/health`, `/api/me`, the connection probe's two routes, **schema evolution (registry + admin-applied Alembic batch DDL)**, the logging call site, **the disconnect/stop path** |
-| `frontend-structure.md` | Vite multi-entry, the `admin` entry's boot + async gate, per-page MobX stores, routing inside the `app` entry, **"ids are strings"**, the API client, the SSE consumer **and its abort path** |
+| `backend-structure.md` | FastAPI layout, routers/services split, `require_role`, **`roles.py` vs `dependencies.py` + what `require_user` resolves**, **the bootstrap route surface**, **the three admin route surfaces (`/api/admin/users`, `/llm-servers`, `/database`)**, **the 500 posture (`secret_ref_missing`, `schema_apply_failed`)**, **the first async code (`httpx.AsyncClient`) and its flip condition**, **the Sync rebuild's foreign-key posture**, **the authentication surface (login/logout/me, password hashing, session lifetime, token digest, cookie flags)**, **transactional DDL**, **SQLAlchemy Core**, `pydantic-settings`, the `"$ENV_VAR"` secret pointer, `app/ids.py`, **the JSON id boundary**, the stream routes, settle/re-open, the `(( ))` seam, the typed error model (**per-subclass `http_status`, the per-code status record, handler registration**), `/api/health` (**roll-up, all statuses 200**), the engine (**one `connect` listener, per-path engine cache, `get_connection`, loud `sqlite-vec` failure**), `/api/me`, the connection probe's two routes, **schema evolution (registry + admin-applied Alembic batch DDL)**, the logging call site, **the disconnect/stop path** |
+| `frontend-structure.md` | Vite multi-entry (**`root: src/`, the `vite.config.ts` shape, the emitted layout**), the `admin` entry's boot + async gate + basename, **the `bootstrap` and `login` entries' boot shapes**, **pure-data-contract MobX stores (four rules) + where a store's file lives**, **the not-ready-yet predicate**, routing inside the `app` entry, **"ids are strings" and the test that enforces it**, the API client (**`ApiError` shape, the `client_*` codes, abort not wrapped**), the SSE consumer **and its abort path**, who imports the two stylesheets |
 | `workspace-shell.md` | The `app` entry's one screen: the three columns, **all geometry**, the note wall's two modes, **layout persistence**, the stream, the ruler and the current zone, the kind switch and settle, **the stop control and the discard-empty-zone affordance**, the wall's contents, the character page, the user menu, the model picker, and the reversal record for the deleted splitters |
 | `ui-conventions.md` | Everything that is **not** the shell: icons + the shared `IconButton` + the full icon table, the accessibility floor, tables, **the list/modal/MobX-draft/confirm CRUD conventions**, **no *success* toasts + the transient failure-notification rule**, never-optimistic, page state |
-| `admin-surfaces.md` | The `admin` entry in full: 3 routes + 404, shell, the admin gate and why it deviates, the Users / LLM Servers / Database pages |
+| `admin-surfaces.md` | The `admin` entry in full: 3 routes + 404, shell (**no user menu, no sign-out**), the admin gate and why it deviates, the Users / LLM Servers / Database pages — **each with its as-built state** (create-modal mapping, reset keeps sessions, Change Role = UC-087; no active column, probe ok-mapping, designation measures the dimension; the drift report's granularity, statuses, badge colours, Create/Sync postconditions, the views/virtual-table gaps) |
 | `llm-and-streaming.md` | The one LLM client, resolve→validate→call, the SSE frame protocol, **the stop (UC-085) and its named divergences**, the tool loop (**no iteration cap**), context assembly and its exclusions, translation |
 | `search-and-retrieval.md` | Hybrid vec+FTS+RRF, `memo_search`, `session_search` (**vector arm only**; `session_vec` spans **three sources**), my-search (**applies no reach-flag predicate**), embedding lifecycle + **the persona-edit fan-out**, rebuild |
-| `deployment.md` | Ports, `start.ps1`, nginx directives (and the five deliberate deviations), compose, the `supervisord` ordering window and the admin boot, the single-generator guarantee, config conventions, **logging (loguru, two sinks, the redaction rule)** |
+| `deployment.md` | Ports, `start.ps1`, nginx directives (and the five deliberate deviations), **the open nginx seams (`/`, `/app/`, `/login`)**, compose (**the healthcheck asserts status, never body**), the `supervisord` ordering window and the admin boot, the single-generator guarantee, config conventions, **logging (loguru, two sinks, the redaction rule)** |
 
 Requirements are **not** here. They are in `docs/product/` and are cited by id.
 The id registry is `docs/product/quick-reference.md`.
@@ -67,15 +67,86 @@ Frontend (run from frontend/)
 
 Dev: `start.ps1 -app` and `start.ps1 -ui` in **separate terminals**.
 
+## Backend toolchain and packaging
+
+- **One PEP 621 `backend/pyproject.toml`** holds runtime deps, dev deps and the
+  `[tool.ruff]` / `[tool.mypy]` / `[tool.pytest.ini_options]` config. **No
+  `requirements.txt`, no separate tool config files.**
+- Virtualenv at **`backend/.venv`** via `uv venv`; dependencies installed with
+  **`uv sync`**; **`uv.lock` committed**, regenerated by `uv sync`, never
+  hand-edited. A new backend dependency goes into `pyproject.toml` and the lock is
+  regenerated (`overview.md` — uv; `deployment.md` — the image installs from the
+  lock).
+- **Minimum Python 3.12.**
+- **`sqlite-vec==0.1.9`**, pinned exactly; a failed load raises rather than
+  handing out a connection without it (`backend-structure.md`).
+- **`alembic` is a RUNTIME dependency** (plan 007) — batch DDL only. Its four
+  negatives are verifier-checked: **no `versions/`, no revision chain, no version
+  table, no startup upgrade**. Only `MigrationContext` + `Operations` +
+  `batch_alter_table` (recreate mode) are used; nothing from `alembic.config`,
+  `ScriptDirectory`, `EnvironmentContext` or `command.*`.
+- **`httpx` is a RUNTIME dependency** (plan 006) — `httpx.AsyncClient`, the first
+  outbound-HTTP and first async code in `app/`. The three network-reaching
+  registry operations and their routes are `async def` over a **sync**
+  `Connection`; flip condition in `backend-structure.md`.
+
+## Configuration additions
+
+- **`RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS`** — default **30.0** (plan 006). The
+  full `Settings` model is `backend-structure.md`'s.
+
+## Backend test conventions
+
+- **The database fixture is a real `.sqlite` file under pytest's `tmp_path`, one
+  per test**, obtained through the same engine factory production uses. Not
+  `:memory:` — that makes WAL a no-op and takes a different extension-load path,
+  so it would silently not test the two properties `db/engine.py` exists to
+  guarantee. Not a shared session-scoped database — that leaks DDL state between
+  tests, which is precisely what FEAT-005's Sync does.
+- **Environment isolation:** every `RPHELPER_*` variable and the settings
+  accessor's `lru_cache` are cleared around each test.
+
+## Frontend toolchain, packaging and tests
+
+- **One `frontend/package.json`** — dependencies and four scripts (`build`,
+  `test`, `typecheck`, `dev`); **`package-lock.json` committed**.
+- **Two tsconfigs**: `tsconfig.json` (`strict`, `src/` + `tests/`) and
+  `tsconfig.node.json` (`vite.config.ts`). No `paths` aliases (`overview.md`).
+- **One `vite.config.ts` that also carries the Vitest block** — there is no
+  `vitest.config.*`. The build is **rooted at `frontend/src`** and emits to
+  **`frontend/dist`**; the Vitest block keeps **`frontend/`** as its root
+  (`frontend-structure.md`).
+- Test stack: **Vitest + Testing Library + jsdom**; `npm test` runs once and
+  exits. **No ESLint, no JS linter** — `tsc --noEmit` is the gate.
+- **Tests live under `frontend/tests/`, outside `src/`, mirroring it.**
+  `frontend/tests/setup.ts` is harness source, not a test. Not co-located, for two
+  reasons: the ids scan is scoped to `frontend/src`, so no fixture can trip it and
+  no exclusion list is needed; and the build's root is `src/`, so nothing
+  test-only is reachable from a bundle.
+
 ## Paths
 
 ```
 backend/app/{routers,services,models,db}/     backend code (mypy target: app)
 backend/app/ids.py                            the snowflake generator (not services/, not db/)
+backend/app/roles.py                          Role enum + ROLE_LADDER + pure rung comparison; NO fastapi (db/schema.py imports it)
+backend/app/dependencies.py                   CurrentUser, require_user, require_role(min_role), session-cookie set/clear
+backend/app/services/passwords.py             the password-hashing seam (Argon2id, library defaults)
+backend/app/routers/bootstrap.py              also declares require_unconfigured (its only consumer)
 backend/tests/                                pytest target
-backend/app/db/{schema,drift,sync}.py         registry / introspection / Alembic batch DDL
+backend/app/db/{schema,drift,sync}.py         registry / introspection / Alembic batch DDL; sync.py may import drift.py, never the reverse
+backend/app/models/secret_ref.py              the "$"-pointer field type — a non-"$" value is FastAPI's 422, no domain code
+backend/app/services/llm/client.py            httpx.AsyncClient; probe() + embed() only (no chat_stream yet); the 4-value probe-outcome set
+backend/app/services/llm_registry.py          servers, models, the probe primitive, designation, both use-time validators (no call site yet — by design)
 frontend/src/{bootstrap,login,admin,app}/     the four Vite entries
-frontend/src/shared/                          api client, SSE consumer, IconButton
+frontend/src/shared/                          api client, SSE consumer, IconButton, AppProviders, notifyFailure
+frontend/src/shared/notReady.ts               the one not-ready-yet predicate (transport failure, or malformed body at >= 500); used by bootstrap AND the admin gate
+frontend/src/shared/ConfirmModal.tsx          the one confirm component; cancel left of confirm (plan 005)
+frontend/src/admin/                           gate, not-ready screen, shell state, nav table, shell, 404, app, page store, drafts — all beside main.tsx
+frontend/src/<entry>/<page>State.ts, *Draft.ts   a single-entry store lives in its entry folder beside main.tsx
+frontend/tests/                               Vitest target — outside src/, mirrors it
+frontend/dist/{bootstrap,login,admin,app}/index.html   the emitted layout nginx resolves against
+backend/pyproject.toml + backend/uv.lock      backend deps + tool config; lock committed
 backend/app/logging.py                        loguru sinks + the InterceptHandler; called ONCE from main.py
 frontend/src/global.css                       hand-written stylesheet 1 of 2 — resets only
 frontend/src/shell.css                        hand-written stylesheet 2 of 2 — workspace layout only, imported by the `app` entry alone
@@ -87,8 +158,15 @@ docs/architecture/                            this doc set
 docs/plans/CLAUDE.md                          the pipeline contract
 ```
 
-localStorage key: **`rphelper.workspace-layout`** (renamed from BookWriter's — must
-not be copied verbatim).
+localStorage keys — two keys, two scopes, **never consolidated**:
+
+| Key | Scope | Owner |
+|---|---|---|
+| **`rphelper.workspace-layout`** | the `app` entry only | `workspace-shell.md` (renamed from BookWriter's — must not be copied verbatim) |
+| **`rphelper.color-scheme`** | all four entries | `overview.md` — Mantine's `localStorageColorSchemeManager`; both schemes, dark default |
+
+Folding one into the other would make the login page's colour scheme depend on a
+workspace record.
 
 ## Ids — the one rule that fails silently
 
@@ -127,10 +205,20 @@ string     in TypeScript, end to end
 generator process per node id** (one container, one uvicorn — `deployment.md`). A
 second worker or a syncing second instance re-opens both.
 
+## Timestamps — one fixed-width text form
+
+Every stored timestamp is UTC ISO-8601 **text**, **microsecond precision, explicit
+`+00:00`** (`YYYY-MM-DDTHH:MM:SS.ffffff+00:00`) — because these columns are
+compared **as text** (`auth_sessions.expires_at` on every request) and mixed forms
+compare silently wrong (`data-model.md`). **Known deviation, not yet fixed:**
+`users.created_at` / `updated_at` from plan 003 use plain `isoformat()`
+(microseconds dropped when zero) — owned by a `/bug-fixer` pass against plan 003.
+
 ## Stack
 
-FastAPI + `pydantic-settings` · **SQLAlchemy Core (not the ORM)** · SQLite (one
-file: rows + `sqlite-vec` `vec0` + FTS5) · **Alembic — batch DDL only, not a
+FastAPI + `pydantic-settings` · **uv** (committed `uv.lock`) · **SQLAlchemy Core
+(not the ORM)** · SQLite (one file: rows + `sqlite-vec` **`==0.1.9`** `vec0` +
+FTS5) · **Alembic — batch DDL only, not a
 migration framework** (no `versions/`, no version table, no startup upgrade;
 `db/schema.py` is the source of truth and the admin drift page applies —
 `overview.md`, `backend-structure.md`) · **`loguru`** (two sinks: console `DEBUG`
@@ -138,14 +226,17 @@ migration framework** (no `versions/`, no version table, no startup upgrade;
 load-bearing** — without it uvicorn's output never reaches the file and nothing
 errors; **absolute redaction rule at every level** — `deployment.md`) ·
 React 19 + TS + Vite multi-entry ·
-Mantine 7 (`core`/`hooks`/`tiptap`/**`notifications`**; **`form` present but
-unused**; **`notifications` IS used — transient FAILURE reasons only,
+Mantine 7 (`core`/`hooks`/`tiptap`/**`notifications`**; **`form` is NOT a
+dependency**; **`notifications` IS used — transient FAILURE reasons only,
 `autoClose` 5000, no success toasts** (US-044.AC-4, reversing the old "absent"
 note); **`AppShell` in the `admin` entry only** — the `app` workspace is a
 hand-written CSS grid)
 · MobX 6 + `mobx-react-lite` · `react-router-dom` 7 · `@tabler/icons-react` `^3.40`
 · TipTap + `tiptap-markdown` (edit) + `react-markdown` (render) · **`@dnd-kit`
-(used — note reorder only)** · SSE over POST · HttpOnly `SameSite=Lax` cookie ·
+(used — note reorder only)** · SSE over POST · HttpOnly `SameSite=Lax` cookie over **server-side
+`auth_sessions`** (opaque 32-byte token, stored as a SHA-256 digest, absolute 720 h)
+· **Argon2id via `argon2-cffi`, library defaults** (passwords only) · **pysqlite
+with transactional DDL** (`begin()` covers `CREATE TABLE`) ·
 nginx + uvicorn under `supervisord` in one container.
 
 No Tailwind / CSS modules / styled-components. **Exactly two hand-written
@@ -183,6 +274,44 @@ Cross-entry navigation is a document navigation; the cookie travels with it.
 this rung". Frontend gating is **UX only**. Replaces BookWriter's
 `{author, admin}`. Full reasoning: `domain-rules.md`.
 
+**Where it lives** (plan 004, superseding plan 003's "same module" proposal):
+`app/roles.py` = enum + `ROLE_LADDER` + pure comparison, **no `fastapi`**
+(`db/schema.py` imports it); `app/dependencies.py` = `CurrentUser`,
+`require_user`, `require_role`, cookie writers. `require_user` resolves cookie →
+digest → live, unrevoked, unexpired `auth_sessions` row → enabled `users` row →
+**role read live**, so a role change or disable bites on the **next request**.
+`require_unconfigured` lives in `routers/bootstrap.py`.
+
+## Auth and bootstrap at a glance — `backend-structure.md`
+
+| Route | Answers |
+|---|---|
+| `POST /api/bootstrap/create` | **201** + identity **+ `Set-Cookie`** (operator signed in, same transaction as `create_all` + admin insert); no token in the body; router-level `require_unconfigured` |
+| `POST /api/bootstrap/import` | reserved — `fast/003.bootstrap-from-export` (UC-002 deferred) |
+| `POST /api/auth/login` | **200** + identity + `Set-Cookie`; **never 401**; any failure = `invalid_credentials` **400**, uniform for unknown user / wrong password / disabled (US-006.AC-3) |
+| `POST /api/auth/logout` | **204**, idempotent, **no `require_user`**, revokes the calling session only |
+| `GET /api/me` | identity, or **401** `not_authenticated` (no/dead session, disabled account) |
+
+- **Cookie:** name from `Settings.session_cookie_name` · `HttpOnly` · `SameSite=Lax`
+  · `Path=/` · `Max-Age` = TTL · **`Secure` OFF** (no TLS; flip: TLS anywhere →
+  on, one setter in `app/dependencies.py`). Cookie lifetime is a hint; the row's
+  `expires_at` is the authority.
+- **Lifetime:** `expires_at` written once from `session_ttl_hours` (720), **never
+  moved**; **no refresh route, no sliding** (single writer — every read would
+  become a write).
+- **Token:** 32-byte `secrets.token_urlsafe`, stored as **SHA-256**, **deliberately
+  not Argon2**; plaintext only in the cookie; never logged.
+- **`users.password_hash`** = argon2-cffi's encoded string; params live in the
+  value, no `hash_algorithm` column.
+- **Entries:** `bootstrap` reads `/api/health`'s **`configured` alone** (a fresh
+  instance is `degraded`/`missing` and that is correct), five states, hands off by
+  document navigation to **`/`**; `login` makes **no request on mount**, renders
+  every failure in place, goes to `/` for both roles, has **no disabled-account
+  screen** and **no not-ready state**.
+- **Not-ready-yet** = `client_transport_failed`, or `client_malformed_error` at
+  status ≥ 500 (`shared/notReady.ts`); fixed 2000 ms re-probe, uncapped, plus a
+  manual retry.
+
 ## Admin area at a glance — `admin-surfaces.md`
 
 | Route (under `/admin`) | Page | Realizes |
@@ -203,7 +332,15 @@ this rung". Frontend gating is **UX only**. Replaces BookWriter's
   rendered meanwhile. Pure `resolveAdminAccess(currentUser)` + impure async
   `enforceAdminAccess()`. Deny cases: no session → `/login`; session but no
   resolvable user → `/login`; role not admin → `/`. **A 502/network failure is not
-  a deny** (`deployment.md`).
+  a deny** (`deployment.md`). **Five boot outcomes** (plan 005): 401 → the shared
+  client has already navigated, the gate navigates nothing; non-admin → `/`;
+  admin → mount; **not-ready** (`shared/notReady.ts`) → re-probe every 2000 ms,
+  navigates nothing; **anything else, incl. a well-formed 403 or 5xx** → failure
+  panel + manual retry, navigates nothing (`frontend-structure.md`).
+- **Header:** `Burger`, title, `<a href="/">` — **no user menu, so no sign-out in
+  the admin area**; `ColorSchemeToggle` not mounted (both left to feature `008`).
+- **Nav rows:** all three declared since plan 005; both former 404 targets now
+  have pages (`006`, `007`).
   **Deviation:** BookWriter decodes a JWT pre-mount; impossible here — HttpOnly
   cookie **and** FEAT-003's disable-ends-sessions needs revocable server-side
   sessions.
@@ -211,7 +348,32 @@ this rung". Frontend gating is **UX only**. Replaces BookWriter's
   Per-row, administrator-triggered, executed by `db/sync.py` via Alembic batch
   operations (SQLite cannot drop or retype a column in place). `Create` = UC-015's
   missing tables; `Sync` = an existing table whose shape moved. **Seed is not
-  carried across** (`_TBD:`, no seed data exists). Nothing runs at boot.
+  carried across** (`_TBD:`, no seed data exists — plan 007 looked and declined).
+  Nothing runs at boot. **As delivered (plan 007): the report + per-row
+  Create/Sync and nothing else** — Rebuild index (UC-016 / US-019) is owned by
+  **`docs/plans/fast/002.vector-index-rebuild`**; Export / Import by features
+  `030` / `031`; no disabled placeholders.
+  - **Statuses (three, fixed):** in sync → **`green`**, drifted → **`yellow`**,
+    missing → **`red`**; the status word is rendered as text, colour is redundant.
+  - **Compared:** column set, declared SQLite type (compiled through the SQLite
+    dialect), NOT NULL, index set keyed on (columns, uniqueness). **Not
+    compared:** defaults, `CHECK` text, FK clauses. Implicit UNIQUE/PK indexes
+    are not live indexes. No row count, size or timestamp.
+  - **Create and Sync are idempotent and total** — no state precondition, no
+    "wrong state" code. Create never drops anything. Each action is offered only
+    in its state (**absent, not disabled**); an in-sync row has no trigger.
+  - **Sync = recreate-mode rebuild:** surviving columns' data kept
+    (US-018.AC-5); a **lossy** Sync names the lost columns and needs a confirm
+    (US-018.AC-3/AC-4); a failed apply rolls back completely, no
+    `_alembic_tmp_*` left (US-018.AC-6/AC-7). The cast refusal is a post-copy
+    probe only for `INTEGER`/`REAL`/`NUMERIC`/`DECIMAL`/`BOOLEAN` targets.
+  - **FK posture:** `foreign_keys = OFF` **outside** the transaction, rebuild,
+    `foreign_key_check` before commit, `ON` restored on both paths (pooled
+    connection; the pragma is ignored inside a transaction).
+  - **Gaps, with owners:** views and `vec0`/FTS5 tables are outside the report
+    (`metadata.tables` only) — the features introducing them extend it; once
+    views exist, a Sync of a table a view references may fail safely at the
+    rename until that feature handles views around the rebuild.
 - **Dropped from BookWriter, deliberately:** `AssistantModesPage`,
   `SubAgentsPage` — authoring-domain, no RPHelper analogue. Do not re-add.
 - **Nav:** static declaration table → `NavLink`s, pure
@@ -231,31 +393,68 @@ cardinality; `_TBD:`) · centered `Loader` on an idle/loading status · inline r
 spot) · create/edit is **always a `Modal`**, with **two named workspace
 exceptions** — in-place edit of a settled entry / zone message / note (UC-078,
 US-104, US-109, US-110, US-115) and the character **draft page** (UC-074, US-097)
-· **`@mantine/form` NOT used** — per-modal MobX `*Draft.ts` class (observable
-fields, `serverErrors`, `submitStatus`, `clientErrors`/`errors`/`canSubmit`
-getters) with an **external** `submitX(draft, …, onSaved, signal?)`, never a method
+· **`@mantine/form` is NOT a dependency** — per-modal MobX `*Draft.ts` class
+(**observable fields only** — `serverErrors`, `submitStatus`, no methods, **no
+getters**) with **pure free functions** `clientErrors(draft)` / `errors(draft)` /
+`canSubmit(draft)` and an **external** `submitX(draft, …, onSaved, signal?)`,
+never a method
 · fresh draft per open via conditional mount · modal open/target flags are
 component-local `useState` (view state, not domain state) · **no *success* toasts** — success = modal closes + list refreshes; **`@mantine/notifications` IS a dependency and IS used, for transient FAILURE reasons only** (`autoClose` 5000: `llm_unreachable`, `model_not_enabled`, `translation_failed`, `tool_failed` and the rest of the typed table, **only where the failure is not already rendered in place**). **Reviewable boundary: a notification whose message is a success is a defect.** US-044.AC-3's **retry lives in the stream at the failed exchange**, not in the notice, which auto-dismisses ·
 **never optimistic** — re-load after every mutation, `void` + non-rethrowing catch
 (the workspace narrows the re-load to the edited row, same intent) · **confirm
-step** on disable account / delete LLM connection / rebuild index (designed, not
-inherited; no AC requires it) · page state = `makeAutoObservable` class **with no
+step** via **`shared/ConfirmModal.tsx`** (cancel left of confirm) on disable
+account / delete LLM connection / **clear embedding** (US-015.AC-2) / **a lossy
+Sync, only when a column will be dropped** (US-018.AC-3/AC-4) / rebuild index
+(**not yet realized** — `fast/002`); **not** confirmed: re-enable, saving an
+enabled-model set, `Create`. A confirm **may name structure** (table, column,
+index columns, type) and **never content** — no "N rows will be lost", "N rows
+will be rebuilt", "rows affected" ·
+**a probe-backed picker gets its selection from the list payload, never from the
+probe** — failed-probe resilience by construction, one shared picker module · page state = `makeAutoObservable` class **with no
 methods** + free `loadX`/`xAction(state, …, signal?)` that `runInAction` and
-early-return on abort, driven from `useEffect` + `AbortController`.
+early-return on abort, driven from `useEffect` + `AbortController` ·
+**pure data contracts everywhere** (`frontend-structure.md`'s four MobX rules):
+a MobX class holds observable fields only — **no methods, no computed getters** —
+derivations are pure free functions, effects are free functions with an optional
+`AbortSignal` · notifications: outlet in **`shared/AppProviders`** (`autoClose`
+5000 on the outlet), raised **only** via **`shared/notifyFailure(thrown)`** — no
+success path, no colour parameter · `IconButton`: `ActionIcon` variant
+**`"subtle"`**, `sizeVariant` defaults to `"main"`, props never widened.
 
 ### Admin API facts
+
+**Route surfaces** (`backend-structure.md`) — all under `/api/admin/`,
+`require_role(Role.admin)` once per router (all three consumers now exist), ids in
+paths use the `models/ids.py` inbound alias:
+
+| Prefix | Routes |
+|---|---|
+| `/api/admin/users` (plan 005) | `GET`, `POST` (201), `POST /{user_id}/{disable\|enable\|password\|role}` — named actions, not one `PATCH`; no query params |
+| `/api/admin/llm-servers` (plan 006) | `GET` (rows carry enabled model names), `POST` (201), `PATCH /{server_id}`, `DELETE /{server_id}` (204), `POST /{server_id}/test`, `GET /{server_id}/available-models`, `POST /{server_id}/models` (replace set; POST not PUT), `POST` / `DELETE /{server_id}/embedding-model` |
+| `/api/admin/database` (plan 007) | `GET /tables`, `POST /tables/{table_name}/create`, `POST /tables/{table_name}/sync` — all 200, no body, no query; apply answers the re-derived row; `{table_name}` resolved **in `db/sync.py`**, never interpolated; no ids on this wire |
 
 - `GET /api/me` → `{id, username, role}`, **`id` a decimal string**; **401** when
   no session **or** the account no longer resolves (disabled — FEAT-003). Own
   identity only. Three consumers: the admin gate, the app's user menu (UC-071,
   US-093), and sign-out.
+- **Users:** **last login** = `users.last_login_at` (em dash when NULL), stamped
+  in the open-session transaction, `updated_at` not bumped. **A password reset
+  keeps live sessions** (US-010.AC-3). **Change Role = UC-087 / US-140**; self
+  target → `self_role_change_refused` 409 on the modal's general key; the action
+  is not hidden on one's own row. Create modal: 409 → username field; the
+  password-policy mapping is **pending a policy**, not missing.
 - **Two** routes over **one** probe primitive: list-available-models (UC-012/013)
-  and **test connection** (UC-011, own typed result). Test writes
-  `llm_servers.last_test_*`; a failed test never blocks registration. **Taxonomy
-  `reachable`/`unreachable`/`auth_failed`/`model_list_empty` is no longer a
-  `_TBD:`** — UC-011 now commits the product to two outcomes and says a finer
-  distinction is "a design choice, not a requirement", which **authorizes** the
-  four values as a design decision that deliberately exceeds the requirement.
+  and **test connection** (UC-011, own typed result). **Test answers 200 even for
+  a failing outcome** and writes `llm_servers.last_test_*`; **available-models
+  writes nothing and answers 502 `llm_unreachable`**. A failed test never blocks
+  registration. **Probe outcomes `reachable`/`unreachable`/`auth_failed`/`model_list_empty`**
+  — kept at four by plan 006; ok = `reachable` only; `last_test_error` stores the
+  value itself; declared once in `services/llm/client.py`.
+- **No "active" column or switch** on LLM Servers. **Designation measures the
+  dimension** with one real embeddings call; a model that cannot embed is
+  refused, nothing saved (US-015.AC-3/AC-4). **Clear Embedding is confirmed**
+  (US-015.AC-2), row menu only. Designation is independent of `is_enabled`; the
+  use-time validator needs both.
 - **Rebuild index (UC-016) is ALWAYS available** — no precondition beyond
   authentication, never gated on drift state or on an embedding model being
   designated. With no designation it **runs and fails** `no_embedding_model`;
@@ -401,13 +600,52 @@ That earlier `_TBD:` is closed.
 Wire shape: `{ "error": { "code", "message", "detail" } }`. Full table in
 `backend-structure.md`.
 
-`model_not_enabled` (carries the level that set it) · `no_embedding_model` ·
-`secret_ref_missing` · `llm_unreachable` · `tool_failed` (a tool *result*, not a
-stream error) · `translation_failed` · **`zone_empty`** (settle with nothing in
+`model_not_enabled` (**409**; carries server id as a string, model name, and the
+level — `character` | `session`) · `no_embedding_model` (**409**) ·
+`secret_ref_missing` (**500**) · `llm_unreachable` (**502**) · `tool_failed` (a
+tool *result*, not a stream error) · `translation_failed` ·
+**`username_taken`** (**409**) · **`user_not_found`** (**404**) ·
+**`self_role_change_refused`** (**409**, UC-087 / US-140.AC-2) ·
+**`llm_server_not_found`** (**404**) · **`unknown_table`** (**404**) ·
+**`schema_apply_failed`** (**500**; `detail` = table + `create`|`sync`, **never
+the driver's message**) · **`zone_empty`** (settle with nothing in
 the zone) · **`zone_not_empty`** (re-open while the zone is not empty) ·
 **`nothing_to_reopen`** (the head has no buried group — a pasted partner block) ·
-**`message_not_editable`** (edit targets a buried row) · `already_configured` ·
-`account_disabled`.
+**`message_not_editable`** (edit targets a buried row) · `already_configured`
+(**409**; carries a default non-empty `message` on the subclass) ·
+**`invalid_credentials`** (**400, never 401** — the client's 401 navigation
+would wipe the login message; uniform across unknown user / wrong password /
+disabled, US-006.AC-3) · **`not_authenticated`** (**401**) ·
+**`insufficient_role`** (**403**; names neither role).
+
+**`account_disabled` is struck** — nothing raises it (plan 004); FEAT-003 may
+reintroduce it if an administrator surface needs a distinguishable code.
+
+**`http_status` is a class attribute each `DomainError` subclass sets**, decided
+by the feature introducing the code; the error table has no status column by
+design, and statuses live in `backend-structure.md`'s per-code status record. One
+handler on the base class, installed by `errors.py`'s
+`register_exception_handlers(app)` from the app factory. `BackwardsClockError` and
+`ExtensionLoadError` are **not** `DomainError`s — operational 500s.
+
+**The 500 posture** (user decision H1, `backend-structure.md`):
+`secret_ref_missing` and `schema_apply_failed` are **one deliberate posture** —
+nothing about the request is malformed; the instance failed to do what it
+offered, or its environment is misconfigured (fixable only by changing the
+environment and restarting). Both render as a failure panel. **Flip:** an admin
+surface needs either as an actionable, field-level message → that code moves to a
+4xx. A non-`$` secret pointer is **FastAPI's 422**, not a domain code.
+
+**`/api/health` `schema` precedence: `missing` > `drift` > `ok`** — `"drift"` is
+now produced (plan 007); the roll-up is one word naming no table; the probe runs
+the PRAGMA walk (flip: narrow to presence if it shows against the healthcheck
+interval); **caching it is rejected**.
+
+**Frontend: call sites branch on `ApiError.code`** — never on `status`, never on
+the message (`frontend-structure.md`). **`client_malformed_error`** (non-2xx
+without a well-formed envelope; real status) and **`client_transport_failed`**
+(`fetch` rejected; status `0`) are **client-side codes no backend produces**. An
+abort is not an error and is not wrapped.
 
 **`discussion_not_resumable` is gone.** It named a table that no longer exists and
 a condition that has changed; `zone_not_empty` replaces it and the rename is not
@@ -470,8 +708,9 @@ type WorkspaceLayout = { navCollapsed: boolean; wallPinned: boolean };
 
 ## Icons
 
-`@tabler/icons-react` `^3.40`. `size={18} stroke={1.5}` main/header/composer,
-`size={16}` inline, `size={14}` chevrons. Colour via the wrapping button's `color`.
+`@tabler/icons-react` `^3.40`. `size={18}` main/header/composer, `size={16}`
+inline, `size={14}` chevrons — **`stroke={1.5}` on all three** (one family, one
+visual weight). Colour via the wrapping button's `color`.
 **Every icon-only action goes through the shared `IconButton`** (`Tooltip` +
 `ActionIcon` + `aria-label` from one `label` prop) — a deliberate deviation from
 BookWriter, which has none.
@@ -526,11 +765,26 @@ first and only drag interaction; the earlier "available, unused" note is closed.
 
 Kept from BookWriter: `proxy_buffering off`, `proxy_cache off`,
 `proxy_read_timeout 300s`. SPA fallback: one `location` per entry plus a catch-all.
+**The catch-all `/` is an open seam** — the build emits no `dist/index.html`, so
+something must bridge `dist/app/index.html` to the root; unchosen, owned by
+`fast/001.dev-and-container-harness` (`deployment.md`). **Same owner, two more:**
+the **`location /app/` block** serves a URL space the root-mounted `app` entry
+never uses; and **`/login` without a trailing slash** — the exact target of the
+client's 401 navigation and the bootstrap refusal link — does not match
+`location /login/` and falls to the unbridged catch-all.
+
+**Healthcheck:** `curl -f` asserts the **HTTP status, never the body** —
+`/api/health` is 200 whatever the roll-up says, so a fresh `degraded` instance is
+healthy. A body-inspecting "hardening" makes the bootstrap page unreachable.
 
 ## Deferred / non-goals
 
 - FEAT-018's four export granularities in full detail — contract sketched in `data-model.md`.
 - FEAT-016's `web_search` provider adapter — **seam only**.
+- **FEAT-002 deliberately does not build** (`overview.md`): session refresh /
+  sliding expiry; rate limiting, lockout, attempt counting; "remember me";
+  password reset / change-password (FEAT-003's); **rehash-on-verify (owned by no
+  feature)**; session listing / sign-out-everywhere.
 - **Context compaction — an explicit non-goal, and no longer a `_TBD:`**
   (`vision.md`, restated in FEAT-009 and FEAT-010). Context grows forever;
   nothing warns first; a context-window refusal arrives as an ordinary generation
@@ -555,10 +809,12 @@ Kept from BookWriter: `proxy_buffering off`, `proxy_cache off`,
 | `frontend-structure.md` | where the archive toggle sits now that the character and session lists are gone (placement, not design) |
 | `workspace-shell.md` | whether the character page's composer carries the kind switch or a setup choice (UC-080/US-117 decide neither); US-120's product `_TBD:` on what a settled **decision** does to the kind switch's alternating default, carried forward |
 | `ui-conventions.md` | the wall pin and a note's "forced" flag are drawn with the **same pin glyph** for two unrelated meanings on one screen; the enabled/disabled note toggle's glyphs map onto no Tabler icon; the discard-empty-zone glyph; `IconLanguage` toggle-state presentation unspecified; no wider accessibility target stated; **no sorting/filtering/pagination assumes small cardinality — revisit on a large account or list count** |
-| `admin-surfaces.md` | **Seed** exists in the inherited drift report and is **required by no UC** — RPHelper has no seed data at all, so it is recorded as prior art and not written up as a requirement (**Sync is no longer open** — it is Decision A's mechanism; **the connection-test taxonomy is no longer open either** — see the closed list) |
+| `admin-surfaces.md` | **Seed** exists in the inherited drift report and is **required by no UC** — RPHelper has no seed data at all, so it is recorded as prior art and not written up as a requirement; **FEAT-005's plan (007) looked and declined, without resolving it** (**Sync is no longer open** — it is Decision A's mechanism; **the connection-test taxonomy is no longer open either** — see the closed list) |
 | `llm-and-streaming.md` | no `web_search` provider chosen |
 | `search-and-retrieval.md` | RRF `k` / candidate depth / result count unmeasured; **how a disabled memo hit is marked in my-search results** (presentation only — the behaviour is ratified by US-137); **NEW — whether ARCHIVED sessions participate in the persona-edit re-embed fan-out, or are skipped and reconciled on restore**; **NEW — whether a persona edit touching many sessions needs a progress surface**; the **cost** of the per-write `session_vec` refresh on a long session; whether a per-session staleness marker earns a column |
-| `deployment.md` | TLS / exposure model; `64m` body limit is a judgement |
+| `deployment.md` | TLS / exposure model (the cookie's `Secure` flag is no longer part of it — shipped off with a flip condition); `64m` body limit is a judgement; **the `/` fallback — no `dist/index.html` exists, the mechanism bridging `dist/app/index.html` to the root is unchosen, owned by `fast/001.dev-and-container-harness`**; **same owner: the `location /app/` block vs the root-mounted `app` entry, and `/login` without a trailing slash** |
+| `data-model.md` (conventions) | **not a design `_TBD:` but an open defect: `users.created_at` / `updated_at` deviate from the fixed-width timestamp form — `/bug-fixer` against plan 003** |
+| `data-model.md` (`sessions`) | **the ENCODING of `sessions.model_ref`** — a bare model name is ambiguous across two servers; owned by FEAT-008 / FEAT-013's plans (the validator takes server id + model name separately) |
 
 ### Closed in THIS pass — do not re-open, do not re-list
 
@@ -578,6 +834,9 @@ regression, and a plan that treats one as unanswered is reading a stale copy.
 | **Whether changing the embedding designation forces a rebuild** (`search-and-retrieval.md`) | **Neither forces nor prompts one** (UC-013). Stale vectors are not comparable and **nothing indicates it**; remedy is UC-016 |
 | **R12 — double parentheses in RP prose** (`domain-rules.md`) | **A recorded constraint with its provenance** (US-130's `Constraint:` line): the convention assumes they never occur, confirmed by the roleplayer. Flip condition kept visible |
 | **UC-011's connection-test taxonomy** (`admin-surfaces.md`) | **An authorized design proposal**, not an open question: UC-011 commits to two outcomes and calls a finer distinction "a design choice, not a requirement". The four values stay |
+| **`secret_ref_missing`'s status posture** (`backend-structure.md`, finalization of plans 001..007, H1) | **500 kept**, as one shared posture with `schema_apply_failed`, reason and flip condition recorded once in the error model |
+| **Whether Change Role realizes a product id** (`admin-surfaces.md`, plan 005) | **UC-087 / US-140** now specify it |
+| **Whether a password reset revokes sessions** (`admin-surfaces.md`, plan 005) | **No** — now a requirement, US-010.AC-3 |
 | **Whether my-search shows disabled memos** (`search-and-retrieval.md`, `overview.md`) | **Ratified by US-137** — it was already decided here and flagged for `/product-spec`; the flag is discharged. *How* a disabled hit is marked stays open |
 
 **Newly open after this pass**, listed so they are found rather than rediscovered:
@@ -615,8 +874,15 @@ Not `_TBD:` but flagged for another owner:
   does **not** continue) and **US-133.AC-2** ("nothing is cached" is best-effort,
   not a guarantee). Recorded in `llm-and-streaming.md`. **Do not design to either
   AC as written.**
-- The **confirm step** on destructive admin actions is required by **no
-  acceptance criterion** and FEAT-003/004/005's planners may revisit it.
+- The **confirm step** on destructive admin actions is architectural judgement
+  except where an AC now requires it — **clear embedding (US-015.AC-2)** and **a
+  lossy Sync (US-018.AC-3/AC-4)**. The rest may be revisited by a later planner.
+- **Drift-report gaps with named owners** (`admin-surfaces.md`): SQL views and
+  `vec0` / FTS5 tables are outside the report — the features introducing them
+  extend it; a Sync of a view-referenced table may fail safely at the rename
+  until the views feature handles it.
+- **`memos`' orphan-scope check is not built** and is not part of the structural
+  drift report — owned by the feature that creates `memos` (`data-model.md`).
 
 *(The my-search/disabled-note flag that stood here is discharged — US-137
 ratified it. See the closed table above.)*

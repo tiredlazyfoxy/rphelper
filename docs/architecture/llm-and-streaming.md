@@ -40,6 +40,21 @@ unaffected either way** (UC-011's postcondition and alternate flow). The result 
 recorded on the row (`last_test_at`, `last_test_ok`, `last_test_error`) so the admin
 sees the last known state without re-probing on every page load.
 
+### As built by FEAT-004 (plan 006) — and what is deliberately absent
+
+- **FEAT-004 builds construction, `probe()` and `embed()`. `chat_stream` is not
+  stubbed** — a stub with no caller is dead code FEAT-009/010 would rewrite.
+- **`probe()` returns its outcome and raises nothing; `embed()` raises
+  `llm_unreachable`.** Every probe state, total failure included, is an answer
+  UC-011 requires to be reported, whereas an embedding has no useful partial
+  result. The asymmetry is the kind of thing a later contributor would "tidy";
+  do not.
+- **Base-URL composition tolerates a trailing slash and an already-present
+  `/v1`**, because an administrator types the URL by hand and a wrong composition
+  presents as `unreachable` against a healthy host.
+- The client is `httpx.AsyncClient`; why, and what the async/sync mix costs, is
+  `backend-structure.md`'s "The first async code in the backend".
+
 ### The model registry and use-time validation
 
 **Realizes:** FEAT-004, FEAT-013, UC-012, UC-050 — see `domain-rules.md` R4
@@ -76,7 +91,18 @@ model (UC-013) is validated at use time and a missing or changed designation rai
 **`no_embedding_model`** rather than falling back to another model — because
 vectors produced by a different embedding model are **not comparable** with the
 stored ones, so a silent substitution would return confidently wrong search
-results rather than an error. See `search-and-retrieval.md`.
+results rather than an error. See `search-and-retrieval.md`. The designated model
+must be **both designated and enabled** (`data-model.md`'s `models`).
+
+**Both use-time validators ship with no call site, and that is expected** (plan
+006). They live in `services/llm_registry.py` and were built by FEAT-004 with no
+consumer — sessions arrive with FEAT-008/FEAT-013's features and embeddings with
+FEAT-014/015's — so they are covered by tests against the service rather than
+through a session. This is **not an unfinished path**; do not "fix" the missing
+end-to-end test by wiring a premature call site. The model validator takes the
+**server id and the model name as two plain arguments**, so the encoding of
+`sessions.model_ref` stays with the feature that writes it (`data-model.md`'s
+`_TBD:`).
 
 ---
 

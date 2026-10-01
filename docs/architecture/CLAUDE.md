@@ -47,26 +47,33 @@ Current lengths, recorded honestly rather than implied:
 
 | Doc | Lines | |
 |---|---|---|
-| `backend-structure.md` | 745 | **split candidate — two subjects** |
-| `data-model.md` | 691 | deliberate exception |
-| `domain-rules.md` | 556 | deliberate exception |
-| `admin-surfaces.md` | 531 | over |
-| `workspace-shell.md` | 529 | deliberate exception |
-| `search-and-retrieval.md` | 520 | deliberate exception |
-| `quick-reference.md` | 511 | exempt; intentionally dense — the count is informational only |
-| `frontend-structure.md` | 491 | over |
-| `ui-conventions.md` | 473 | **split candidate — two subjects** |
-| `llm-and-streaming.md` | 468 | over |
-| `overview.md` | 429 | over |
-| `deployment.md` | 368 | within |
+| `backend-structure.md` | 1477 | **split candidate — two subjects; badly over budget** (below) |
+| `data-model.md` | 937 | deliberate exception |
+| `quick-reference.md` | 889 | exempt; intentionally dense — the count is informational only |
+| `frontend-structure.md` | 840 | over |
+| `admin-surfaces.md` | 768 | over |
+| `llm-and-streaming.md` | 696 | over |
+| `domain-rules.md` | 688 | deliberate exception |
+| `search-and-retrieval.md` | 640 | deliberate exception |
+| `workspace-shell.md` | 630 | deliberate exception |
+| `ui-conventions.md` | 629 | **split candidate — two subjects** |
+| `deployment.md` | 622 | over |
+| `overview.md` | 590 | over |
 
-These counts are a snapshot taken at one pass and drift with every one after it,
-so a reader who needs the real number opens the file rather than trusting the row.
-**They are known to be stale after the logging + product-delta pass** — every doc
-grew, several substantially — and were deliberately not re-counted, because the
-row's own instruction is to open the file. **The two split candidates below both
-grew again and neither split is authorized**; that is the part of this section
-that still binds.
+Re-counted at the finalization of plans 001..007 (2026-10-01), after that pass's
+three batches landed. The counts drift with every pass after it, so a reader who
+needs the real number opens the file rather than trusting the row. **Every doc is
+now over the ~400-line budget**; that is mostly the as-built records the
+finalization added, and it is not by itself a reason to split (the rule above).
+
+**`backend-structure.md` is the outlier — roughly three and a half times the
+budget, and nearly double its last recorded count.** The finalization added the
+three admin route surfaces, the per-code status record and the 500 posture, the
+probe's as-built postures, the first async code, and the Sync rebuild's
+foreign-key posture, on top of the stream/settle material that already made it a
+two-subject doc. **The `session-stream.md` split below is more pressing than when
+it was identified and is still not authorized**; that is the part of this section
+that binds.
 
 The four deliberate exceptions, each with the reason it stays whole:
 
@@ -118,7 +125,7 @@ registry of record** — the sole canonical list of every `ACT-###`, `FEAT-###`,
 quoted in a design doc or a briefing: a range goes stale the moment a feature
 lands, and a range that spans ids owned by several features is how a citation ends
 up attributed to the wrong one. (Current as of this writing: FEAT-001..020,
-UC-001..086, US-001..139 — treat as a sanity check, not as the source.) Rules:
+UC-001..087, US-001..140 — treat as a sanity check, not as the source.) Rules:
 
 - **Cite, do not copy.** If a reader needs the behavioural detail, they open the
   product doc. Architecture states the *mechanism* that satisfies the

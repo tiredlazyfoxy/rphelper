@@ -1,9 +1,10 @@
 # Backend structure
 
 **Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-008,
-FEAT-009, FEAT-010, FEAT-013, FEAT-018, FEAT-019, FEAT-020, UC-003, UC-012,
-UC-013, UC-027, UC-035, UC-037, UC-050, UC-065, UC-066, UC-071, UC-078, UC-080,
-UC-083, UC-084, UC-085, UC-086, US-132, US-134, US-135
+FEAT-009, FEAT-010, FEAT-013, FEAT-018, FEAT-019, FEAT-020, UC-003,
+UC-006..UC-015, UC-027, UC-035, UC-037, UC-050, UC-065, UC-066, UC-071, UC-078, UC-080,
+UC-083, UC-084, UC-085, UC-086, UC-087, US-006.AC-3, US-018.AC-6, US-018.AC-7,
+US-132, US-134, US-135, US-140
 
 FastAPI application layout, the routers/services split, the id and JSON
 boundaries, configuration and secrets, and the error model that carries typed
@@ -23,19 +24,25 @@ backend/
     ids.py               # the snowflake generator — see below
     secrets.py           # "$ENV_VAR" pointer resolution
     errors.py            # typed error hierarchy + exception handlers
+    roles.py             # Role enum + ROLE_LADDER + one pure "at least this
+                         #   rung" comparison; no fastapi (plan 003, plan 004)
+    dependencies.py      # CurrentUser, require_user, require_role(min_role)
+                         #   and the session-cookie set/clear writers (plan 004)
     db/
       engine.py          # connection, PRAGMAs, sqlite-vec extension load
       schema.py          # the table-definition registry (data-model.md)
       drift.py           # PRAGMA introspection vs the registry (FEAT-005)
       sync.py            # the DDL executor: Alembic batch ops, admin-triggered
-                         #   only — see "Schema evolution" below
+                         #   only; resolves the table name itself and may
+                         #   import drift.py, never the reverse — see
+                         #   "Schema evolution" below
     routers/
       health.py          # /api/health
       bootstrap.py       # FEAT-001
       auth.py            # FEAT-002, and /api/me
-      admin_users.py     # FEAT-003
-      admin_llm.py       # FEAT-004
-      admin_db.py        # FEAT-005
+      admin_users.py     # FEAT-003 — /api/admin/users (plan 005)
+      admin_llm.py       # FEAT-004 — /api/admin/llm-servers (plan 006)
+      admin_db.py        # FEAT-005 — /api/admin/database (plan 007)
       characters.py      # FEAT-006
       setups.py          # FEAT-007
       sessions.py        # FEAT-008, FEAT-013
@@ -45,8 +52,12 @@ backend/
       search.py          # FEAT-017
       transfer.py        # FEAT-018
     services/
+      health.py                  # /api/health's probe SQL — NOT a domain service; see
+                                 #   "Routers versus services" (decided in plan 001)
       bootstrap.py  auth.py  users.py
-      llm_registry.py            # servers, models, enabled-model validation
+      passwords.py               # the password-hashing seam: hash + verify (plan 003)
+      llm_registry.py            # servers, models, the probe primitive, designation,
+                                 #   and BOTH use-time validators (plan 006)
       config_resolver.py         # R1's two chains
       memo_chain.py              # R2
       characters.py  setups.py
@@ -62,11 +73,15 @@ backend/
         hybrid.py                # vec + FTS + RRF
         memo_search.py  session_search.py  my_search.py
       llm/
-        client.py                # one OpenAI-compatible client
+        client.py                # one OpenAI-compatible client, httpx.AsyncClient;
+                                 #   also declares the probe-outcome value set
+                                 #   (plan 006 — see "The first async code")
         frames.py                # SSE frame emission
         tools.py                 # the three tool definitions + dispatch
       transfer.py                # export/import
-    models/                      # pydantic request/response models
+    models/                      # pydantic request/response models; ids.py holds
+                                 #   the id aliases, secret_ref.py the "$"-pointer
+                                 #   field type (plan 006)
   tests/
 ```
 
@@ -110,6 +125,24 @@ Guarantees:
 - **A backwards clock refuses to issue and raises.** Waiting out the drift and
   carrying on both mint duplicates. It surfaces as an operational fault (a 500),
   not as a domain failure the SPA is expected to render.
+- **The backwards-clock exception is NOT a `DomainError` subclass**, and the
+  non-relationship is deliberate (decided in plan 001). It is an operational
+  fault — a 500 — and a `DomainError` is by definition something the SPA is told
+  to render (the error model below). It is exactly the kind of class someone later
+  "tidies" into the hierarchy; doing so would dress an operational fault as a
+  domain failure with a wire code the UI has no rendering for.
+- **Sequence exhaustion blocks until the next millisecond** (decided in plan 001).
+  More than 4096 ids in one millisecond waits out the millisecond and continues.
+  The two rejected alternatives each fail worse: wrapping the sequence mints a
+  duplicate, and raising turns an ordinary write burst into an error the caller
+  cannot act on. The wait re-reads the clock, so a backwards step observed during
+  it still raises.
+- **Time is read through an injectable clock** (decided in plan 001) — the
+  generator is constructed with a milliseconds clock that defaults to the system
+  clock. That is the only seam by which the backwards-clock refusal and the
+  exhaustion wait are testable at all; both are silent-failure territory
+  (a duplicate id, an untestable refusal), which is why the seam is recorded
+  rather than left an implementation detail.
 
 ## The JSON id boundary — every id crosses the wire as a string
 
@@ -140,6 +173,11 @@ SnowflakeIn  = Annotated[int, BeforeValidator(lambda v: int(v))]
   `detail`, and the `message_id` on the SSE `done` frame
   (`llm-and-streaming.md`). Those are JSON on the wire and are bound by the same
   rule.
+- **It covers path parameters too** (plan 005). An id in a path is declared with
+  the inbound annotated alias from `models/ids.py`, **never as a bare `int` path
+  type and never as a `str` the handler calls `int()` on**.
+  `/api/admin/users/{user_id}` was the first route with an id in its path; a bare
+  `int` happens to work there and quietly moves the boundary out of `models/`.
 - The frontend half — **a TypeScript `id: number` anywhere is a defect** — is in
   `data-model.md` and `frontend-structure.md`.
 
@@ -168,6 +206,14 @@ Two reasons this is worth being strict about here:
 Dependency direction is one-way: `routers → services → db`. Nothing in `services`
 imports from `routers`. `models/` is imported by both and imports neither.
 
+**`services/health.py` is not a domain service, and is not an exception to the
+split either** (decided in plan 001). It enforces no rule from `domain-rules.md`
+and takes no `user_id`. It exists only because `/api/health`'s probe issues SQL
+and the split forbids a router from doing so: the router calls the probe with a
+connection and the registry, and the probe returns a plain result. A reader
+finding it in `services/` should read it as the split applied to its first
+router, not as a domain-shaped carve-out.
+
 ### Authorization as router dependencies
 
 Three dependencies, and every route uses exactly one:
@@ -184,8 +230,10 @@ the session cookie and compares their role against the numeric ladder in
 `domain-rules.md`:
 
 ```python
+# app/roles.py — no fastapi import
 ROLE_LADDER: dict[Role, int] = {Role.roleplayer: 0, Role.admin: 1}
 
+# app/dependencies.py
 def require_role(min_role: Role) -> Callable[..., CurrentUser]: ...
 ```
 
@@ -194,9 +242,52 @@ route wants to express is a **threshold** — "at least this rung" — so a new 
 is one ladder entry rather than a new dependency per role plus an audit of which
 routes should have gained it.
 
+#### Where the vocabulary and the dependencies live — two leaf modules
+
+Decided in plan 004, **correcting what plan 003's outcome proposed** (that
+`ROLE_LADDER` and `require_role` would sit "naturally beside" the enum in the
+same module). Written down so the two features' proposals are not re-mixed:
+
+- **`app/roles.py` holds the two-value `Role` enum, `ROLE_LADDER` and one pure
+  "at least this rung" comparison, and stays free of `fastapi`.** It is a
+  top-level leaf beside `config.py` and `ids.py` because `db/schema.py`,
+  `services/`, `models/` and the dependencies all need the vocabulary, and a
+  top-level leaf keeps `db/` from importing `models/`. FEAT-001 declared the
+  enum; FEAT-002 added the ladder and the comparison.
+- **`app/dependencies.py` holds `CurrentUser`, `require_user`,
+  `require_role(min_role)` and the two session-cookie writers (set and clear).**
+  A top-level leaf beside `config.py`, `ids.py`, `errors.py` and `roles.py`.
+
+Why not "in the same module" as the enum: **`db/schema.py` imports
+`app/roles.py`** for the `role` column's value domain, so a FastAPI dependency
+factory in `roles.py` would drag `fastapi` into `db/` transitively. Why not
+inside a router either: the dependencies' consumers are **many** routers, so one
+router owning them would make every other router import from a sibling — unlike
+`require_unconfigured`, whose only consumer is `routers/bootstrap.py`, which is
+why it lives there. The cookie writers sit beside the dependencies because all
+four share one fact — the cookie's name and flags — and are used by two routers
+(`auth.py` and `bootstrap.py`).
+
+**What `require_user` resolves**, stated because three docs depend on it:
+
+```
+cookie → SHA-256 digest → an auth_sessions row, not revoked, not expired
+       → join users → the account must be enabled
+       → CurrentUser { id, username, role }   # role read LIVE from users
+```
+
+Consequence: **a role change or a disable takes effect on the caller's next
+request**, with no session rewrite. `auth_sessions` carries no `role` column
+(`data-model.md`), so there was never a cached role to go stale. `require_role`
+runs the same resolution and then compares the rung.
+
 `require_role(Role.admin)` sits on **every** route in `admin_users.py`,
 `admin_llm.py` and `admin_db.py` — as a router-level dependency, not per handler,
-so adding an admin route cannot forget it. The frontend's pre-mount gate
+so adding an admin route cannot forget it. **All three consumers now exist**:
+`admin_users.py` was the factory's first (plan 005 — it shipped with zero
+consumers in plan 004), `admin_llm.py` the second (plan 006), `admin_db.py` the
+third and last (plan 007). The property proved by test is that a route on such a
+router declaring nothing of its own is still refused. The frontend's pre-mount gate
 (`admin-surfaces.md`) and the hidden menu item (`workspace-shell.md`) are UX
 only; this is the boundary. Every route behind it is additionally bound by R5: it
 returns no user content and no count derived from it.
@@ -210,6 +301,183 @@ scope becomes a type error rather than a privacy incident.
 configured, every bootstrap route refuses (create-new and import alike). The
 check is a dependency rather than a check inside each handler so that adding a
 bootstrap route cannot forget it.
+
+#### The bootstrap route surface — FEAT-001
+
+**Realizes:** FEAT-001, UC-001, UC-003
+
+| Route | Answers | Notes |
+|---|---|---|
+| `POST /api/bootstrap/create` | **201** + the new administrator's identity — id as a decimal string, username, role — **and `Set-Cookie`** | request = username + password, nothing else accepted onto the account; **the body carries no token** |
+| `POST /api/bootstrap/import` | — | **reserved**, not built: `fast/003.bootstrap-from-export` adds it under the same guard (UC-002, deferred) |
+
+- **The create signs the operator in.** It mints an `auth_sessions` row **inside
+  the same transaction** that applies the registry and inserts the first
+  administrator, and sets the session cookie on its 201 through the cookie
+  writer in `app/dependencies.py` (plan 004, which closed the deferral plan 003
+  shipped with). The body still carries no token or session field — the cookie
+  is the only carrier, exactly as for login.
+- **`require_unconfigured` is attached to the router, not the handler**, and is
+  declared in `routers/bootstrap.py` itself rather than in a shared module: its
+  only consumer is that router. A router-level guard is what lets `fast/003`'s
+  import route inherit the refusal for free.
+- `already_configured` answers **409** (the per-code status record below).
+
+#### The admin route surfaces — FEAT-003, FEAT-004, FEAT-005
+
+**Realizes:** FEAT-003, FEAT-004, FEAT-005, UC-006..UC-015, UC-087
+
+All three live under **`/api/admin/`**, one prefix per router, each with
+`require_role(Role.admin)` attached once at router level. No document fixed the
+paths before the plans did; they are recorded rather than left to be discovered,
+as the bootstrap and auth surfaces are.
+
+**`/api/admin/users` — `routers/admin_users.py` (plan 005).** Six routes, each
+answering with an account model, none taking a query parameter:
+
+| Route | Answers |
+|---|---|
+| `GET /api/admin/users` | the account list |
+| `POST /api/admin/users` | **201**, the created account |
+| `POST /api/admin/users/{user_id}/disable` | the account |
+| `POST /api/admin/users/{user_id}/enable` | the account |
+| `POST /api/admin/users/{user_id}/password` | the account |
+| `POST /api/admin/users/{user_id}/role` | the account (UC-087, US-140) |
+
+**Named action routes, not one `PATCH /api/admin/users/{id}`**, so that the
+disable's transaction, the self-target refusal and the password hash each hang
+off their own body and rule.
+
+**`/api/admin/llm-servers` — `routers/admin_llm.py` (plan 006).** Nine routes:
+
+| Route | Answers |
+|---|---|
+| `GET /api/admin/llm-servers` | the list, **each row carrying its enabled model names** |
+| `POST /api/admin/llm-servers` | **201** |
+| `PATCH /api/admin/llm-servers/{server_id}` | the registration |
+| `DELETE /api/admin/llm-servers/{server_id}` | **204** |
+| `POST /api/admin/llm-servers/{server_id}/test` | **200 even for a failing outcome** ("The connection probe" below) |
+| `GET /api/admin/llm-servers/{server_id}/available-models` | the offered names, or **502** `llm_unreachable` |
+| `POST /api/admin/llm-servers/{server_id}/models` | replaces the enabled set |
+| `POST /api/admin/llm-servers/{server_id}/embedding-model` | designate (measures the dimension — `admin-surfaces.md`) |
+| `DELETE /api/admin/llm-servers/{server_id}/embedding-model` | clear the designation |
+
+Four decisions embedded in it:
+
+- **`PATCH`, not FEAT-003's named-action pattern.** A registration is one entity
+  with one rule, and the API-key contract is literally "which fields were
+  supplied" (`admin-surfaces.md`'s round-trip rule).
+- **`POST`, not `PUT`, for the enabled set**, because the shared frontend client's
+  method union has no `PUT`, and adding one for a single call site was out of
+  scope.
+- **No `GET /{server_id}/models`.** The enabled names ride on the list payload,
+  which is what makes failed-probe resilience structural (`ui-conventions.md`).
+- **The clear-designation path is server-scoped**, so it cannot collide with
+  `{server_id}` in the route table.
+
+**`/api/admin/database` — `routers/admin_db.py` (plan 007).** Three routes, all
+answering **200**, all taking **no body and no query parameter**:
+
+| Route | Answers |
+|---|---|
+| `GET /api/admin/database/tables` | the whole drift report |
+| `POST /api/admin/database/tables/{table_name}/create` | the per-table report **re-derived after the apply** |
+| `POST /api/admin/database/tables/{table_name}/sync` | the same |
+
+- **Each apply answers with the re-derived row**, giving US-018.AC-2 a
+  server-side witness beside the page's re-load.
+- **`{table_name}` is validated by lookup in the registry inside `db/sync.py`,
+  never in the router**, and the raw string is never interpolated into SQL — only
+  the registry's own `Table` object reaches the DDL. That is what makes a non-id
+  path parameter safe here, and it is the one thing a later contributor could
+  undo by "simplifying" the lookup into the handler.
+- **Two routes rather than one `apply`**, because the UI offers them under
+  different conditions and only one of the two can lose data.
+- **The one admin route family not keyed on a snowflake** — its wire carries no
+  id at all, so the JSON id boundary has no call site here.
+
+## The authentication surface — FEAT-002
+
+**Realizes:** FEAT-002, UC-004, UC-005, US-006.AC-3
+
+Owned by `routers/auth.py` under the `/api` prefix:
+
+| Route | Answers | Notes |
+|---|---|---|
+| `POST /api/auth/login` | **200** + the caller's identity (id as a decimal string, username, role), **and `Set-Cookie`** | no authorization dependency; **never answers 401** (the error model's `invalid_credentials` reasoning); the body carries no token |
+| `POST /api/auth/logout` | **204**, cookie cleared | **idempotent and carries no `require_user`** — the same answer whether or not a live session resolved; revokes the **calling** session only |
+| `GET /api/me` | as documented below | real since FEAT-002; its 401-on-disabled is mechanically true through `require_user` |
+
+The identity model is **one model serving both `GET /api/me` and the login
+route**. **There is no session-refresh route** (below).
+
+**The refusal is uniform** (US-006.AC-3): an unknown username, a wrong password
+and a **correct password on a disabled account** all produce the same
+`invalid_credentials` refusal — same code, status and message — so a login
+attempt never learns whether an account exists or is disabled.
+
+### Password hashing — `services/passwords.py`
+
+The one seam for the algorithm: a hash operation and a verify operation, used by
+FEAT-001's first-administrator insert and FEAT-002's login alike. The decision —
+**Argon2id via `argon2-cffi`, at the library's own defaults** — and its flip
+condition are in `overview.md`'s stack list.
+
+**`users.password_hash` holds `argon2-cffi`'s own encoded string**
+(`$argon2id$v=19$m=...`), so the algorithm, version and parameters live **in the
+value** and no schema column records them. That is why a parameter change is not
+a migration, and why there is no `hash_algorithm` column to add later.
+
+### Session lifetime — absolute 720 hours, no sliding, no refresh route
+
+`auth_sessions.expires_at` is written **once, at login** (and at bootstrap
+create), from `Settings.session_ttl_hours` (default 720), and is **never
+moved**. There is consequently **no session-refresh route** — the plan 004 brief
+named one and the plan dropped it deliberately.
+
+Reason: SQLite has a **single writer**, and an SSE compose exchange holds a
+request open for the length of a generation. Extending a session on every
+authenticated request would turn **every read into a write** and put the busiest
+path in the product behind the one lock the whole database shares.
+
+**Flip condition:** if sessions ever need to survive activity beyond the absolute
+window — a product requirement for "stay signed in while working", or a TTL short
+enough that people are logged out mid-roleplay — sliding expiry becomes worth the
+writes, and the cheapest form is a bounded touch (rewrite `expires_at` at most
+once per N minutes) rather than a write per request.
+
+### The session token — opaque and random, stored as a SHA-256 digest
+
+`auth_sessions.token_hash` holds a **SHA-256 digest** of a **32-byte
+`secrets.token_urlsafe`** token. The plaintext exists **only in the cookie**;
+lookup is by digest. The token is **never logged**.
+
+**Deliberately not Argon2**, although the codebase already depends on it for
+passwords. Argon2 exists to make **low-entropy human passwords** expensive to
+guess; a 256-bit random token has nothing to guess, and running a memory-hard KDF
+on **every authenticated request** would pay a deliberately expensive
+computation for no gain. The digest is what makes a stolen database file useless
+for replaying live sessions, which is the whole of the requirement. "Argon2 for
+passwords, SHA-256 for tokens" is the difference between the two inputs, not an
+inconsistency — and the "fix" would be a real performance defect.
+
+### The session cookie's flags
+
+Written by the one setter in `app/dependencies.py`; each flag has a reason:
+
+| Flag | Value | Why |
+|---|---|---|
+| name | `Settings.session_cookie_name` | never a literal |
+| `HttpOnly` | on | there is no token JavaScript can read — which is why the admin gate is a server round-trip (`admin-surfaces.md`) |
+| `SameSite` | `Lax` | single origin in both topologies (`overview.md`) |
+| `Path` | `/` | it must reach all four entries |
+| `Max-Age` | the TTL | not a browser-session cookie: that would silently turn a 30-day session into "until I close the window", experienced as random logouts; matching the TTL also stops the browser sending a cookie the server would only reject |
+| `Secure` | **off** | `deployment.md` records HTTP only, no TLS anywhere |
+
+The cookie's lifetime is a **hint**; `expires_at` in the row is the
+**authority**. **Flip condition:** TLS termination anywhere in front of this
+application makes `Secure` mandatory — the change surface is the one setter
+(`deployment.md`'s TLS `_TBD:`).
 
 ## The stream routes — FEAT-009 and FEAT-010 in one router
 
@@ -455,6 +723,7 @@ class Settings(BaseSettings):
     node_id: int = Field(default=0, validation_alias="RPHELPER_NODE_ID")
     session_cookie_name: str = Field(default="rphelper_session", validation_alias="RPHELPER_SESSION_COOKIE_NAME")
     session_ttl_hours: int = Field(default=720, validation_alias="RPHELPER_SESSION_TTL_HOURS")
+    llm_request_timeout_seconds: float = Field(default=30.0, validation_alias="RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS")  # plan 006
 
     # logging — sinks and their thresholds (deployment.md owns the posture)
     log_console_level: str  = Field(default="DEBUG",   validation_alias="RPHELPER_LOG_CONSOLE_LEVEL")
@@ -487,6 +756,10 @@ def get_settings() -> Settings:
   non-colliding node ids — is superseded**: US-136.AC-2 makes import mint fresh
   ids and remap the payload's internal references (`data-model.md`), so import
   uses this same generator and needs no cross-instance guarantee at all.
+- **`session_ttl_hours`** (default 720) is read once per session, when its
+  `expires_at` is written, and the expiry is never moved afterwards — no sliding
+  expiry, no refresh route ("Session lifetime" above has the reason and the flip
+  condition). **`session_cookie_name`** is the only source of the cookie's name.
 - **The five `log_*` fields** are the only configuration the logging module
   reads. `log_file_path` defaults under `data/` because that is the one writable
   volume in prod; `deployment.md` owns that reasoning and the redaction rule.
@@ -530,11 +803,21 @@ def resolve_secret(ref: str | None) -> str | None:
 
 - A value that does not start with `$` is **rejected on write**, so a pasted raw
   key cannot be persisted by accident. The admin UI says what the field expects.
+  **Where and how** (plan 006): an annotated pydantic field type in
+  **`app/models/secret_ref.py`**, answered by FastAPI's own **422** and adding no
+  domain error code. `resolve_secret` is unchanged and handles read-time
+  resolution alone.
+- **The empty string is a legal value** meaning "no pointer" on create and "clear
+  the stored pointer" on update (`admin-surfaces.md`'s round-trip rule).
 - Resolution happens **at call time**, not at registration and not at startup, so
   rotating a key is an environment change plus a restart — no database write, no
   re-registration.
 - A missing environment variable is a **typed error** (`secret_ref_missing`), not
   a `None` that turns into an unauthenticated request against the provider.
+- **It has an administrator-facing call site since plan 006**: the
+  test-connection route lets it propagate as a **500** and records nothing on the
+  row. Why 500 is right, and when it would stop being right, is "The 500 posture"
+  under the error model below.
 
 Why this is right for RPHelper rather than merely inherited from BookWriter:
 FEAT-018/UC-061 requires a whole-database export an administrator may move
@@ -545,8 +828,9 @@ moves configuration and the environment supplies credentials.
 
 ## The error model
 
-**Realizes:** FEAT-004, FEAT-009, FEAT-010, FEAT-011, FEAT-013, UC-012, UC-032,
-UC-037, UC-039
+**Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-009,
+FEAT-010, FEAT-011, FEAT-013, UC-003, UC-006..UC-015, UC-032, UC-037, UC-039,
+UC-087, US-006.AC-3, US-018.AC-6, US-018.AC-7, US-140
 
 Domain failures in RPHelper are not incidental — several are *product behaviour*.
 "Your session's model was disabled" (UC-012) and "translation failed, showing the
@@ -562,6 +846,27 @@ class DomainError(Exception):
     detail: dict       # structured, never free prose the UI has to parse
 ```
 
+**`code` and `http_status` are class attributes each concrete subclass sets**;
+the base declares them and gives them no value. The status a code answers with is
+**decided by the feature that introduces the code**, in the subclass it declares.
+`detail` (and the optional `message`) are per instance, `detail` defaulting to
+empty.
+
+**The table below carries no status column, by design rather than by omission.**
+A code's status is a property of its subclass, decided where the code is born, so
+the error table records *what* a code means and leaves *how it is answered* to the
+per-code status record further down. Without a recorded rule, twenty codes would
+have their statuses decided twenty separate times with nothing tying them together.
+
+**Handler registration** (decided in plan 001). `errors.py` exposes one
+registration entry point, `register_exception_handlers(app)`, which installs the
+one handler for the `DomainError` base class on the application; `main.py`'s app
+factory calls it. One registration on the base covers every subclass, so a feature
+adding a code adds a subclass and touches no registration. The handler reads the
+status off the instance's `http_status` and renders the wire body below. Recorded
+because the "one handler" rule otherwise names no call site and would be
+re-inferred — possibly differently — by the next feature that adds a code.
+
 Wire shape for every non-2xx the SPA is expected to handle:
 
 ```json
@@ -572,9 +877,15 @@ The named errors the design requires:
 
 | `code` | Raised when | `detail` carries | Realizes |
 |---|---|---|---|
-| `model_not_enabled` | Use-time validation of a resolved model reference fails (R4) | the model reference, and **which level set it** — `character` or `session`, **never `user`**: there is no user-level model default (UC-050, R1's correction) | FEAT-004, UC-012 |
-| `no_embedding_model` | An embedding is attempted with no designated embedding model, or the designation is gone (R4) | nothing user-scoped | FEAT-004, UC-013 |
+| `model_not_enabled` | Use-time validation of a resolved model reference fails (R4) | the model reference — **the server id as a decimal string and the model name** — and **which level set it**, constrained to `character` or `session`, **never `user`**: there is no user-level model default (UC-050, R1's correction) | FEAT-004, UC-012 |
+| `no_embedding_model` | An embedding is attempted with no designated embedding model, or the designation is gone, or the designated model is not also enabled (R4) | nothing user-scoped | FEAT-004, UC-013 |
 | `secret_ref_missing` | `"$ENV_VAR"` names an absent variable | the variable name | FEAT-004 |
+| `username_taken` | An account is created with a username that already exists | nothing | FEAT-003, UC-006 |
+| `user_not_found` | An admin route addresses an account id that does not exist | nothing | FEAT-003, UC-007, UC-008, UC-009, UC-087 |
+| `self_role_change_refused` | A role change whose target is the acting administrator | nothing | FEAT-003, UC-087, US-140.AC-2 |
+| `llm_server_not_found` | An admin LLM route addresses a server id that does not exist | nothing | FEAT-004, UC-010..UC-013 |
+| `unknown_table` | A drift-page apply route names a table the registry does not declare | the table name | FEAT-005, UC-015 |
+| `schema_apply_failed` | A `Create` or a `Sync` could not be applied — a driver error, a failed cast, or a `PRAGMA foreign_key_check` violation | the table name and the operation (`create` \| `sync`); **never the driver's message** (below) | FEAT-005, UC-015, US-018.AC-6, US-018.AC-7 |
 | `llm_unreachable` | Provider call fails or times out | provider-side message, no request body | FEAT-010, UC-032 |
 | `tool_failed` | A tool invocation fails — **not surfaced as a stream error** (R9) | tool name | FEAT-014, FEAT-015, FEAT-016 |
 | `translation_failed` | UC-039's exception flow; nothing is cached | the message id, as a string | FEAT-011 |
@@ -583,7 +894,26 @@ The named errors the design requires:
 | `nothing_to_reopen` | Re-open is attempted where the last settled row has no buried group — a pasted partner block (US-121) | nothing | FEAT-010, UC-037 |
 | `message_not_editable` | An edit targets a **buried** row (US-116) | nothing | FEAT-010, UC-036 |
 | `already_configured` | A bootstrap route is reached on a configured instance (UC-003) | nothing | FEAT-001 |
-| `account_disabled` | Login by a disabled account (FEAT-002) | nothing | FEAT-002 |
+| `invalid_credentials` | A login attempt fails for **any** reason — unknown username, wrong password, or a disabled account | nothing | FEAT-002, US-006.AC-3 |
+| `not_authenticated` | A guarded route is reached with no session cookie, or one that does not resolve to a live session | nothing | FEAT-002 |
+| `insufficient_role` | An authenticated, enabled caller's role is below the required rung | nothing — **it names neither the caller's role nor the required one** | FEAT-002 |
+
+**`account_disabled` is struck** (plan 004). Nothing raises it: a correct password
+on a disabled account receives the same `invalid_credentials` refusal as a wrong
+password — same code, status and message (US-006.AC-3) — and the login screen
+renders one message for all three causes. The row is struck because it has **no
+caller**, not because the concept is wrong; FEAT-003's planner **may reintroduce
+it** if an administrator-facing surface needs a distinguishable code.
+
+**`already_configured` carries a default human-readable `message`** (plan 003).
+Raised with no arguments — as `require_unconfigured` raises it — it renders a
+non-empty `message`, so the wire body matches the shape above, where `message`
+is a string. **The default lives on the subclass**: the base class and its
+handler have no class-level default message, because adding one there would
+change what every other error renders. The base stores a message exactly as
+given, which is how plan 003's first build shipped `"message": null` on its 409.
+Whether other named errors adopt the same subclass-default pattern is decided per
+code, by the feature that introduces it.
 
 **`discussion_not_resumable` is renamed to `zone_not_empty`, and the rename is
 not cosmetic.** The old code named a table that no longer exists and a condition
@@ -613,6 +943,61 @@ do that if they are told whether the dead reference came from the character or
 from this session. (It used to say "their account default, the character, or this
 session" — there is **no account default for a model**; see R1's correction.)
 
+### The per-code status record
+
+One row per code, added by the feature that introduces the code's subclass, with
+the reason for the status beside it. A code not listed here has not been
+introduced yet.
+
+| `code` | HTTP status | Reason | Introduced by |
+|---|---|---|---|
+| `secret_ref_missing` | **500** | the **500 posture** below — the instance's environment is misconfigured, and nothing about the request is malformed. Reachable from an administrator's test-connection action since plan 006; kept at 500 by user decision at the finalization of plans 001..007 (H1) | plan 001 |
+| `already_configured` | **409** | the request is well formed and no identity is being judged — the instance's state conflicts with the operation. **403 rejected:** there is no caller identity to authorize on an instance that may not even be configured. **404 rejected:** hiding the route would make UC-003's "directs them to sign in instead" undiagnosable | plan 003 |
+| `invalid_credentials` | **400** | **not 401, deliberately.** The shared API client performs a document navigation to `/login` on **any** 401 and then still throws (`frontend-structure.md`), so a 401 from the login route would reload the login page and destroy the message US-005.AC-2 requires the user to see. **401 plus a per-call opt-out rejected:** it widens a shared module's contract for one call site. **403 rejected:** nothing has been authenticated, so there is no identity to refuse an action to. A reader "correcting" this to 401 breaks the login screen in a way that presents as "the form does nothing" | plan 004 |
+| `not_authenticated` | **401** | the condition the client's 401 navigation exists for | plan 004 |
+| `insufficient_role` | **403** | a genuine authorization failure for an identified caller; the client renders a 403 rather than redirecting | plan 004 |
+| `username_taken` | **409** | a conflict with existing state for a caller who is authenticated and authorized; **403 rejected** because it is already spoken for by `insufficient_role` | plan 005 |
+| `self_role_change_refused` | **409** | same reasoning as `username_taken`: an authorized caller, a request that conflicts with a rule; **not 403** | plan 005 |
+| `user_not_found` | **404** | the path's account id addresses no row | plan 005 |
+| `llm_server_not_found` | **404** | the sibling of `user_not_found`: the path's server id addresses no row | plan 006 |
+| `llm_unreachable` | **502** | the failure is the upstream provider's, and there is no useful partial answer to give (the available-models route, "The connection probe" below) | plan 006 (status left open by this table until then) |
+| `no_embedding_model` | **409** | assigned by plan 006, which introduced the first raising path; the request is well formed and the registry's state conflicts with it — the same shape as `already_configured` (this doc's gloss; the plan records the status, not a separate reason) | plan 006 |
+| `model_not_enabled` | **409** | as `no_embedding_model` | plan 006 |
+| `unknown_table` | **404** | the path's table name addresses no registry entry | plan 007 |
+| `schema_apply_failed` | **500** | the **500 posture** below — the instance failed to do what it offered | plan 007 |
+
+#### The 500 posture — `secret_ref_missing` and `schema_apply_failed`
+
+**Decided by the user at the finalization of plans 001..007 (H1): both keep 500,
+and they are one deliberate posture, not two accidents.** Plans 006 and 007 each
+flagged their code as worth a second look, because each is now reachable from a
+routine administrator action — a test connection, a Sync — and so can put a 500
+in the logs. The answer is the same for both:
+
+- **Nothing about the request is malformed.** A 4xx says "the caller asked
+  wrongly"; here the caller asked correctly. `schema_apply_failed` means the
+  instance **failed to do what it offered** (a cast failed, a foreign-key check
+  failed, the driver refused). `secret_ref_missing` means the instance's
+  **environment is misconfigured** — fixable only by changing the environment and
+  restarting, never by a different request. **409 and 422 were rejected** for
+  that reason.
+- **Neither is a field-level message.** The admin surfaces render both as a
+  failure panel, not as a correctable input error (`admin-surfaces.md`'s LLM
+  Servers and Database pages).
+- **The driver's message never reaches `detail` or a log line**
+  (`schema_apply_failed`): a SQLite error text can embed a column **value**, which
+  would put user content into an administrator-facing payload (R5,
+  `deployment.md`'s redaction rule). `detail` carries the table name and the
+  operation only.
+- **The test-connection route lets `secret_ref_missing` propagate and records
+  nothing on the row** (plan 006): the failure is a configuration fault of the
+  instance, not a property of the connection, so it must not be written into
+  `last_test_*` as though the server had answered.
+
+**Flip condition:** an admin surface needs to render either case as an
+**actionable, field-level message** rather than a failure panel. That code then
+moves to a 4xx. No code changed with this decision.
+
 ## `/api/health`
 
 **Realizes:** FEAT-001, FEAT-005
@@ -636,10 +1021,69 @@ session" — there is **no account default for a model**; see R1's correction.)
   because `supervisord` has no wait-for ordering: nginx can accept connections
   before uvicorn is listening, so the probe has to come from the app.
 
-The endpoint deliberately **touches the database** (a cheap `sqlite_master` read)
-rather than returning a static `{"status":"ok"}`. A health check that cannot fail
-tells an operator nothing, and FEAT-001's whole problem is an instance that is
-running but not usable.
+The endpoint deliberately **touches the database** rather than returning a static
+`{"status":"ok"}`. A health check that cannot fail tells an operator nothing, and
+FEAT-001's whole problem is an instance that is running but not usable.
+
+**Since plan 007 the probe runs the drift check's PRAGMA walk**, not one
+`sqlite_master` read, on an endpoint that is also the container healthcheck
+target. Accepted over a handful of tables on a WAL file. **Flip condition:** if
+the registry grows to where the walk shows against the healthcheck interval, the
+roll-up narrows back to presence and the drift branch moves behind the admin
+route. **Caching the probe is explicitly rejected** — a cached health check cannot
+fail, which is what this section says the endpoint exists not to be. The registry
+still reaches `probe_health` as a **parameter**.
+
+### Behaviour, roll-up and status codes
+
+- **Against an empty registry, `schema` is `"ok"`, and that is correct rather
+  than a stub.** The probe answers "is every declared table present?"; with
+  nothing declared the answer is yes. This is the state the system is in for the
+  whole of stage 001, which is why it is stated.
+- **`schema` precedence: `"missing"` > `"drift"` > `"ok"`.** Any declared table
+  absent gives `"missing"`; otherwise any present table whose shape diverges from
+  its declaration gives `"drift"`; otherwise `"ok"`. `"drift"` is produced by
+  FEAT-005's drift check (plan 007); plan 001 declared the value and produced only
+  `"missing"` / `"ok"`. **Missing outranks drift** because a table that does not
+  exist fails every query against it, and the admin page's badge colours follow
+  the same order (`admin-surfaces.md`). The roll-up is **one word naming no
+  table**, which is what keeps the endpoint safe unauthenticated.
+- **`status` roll-up:** a non-`"ok"` `schema` gives `"degraded"`; otherwise
+  `configured` false gives `"unconfigured"`; otherwise `"ok"`.
+- **All three `status` values answer HTTP 200** (decided in plan 001). The body
+  *is* the answer, and every consumer — the bootstrap entry, the container
+  healthcheck, an operator — must be able to read it; returning `"degraded"` as a
+  503 would make the SPA discard the very body that explains the condition. **A
+  probe that cannot read the database at all is a 500** — that is the case where
+  there is no body worth reading.
+- **Later features widen this function; they do not rewrite it.** `configured` is
+  sharpened by FEAT-001's bootstrap (plan 003) and `"drift"` is filled in by
+  FEAT-005 (plan 007); the response shape above is unchanged by either.
+
+### A genuinely pre-bootstrap instance reads as `"degraded"` — and that is correct
+
+Once `users` is in the registry (plan 003), an instance with no schema at all
+answers:
+
+```json
+{ "status": "degraded", "configured": false, "schema": "missing" }
+```
+
+because a declared table really is absent and the roll-up gives a non-`"ok"`
+`schema` precedence over `configured`. "Degraded" on a brand-new instance reads
+like a fault and will be reported as one; it is not. Two consequences for
+clients:
+
+- **The bootstrap entry branches on `configured` alone and never on `status`**
+  (`frontend-structure.md`). `configured` is FEAT-001's signal; `status` is an
+  operator's roll-up.
+- **`status: "unconfigured"` is the narrower case** of a database whose tables
+  exist with no administrator row in them.
+
+**The endpoint answers HTTP 200 whatever the roll-up says**, and the compose
+healthcheck depends on exactly that: it asserts the status code and never the
+body (`deployment.md`). The two facts are read together — a body-inspecting
+healthcheck would make a fresh instance permanently unhealthy.
 
 ## `GET /api/me`
 
@@ -676,7 +1120,10 @@ Three consumers, and the first is why it exists:
 
 The 401-on-disabled behaviour is load-bearing rather than incidental: it is the
 point at which FEAT-003's session termination becomes observable to a client that
-is already loaded.
+is already loaded. Since FEAT-002 it is mechanically true rather than promised:
+the route sits behind `require_user`, whose resolution requires an enabled
+account ("What `require_user` resolves", above), and answers with
+`not_authenticated`.
 
 ## The connection probe — one primitive, two routes
 
@@ -692,8 +1139,8 @@ That one primitive is exposed as **two distinct routes** in `admin_llm.py`:
 
 | Route | Purpose | Result |
 |---|---|---|
-| list available models | populates the models and embedding modals (UC-012, UC-013) | the model names the server offers |
-| **test connection** | UC-011's own capability | a typed connection-test result |
+| list available models — `GET …/{server_id}/available-models` | populates the models and embedding modals (UC-012, UC-013) | the model names the server offers |
+| **test connection** — `POST …/{server_id}/test` | UC-011's own capability | a typed connection-test result |
 
 **The second route is a deliberate deviation from the sibling project**, which
 tests a connection by reusing the model listing. Reason: FEAT-004 treats testing
@@ -706,8 +1153,41 @@ contracts.
 
 The test route writes `llm_servers.last_test_at` / `last_test_ok` /
 `last_test_error` (`data-model.md`), and per UC-011 a failed test **never** blocks
-or removes a registration. Its result is a **typed value**; the proposed value set
-and its `_TBD:` are in `admin-surfaces.md`.
+or removes a registration. Its result is a **typed value**; the four-value set and
+its ok mapping are in `admin-surfaces.md`.
+
+### As built (plan 006) — two routes, opposite error postures
+
+- **The primitive writes nothing.** It resolves the pointer, builds a client
+  through an **injectable factory**, and returns a typed outcome.
+- **The test route answers 200 even for a failing outcome** and writes the three
+  `last_test_*` columns — the test succeeded; the connection did not.
+- **The available-models route writes nothing and answers 502
+  `llm_unreachable`** for an unreachable or auth-failed server — there is no
+  useful partial answer to "what can it run".
+- Consequence: **opening a models modal cannot overwrite the administrator's last
+  deliberate test result.**
+- The two opposite postures are the pair a later reader would "harmonise"; do
+  not. `secret_ref_missing` is the exception to "200 even for a failing outcome":
+  it propagates as a 500 and records nothing ("The 500 posture" above).
+
+### The first async code in the backend, and what it costs
+
+Plan 006 moved **`httpx` from the dev dependency group into the runtime
+dependencies** — the first outbound-HTTP code in `app/` — and the client is
+**`httpx.AsyncClient`**, because FEAT-009/010's streaming goes through the same
+module and a sync client would have to be rewritten.
+
+Consequence: the three registry operations that reach the network are
+`async def`, and so are their three routes, while the SQLAlchemy `Connection`
+they hold stays **sync** — so their small single-row reads and writes block the
+event loop briefly. The persistence sections below are written on the assumption
+that everything is sync; this is the first exception.
+
+**Flip condition:** if a request path ever needs a long or multi-statement
+transaction around an awaited call, the mix has to be resolved rather than
+extended — either by moving the database work off the loop or by adopting an
+async driver.
 
 ## Database access
 
@@ -718,7 +1198,105 @@ One SQLite connection factory in `db/engine.py`, which on every connection:
   which matters because an SSE compose exchange holds a request open while other
   reads happen,
 - loads the `sqlite-vec` extension, so `vec0` tables and the KNN operators are
-  available on every connection rather than only where someone remembered.
+  available on every connection rather than only where someone remembered,
+- and runs the pysqlite driver with **transactional DDL** (below).
+
+### Transactional DDL — the driver never opens or commits on its own
+
+Decided in plan 003. `db/engine.py` turns the pysqlite driver's own implicit
+transaction handling **off**, so the driver never opens or commits a transaction
+by itself, and SQLAlchemy's `begin` sends the real `BEGIN`. This is SQLAlchemy's
+documented "pysqlite transactional DDL" configuration. So a
+`with conn.begin():` block covers **every** statement inside it, `CREATE TABLE`
+included, and savepoints behave.
+
+**Why.** Under the driver's default (legacy) transaction control, SQLAlchemy's
+`begin()` sends no `BEGIN`, and the driver opens a transaction only right before
+DML, so DDL autocommits. FEAT-001's first build found this: a failed
+first-administrator insert rolled back the row and **left the tables** — exactly
+the half-bootstrapped state the bootstrap's single transaction promises cannot
+exist. Every "these writes commit together or not at all" claim in this doc —
+reason 1 of the Core decision below — is only true with this setting, and
+settle, memo-plus-embedding, account-disable and FEAT-005's DDL all rely on it.
+It is an **engine-wide property, not a bootstrap special case**, so that the
+process has one transaction semantics.
+
+Constraints that come with it:
+
+- **The per-connection PRAGMAs still run outside any transaction.**
+  `journal_mode = WAL` cannot be entered inside one, and `foreign_keys` is a
+  no-op inside one — so a driver mode that keeps a transaction open at all times
+  is excluded, and the `connect` listener runs in autocommit.
+- **`get_connection` still opens no transaction** (below).
+- **An autobegun read now holds a real deferred `BEGIN`** until the caller's
+  rollback or commit, or the pool's reset-on-return. Consequence: **a caller that
+  runs a read and then `begin()` on the same connection must end the read's
+  transaction first**, or `begin()` raises. Plan 003's `is_configured` ends its
+  own implicit read for exactly this reason (the bootstrap guard and handler share
+  one request-scoped connection); `/api/health`'s probe does not, which is safe
+  only because no live path runs it and then `begin()` on the same connection.
+
+**Flip condition:** if the project moves off the stdlib `sqlite3` driver, or a
+later SQLAlchemy/Python release makes transactional DDL the default, re-check
+this setting and drop it if it has become redundant. The DDL-rollback test added
+with FEAT-001 (`backend/tests/test_db_engine.py`) is the check.
+
+### The PRAGMA and WAL lifecycle — one listener, every connection
+
+All three are applied by a **single SQLAlchemy `connect` event listener on the
+engine**, which runs on every new connection — extension load, then
+`foreign_keys`, then `journal_mode` — and **none of it is applied per
+transaction**. One mechanism, no first-open special case:
+
+- `PRAGMA foreign_keys = ON` genuinely is per-connection state and must be re-set
+  on every connection, so the listener is required for it regardless. **One code
+  path suspends it** — a FEAT-005 Sync rebuild, outside its transaction, restored
+  on both paths ("Schema evolution", below).
+- `PRAGMA journal_mode = WAL` is a **persistent, file-level** property. Re-asserting
+  it on a connection that already sees WAL is a cheap idempotent no-op.
+
+The rejected alternative was setting WAL once, at first open. That is a second
+mechanism with its own ordering question ("first open" of what, by whom, before
+which connection?) for a statement that costs nothing when it is a no-op.
+
+### Pooling, threading and the engine cache
+
+**One `Engine` per resolved database path**, cached in `db/engine.py`, using the
+pysqlite dialect's **default pool** for a file database with the DBAPI
+**same-thread assertion disabled** (`check_same_thread=False`), plus a disposal
+entry point that disposes and forgets every cached engine, for teardown.
+
+- **Why the same-thread assertion is off.** uvicorn hands a pooled connection to
+  whichever worker thread runs the request. The pool already guarantees a
+  connection is never used by two threads at once, so the assertion forbids the
+  normal case while protecting against nothing.
+- **Why the cache is keyed on the path** rather than being a module singleton:
+  it is what lets per-test databases coexist in one process (the test conventions
+  in `quick-reference.md`).
+
+### The `get_connection` dependency
+
+**`get_connection`, declared in `db/engine.py`, is the single, request-scoped way
+a router obtains a Core `Connection`.** It is a FastAPI generator dependency: it
+acquires a connection from the engine, yields it for the life of the request and
+closes it afterwards. **It opens no transaction** — transaction boundaries stay
+`with conn.begin():` blocks at the service's own level (below). Naming the
+dependency is what keeps connection lifetime out of handler code; the doc
+previously described a connection factory with no call-site mechanism.
+
+### A failed `sqlite-vec` load fails loudly
+
+A connection on which the extension cannot be loaded **raises a dedicated
+operational exception** (`ExtensionLoadError`) rather than being handed out
+without the extension. Like the id generator's backwards-clock exception, it is
+**not** a `DomainError` subclass: it is an environment fault, not something the
+SPA renders. Reason: the extension is a hard requirement from stage `004` onward,
+and a silently missing extension surfaces much later as an inexplicable query
+error, in a feature that did nothing wrong.
+
+**The version is pinned in `backend/pyproject.toml`: `sqlite-vec==0.1.9`.** The
+docs named no version, so the pin is a decision rather than a transcription,
+taken because the extension's availability is a hard runtime requirement.
 
 ### Persistence access — SQLAlchemy **Core**, not the ORM
 
@@ -737,7 +1315,8 @@ Three reasons, in the order they decided it:
    (FEAT-003). Core makes the boundary a `with conn.begin():` block at the
    service's own level. The ORM's unit-of-work flushes when it decides to, which
    is exactly the wrong property for an invariant stated as "these writes commit
-   together or not at all".
+   together or not at all". The block covers DDL too only because of the
+   engine's transactional-DDL setting ("Transactional DDL", above).
 2. **A `text()` escape hatch for the queries no ORM expresses.** `vec0 MATCH`
    with a bound query vector and `ORDER BY distance`, and FTS5 `MATCH` with
    `bm25()`, are SQLite-extension syntax with no expression-language equivalent,
@@ -750,6 +1329,16 @@ Three reasons, in the order they decided it:
    table_info` / `index_list` against a declaration. A Core `MetaData` with
    `Table` objects **is** that declaration — `db/schema.py` stays the single
    introspectable source of truth and `db/drift.py` walks it directly.
+
+**The registry's concrete shape: one module-level
+`metadata = MetaData()` in `db/schema.py`, with every table declared as a
+`Table(...)` literal in that same file.** (Closed by plan 001.) No per-feature table modules, no
+import-side-effect registration, no `build_registry()` callable; FEAT-005's drift
+check walks `metadata.tables`. Reason: the root `CLAUDE.md` already makes
+`db/schema.py` *the* source of truth, a single file has no import-order hazard,
+and nothing can be silently absent from the drift report because the module that
+declared it was never imported. Plan 001 shipped the file with the `MetaData` and
+zero tables; each later feature adds its `Table` literals there.
 
 The registry in `db/schema.py` remains authoritative for both the creation path
 and the drift report, and all SQL stays in `services`/`db` so R5's query-level
@@ -765,7 +1354,7 @@ project BookWriter, which carries a "DB shape check" administrative page where
 the administrator sees the divergence between the declared model and the live
 database and applies the shape change. RPHelper copies that.
 
-Four facts, each stated because it is the one a reader would otherwise assume
+Five facts, each stated because it is the one a reader would otherwise assume
 wrongly:
 
 1. **`db/schema.py` remains the single source of truth.** The argument for a
@@ -792,13 +1381,68 @@ wrongly:
    implementation of that dance. That is the whole of the reason, recorded this
    narrowly on purpose — "we use Alembic" without it is how a `versions/`
    directory arrives later.
+   **As built (plan 007):** `alembic` is a **runtime** dependency in
+   `backend/pyproject.toml` — before, it was named here and in the stack table
+   but was not a dependency at all. Fact 2's four negatives are now **assertions a
+   verifier checks**, not intentions: no `versions/` directory, no revision chain,
+   no version table, no upgrade at startup — `main.py`'s lifespan still runs no
+   DDL, and FEAT-001's "`sqlite_master` is empty after startup" assertion still
+   passes. The API surface actually used is narrow:
+   `alembic.migration.MigrationContext` plus `alembic.operations.Operations`
+   around the request's own `Connection`, and `batch_alter_table` in **recreate
+   mode**. Nothing from `alembic.config`, `ScriptDirectory`,
+   `EnvironmentContext` or `command.*` is imported.
+5. **First-run creation is `create_all`, and it is request-time** (plan 003).
+   FEAT-001's bootstrap applies the registry with SQLAlchemy's own
+   create-if-missing creation against the single `MetaData` in `db/schema.py`,
+   bound to the request's connection and **inside the same transaction as the
+   first administrator's insert** (and, since plan 004, the operator's first
+   session), so no half-bootstrapped instance is reachable. This is **neither DDL
+   at startup nor FEAT-005's admin-triggered Sync**: it is a one-time,
+   operator-triggered operation on an instance that has no schema at all, it uses
+   no Alembic and no `db/sync.py`, and fact 2's "no DDL at startup" is untouched.
+   "Inside the same transaction" is true only because of the engine's
+   transactional-DDL setting (Database access, above).
 
 **Where the executor lives: `db/sync.py`**, beside `db/schema.py` and
-`db/drift.py`. It takes a drift-report row plus the registry's `Table` object
-and emits the batch operations that close the gap; it holds no state of its own
-and is called only from `routers/admin_db.py`'s Sync route. Diagnosis stays in
-`db/drift.py` and remediation lives in `db/sync.py`, so the code path that only
-reports cannot write.
+`db/drift.py`. It takes **the registry and a table name**, resolves the `Table`
+itself, raises `unknown_table` when the registry does not declare it, calls
+`db/drift.py` for the report row it needs, and emits the batch operations that
+close the gap. It holds no state of its own and is called only from
+`routers/admin_db.py`'s Create and Sync routes. Diagnosis stays in `db/drift.py`
+and remediation lives in `db/sync.py`, so the code path that only reports cannot
+write: **`db/sync.py` may import `db/drift.py`, and the reverse import is a
+defect.**
+
+**Correction (plan 007).** This paragraph used to say the executor takes "a
+drift-report row plus the registry's `Table` object". With that signature someone
+has to perform the lookup, and the only caller is a router — which would put a
+rule and a refusal in the layer that is supposed to hold neither. A skeleton
+binding to the old wording would produce exactly that router.
+
+**The foreign-key posture of a rebuild** (plan 007). A batch recreate drops and
+renames tables, so a Sync:
+
+1. sets `PRAGMA foreign_keys = OFF` **outside** the transaction;
+2. performs the rebuild inside one transaction;
+3. runs `PRAGMA foreign_key_check` **before** committing and treats any returned
+   row as a failure (`schema_apply_failed`);
+4. restores `PRAGMA foreign_keys = ON` afterwards on **both** the success and the
+   failure path.
+
+Two reasons a reader will not infer. SQLite **silently ignores** a change to that
+pragma inside a transaction, so the obvious ordering compiles and does nothing.
+And the connection is **pooled**, so a Sync that left the pragma off would
+disable foreign keys for every later request on that connection. This is the
+**one code path that suspends** the per-connection `foreign_keys = ON` invariant
+(Database access, above); an unrecorded suspension is the kind of thing a later
+reader deletes.
+
+**A rebuild that cannot complete completes not at all.** A failed cast, a
+nullability tightening over existing NULLs, or a foreign-key violation rolls the
+transaction back, leaves the table as it was, leaves no `_alembic_tmp_*` table
+behind, and raises `schema_apply_failed` (US-018.AC-6, US-018.AC-7). What the
+administrator sees and agrees to is `admin-surfaces.md`'s.
 
 The flip condition is recorded in `overview.md`.
 

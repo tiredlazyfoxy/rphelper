@@ -202,3 +202,9 @@ the build. Flagged as a forward-looking note — nothing in this feature builds 
 ---
 
 _Nothing below this line is written by the planner._
+
+---
+Status: Applied 2026-10-01 — /architect finalization (with /product-spec finalization the same day)
+Applied items: 15 (all entries; planner inferences kept as "(decided in plan 001)")
+Rejected items: 0
+Notes: applied in batch 1, except the `secret_ref_missing → 500` status posture, held as H1 and applied in batch 3 — 500 kept by user decision and recorded once as a shared posture with `schema_apply_failed` in `backend-structure.md`'s error model. The health entry's "`drift` produced by nothing until 007" is written as now produced by 007.

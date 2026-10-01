@@ -1,7 +1,7 @@
 # Deployment
 
 **Realizes:** FEAT-001, FEAT-002, FEAT-005, FEAT-009, FEAT-010, FEAT-018,
-FEAT-019, UC-003, UC-016, UC-027, UC-061, US-035.AC-1, US-035.AC-2
+FEAT-019, UC-001, UC-003, UC-016, UC-027, UC-061, US-035.AC-1, US-035.AC-2
 
 Ports, the dev and prod topologies, every nginx directive with its reason, the
 configuration conventions, and the logging posture. Build and test commands live
@@ -39,10 +39,16 @@ handling and no certificate mount anywhere in the sibling project, and RPHelper
 inherits that.
 
 `_TBD: if this instance is ever exposed beyond a trusted LAN, TLS must be
-designed — termination point, certificate lifecycle, and the session cookie's
-`Secure` flag, which is not set today (FEAT-002). Nothing in docs/product/ states
-an exposure model, so nothing is assumed here. Until then the deployment target is
-a trusted local network._`
+designed — termination point and certificate lifecycle. Nothing in docs/product/
+states an exposure model, so nothing is assumed here. Until then the deployment
+target is a trusted local network._`
+
+**The cookie half of that `_TBD:` is now a concrete change surface, not a gap.**
+FEAT-002 (plan 004) has shipped the session cookie with **`Secure` off** and the
+flip condition attached: TLS termination anywhere in front of the application
+makes `Secure` mandatory (`backend-structure.md`'s cookie-flag table). The change
+is **one function** — the cookie setter in `app/dependencies.py` — so the TLS
+work has a checklist entry rather than a memory.
 
 ---
 
@@ -66,9 +72,14 @@ Vite proxy configuration — **one prefix only**:
 ```ts
 server: {
   port: 8193,
+  strictPort: true,
   proxy: { "/api": "http://localhost:8184" },
 }
 ```
+
+**`strictPort` is on**, so a busy 8193 fails loudly rather than moving to 8194.
+The `/api` proxy is the only thing connecting the frontend to the backend in dev,
+and a silently relocated dev server appears to work until the first API call.
 
 The result is that **the browser sees one origin in dev**, so the cookie and CORS
 story is *identical* to production: no CORS middleware, no `credentials: "include"`
@@ -116,7 +127,11 @@ way to reach the API without passing the directives below.
 1. **Build stage** — `npm ci` and `npm run build` in `frontend/`, producing `dist/`
    with all four entries.
 2. **Runtime stage** — Python base, backend installed, `dist/` copied to
-   `/usr/share/nginx/html`, nginx and supervisord configs installed.
+   `/usr/share/nginx/html`, nginx and supervisord configs installed. **The backend
+   dependencies are installed from the committed `backend/uv.lock`**, never
+   resolved at build time — a consequence of the uv packaging decision
+   (`overview.md`): the lock is what makes the image and a developer machine run
+   the same tree. Forward-looking; no feature has built an image yet.
 
 Two stages so Node and the frontend's `node_modules` never reach the runtime
 image.
@@ -141,6 +156,20 @@ restart:    unless-stopped
   deliberately does not contain actually lives.
 - The healthcheck targets `/api/health`, which goes **through nginx to uvicorn** —
   so a healthy result means the whole chain answers, not just that nginx is up.
+- **The healthcheck asserts the HTTP status code and never the body — deliberate
+  and load-bearing, not an implementation detail** (plan 003). `curl -f` fails
+  only on an HTTP error status. `/api/health` answers **200 whatever its roll-up
+  says** (`backend-structure.md`), so a fresh pre-bootstrap instance reporting
+  `status: "degraded"`, `configured: false`, `schema: "missing"` still becomes
+  **healthy** and stays reachable. **Do not "harden" it** into a check that
+  inspects the body for `"status":"ok"`: a fresh instance would then be
+  **permanently unhealthy**, and the rule below — an orchestrator that waits on
+  health never routes a user into the window — would mean **nobody can ever reach
+  the bootstrap page to configure the instance**. FEAT-001 would be made
+  unreachable by the mechanism meant to protect it, and the symptom would present
+  as a container fault rather than a bootstrap one. Stated here, and not only in
+  `backend-structure.md`, because `fast/001.dev-and-container-harness` writes this
+  healthcheck, and the invariant is visible only once `users` is in the registry.
 
 **`supervisord` has no wait-for ordering.** nginx will accept connections before
 uvicorn is listening, so early requests get a 502. This is not worked around; it is
@@ -167,7 +196,9 @@ Consequences, stated so neither is mistaken for a bug:
   5xx is **neither**, and must not redirect to `/login` — that would bounce an
   administrator out of the admin area for the two seconds after a container start,
   and the redirect would land on a login page whose own API calls fail too.
-  It is rendered as a not-ready-yet state, consistent with FEAT-001's handling.
+  It is rendered as a not-ready-yet state, consistent with FEAT-001's handling —
+  the condition is classified by the one shared predicate, `shared/notReady.ts`
+  (`frontend-structure.md`).
 - **The window is bounded by the same healthcheck** the rest of the stack uses:
   compose's `/api/health` probe reports unhealthy until the whole chain answers, so
   an orchestrator that waits on health never routes a user into the window at all.
@@ -234,6 +265,57 @@ entry is its own document with its own router: a deep link into `/admin/users`
 must land on the **admin** document, not on the roleplayer's app document which
 would then 404 the route client-side. The catch-all handles the root and anything
 unmatched.
+
+#### Open seam — the `/` fallback and the app document
+
+**The last rule above does not line up with the emitted build, and this is
+recorded as a real gap rather than as silence.** The build emits exactly four
+documents — `dist/bootstrap/index.html`, `dist/login/index.html`,
+`dist/admin/index.html`, `dist/app/index.html` (`frontend-structure.md`'s emitted
+layout) — and **no `dist/index.html`**. `location / { try_files $uri $uri/
+/index.html; }` resolves against that absent file, while the `app` entry's routes
+are mounted at the origin root with no basename (`frontend-structure.md`). As
+written, the root case has nothing to serve.
+
+Something must bridge `dist/app/index.html` to the root: a copy in the image
+build, an nginx `root`/`alias`, or a fifth build input. **This doc does not pick
+one.** Plan 002 deliberately created no root HTML document, because that would be
+a fifth entry the architecture's input list does not have.
+
+`_TBD: the mechanism that serves the app document at "/" is unchosen. Owned by
+fast/001.dev-and-container-harness (roadmapped, not built), whose nginx and image
+configuration it belongs to._`
+
+**Dev-side consequence while it is unbridged:** the Vite dev server's root is
+`src/`, so `http://localhost:8193/` does not resolve, and the entries are reached
+at `/<entry>/index.html`.
+
+**The `location /app/` block conflicts with the same fact, under the same
+owner.** The `app` entry is mounted at the **origin root** with no basename
+(`frontend-structure.md`): its routes are `/`, `/sessions/:id`,
+`/characters/:id` and so on, and every cross-entry link into it is
+`<a href="/">`. Nothing navigates to `/app/`, so the block above serves a URL
+space the entry does not use, while the URL space it does use falls to the
+catch-all. Whatever closes the `/` seam must also decide this block's fate
+(drop it, or make it the source the root is bridged from). Owned by
+`fast/001.dev-and-container-harness` with the seam above; **this doc does not
+pick.**
+
+#### Open seam — `/login` without a trailing slash
+
+**`/login` (no trailing slash) is a load-bearing path, not a convenience**
+(plan 004). The shared API client navigates to exactly `/login` on any 401
+(`frontend-structure.md`), and FEAT-001's bootstrap refusal links to exactly
+`/login`. The configured block is `location /login/ { ... }`, which does **not**
+match the slash-less path — it falls to the catch-all, which is the unbridged
+root seam above. The failure mode is a session expiry that lands on the wrong
+document, which presents as "logging out breaks the app" and is diagnosed nowhere
+near nginx.
+
+`_TBD: the mechanism that resolves "/login" to the login document — a redirect,
+a second "location = /login", or whatever the root fix turns out to be — is
+unchosen. Owned by fast/001.dev-and-container-harness, with the "/" fallback
+seam._`
 
 ### `/api/` proxy
 

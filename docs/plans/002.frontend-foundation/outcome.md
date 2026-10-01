@@ -429,3 +429,9 @@ _Nothing below this line is written by the planner._
 ## Observations
 
 - Step 005: `notifyFailure` shows no title — only the reason as `message` — and falls back to the generic reason "Something went wrong. Please try again." for a non-`ApiError` value and for an `ApiError` whose message is empty. `ColorSchemeToggle` labels are "Switch to light theme" / "Switch to dark theme", and it passes `"dark"` as the computed-scheme fallback. Possible impact: record the generic-reason text and label wording in `ui-conventions.md` if they should be canonical.
+
+---
+Status: Applied 2026-10-01 — /architect finalization (with /product-spec finalization the same day)
+Applied items: 25 (all planner entries; the nginx `/` fallback entry with modification)
+Rejected items: 1 (`## Observations` — notifyFailure fallback text and ColorSchemeToggle labels are copy text, not architecture)
+Notes: applied in batch 1, except the root `CLAUDE.md` stack-table entry, held as H3 and applied in batch 3 (Components row now `@mantine/core`, `/hooks`, `/notifications`, `/tiptap`; the same grant also refreshed the root file's id range). The nginx `/` fallback is recorded as an open seam owned by `fast/001.dev-and-container-harness`, mechanism not chosen. Both MobX entries landed together.

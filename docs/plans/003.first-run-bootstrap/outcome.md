@@ -296,3 +296,9 @@ as the plan that owns AC-2 — a `/product-spec` action, not an architecture edi
 
 Both are consequences of a foundation feature's criteria being true only until the first real
 feature lands. Neither is an architecture change, and neither should be recorded as one.
+
+---
+Status: Applied 2026-10-01 — /architect finalization (with /product-spec finalization the same day)
+Applied items: 14 (entries 1–4, 6–15; entries 3 and 9 with modification)
+Rejected items: 1 (entry 5 — superseded, not applied)
+Notes: entry 3 modified — `POST /api/bootstrap/create` answers 201 and sets the session cookie inside the same transaction (per 004 C1); body still carries no token. Entry 9 modified — the post-create hand-off is a document navigation to `/` (the refusal still links to `/login`). Entry 5 superseded by 004 entry 4 (`roles.py` = enum + ladder + pure comparison; `dependencies.py` = the FastAPI dependencies and cookie writers). Entry 14 additionally records the status.md consequence: an autobegun read holds a real deferred BEGIN until rollback/commit or pool reset, so a read followed by `begin()` on one connection must end the read first. C1/C2 are not doc changes.

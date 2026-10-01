@@ -331,3 +331,9 @@ _Nothing below this line is written by the planner._
 ## Observations
 
 - Step 001: `auth_sessions` timestamps are written as `datetime.isoformat(timespec="microseconds")` in UTC (`...T..:..:..ffffff+00:00`) so text comparison of `expires_at` is valid; `users.created_at` from `003` uses plain `isoformat()` (microseconds dropped when zero), so the two tables do not share one fixed-width format. Possible impact: record one timestamp text format in `data-model.md`'s conventions.
+
+---
+Status: Applied 2026-10-01 — /architect finalization (with /product-spec finalization the same day)
+Applied items: 14 (entries 1–14), plus the `## Observations` item resolved via user decision H2
+Rejected items: 0
+Notes: entries 1, 9 and 10 cite US-006.AC-3 for the uniform refusal; entry 1's statuses were recorded in `backend-structure.md`'s per-code status record rather than as a column on the error table, which carries no status column by design. Entry 13 recorded as an open `_TBD:` seam owned by `fast/001.dev-and-container-harness`, together with the `location /app/` vs root-mounted `app` entry conflict. Observations → H2: one fixed-width timestamp form in `data-model.md`'s conventions; `users.created_at`/`updated_at` recorded as a known deviation owned by a `/bug-fixer` pass against plan 003. C1–C4 are not doc changes.

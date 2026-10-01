@@ -37,7 +37,7 @@ Every downstream agent reads its commands from this section and nowhere else.
 | Full text | SQLite FTS5 (BM25), fused with vectors by reciprocal-rank fusion |
 | Schema DDL | Alembic **batch operations only** — the executor behind the admin drift page's `Sync`/`Create`. Not a migration framework: no `versions/`, no version table, no startup upgrade; `db/schema.py` is the source of truth |
 | Frontend | React 19 + TypeScript + Vite, **multi-entry** build (4 entries); **TypeScript only — no JavaScript** |
-| Components | Mantine 7 (`@mantine/core`, `/form`, `/hooks`, `/tiptap`) |
+| Components | Mantine 7 (`@mantine/core`, `/hooks`, `/notifications`, `/tiptap`) |
 | State | MobX 6 + `mobx-react-lite`; `react-router-dom` 7 |
 | Icons | `@tabler/icons-react` `^3.40` |
 | Markdown | TipTap + `tiptap-markdown` (editor), `react-markdown` (render) |
@@ -100,7 +100,7 @@ frontend never receives a backend base URL; it always calls same-origin
   `use-cases/FEAT-*.md`, `stories/FEAT-*.md` (with `US-###.AC-#` criteria).
   **`docs/product/quick-reference.md` is the id registry** — the sole canonical
   list of every id. Verify an id there, never against a range quoted elsewhere.
-  Current as of this writing: FEAT-001..020, UC-001..084, US-001..131.
+  Current as of this writing: FEAT-001..020, UC-001..087, US-001..140.
   Requirements are cited by id, never restated elsewhere.
 - **Design** — `docs/architecture/`. Start at
   `docs/architecture/quick-reference.md`; it indexes the other eleven docs.

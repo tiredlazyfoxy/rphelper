@@ -3,7 +3,7 @@
 **Realizes:** FEAT-006, FEAT-007, FEAT-008, FEAT-009, FEAT-010, FEAT-011,
 FEAT-012, FEAT-013, FEAT-017, FEAT-018, FEAT-020, UC-030, UC-032, UC-035,
 UC-037, UC-043, UC-069, UC-070, UC-071, UC-072, UC-075, UC-082, UC-085,
-US-044.AC-3, US-044.AC-4
+US-015.AC-2, US-018.AC-3, US-018.AC-4, US-044.AC-3, US-044.AC-4
 
 **The workspace shell lives in `workspace-shell.md`** — the three columns, all
 geometry, the note wall's two modes, layout persistence, and the anatomy of the
@@ -26,8 +26,14 @@ that "simplifies" one of these is changing behaviour, not style.
 | Context | Props |
 |---|---|
 | Main, header and composer actions | `size={18} stroke={1.5}` |
-| Inline controls | `size={16}` |
-| Smallest chevrons | `size={14}` |
+| Inline controls | `size={16} stroke={1.5}` |
+| Smallest chevrons | `size={14} stroke={1.5}` |
+
+**All three variants use stroke 1.5.** The section opens with "one family, for one
+visual weight", and a stroke that changed between variants would be a second
+weight in the same family. The table used to carry the stroke on the first row
+only, because it does not change — which read as either an omission or a
+deliberate difference, and a reader could not tell which.
 
 Colour is left as `currentColor`; semantic colour is applied via the **wrapping
 button's** `color` prop, never on the icon. One place decides colour, and it is
@@ -61,6 +67,19 @@ type IconButtonProps = {
 icon is a defect, because it is how an action ends up with a tooltip and no
 `aria-label`, or with the two disagreeing. `label` is a single prop feeding both
 precisely to prevent that.
+
+Three things the props type does not carry, recorded because the component cannot
+be written without choosing them and a choice made silently at implementation
+time is one nobody can find later:
+
+- **The `ActionIcon` variant is `"subtle"`.** An icon-only action is secondary
+  chrome; Mantine's default filled variant would render roughly thirty solid
+  coloured boxes across the product.
+- **`sizeVariant` defaults to `"main"`** — the sizing table's first and most
+  common row.
+- **The props type is deliberately not widened** with `children`, a `variant`
+  escape hatch, a raw `size`, or an `aria-label` override. Each would reintroduce
+  the divergence the `label`-feeds-both rule exists to prevent.
 
 **The one boundary — `IconButton` versus the table overflow menu.** There is a
 real tension between the rule above and the table convention below, and it is
@@ -281,8 +300,11 @@ depend on the page's visual arrangement. Domain data goes in the MobX class;
 ### `@mantine/form` is NOT used — the MobX draft convention
 
 This is the **project-wide form convention** and it applies well beyond the admin
-area. `@mantine/form` is a listed dependency (`overview.md`) and is deliberately
-not used for these forms.
+area. **`@mantine/form` is not a dependency** (plan 002). "Inherited" described
+the sibling project's tree; RPHelper's frontend is greenfield and has nothing to
+inherit, so the package was simply not installed. A dependency the project-wide
+form convention forbids using would be a version to maintain, a line in the
+lockfile, and a standing invitation for someone to reach for it.
 
 Every modal has a hand-rolled MobX **draft class** in a same-named `*Draft.ts`
 sibling module:
@@ -298,11 +320,13 @@ export class CreateUserDraft {
   submitStatus: "idle" | "submitting" | "done" = "idle";
 
   constructor() { makeAutoObservable(this, {}, { autoBind: true }); }
-
-  get clientErrors(): Record<string, string> { /* pure validation over the fields */ }
-  get errors(): Record<string, string> { /* clientErrors merged with serverErrors */ }
-  get canSubmit(): boolean { /* no clientErrors && submitStatus !== "submitting" */ }
+  // observable fields ONLY — no methods, no computed getters
 }
+
+// derivations are PURE FREE FUNCTIONS taking the draft:
+export function clientErrors(draft: CreateUserDraft): Record<string, string> { /* pure validation over the fields */ }
+export function errors(draft: CreateUserDraft): Record<string, string> { /* clientErrors merged with serverErrors */ }
+export function canSubmit(draft: CreateUserDraft): boolean { /* no clientErrors && submitStatus !== "submitting" */ }
 
 // the effectful half is a FREE FUNCTION, never a method:
 export async function submitCreateUser(
@@ -314,10 +338,14 @@ export async function submitCreateUser(
 
 Four rules, each with its reason:
 
-1. **The draft class holds observable fields and getters only.** `clientErrors`,
-   `errors` and `canSubmit` are **computed getters over pure validation** — so the
-   validation rules are testable by constructing a draft and reading a getter,
-   with no render and no network.
+1. **The draft class holds observable fields only — no methods and no computed
+   getters.** `clientErrors`, `errors` and `canSubmit` are **pure free functions
+   taking the draft**: `clientErrors(draft)`, `errors(draft)`, `canSubmit(draft)`.
+   They stay reactive — an `observer` component reading the draft through them
+   still tracks it — and the validation rules are testable by constructing a
+   draft and calling a function, with no render and no network. This is
+   `frontend-structure.md`'s pure-data-contract rule applied to drafts; the two
+   docs used to disagree about getters and now say the same thing (plan 002).
 2. **The submit is an external function `submitX(draft, ..., onSaved, signal?)`,
    never a method on the draft.** This is the repo's MobX rule — **no effectful
    class methods** — and it holds for page stores too (`frontend-structure.md`).
@@ -331,6 +359,17 @@ Four rules, each with its reason:
    matter most.
 4. **On success the submit invokes the page's refresh callback.** The draft does
    not know about the list; the page passes `onSaved`.
+
+**A probe-backed picker keeps the selection out of the probe's reach — by
+construction** (plan 006). `admin-surfaces.md`'s failed-probe rule — a probe
+failure must not disturb the existing selection — holds structurally, not by
+care: the **already-enabled set arrives with the page's list payload**, which
+involves no outbound call, and the probe writes only the *available* list. There
+is no code path by which a probe failure can reach the selection. The two model
+modals share **one picker module** for the probe, the `available ∪
+already-enabled` union and the failure behaviour, and differ only in their
+`*Draft.ts`. Naming the shape that cannot go wrong is more durable than warning
+against the one that can.
 
 **Draft lifetime — a fresh instance per open.** `useState(() => new XDraft(...))`
 inside a **conditionally mounted** modal body, so opening the modal constructs a
@@ -368,6 +407,13 @@ already has a place to be rendered — a field error in a modal, the inline
 `Alert` above an admin table, the no-embedding-model banner above the stream
 (US-112) — keeps rendering there and does **not** also raise a notification.
 
+**The same holds for a failure that has a full-page state of its own** — a
+not-ready-yet screen, a refusal, a form's inline alert: it is rendered there and
+is **not** also a notification. The rule is "a failure with no place of its own",
+never "every thrown error gets a toast". The worked example is FEAT-001's
+`bootstrap` entry (plan 003), which has five states and a form and adds **no
+`notifyFailure` call site at all** (`frontend-structure.md`).
+
 **The boundary a reviewer can check, stated as one line:**
 
 > **A notification whose message is a success is a defect.**
@@ -375,6 +421,22 @@ already has a place to be rendered — a field error in a modal, the inline
 That is the whole test. It is phrased that way because "no toasts, except…" is a
 rule nobody can apply, while "failures only" is a rule that is either satisfied
 or visibly broken at the call site.
+
+#### The mechanism — one outlet, one call site
+
+The rule above is made **structural**, not left to review (plan 002):
+
+- **The notifications outlet is mounted by `shared/AppProviders`**, and reaches
+  all four entries through that one component. It is configured with
+  **`autoClose: 5000` on the outlet**, so no call site can pick a different value.
+- **`shared/notifyFailure` is the only sanctioned way anything raises a
+  notification.** It takes a **thrown value** and has **no success path and no
+  colour parameter** — so a success notification is not something a call site can
+  express at all.
+
+A rule enforced only by review is one an unfamiliar contributor breaks first; the
+shape of the one function is what turns "a notification whose message is a
+success is a defect" from a review check into something that cannot be written.
 
 #### The tension with US-044.AC-3, and how it is resolved
 
@@ -434,24 +496,56 @@ the action's title, a one-sentence consequence, a labelled confirm button
 is a component, not a per-page hand-roll, so the wording shape and the button
 order cannot drift between pages.
 
+**The component is `frontend/src/shared/ConfirmModal.tsx`** (built by FEAT-003,
+plan 005; first used for disabling an account). It takes the title, the
+one-sentence consequence, the confirm label, an optional confirm colour and the
+two callbacks. **Cancel sits left of confirm**, fixed in the component.
+
 The actions that use it, and why each is destructive:
 
 | Action | Feature | Consequence that earns the confirm |
 |---|---|---|
 | Disable an account | FEAT-003 | it **ends that user's login sessions** — someone is signed out mid-roleplay |
 | Delete an LLM connection | FEAT-004 | irreversible removal of a registration and its enabled-model set |
-| Rebuild the vector index | FEAT-005 | expensive: re-embeds every memo and session, real time and real metered LLM calls (UC-016) |
+| Clear the embedding designation | FEAT-004, US-015.AC-2 | every semantic feature stops working until a model is designated again, and re-designating requires a fresh measuring call (plan 006) |
+| **A lossy `Sync`** on the drift page — **conditional** | FEAT-005, US-018.AC-3, US-018.AC-4 | the rebuild drops the columns the registry no longer declares, and their data goes with them; every surviving column's data is preserved (plan 007) |
+| Rebuild the vector index — **not yet realized** | FEAT-005 | expensive: re-embeds every memo and session, real time and real metered LLM calls (UC-016). UC-016 is deferred to `fast/002.vector-index-rebuild` |
+
+**The lossy-Sync confirm is conditioned on data loss, not on the action's
+name.** It fires only when the row lists **at least one extra column**; a Sync
+with nothing to drop applies directly.
+
+**Deliberately NOT confirmed**, so each reads as decided rather than forgotten:
+
+- **Re-enabling an account** (plan 005) — it destroys nothing.
+- **Saving an enabled-model set** (plan 006) — fully reversible, and it has no
+  permissible informative consequence sentence under R5.
+- **`Create` on the drift page, in any state** (plan 007) — it is provably
+  incapable of dropping anything (`admin-surfaces.md`'s postconditions). The same
+  shape as re-enable.
 
 **The confirm text must not name a blast radius it is not allowed to know.** R5
 forbids "N sessions use this model" (`domain-rules.md`, `admin-surfaces.md`) — the
 consequence sentence describes the action, never a count derived from other users'
 data.
 
-**No acceptance criterion requires any of this.** It is an architectural
-judgement about irreversible and expensive operations, so **FEAT-003, FEAT-004 and
-FEAT-005's planners may revisit it** — including dropping it for an action whose
-plan argues the friction is not worth it. Stated plainly so it is neither treated
-as a requirement nor quietly deleted as an accident.
+**The line is between structure and content, not between specific and vague**
+(plan 007). The drift page is the first surface where a confirm legitimately names
+something. **A table name, a column name, an index's column list and a SQLite
+type are administrative data** — identical on every instance, declared in
+`db/schema.py`, and UC-014 is unanswerable without them — so the lossy-Sync
+confirm **names the columns it will drop** (US-018.AC-3). **A row count is
+content** and stays forbidden — in the confirm, in the report, in an apply
+response and in a log line. Forbidden strings, beside the one above:
+**"N rows will be lost"**, **"N rows will be rebuilt"**, **"rows affected"**.
+
+**Acceptance criteria now require two of these confirms** — clearing the
+embedding designation (US-015.AC-2) and the lossy Sync (US-018.AC-3, US-018.AC-4).
+The lossy-Sync confirm was a user decision in plan 007 before `docs/product/`
+recorded it. **The others are still architectural judgement** about irreversible
+and expensive operations, and a later planner may revisit them — including
+dropping one whose plan argues the friction is not worth it. Stated plainly so
+none is treated as a requirement it is not, nor quietly deleted as an accident.
 
 **BookWriter is internally inconsistent here and should not be copied either
 way:** its sub-agents use disable-only-with-no-delete, while its LLM servers use a
@@ -471,7 +565,7 @@ class UsersPageState {
   users: UserRow[] = [];
   status: "idle" | "loading" | "ready" = "idle";
   error: string | null = null;
-  constructor() { makeAutoObservable(this, {}, { autoBind: true }); }   // NO methods
+  constructor() { makeAutoObservable(this, {}, { autoBind: true }); }   // NO methods, NO getters
 }
 
 export async function loadUsers(state: UsersPageState, signal?: AbortSignal) { ... }
@@ -480,8 +574,11 @@ export async function disableUser(state: UsersPageState, id: string, signal?: Ab
 //                                                              (frontend-structure.md, "Ids are strings")
 ```
 
-- **`makeAutoObservable` class with no methods.** Behaviour is free functions
-  taking the state as their first argument.
+- **`makeAutoObservable` class with no methods and no computed getters.**
+  Behaviour is free functions taking the state as their first argument, and so is
+  every derivation — a value computed from the state is a pure function of it,
+  not a getter on it. This is the same statement `frontend-structure.md`'s four
+  MobX rules now make; the two are one convention.
 - Every free function **`runInAction`s its writes** — an `await` ends the
   enclosing action, so a post-await assignment outside `runInAction` is a MobX
   strict-mode violation and, worse, an untracked write.
@@ -508,8 +605,8 @@ screen:
 - **Mantine 7** — `@mantine/core`, `@mantine/hooks`, `@mantine/tiptap`,
   `@mantine/notifications`. No Tailwind, no CSS modules, no styled-components;
   two small hand-written stylesheets (`frontend-structure.md`).
-  **`@mantine/form` is present as an inherited dependency but is deliberately not
-  used** — forms go through the MobX draft convention above.
+  **`@mantine/form` is not a dependency** — forms go through the MobX draft
+  convention above, which forbids it.
   **`@mantine/notifications` IS a dependency and IS used**, for transient
   **failure reasons only**, `autoClose` 5000 — this reverses the earlier "not a
   dependency at all, there is no toast system" note, narrowly, on US-044.AC-4.

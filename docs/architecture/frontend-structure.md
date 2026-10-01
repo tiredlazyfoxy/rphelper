@@ -2,7 +2,7 @@
 
 **Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-006,
 FEAT-007, FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-017,
-FEAT-019, FEAT-020, ACT-001, ACT-002, ACT-003
+FEAT-019, FEAT-020, ACT-001, ACT-002, ACT-003, US-006.AC-3
 
 React 19 + TypeScript, built by Vite as **four separate entries**. Component
 library, state library and icon set are fixed in `overview.md`.
@@ -24,32 +24,107 @@ routing, the stores, the API client and the SSE consumer.
 
 ```
 frontend/
-  vite.config.ts
-  src/
+  package.json  package-lock.json
+  tsconfig.json             # strict; covers src/ and tests/
+  tsconfig.node.json        # covers vite.config.ts (Node, not browser)
+  vite.config.ts            # the build AND the Vitest block — no vitest.config.*
+  src/                      # the build's root
     global.css              # hand-written stylesheet 1 of 2: resets only
     shell.css               # hand-written stylesheet 2 of 2: workspace layout
                             #   only; imported by the app entry alone
-    shared/                 # api client, sse consumer, error rendering, IconButton
+    shared/                 # api client, sse consumer, error rendering, IconButton,
+                            #   AppProviders, notifyFailure, notReady,
+                            #   ConfirmModal (plan 005)
     bootstrap/  index.html  main.tsx  ...   # FEAT-001
     login/      index.html  main.tsx  ...   # FEAT-002
     admin/      index.html  main.tsx  ...   # FEAT-003, FEAT-004, FEAT-005
     app/        index.html  main.tsx  ...   # FEAT-006 .. FEAT-017, FEAT-020
+  tests/                    # mirrors src/; outside the build root (quick-reference.md)
+    setup.ts                # harness source, not a test
+  dist/                     # build output — outside the root
 ```
 
 ```ts
 // vite.config.ts (shape)
+// configDir = the directory holding vite.config.ts (frontend/)
+plugins: [react()],                              // @vitejs/plugin-react
+root: resolve(configDir, "src"),
 build: {
+  outDir: "../dist",                             // frontend/dist, relative to root
+  emptyOutDir: true,                             // outDir lies outside root
   rollupOptions: {
-    input: {
-      bootstrap: "src/bootstrap/index.html",
-      login:     "src/login/index.html",
-      admin:     "src/admin/index.html",
-      app:       "src/app/index.html",
+    input: {                                     // ABSOLUTE paths, from configDir
+      bootstrap: resolve(configDir, "src/bootstrap/index.html"),
+      login:     resolve(configDir, "src/login/index.html"),
+      admin:     resolve(configDir, "src/admin/index.html"),
+      app:       resolve(configDir, "src/app/index.html"),
     },
   },
 },
-server: { port: 8193, proxy: { "/api": "http://localhost:8184" } },
+server: { port: 8193, strictPort: true, proxy: { "/api": "http://localhost:8184" } },
+test: { root: configDir /* frontend/, so tests/ and tests/setup.ts are found */ },
 ```
+
+**The build is rooted at `src/` — a deviation from this block's earlier form,
+taken by user decision (2026-09-29, plan 002).** The block used to show the
+default `root` (the package directory) with the literal relative inputs
+`src/<entry>/index.html`. Built that way, Vite names each emitted document by its
+input's path **relative to `root`**, and the first build emitted
+`dist/src/<entry>/index.html` — which matches neither the emitted-layout contract
+below nor `deployment.md`'s per-entry `location /<entry>/` blocks. The user chose
+to root the build at `src/` rather than rename or move output after the fact.
+Consequently:
+
+- `root` is `frontend/src`; `build.outDir` is `frontend/dist` (`../dist` from the
+  root) with **`build.emptyOutDir: true`**, because an output directory outside
+  the root is otherwise neither emptied nor refused by Vite.
+- `build.rollupOptions.input` keeps its four keys, but **each value is an absolute
+  path resolved from the config file's directory**, so entry resolution does not
+  depend on the working directory once the root is no longer the package
+  directory. The input paths are **not** relative to the package root.
+- The Vitest `test` block sets **its own root back to `frontend/`**, so the tests
+  under `frontend/tests/` and the setup file are still found.
+
+**The remaining Vite specifics**, which the block's `(shape)` label leaves partial
+by design but no build can omit: `@vitejs/plugin-react` is the plugin; `base`
+stays at its default; **`server.strictPort` is on**, so a busy 8193 fails loudly
+instead of moving to 8194, where the proxy assumption silently stops holding; and
+there is **exactly one** proxy rule, matching `deployment.md`'s "one prefix only".
+**Knock-on of the root:** Vite's `publicDir` now defaults to `src/public`, which
+does not exist yet — a feature that adds static assets puts them there or sets
+`publicDir` explicitly.
+
+### The emitted layout nginx depends on
+
+The build emits exactly:
+
+```
+dist/bootstrap/index.html
+dist/login/index.html
+dist/admin/index.html
+dist/app/index.html
+```
+
+which is precisely what `deployment.md`'s four per-entry `try_files` fallbacks
+resolve against. **This layout is a consequence of the build's `root` being
+`src/`** (above), so a later change to `root` or to the input values must re-check
+it. It is the seam between the frontend build and the nginx configuration, and
+getting it wrong is invisible until deployment — as plan 002's own first build
+showed. The half of the seam that is **not** this doc's — the catch-all `/`
+fallback, for which no `dist/index.html` exists — is an open seam recorded in
+`deployment.md`.
+
+### `src/shared/` is one folder for all four entries — and that does not violate UC-066
+
+`shared/` is a single folder used by every entry. This does **not** weaken the
+"admin code never ships to the roleplayer" property below: UC-066 is satisfied by
+**the entry split itself** — separate documents, separate bundles, separate route
+tables — and `shared/` holds only **generic infrastructure** (the HTTP client,
+error rendering, `IconButton`, the providers, the failure notifier). It never
+holds an admin-specific component and never a route table naming `/admin`, which
+is the concrete thing the roleplayer's document must not contain. Written down
+here because the apparent tension is legible enough that every planner would
+otherwise raise it again.
 
 ### Why four entries and not one bundle
 
@@ -101,7 +176,7 @@ still the backend's `require_role` (`backend-structure.md`, R5).
 | Entry | Screens | Realizes |
 |---|---|---|
 | `bootstrap` | Create-new-database (with first admin), import-an-export, and the already-configured refusal | FEAT-001, UC-001, UC-002, UC-003 |
-| `login` | Sign in, sign out landing, disabled-account message | FEAT-002, UC-004, UC-005 |
+| `login` | Sign in — one form; being signed out *is* arriving at it (see "The `login` entry" below) | FEAT-002, UC-004, UC-005 |
 | `admin` | Account list + lifecycle; LLM servers, connection test, enabled models, embedding designation; drift report + remediation + vector rebuild; whole-database export/import | FEAT-003, FEAT-004, FEAT-005, FEAT-018 (admin half), UC-006..UC-016, UC-061 |
 | `app` | The workspace — tree, stream and note wall (`workspace-shell.md`); the character page; settings; session configuration; my-search; user/character/session export | FEAT-006..FEAT-013, FEAT-017, FEAT-018 (user half), FEAT-020 |
 
@@ -125,6 +200,13 @@ is in **`admin-surfaces.md`**. What belongs here is the entry's own shape:
   entries no longer share a shell component. The asymmetry is deliberate — the
   admin area *is* a fixed navbar plus a main region, which is exactly what
   `AppShell` models, while the workspace's wall is not.
+- **The basename and the URL differ by one character, on purpose.** nginx serves
+  the document under `/admin/` **with** a trailing slash; the router's basename is
+  `"/admin"` with **none**. The two strings belong to two mechanisms: React Router
+  strips the basename before matching, so a trailing slash on the basename breaks
+  the match. Two near-identical strings in two files is the shape of a bug someone
+  "fixes" by making them agree — do not. `bootstrap`, `login` and `app` declare
+  **no basename**; the `app` entry's routes are mounted at the origin root.
 - **Flat `<Routes>`** — three pages plus a catch-all 404, no nested layout route
   and no `<Outlet/>`. The shell renders above the `<Routes>`. With three sibling
   pages and no per-page layout variation, a layout route adds a level of
@@ -132,16 +214,40 @@ is in **`admin-surfaces.md`**. What belongs here is the entry's own shape:
 - **The back-to-app link is a real `<a href="/">`**, not a router `Link` — the app
   area is a different document (see "Navigation between entries" above), and an
   anchor is also what makes middle-click and ctrl-click behave correctly.
+- **Its modules, as built (plan 005), all live under `src/admin/` beside
+  `main.tsx`**: the gate, the not-ready screen, the shell state, the nav table,
+  the shell, the 404, the app component, the page store and the three drafts.
+  This is plan 003's placement convention ("Where a store's file lives", below) —
+  the admin entry is its first multi-page instance and confirms it.
 
 #### Boot sequence — one `/api/me` round-trip before mount
 
 ```
 main.tsx
   └─ await GET /api/me
-       ├─ 401 / no session            ──► document navigation to /login
+       ├─ 401 / no session            ──► nothing of its own — the shared client
+       │                                   has already navigated to /login
        ├─ session, role !== "admin"   ──► document navigation to /        (app area)
-       └─ session, role === "admin"   ──► createRoot(...).render(<AdminApp/>)
+       ├─ session, role === "admin"   ──► createRoot(...).render(<AdminApp/>)
+       ├─ not-ready (shared/notReady) ──► not-ready screen; re-probe every 2000 ms;
+       │                                   navigates nothing
+       └─ anything else thrown        ──► failure panel + manual retry;
+                                           navigates nothing
 ```
+
+**Five outcomes, not three** (plan 005). The diagram used to show three and so
+contradicted `deployment.md`'s rule by omission:
+
+- **The 401 branch performs no navigation of its own**: the shared API client
+  has already navigated to `/login` (below). A second redirect path here would be
+  a second owner of the same behaviour.
+- **Not-ready** is exactly the `shared/notReady.ts` predicate — transport failure,
+  or a malformed body at status ≥ 500 — rendering a not-ready screen that
+  re-probes on the fixed 2000 ms interval and **navigates nothing**.
+- **Failed** is anything else thrown, **including a well-formed 403 or 5xx
+  envelope**: a failure panel with a manual retry, navigating nothing. This fifth
+  outcome exists because a 403 must be treated as **neither a deny nor a
+  not-ready**.
 
 Nothing is rendered while the request is in flight — not a spinner, not the shell.
 That is deliberate: it preserves the **no flash of admin content** property, at
@@ -167,18 +273,74 @@ no DOM.
 `require_role(Role.admin)` on every admin route (`backend-structure.md`); removing
 the gate must change nothing but the flash.
 
+### The `bootstrap` entry
+
+**Realizes:** FEAT-001, UC-001, UC-003
+
+The counterpart to the `admin` entry's boot sequence (plan 003, hand-off amended
+by plan 004):
+
+- **One `GET /api/health` on mount, reading `configured` alone** — never
+  `status` or `schema`, because a genuinely pre-bootstrap instance answers
+  `status: "degraded"` (`backend-structure.md`'s `/api/health`).
+- **Five states:** *probing* (neither the offer nor the refusal rendered), *the
+  offer*, *the already-configured refusal* — with a real `<a href="/login">`, not
+  a router link — *not-ready-yet*, and a *failure* that is not not-ready (the
+  envelope's own message).
+- **After a successful create, a document navigation to `/`.** The create
+  response sets the session cookie (`backend-structure.md`'s bootstrap route
+  surface), so the operator arrives signed in; there is no detour through
+  `/login`. A create refused with `already_configured` flips the page to the
+  refusal state instead.
+- **No `basename`**, no stylesheet import of its own, and no API surface beyond
+  `/api/health` and the bootstrap routes.
+- **The refusal is UX over a server-side guard**, exactly as the admin gate is:
+  `require_unconfigured` is the boundary.
+- It adds **no notification call site**: every failure it has is a full-page
+  state or the form's inline alert (`ui-conventions.md`'s notification rule).
+
+### The `login` entry
+
+**Realizes:** FEAT-002, UC-004, UC-005, US-006.AC-3
+
+- **No request on mount at all** — no `/api/me`, no probe, no gate. One form, one
+  route (`POST /api/auth/login`), every failure rendered **in place** in the
+  form's general alert.
+- **A document navigation to `/` on success, for both roles, with no role
+  branch.** An administrator reaches `/admin` from the user menu, which is
+  FEAT-020's surface.
+- **No not-ready-yet state**, because it makes no request before the user acts —
+  the condition that created that state for the `bootstrap` entry and the `admin`
+  gate.
+- **No disabled-account screen.** A disabled account receives the identical
+  refusal, rendered identically, as a wrong password (US-006.AC-3,
+  `invalid_credentials`). The entry's screen list used to name a
+  "disabled-account message"; it must not be built.
+- **"Sign out landing" is the sign-in form itself**, not a second screen. Nothing
+  in `docs/product/` asks for a confirmation page.
+
 ## State — MobX 6, per-page stores, no context
 
-The convention, inherited and kept:
+**Pure data contracts.** Data is separated from code — a functional-like style,
+despite MobX, at least for the data contracts. A store class is a data structure;
+everything that derives from it or acts on it is a free function taking it.
 
 ```tsx
-// SessionWorkspacePage.tsx
+// SessionWorkspacePage.tsx — field and function names are illustrative, the shape is the rule
 class SessionWorkspaceState {
+  messages: ZoneMessage[] = [];
+  status: "idle" | "loading" | "ready" = "idle";
   constructor(readonly sessionId: string) {     // string — see "Ids are strings" below
     makeAutoObservable(this, {}, { autoBind: true });
   }
-  // observables, computeds, actions
+  // observable fields ONLY — no methods, no computed getters
 }
+
+// a derivation: pure, takes the data object, still reactive under observer
+export function isZoneEmpty(state: SessionWorkspaceState): boolean { ... }
+
+// an effect: free function, data object + optional signal, runInAction, abort-aware
+export async function loadZone(state: SessionWorkspaceState, signal?: AbortSignal): Promise<void> { ... }
 
 export const SessionWorkspacePage = observer(function SessionWorkspacePage(
   { sessionId }: { sessionId: string },
@@ -188,20 +350,59 @@ export const SessionWorkspacePage = observer(function SessionWorkspacePage(
 });
 ```
 
-Three rules:
+Four rules:
 
-1. **One `makeAutoObservable` class per page**, instantiated in the page component
-   via `useState(() => new XState())`. `useState` with an initializer, not
-   `useMemo` — `useMemo` is a cache with no guarantee of identity, and a store
-   whose identity can change silently is a source of lost in-flight state.
-2. **Stores are passed explicitly as props. There is no React context.** The
-   reason is legibility of lifetime and of dependency: reading a component's props
-   tells you exactly which store it touches, and a store's lifetime is visibly the
-   page's. Context would make both invisible and would make it easy for a child
-   to reach a store the page did not intend to give it.
-3. **Components that read observables are wrapped in `observer`.** A component that
-   is not an `observer` must not read an observable — the resulting missed render
-   is the hardest bug in this stack to find.
+1. **A data class holds observable fields only** — `makeAutoObservable(this, {},
+   { autoBind: true })` in the constructor, initial values, and nothing else.
+2. **No methods, and no computed getters either.** Derivations are **pure free
+   functions taking the data object**. They remain reactive: an `observer`
+   component that reads observables through a plain function still tracks them.
+3. **All effectful work is a free function taking the data object plus an
+   optional `AbortSignal`.** Each one `runInAction`s its writes — an `await` ends
+   the enclosing action, so a post-await write outside `runInAction` is untracked
+   — and each **early-returns on an aborted signal before writing**, so a response
+   that arrives after unmount cannot write into a dead store.
+4. **Unchanged from the inherited convention:**
+   - **one store per page**, instantiated via `useState(() => new XState())`.
+     `useState` with an initializer, not `useMemo` — `useMemo` is a cache with no
+     guarantee of identity, and a store whose identity can change silently is a
+     source of lost in-flight state;
+   - **stores passed explicitly as props, no React context.** Reading a
+     component's props tells you exactly which store it touches, and a store's
+     lifetime is visibly the page's; context would make both invisible and would
+     let a child reach a store the page did not intend to give it;
+   - **components that read observables are wrapped in `observer`.** A component
+     that is not an `observer` must not read an observable — the resulting missed
+     render is the hardest bug in this stack to find.
+
+**The payoff:** validation and every other derivation are testable by
+constructing a value and calling a function, with no render and no network; and
+anything that can fail, await or navigate is visibly a call rather than a method
+reached through an object.
+
+### Where a store's file lives
+
+Precedent set by FEAT-001 (plan 003), extended by FEAT-002 (plan 004):
+
+- **A page's state and draft modules live under the entry's own folder, beside
+  `main.tsx`** — `src/bootstrap/bootstrapState.ts`,
+  `src/bootstrap/createAdminDraft.ts` — **with the pure derivations and the
+  effectful free functions in the same module as the data class they operate
+  on.** A store is a data class plus free functions over it, which is one
+  subject; and the entry folder is already the unit of bundling, so a
+  single-entry store has no business in `shared/`.
+- **A page whose entire state *is* its form holds a draft module and no
+  page-state module** — `src/login/loginDraft.ts`, with no `loginState.ts`. A
+  store holding no field the draft does not already hold is a store somebody will
+  later find a use for. The convention is "one subject, one module", not "one
+  page, two modules" — do not add an empty page store for symmetry.
+
+**This resolves a divergence, by user decision (plan 002).** This doc's example
+used to carry `// observables, computeds, actions`, while `ui-conventions.md`'s
+carried **no methods** with behaviour in free functions. A convention stated two
+ways is one nobody can be held to; the second is the one chosen, extended to
+getters. `ui-conventions.md`'s draft and page-state conventions now say the same
+thing, and **the two must stay in step** or the contradiction simply moves.
 
 ### Why MobX over a reducer store — re-argued, because the old reason is gone
 
@@ -323,8 +524,22 @@ throws and nothing warns.
   and it stays that string through the store, the props, the route params and back
   into a request body. `useParams()` already hands back `string`; that is correct,
   not a conversion someone forgot.
-- **`id: number` on a type, a prop, a store field or a route param is a defect** —
-  the reviewable form of this rule is one grep over `frontend/src`.
+- **`id: number` on a type, a prop, a store field or a route param is a defect.**
+  **The rule is enforced by a test, not by a habit** (plan 002). The project has no
+  linter (`overview.md`), so a test is the only automated form available, and it
+  costs no dependency. A test under `frontend/tests` scans every `.ts` and `.tsx`
+  file under `frontend/src` and fails naming the offending file and line. It
+  catches three patterns:
+  - an `id`/`Id`-suffixed binding annotated `number` or `number[]`;
+  - `parseInt`;
+  - `Number.parseInt`.
+
+  **There is no exception list and no suppression comment** — a genuine need
+  changes the architecture first. **What it deliberately does not catch:** numeric
+  sort and arithmetic on ids, which are not textually detectable without type
+  information and stay a review matter. The scan is scoped to `frontend/src` and
+  the tests live outside it, so no fixture can trip it and no exclusion list is
+  needed.
 - **SSE frames are bound by the same rule.** `done.message_id` arrives as a
   decimal string (`llm-and-streaming.md`) and is used as one. A frame is the
   easiest place to overlook — it is hand-built JSON, not a serialized model.
@@ -353,15 +568,102 @@ One module in `shared/`, used by every entry:
   codes the UI must branch on specifically are `model_not_enabled`,
   `no_embedding_model`, `translation_failed`, `zone_empty`, `zone_not_empty`,
   `nothing_to_reopen`, `message_not_editable`, `already_configured` and
-  `account_disabled`. **`discussion_not_resumable` is gone** — it named a table
+  `invalid_credentials`. **`discussion_not_resumable` is gone** — it named a table
   that no longer exists and a condition that has changed; `zone_not_empty` is its
   replacement and the rename is not cosmetic (`backend-structure.md`).
+  **`account_disabled` is gone too** (plan 004): no backend code raises it, so a
+  branch on it could never be exercised. `invalid_credentials` replaces it, and
+  the only surface that branches on it is the `login` entry's form, which renders
+  **one fixed message** that never says which of the three causes applied
+  (US-006.AC-3).
   **Where a failure is not already rendered in place, its reason is shown as a
   transient notification** (US-044.AC-4, `ui-conventions.md`) — the client throws
   and renders exactly as before; what changed is only the surface some of these
   codes land on.
 - A `401` triggers a document navigation to `/login`. A `403` does not — it is a
-  genuine authorization failure and is rendered, not redirected.
+  genuine authorization failure and is rendered, not redirected. (This is why the
+  login route's own refusal is a 400, never a 401 — `backend-structure.md`.) The
+  navigation target is exactly `/login`, without a trailing slash, which nginx
+  must resolve — an open seam recorded in `deployment.md`.
+
+### Not-ready-yet — one shared classification
+
+**`shared/notReady.ts` exports one pure predicate** answering whether a thrown
+value is the not-ready-yet condition (plan 003):
+
+```
+not-ready  =  code client_transport_failed
+           or code client_malformed_error  with status >= 500
+```
+
+- **Widened from "a 502"**, deliberately. `supervisord` has no wait-for ordering
+  (`deployment.md`); 502, 503, 504 and a response that died mid-body are the same
+  "running but not answering" condition, and keying on one number would make the
+  screen depend on one proxy's choice.
+- **A well-formed backend envelope can never match**, whatever its status,
+  because its code is a backend code — a real 500 from the application is a
+  failure, not not-ready. An abort never matches either (it is not wrapped).
+- **Retry posture, as FEAT-001 chose it:** a fixed **2000 ms** re-probe,
+  **uncapped, no backoff**, plus a visible manual retry, all cancelled on
+  unmount.
+
+`deployment.md` states the requirement in two places — the bootstrap entry's
+not-ready-yet state and the admin gate's "a 502 is not a deny" — and this is what
+the rule *is*. **Both consumers use this predicate**: the `bootstrap` entry
+(plan 003) and the `admin` gate (plan 005, the boot sequence above). Any further
+surface that needs the condition uses it too, rather than re-deriving it.
+
+### The `ApiError` shape
+
+`ApiError` is a class extending `Error`, carrying:
+
+- **`code: string`** — the branch key;
+- the inherited **`message`**;
+- **`detail`** — an object of unknown values, defaulting to empty;
+- **`status: number`** — the HTTP status.
+
+**Call sites branch on `.code`, never on a status number and never on a message
+string.** `status` is carried for diagnostics and for the by-status half of a
+draft's field mapping (`ui-conventions.md`), not as a branch key. **An exported
+type guard is the one sanctioned way a `catch` block narrows** to `ApiError`. The
+doc used to say the client throws "a typed `ApiError`" without defining the type;
+four features would otherwise have defined four.
+
+### Every failure is an `ApiError` — 5xx, malformed bodies and transport failures
+
+So that **every** call site can branch on `.code`, the client produces an
+`ApiError` for every way a call can fail, not only for a well-formed error body:
+
+| Situation | `code` | `status` |
+|---|---|---|
+| non-2xx with a well-formed envelope | the backend's own code | the real status |
+| non-2xx whose body is absent, not JSON, or not the envelope | `client_malformed_error` | the real status |
+| `fetch` itself rejects | `client_transport_failed` | `0` |
+
+Both synthetic codes are prefixed **`client_`** so no reader mistakes one for a
+backend code, and neither collides with `backend-structure.md`'s table. Without
+this, a 502 from nginx and a dropped connection each reach call sites as a
+different shape, and the branch-on-code contract quietly stops holding at exactly
+the moments it matters. The admin gate's "a 502 is not a deny" rule is
+`admin-surfaces.md`'s and is untouched by this table.
+
+**An abort is not an error and is not wrapped.** The original abort rejection
+propagates unchanged, so `signal.aborted` checks and the early-return-on-abort
+rule (the MobX rules above) work as written. This is the same reasoning as the
+SSE consumer below, where a stop is deliberately not a failure.
+
+### One decode in the client, one field-mapping per draft
+
+The error path has exactly two steps, and each happens in exactly one place:
+
+1. **One decode, in the client.** It parses the envelope and throws a typed
+   `ApiError`. Nothing else parses an error body.
+2. **One field-mapping, per draft.** `ui-conventions.md`'s `submitX` free function
+   maps that `ApiError` onto `serverErrors` field keys **by status or code, never
+   by parsing prose**; anything unmappable lands on the general key.
+
+The second half is where the mistake actually gets made: a store that re-decodes
+the response produces a second, divergent error shape.
 
 `model_not_enabled` gets a dedicated presentation, because it is product
 behaviour and not an incident: UC-012 requires the roleplayer be able to fix it by
@@ -509,8 +811,14 @@ stylesheets and there is no third:
 
 | File | Holds | Imported by |
 |---|---|---|
-| `src/global.css` | **resets only** | every entry |
-| `src/shell.css` | **the `app` workspace's layout only** — the three-column grid and its `1px` gap, the `--navw` custom property and the collapsed-rail class that re-points it, the `820px` media query | the **`app` entry** alone |
+| `src/global.css` | **resets only** | every entry — imported by **`shared/AppProviders`**, after Mantine's core and notifications stylesheets, and so reaching every entry transitively |
+| `src/shell.css` | **the `app` workspace's layout only** — the three-column grid and its `1px` gap, the `--navw` custom property and the collapsed-rail class that re-points it, the `820px` media query | the **`app` entry** alone — imported directly by **`src/app/main.tsx`**, the one stylesheet an entry imports itself |
+
+**Who performs the imports is fixed** (decided in plan 002). Resets must land
+**after** Mantine's base sheet to win the cascade. Leaving that to
+import-statement order in four separate entry modules would make the cascade
+depend on a line someone can reorder while tidying; one file owns it instead. The
+claim that `global.css` reaches every entry is unchanged.
 
 **Everything else is Mantine** — theme tokens, `style` props and component props.
 A rule that is neither a reset nor workspace layout belongs in neither file;
