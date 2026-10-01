@@ -344,3 +344,63 @@ describe("the re-probe interval", () => {
     expect(ADMIN_ACCESS_RETRY_INTERVAL_MS).toBe(2000);
   });
 });
+
+// ===========================================================================
+// Feature 008, step 001 — the identity move (context.md D1): the /api/me fetch now lives in
+// src/shared/currentUser.ts and the gate obtains the user through it. Observable behaviour is
+// unchanged, which is what the clauses below pin: the same decision for each of the five
+// outcomes, the roleplayer's one navigation to /, and still exactly one GET /api/me per call.
+// ===========================================================================
+describe("the gate reaches the same decision after the identity move (008/001 D1)", () => {
+  const SAME_DECISION: Array<[string, FetchFn, string]> = [
+    ["an administrator", answerIdentity("admin"), "granted"],
+    ["a roleplayer", answerIdentity("roleplayer"), "denied-not-admin"],
+    ["a 401", answer401, "denied-no-session"],
+    ["a not-ready failure", transportFailure, "not-ready"],
+    ["a well-formed 403", answerEnvelope(403, "insufficient_role", "No."), "failed"],
+  ];
+
+  it.each(SAME_DECISION)("answering %s reaches the unchanged decision — DoD-3", async (_name, handler, decision) => {
+    stubFetch(handler);
+    expect(await decisionOf()).toBe(decision);
+  });
+
+  it.each(SAME_DECISION)("answering %s requests /api/me exactly once — DoD-3", async (_name, handler) => {
+    const fetchMock = stubFetch(handler);
+    await captureError(() => enforceAdminAccess());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requests(fetchMock)).toEqual([{ path: "/api/me", method: "GET" }]);
+  });
+
+  it("an administrator is granted and still navigates nothing — DoD-3", async () => {
+    stubFetch(answerIdentity("admin"));
+    expect(await decisionOf()).toBe("granted");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("a roleplayer is still navigated to /, once — DoD-3", async () => {
+    stubFetch(answerIdentity("roleplayer"));
+    await captureError(() => enforceAdminAccess());
+    expect(navigate.mock.calls).toEqual([["/"]]);
+  });
+
+  it("a 401 still yields the shared client's /login navigation alone — DoD-3", async () => {
+    stubFetch(answer401);
+    await captureError(() => enforceAdminAccess());
+    expect(navigate.mock.calls).toEqual([["/login"]]);
+  });
+
+  it("a not-ready failure still navigates nothing — DoD-3", async () => {
+    stubFetch(transportFailure);
+    expect(await decisionOf()).toBe("not-ready");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("a well-formed 403 still carries the envelope's message and navigates nothing — DoD-3", async () => {
+    const message = "The identity probe was refused zq-403-008.";
+    stubFetch(answerEnvelope(403, "insufficient_role", message));
+    const result = await enforceAdminAccess();
+    expect(result).toMatchObject({ decision: "failed", message });
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});

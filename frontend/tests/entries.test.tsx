@@ -8,9 +8,15 @@
 // Feature 005, step 004 DoD-11 repairs the admin clauses only: `mountEntry("admin", …)` stubs
 // GET /api/me with an administrator identity and waits for the gated render. The bootstrap,
 // login and app clauses are unchanged.
+//
+// Feature 008, step 005 DoD-11 replaces the `app` clauses: the app entry now gates on
+// GET /api/me too, so `mountEntry("app", …)` stubs that request and waits for the gated
+// render, and the entry no longer renders a `data-entry` marker of its own — its clauses
+// assert the workspace shell instead (the "Workspace navigation" nav), or that nothing at
+// all is rendered on a 401. The bootstrap, login and admin clauses are unchanged.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { theme } from "../src/shared/theme";
 
@@ -18,6 +24,12 @@ type Entry = "bootstrap" | "login" | "admin" | "app";
 
 const ENTRIES: Entry[] = ["bootstrap", "login", "admin", "app"];
 const NON_ADMIN_ENTRIES: Entry[] = ["bootstrap", "login", "app"];
+
+/** 008/005 DoD-11: the entries that carry a `data-entry` marker of their own. */
+const MARKER_ENTRIES: Entry[] = ["bootstrap", "login", "admin"];
+const MARKER_NON_ADMIN_ENTRIES: Entry[] = ["bootstrap", "login"];
+
+const SHELL_NAV_NAME = "Workspace navigation";
 
 const FRONTEND_ROOT = path.resolve(__dirname, "..");
 const SRC_ROOT = path.join(FRONTEND_ROOT, "src");
@@ -66,6 +78,42 @@ function stubAdminIdentity(): void {
   );
 }
 
+function jsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/** 008/005 DoD-11: a signed-in roleplayer, the app entry's default `/api/me` answer. */
+const signedIn = (): Response =>
+  jsonResponse({ id: "9007199254740993", username: "mira", role: "roleplayer" }, 200);
+
+/** 008/005 DoD-11: no session — the 401 envelope the backend answers with. */
+const notAuthenticated = (): Response =>
+  jsonResponse(
+    { error: { code: "not_authenticated", message: "You are not signed in.", detail: {} } },
+    401,
+  );
+
+/**
+ * Feature 008, step 005 — DoD-11 (context.md D2): from 008/005 the app entry awaits a
+ * GET /api/me gate before it renders anything, so its clauses stub that request. Any other
+ * request is a test failure.
+ */
+function stubAppIdentity(answer: () => Response): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (new URL(raw, "http://localhost").pathname !== "/api/me") {
+        return Promise.reject(new TypeError("unexpected request in app entry test"));
+      }
+      return Promise.resolve(answer());
+    }),
+  );
+}
+
 async function settle(rounds = 6): Promise<void> {
   for (let i = 0; i < rounds; i += 1) {
     await act(async () => {
@@ -74,15 +122,33 @@ async function settle(rounds = 6): Promise<void> {
   }
 }
 
-async function mountEntry(entry: Entry, pathname: string): Promise<void> {
+async function mountEntry(
+  entry: Entry,
+  pathname: string,
+  appIdentity: () => Response = signedIn,
+): Promise<void> {
   vi.resetModules();
   document.body.innerHTML = '<div id="root"></div>';
   window.history.pushState({}, "", pathname);
   if (entry === "admin") stubAdminIdentity(); // 005/004 DoD-11
+  if (entry === "app") stubAppIdentity(appIdentity); // 008/005 DoD-11
   await act(async () => {
     await LOADERS[entry]();
   });
   if (entry === "admin") await settle(); // 005/004 DoD-11: the gate resolves before the mount
+  if (entry === "app") await settle(); // 008/005 DoD-11: the gate resolves before the mount
+}
+
+/** 008/005 DoD-11: the workspace shell, found by the nav column's accessible name. */
+function shellNavIn(container: HTMLElement): HTMLElement | null {
+  return within(container).queryByRole("navigation", { name: SHELL_NAV_NAME });
+}
+
+/** 008/005 DoD-11: every element rendered into the mount, Mantine's style tags aside. */
+function renderedTagNames(container: HTMLElement): string[] {
+  return Array.from(container.querySelectorAll("*"))
+    .map((element) => element.tagName.toLowerCase())
+    .filter((tag) => tag !== "style");
 }
 
 function markersIn(container: ParentNode): string[] {
@@ -135,18 +201,20 @@ afterEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
+// The `app` entry is absent from these three clauses from 008/005 on: its placeholder marker
+// is gone with the boot gate, and DoD-11's clauses below assert the shell instead.
 describe("each entry mounts its own marker", () => {
-  it.each(ENTRIES)("%s renders its own marker on #root — DoD-1", async (entry) => {
+  it.each(MARKER_ENTRIES)("%s renders its own marker on #root — DoD-1", async (entry) => {
     await mountEntry(entry, HOME_PATH[entry]);
     expect(mountElement().querySelector(`[data-entry="${entry}"]`)).not.toBeNull();
   });
 
-  it.each(ENTRIES)("%s renders no other entry's marker — DoD-1", async (entry) => {
+  it.each(MARKER_ENTRIES)("%s renders no other entry's marker — DoD-1", async (entry) => {
     await mountEntry(entry, HOME_PATH[entry]);
     expect(markersIn(document)).toEqual([entry]);
   });
 
-  it.each(ENTRIES)("%s renders its marker for a deep link too — DoD-1", async (entry) => {
+  it.each(MARKER_ENTRIES)("%s renders its marker for a deep link too — DoD-1", async (entry) => {
     const deep = entry === "admin" ? "/admin/users/abc123" : "/sessions/abc123";
     await mountEntry(entry, deep);
     expect(markersIn(document)).toEqual([entry]);
@@ -215,7 +283,7 @@ describe("the admin entry's basename is exactly /admin", () => {
 describe("bootstrap, login and app declare no basename", () => {
   const PATHS = ["/", "/admin/users", "/sessions/abc123", "/login", "/bootstrap"];
 
-  for (const entry of NON_ADMIN_ENTRIES) {
+  for (const entry of MARKER_NON_ADMIN_ENTRIES) {
     it.each(PATHS)(`${entry} renders its marker at %s — DoD-4`, async (pathname) => {
       await mountEntry(entry, pathname);
       expect(markersIn(mountElement())).toEqual([entry]);
@@ -331,5 +399,39 @@ describe("the four index.html documents", () => {
     const doc = parseHtml(entryHtml(entry));
     expect(doc.querySelectorAll("style").length).toBe(0);
     expect(doc.querySelectorAll("[style]").length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 008, step 005 — the app entry behind its boot gate (DoD-11, DoD-12).
+describe("the app entry gates on GET /api/me", () => {
+  const APP_PATHS = ["/", "/sessions/abc123", "/settings", "/search"];
+
+  it("renders the workspace shell into #root for a signed-in roleplayer — DoD-11", async () => {
+    await mountEntry("app", HOME_PATH.app, signedIn);
+    expect(shellNavIn(mountElement())).not.toBeNull();
+    expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
+  });
+
+  it.each(APP_PATHS)("renders the shell at %s too — DoD-11", async (pathname) => {
+    await mountEntry("app", pathname, signedIn);
+    expect(shellNavIn(mountElement())).not.toBeNull();
+  });
+
+  it("renders nothing into #root when /api/me answers 401 — DoD-11", async () => {
+    await mountEntry("app", HOME_PATH.app, notAuthenticated);
+    expect(shellNavIn(mountElement())).toBeNull();
+    expect(renderedTagNames(mountElement())).toEqual([]);
+  });
+
+  it("src/app/main.tsx imports ../shell.css and no other stylesheet — DoD-12", () => {
+    const sheets = importSpecifiers(readSource(entryMain("app"))).filter((spec) =>
+      /\.(css|scss|sass|less)(\?|$)/.test(spec),
+    );
+    expect(sheets).toEqual(["../shell.css"]);
+  });
+
+  it("src/app/main.tsx declares no basename — DoD-12", () => {
+    expect(stripComments(readSource(entryMain("app")))).not.toMatch(/\bbasename\b/);
   });
 });

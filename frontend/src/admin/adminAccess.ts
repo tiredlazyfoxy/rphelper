@@ -1,8 +1,9 @@
 // The admin gate's logic: pure decisions over the fetched identity and a thrown value,
 // plus the impure enforce half that fetches `GET /api/me` and performs the one deny
 // navigation.
-import { apiGet, documentNavigation } from "../shared/api";
+import { documentNavigation } from "../shared/api";
 import { isApiError } from "../shared/apiError";
+import { fetchCurrentUser, type CurrentUser } from "../shared/currentUser";
 import { isNotReady } from "../shared/notReady";
 
 /** The five outcomes of the admin gate (`context.md` D13). */
@@ -13,12 +14,8 @@ export type AdminAccessDecision =
   | "not-ready"
   | "failed";
 
-/** The identity `GET /api/me` answers with. `id` is a decimal string and is never parsed. */
-export type CurrentUser = {
-  id: string;
-  username: string;
-  role: "roleplayer" | "admin";
-};
+/** Defined in `shared/currentUser.ts` (008 D1); re-exported so importers compile unchanged. */
+export type { CurrentUser } from "../shared/currentUser";
 
 /**
  * What `enforceAdminAccess` resolves to: the decision, plus — only for `"failed"` — the
@@ -31,7 +28,6 @@ export type AdminAccessResult =
 /** The fixed, uncapped not-ready re-probe interval, in milliseconds. */
 export const ADMIN_ACCESS_RETRY_INTERVAL_MS = 2000;
 
-const ME_PATH = "/api/me";
 const APP_AREA_PATH = "/";
 const UNAUTHORIZED_STATUS = 401;
 const GENERIC_FAILURE_MESSAGE = "Your access to the admin area could not be checked.";
@@ -63,7 +59,7 @@ function failureMessage(error: unknown): string {
 export async function enforceAdminAccess(signal?: AbortSignal): Promise<AdminAccessResult> {
   let currentUser: CurrentUser;
   try {
-    currentUser = await apiGet<CurrentUser>(ME_PATH, signal);
+    currentUser = await fetchCurrentUser(signal);
   } catch (error) {
     if (signal?.aborted) {
       throw error;

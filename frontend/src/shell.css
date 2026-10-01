@@ -2,10 +2,64 @@
  * shell.css — the `app` workspace's layout stylesheet, and nothing else.
  *
  * Imported by src/app/main.tsx alone; no other entry reaches it.
- * Filled by feature 008 (workspace shell): the three-column grid, the 1px gap,
- * the --navw rail-width custom property, the collapsed-rail class and the 820px
- * media query. Intentionally empty until then.
+ * Holds the workspace grid and nothing but layout: the two-track grid, the 1px
+ * gap that draws the column dividers, the --navw custom property with the
+ * collapsed-rail class that re-points it, and the 820px media query with the
+ * narrow-width overlay.
  *
- * A rule that is neither a reset (global.css) nor workspace layout belongs in
- * neither file — reach for a Mantine theme token (shared/theme.ts) instead.
+ * Column backgrounds, padding, typography, shadow and every colour other than
+ * the divider variable are Mantine style props, never rules here. A rule that
+ * is neither a reset (global.css) nor workspace layout belongs in neither file —
+ * reach for a Mantine theme token (shared/theme.ts) instead.
  */
+
+/* The grid element. The 1px gap over a line-coloured background draws the
+ * dividers, so no column owns a border. minmax(0, 1fr) is load-bearing: without
+ * the 0 minimum a long unbroken line in the centre sets the track's minimum
+ * width and pushes the left column off-screen. */
+.app {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: var(--navw, 252px) minmax(0, 1fr);
+  height: 100vh;
+  background: var(--mantine-color-default-border);
+  transition: grid-template-columns 150ms ease;
+}
+
+/* Collapse is one class re-pointing one custom property. */
+.app.nav-collapsed {
+  --navw: 48px;
+}
+
+/* The two columns: each scrolls on its own. */
+.app-nav {
+  min-width: 0;
+  overflow: auto;
+}
+
+/* Placed explicitly in the second track, so it keeps its track when the nav
+ * column is lifted out of flow by the overlay below 820px. */
+.app-main {
+  grid-column: 2;
+  min-width: 0;
+  overflow: auto;
+}
+
+@media (width < 820px) {
+  /* Below the threshold the left track is always the rail, whatever the
+   * persisted collapse says. */
+  .app {
+    --navw: 48px;
+  }
+
+  /* Expand lifts the same nav column out of the track, above the centre
+   * column, at the expanded width. */
+  .app.nav-overlay-open .app-nav {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 252px;
+    z-index: 100;
+  }
+}
