@@ -18,8 +18,8 @@ renumbered, never reused; gaps stay if a number is ever withdrawn or skipped.
 | `vision.md` | Problem, who has it, what happens without it, 3 success signals, scope & non-goals |
 | `actors.md` | ACT-001..ACT-004 blocks, plus 2 named non-actors |
 | `features.md` | FEAT-001..FEAT-020 blocks + `## Relationships` (dependency graph, overlaps, boundary, conflicts). Never a registry, never splits. |
-| `use-cases/<FEAT-###>.<slug>.md` | UC-001..UC-086, one file per feature |
-| `stories/<FEAT-###>.<slug>.md` | US-001..US-139 with `US-###.AC-#` criteria, one file per feature |
+| `use-cases/<FEAT-###>.<slug>.md` | UC-001..UC-087, one file per feature |
+| `stories/<FEAT-###>.<slug>.md` | US-001..US-140 with `US-###.AC-#` criteria, one file per feature |
 | `glossary.md` | Domain terms, one line each |
 | `quick-reference.md` (this file) | The id registry |
 
@@ -63,31 +63,34 @@ Feature → filename slug (use-cases and stories share the slug):
 
 ## Features
 
-All 20 are `Priority: must`, `Status: proposed`. Sequencing comes from the
-dependency graph below, not from priority.
+All 20 are `Priority: must`. Sequencing comes from the dependency graph below,
+not from priority. FEAT-001, FEAT-002, FEAT-004 and FEAT-005 are `partially
+delivered`; FEAT-003 is `delivered`; every other FEAT is `proposed` — see the
+Status column below and each block's `**Delivered:**`/`**Remaining:**` lines
+in `features.md`.
 
-| FEAT | Name | Actors | Realized by (UC) | Realized by (US) |
-|---|---|---|---|---|
-| FEAT-001 | First-run bootstrap | ACT-003 | UC-001–003 | US-001–003 |
-| FEAT-002 | Authentication & session | ACT-001, ACT-002 | UC-004–005 | US-004–007 |
-| FEAT-003 | User management | ACT-001 | UC-006–009 | US-008–011 |
-| FEAT-004 | LLM server connections | ACT-001 | UC-010–013 | US-012–016 |
-| FEAT-005 | Database consistency & management | ACT-001 | UC-014–016 | US-017–019 |
-| FEAT-006 | Characters | ACT-002 | UC-017–019, UC-067 | US-020–022, US-086 |
-| FEAT-007 | Setups | ACT-002 | UC-020–022, UC-068 | US-023–025, US-087 |
-| FEAT-008 | RP sessions | ACT-002 | UC-023–026, UC-080 | US-026–029, US-117 |
-| FEAT-009 | Session entries & the RP flow | ACT-002 | UC-027–031, UC-078, UC-081–082 | US-030–035, US-109–112, US-120–124 |
-| FEAT-010 | Compose discussion | ACT-002, ACT-004 | UC-032–038, UC-079, UC-083–086 | US-036–044, US-113–116, US-125–135 |
-| FEAT-011 | Partner-text translation | ACT-002 | UC-039–041 | US-045–048 |
-| FEAT-012 | Memos | ACT-002, ACT-004 | UC-042–046, UC-075–076 | US-049–057, US-098–104, US-119 |
-| FEAT-013 | Session configuration & inheritance | ACT-002 | UC-047–050, UC-077 | US-058–062, US-105–108, US-139 |
-| FEAT-014 | `memo_search` tool | ACT-002, ACT-004 | UC-051–052 | US-063–066 |
-| FEAT-015 | `session_search` tool | ACT-002, ACT-004 | UC-053–054 | US-067–069, US-138 |
-| FEAT-016 | `web_search` tool | ACT-002, ACT-004 | UC-055–057 | US-070–073 |
-| FEAT-017 | My search | ACT-002 | UC-058–060 | US-074–076, US-118, US-137 |
-| FEAT-018 | Export & import | ACT-001, ACT-002 | UC-061–064 | US-077–082, US-136 |
-| FEAT-019 | Privacy & isolation | ACT-001, ACT-002 | UC-065–066 | US-083–085 |
-| FEAT-020 | Workspace shell & navigation | ACT-002 (primary), ACT-001 (admin entry point only) | UC-069–074 | US-088–097 |
+| FEAT | Name | Actors | Realized by (UC) | Realized by (US) | Status |
+|---|---|---|---|---|---|
+| FEAT-001 | First-run bootstrap | ACT-003 | UC-001–003 | US-001–003 | partially delivered |
+| FEAT-002 | Authentication & session | ACT-001, ACT-002 | UC-004–005 | US-004–007 | partially delivered |
+| FEAT-003 | User management | ACT-001 | UC-006–009, UC-087 | US-008–011, US-140 | delivered |
+| FEAT-004 | LLM server connections | ACT-001 | UC-010–013 | US-012–016 | partially delivered |
+| FEAT-005 | Database consistency & management | ACT-001 | UC-014–016 | US-017–019 | partially delivered |
+| FEAT-006 | Characters | ACT-002 | UC-017–019, UC-067 | US-020–022, US-086 | proposed |
+| FEAT-007 | Setups | ACT-002 | UC-020–022, UC-068 | US-023–025, US-087 | proposed |
+| FEAT-008 | RP sessions | ACT-002 | UC-023–026, UC-080 | US-026–029, US-117 | proposed |
+| FEAT-009 | Session entries & the RP flow | ACT-002 | UC-027–031, UC-078, UC-081–082 | US-030–035, US-109–112, US-120–124 | proposed |
+| FEAT-010 | Compose discussion | ACT-002, ACT-004 | UC-032–038, UC-079, UC-083–086 | US-036–044, US-113–116, US-125–135 | proposed |
+| FEAT-011 | Partner-text translation | ACT-002 | UC-039–041 | US-045–048 | proposed |
+| FEAT-012 | Memos | ACT-002, ACT-004 | UC-042–046, UC-075–076 | US-049–057, US-098–104, US-119 | proposed |
+| FEAT-013 | Session configuration & inheritance | ACT-002 | UC-047–050, UC-077 | US-058–062, US-105–108, US-139 | proposed |
+| FEAT-014 | `memo_search` tool | ACT-002, ACT-004 | UC-051–052 | US-063–066 | proposed |
+| FEAT-015 | `session_search` tool | ACT-002, ACT-004 | UC-053–054 | US-067–069, US-138 | proposed |
+| FEAT-016 | `web_search` tool | ACT-002, ACT-004 | UC-055–057 | US-070–073 | proposed |
+| FEAT-017 | My search | ACT-002 | UC-058–060 | US-074–076, US-118, US-137 | proposed |
+| FEAT-018 | Export & import | ACT-001, ACT-002 | UC-061–064 | US-077–082, US-136 | proposed |
+| FEAT-019 | Privacy & isolation | ACT-001, ACT-002 | UC-065–066 | US-083–085 | proposed |
+| FEAT-020 | Workspace shell & navigation | ACT-002 (primary), ACT-001 (admin entry point only) | UC-069–074 | US-088–097 | proposed |
 
 **Build order** (transcribed verbatim from `features.md`'s `## Relationships`):
 
@@ -103,34 +106,39 @@ above is `must`, so priority carries no sequencing information on its own.
 
 ## Use cases
 
-UC-001..UC-086, grouped by owning feature, id order. One-liners are the use
-case's own heading text, verbatim. Every UC below is `Status: proposed`.
+UC-001..UC-087, grouped by owning feature, id order. One-liners are the use
+case's own heading text, verbatim. Every UC below is `Status: proposed`
+except the ones tagged inline: UC-001, UC-003, UC-004, UC-006, UC-007,
+UC-008, UC-009, UC-010, UC-011, UC-013, UC-014, UC-015, UC-087 are
+`delivered`; UC-005, UC-012 are `partially delivered`; UC-002, UC-016 are
+`deferred`.
 
 **FEAT-001**
-- UC-001 — Create a new database with the first administrator
-- UC-002 — Bring up an instance from an existing export
-- UC-003 — Bootstrap is unavailable once the instance is configured
+- UC-001 — Create a new database with the first administrator · **Status:** delivered
+- UC-002 — Bring up an instance from an existing export · **Status:** deferred → docs/plans/fast/003.bootstrap-from-export/
+- UC-003 — Bootstrap is unavailable once the instance is configured · **Status:** delivered
 
 **FEAT-002**
-- UC-004 — Log in
-- UC-005 — Log out and session expiry
+- UC-004 — Log in · **Status:** delivered
+- UC-005 — Log out and session expiry · **Status:** partially delivered → docs/plans/008.app-shell-frame/
 
 **FEAT-003**
-- UC-006 — Create an account
-- UC-007 — Disable and re-enable an account
-- UC-008 — Reset a user's password
-- UC-009 — List accounts without reaching any content
+- UC-006 — Create an account · **Status:** delivered
+- UC-007 — Disable and re-enable an account · **Status:** delivered
+- UC-008 — Reset a user's password · **Status:** delivered
+- UC-009 — List accounts without reaching any content · **Status:** delivered
+- UC-087 — Change an account's role · **Status:** delivered
 
 **FEAT-004**
-- UC-010 — Register a server connection (llamaswap or OpenAI)
-- UC-011 — Test a connection
-- UC-012 — Enable and disable specific models
-- UC-013 — Designate the embedding server and model
+- UC-010 — Register a server connection (llamaswap or OpenAI) · **Status:** delivered
+- UC-011 — Test a connection · **Status:** delivered
+- UC-012 — Enable and disable specific models · **Status:** partially delivered → docs/plans/017.session-configuration/
+- UC-013 — Designate the embedding server and model · **Status:** delivered
 
 **FEAT-005**
-- UC-014 — View a per-table drift report
-- UC-015 — Remediate drift
-- UC-016 — Rebuild the vector index
+- UC-014 — View a per-table drift report · **Status:** delivered
+- UC-015 — Remediate drift · **Status:** delivered
+- UC-016 — Rebuild the vector index · **Status:** deferred → docs/plans/fast/002.vector-index-rebuild/
 
 **FEAT-006**
 - UC-017 — Create a character
@@ -232,42 +240,47 @@ case's own heading text, verbatim. Every UC below is `Status: proposed`.
 - UC-073 — Work on a character's page — persona, notes, setups, settings, sessions
 - UC-074 — Create a character from a draft page
 
-Total: 86, UC-001..UC-086, no gaps.
+Total: 87, UC-001..UC-087, no gaps.
 
 ## Stories
 
-US-001..US-139, grouped by owning feature, id order. `ACs` is the count of
+US-001..US-140, grouped by owning feature, id order. `ACs` is the count of
 `US-###.AC-#` criteria on that story. One-liners are the story's own heading
-text, verbatim. Every US below is `Status: proposed`.
+text, verbatim. Every US below is `Status: proposed` except the ones tagged
+inline: US-001, US-003, US-004, US-005, US-006, US-008, US-009, US-010,
+US-011, US-012, US-013, US-015, US-017, US-018, US-140 are `delivered`;
+US-007, US-014, US-016 are `partially delivered`; US-002, US-019 are
+`deferred`.
 
 **FEAT-001**
-- US-001 — Fresh instance with a first admin (ACs: 2)
-- US-002 — Instance from an export (ACs: 2)
-- US-003 — Bootstrap refused once configured (ACs: 2)
+- US-001 — Fresh instance with a first admin (ACs: 2) · **Status:** delivered
+- US-002 — Instance from an export (ACs: 2) · **Status:** deferred → docs/plans/fast/003.bootstrap-from-export/
+- US-003 — Bootstrap refused once configured (ACs: 2) · **Status:** delivered
 
 **FEAT-002**
-- US-004 — Log in with correct credentials (ACs: 2)
-- US-005 — Rejected with wrong credentials (ACs: 2)
-- US-006 — A disabled account cannot log in (ACs: 2)
-- US-007 — Session ends, return to login (ACs: 2)
+- US-004 — Log in with correct credentials (ACs: 2) · **Status:** delivered
+- US-005 — Rejected with wrong credentials (ACs: 2) · **Status:** delivered
+- US-006 — A disabled account cannot log in (ACs: 3) · **Status:** delivered
+- US-007 — Session ends, return to login (ACs: 2) · **Status:** partially delivered → docs/plans/008.app-shell-frame/
 
 **FEAT-003**
-- US-008 — Admin creates an account (ACs: 2)
-- US-009 — Disabling ends that user's sessions (ACs: 2)
-- US-010 — Admin resets a password (ACs: 2)
-- US-011 — The account list shows no RP content (ACs: 2)
+- US-008 — Admin creates an account (ACs: 2) · **Status:** delivered
+- US-009 — Disabling ends that user's sessions (ACs: 2) · **Status:** delivered
+- US-010 — Admin resets a password (ACs: 3) · **Status:** delivered
+- US-011 — The account list shows no RP content (ACs: 2) · **Status:** delivered
+- US-140 — Admin changes an account's role (ACs: 3) · **Status:** delivered
 
 **FEAT-004**
-- US-012 — Register a connection (ACs: 2)
-- US-013 — Test reports reachable or not (ACs: 2)
-- US-014 — Enabled models become selectable (ACs: 2)
-- US-015 — Designate the embedding model (ACs: 1)
-- US-016 — Disabling a model a session is configured to use (ACs: 3)
+- US-012 — Register a connection (ACs: 2) · **Status:** delivered
+- US-013 — Test reports reachable or not (ACs: 2) · **Status:** delivered
+- US-014 — Enabled models become selectable (ACs: 2) · **Status:** partially delivered → docs/plans/017.session-configuration/
+- US-015 — Designate the embedding model (ACs: 4) · **Status:** delivered
+- US-016 — Disabling a model a session is configured to use (ACs: 3) · **Status:** partially delivered (AC-1 delivered; AC-2 → docs/plans/011.rp-sessions/, docs/plans/019.streaming-transport-and-stop/; AC-3 → docs/plans/017.session-configuration/)
 
 **FEAT-005**
-- US-017 — Drift report lists per-table status (ACs: 1)
-- US-018 — Remediation creates missing tables (ACs: 2)
-- US-019 — Vector index rebuild (ACs: 1)
+- US-017 — Drift report lists per-table status (ACs: 1) · **Status:** delivered
+- US-018 — Remediation creates missing tables (ACs: 7) · **Status:** delivered
+- US-019 — Vector index rebuild (ACs: 1) · **Status:** deferred → docs/plans/fast/002.vector-index-rebuild/
 
 **FEAT-006**
 - US-020 — Create a character (ACs: 2)
@@ -419,8 +432,8 @@ text, verbatim. Every US below is `Status: proposed`.
 - US-096 — A character's page shows its persona, its notes, its setups, its configuration and its sessions in one place (ACs: 1)
 - US-097 — Creating a character opens a draft page; nothing is persisted until the roleplayer enters something (ACs: 2)
 
-Total: 139, US-001..US-139, no gaps. Total numbered ACs across all stories:
-230, of which 229 are active and 1 (`US-131.AC-1`) is withdrawn.
+Total: 140, US-001..US-140, no gaps. Total numbered ACs across all stories:
+243, of which 242 are active and 1 (`US-131.AC-1`) is withdrawn.
 
 ## Open `_TBD:` items
 
@@ -440,6 +453,6 @@ carries no inferred requirement.
 
 - `ACT-005`
 - `FEAT-021`
-- `UC-087`
-- `US-140`
+- `UC-088`
+- `US-141`
 <!-- product-spec:end -->

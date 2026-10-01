@@ -49,6 +49,10 @@
   1. Administrator opens embedding configuration.
   2. Administrator designates which registered connection and model serve as the embedding model.
   3. Instance saves the designation.
+- **Alternate flows:**
+  - Administrator clears the designation after a confirm step — no embedding model is designated; the semantic tools (FEAT-014, FEAT-015) cannot work until one is designated again.
+- **Exception flows:**
+  - The chosen model cannot produce an embedding — the designation is refused with an error and the previous state is kept.
 - **Postconditions:** The designated model is the one the assistant's semantic tools (FEAT-014, FEAT-015) rely on. Changing the designation neither forces nor prompts a rebuild — existing vectors were produced by the superseded model and are not comparable, and nothing indicates this; the remedy is UC-016, always available.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7; 2026-09-28, gap-closure round.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7; 2026-09-28, gap-closure round; finalization 2026-10-01, C32, C33.
 <!-- product-spec:end -->

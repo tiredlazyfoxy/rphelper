@@ -11,9 +11,9 @@
   3. Credentials correct and account enabled — instance opens a session and shows the user's home.
 - **Alternate flows:**
   - Credentials incorrect — login rejected, user remains at the login screen.
-  - Account disabled — login rejected, user remains at the login screen.
+  - Account disabled — login rejected, user remains at the login screen; the refusal shown is identical to the incorrect-credentials one, the screen never revealing which applied.
 - **Postconditions:** On success, an active session tied to the user; on any rejection, no session.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 7; finalization 2026-10-01, C34.
 
 ### UC-005 — Log out and session expiry
 - **Actor:** ACT-001, ACT-002

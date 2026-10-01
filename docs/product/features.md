@@ -11,7 +11,9 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** Bring an unconfigured instance to a usable state: create a new
   database with a first admin, or import an existing database export.
 - **Actors:** ACT-003 · **Priority:** must
-- **Status:** proposed
+- **Status:** partially delivered
+- **Delivered:** docs/plans/003.first-run-bootstrap/ (2026-09-29); US-001.AC-2 by docs/plans/004.authentication-session/ (2026-09-29)
+- **Remaining:** UC-002, US-002 → docs/plans/fast/003.bootstrap-from-export/
 - **Realized by:** UC-001, UC-002, UC-003, US-001, US-002, US-003
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
 
@@ -19,26 +21,35 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** Let a created user log in, hold a session, and log out; a
   disabled account cannot log in.
 - **Actors:** ACT-001, ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** partially delivered
+- **Delivered:** docs/plans/004.authentication-session/ (2026-09-29)
+- **Remaining:** US-007.AC-1's logout affordance → docs/plans/008.app-shell-frame/
 - **Realized by:** UC-004, UC-005, US-004, US-005, US-006, US-007
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
 
 ### FEAT-003 — User management
 - **Purpose:** Admin-gated account lifecycle: create an account, disable and
-  re-enable it, reset its password, list accounts without reaching content.
+  re-enable it, reset its password, change its role, list accounts without
+  reaching content.
 - **Actors:** ACT-001 · **Priority:** must
-- **Status:** proposed
-- **Realized by:** UC-006, UC-007, UC-008, UC-009, US-008, US-009, US-010,
-  US-011
+- **Status:** delivered
+- **Delivered:** docs/plans/005.admin-shell-and-users/ (2026-09-29)
+- **Realized by:** UC-006, UC-007, UC-008, UC-009, UC-087, US-008, US-009,
+  US-010, US-011, US-140
 - **Note:** Disabling an account ends that user's sessions. The account list
   shows accounts only, never a user's RP content — see FEAT-019.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 7.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 7; finalization 2026-10-01, C31.
 
 ### FEAT-004 — LLM server connections
 - **Purpose:** Register and test LLM server connections (llamaswap or
   OpenAI); enable specific models; designate the embedding server and model.
 - **Actors:** ACT-001 · **Priority:** must
-- **Status:** proposed
+- **Status:** partially delivered
+- **Delivered:** docs/plans/006.llm-server-connections/ (2026-09-30)
+- **Remaining:** US-014 + US-016.AC-3 session-configuration half →
+  docs/plans/017.session-configuration/; US-016.AC-2 error shown on the
+  session → the session surface (docs/plans/011.rp-sessions/,
+  docs/plans/019.streaming-transport-and-stop/)
 - **Realized by:** UC-010, UC-011, UC-012, UC-013, US-012, US-013, US-014,
   US-015, US-016
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7.
@@ -47,7 +58,9 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** Report per-table schema drift and let an admin remediate it
   (create missing tables, rebuild the vector index).
 - **Actors:** ACT-001 · **Priority:** must
-- **Status:** proposed
+- **Status:** partially delivered
+- **Delivered:** docs/plans/007.schema-drift-and-remediation/ (2026-09-30)
+- **Remaining:** UC-016, US-019 → docs/plans/fast/002.vector-index-rebuild/
 - **Realized by:** UC-014, UC-015, UC-016, US-017, US-018, US-019
 - **Note:** Owns drift, remediation and vector-index rebuild — see the
   Relationships boundary below against FEAT-018, which owns export/import.

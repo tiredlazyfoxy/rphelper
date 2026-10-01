@@ -23,7 +23,8 @@
 - **Acceptance criteria:**
   - **US-006.AC-1** — Given an account is disabled, when its correct credentials are supplied, then login is rejected.
   - **US-006.AC-2** — Given an account is disabled and login was rejected, when the rejection is shown, then the user remains at the login screen.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 7.
+  - **US-006.AC-3** — Given an account is disabled, when its correct credentials are supplied, then the refusal shown is identical to the one for incorrect credentials.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 7; finalization 2026-10-01, C34.
 
 ### US-007 — Session ends, return to login
 - **Actor:** ACT-001, ACT-002 · **Feature:** FEAT-002 · **Exercises:** UC-005
