@@ -1168,3 +1168,219 @@ def test_create_all_creates_characters_and_enforces_the_user_fk__S009_001_DoD4(d
 
         with pytest.raises(IntegrityError):
             connection.execute(RAW_CHARACTER_INSERT, _raw_character(id=11, user_id=999_999))
+
+
+# ======================================================================================
+# Feature 010, step 001 (`001.table-error-models.md`) — the `setups` table.
+# Expected values come from that step's DoD-1..4 and DoD-8 and feature 010's context.md D7
+# (eight columns, both bare FKs, one non-unique composite index) and R2 (no configuration
+# columns, no default-setup flag). Tests are suffixed `__S010_001_DoD<n>`.
+# ======================================================================================
+
+# The registry as it stood before this step (003/001 + 005/001, 004/001, 006/001, 009/001).
+PRE_010_TABLES = PRE_009_TABLES | NEW_009_TABLES
+NEW_010_TABLES = {"setups"}
+# 010/001 DoD-1, in 009/001 DoD-11's shape: features after 010 append their tables here, so
+# this delta keeps meaning "010 added exactly `setups`" once a later feature declares one.
+LATER_THAN_010_TABLES: set[str] = set()
+
+SETUPS_COLUMNS = {
+    "id",
+    "user_id",
+    "character_id",
+    "name",
+    "description",
+    "archived_at",
+    "created_at",
+    "updated_at",
+}
+
+# 010/001 DoD-2 — D7 / data-model.md `setups` / R1-R2: columns 010 must never declare.
+FORBIDDEN_SETUPS_COLUMNS = (
+    "model_ref",
+    "system_prompt",
+    "tools",
+    "rp_language",
+    "preferred_language",
+    "is_default",
+)
+
+RAW_SETUP_INSERT = text(
+    "INSERT INTO setups (id, user_id, character_id, name, description, archived_at, created_at, updated_at) "
+    "VALUES (:id, :user_id, :character_id, :name, :description, :archived_at, :created_at, :updated_at)"
+)
+
+
+def _setups() -> Table:
+    return schema.metadata.tables["setups"]
+
+
+def _raw_setup(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": 20,
+        "user_id": 1,
+        "character_id": 10,
+        "name": "Tavern",
+        "description": "# Scene\n",
+        "archived_at": None,
+        "created_at": TIMESTAMP,
+        "updated_at": TIMESTAMP,
+    }
+    row.update(overrides)
+    return row
+
+
+def _indexes_over(table: Table, columns: list[str]) -> list[Any]:
+    """Every index of `table` whose column list is exactly `columns`, in that order."""
+    return [index for index in table.indexes if [c.name for c in index.columns] == columns]
+
+
+def _seeded_setups_connection(db_engine: Engine) -> Connection:
+    """A connection on a fresh file: whole registry created, foreign keys **on**, one owner
+    (`id=1`) and one of their characters (`id=10`) committed, so a valid setup row has parents."""
+    with db_engine.connect() as setup:
+        schema.metadata.create_all(setup)
+        setup.commit()
+
+    connection = db_engine.connect()
+    connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+    assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+    connection.execute(RAW_INSERT, _raw_row(id=1, username="owner"))
+    connection.execute(RAW_CHARACTER_INSERT, _raw_character(id=10, user_id=1))
+    connection.commit()
+    return connection
+
+
+# --- 010/001 DoD-1: the registry gains `setups` and nothing else ------------------------
+
+
+def test_registry_gains_exactly_the_setups_table__S010_001_DoD1() -> None:
+    """010/001 DoD-1 — `setups` is registered, and it is the only table 010 declares."""
+    assert "setups" in schema.metadata.tables
+    assert isinstance(_setups(), Table)
+    assert _setups().name == "setups"
+    assert set(schema.metadata.tables) - PRE_010_TABLES - LATER_THAN_010_TABLES == NEW_010_TABLES
+
+
+def test_registry_still_carries_every_pre_010_table__S010_001_DoD1() -> None:
+    """010/001 DoD-1 — 010 only adds: every table declared before it is still registered."""
+    assert PRE_010_TABLES <= set(schema.metadata.tables)
+
+
+def test_the_010_delta_survives_a_table_a_later_feature_declares__S010_001_DoD1() -> None:
+    """010/001 DoD-1 — the delta is later-table-proof: it reads "the registry, minus what
+    pre-dated 010, minus what later features declared", so a future table named in the
+    later-features set leaves it meaning "010 added exactly `setups`"."""
+    future_table = "a_table_a_later_feature_declares"
+    future_registry = set(schema.metadata.tables) | {future_table}
+    future_later = LATER_THAN_010_TABLES | {future_table}
+
+    assert future_registry - PRE_010_TABLES - future_later == NEW_010_TABLES
+
+
+# --- 010/001 DoD-2: exactly eight columns, the primary key and nullability ---------------
+
+
+def test_setups_has_exactly_the_eight_declared_columns__S010_001_DoD2() -> None:
+    """010/001 DoD-2 — exactly id, user_id, character_id, name, description, archived_at,
+    created_at, updated_at."""
+    names = [column.name for column in _setups().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == SETUPS_COLUMNS
+
+
+def test_setups_id_is_the_primary_key__S010_001_DoD2() -> None:
+    """010/001 DoD-2 — `id` alone is the primary key."""
+    assert [column.name for column in _setups().primary_key.columns] == ["id"]
+    assert _setups().c.id.primary_key is True
+
+
+def test_setups_archived_at_is_nullable__S010_001_DoD2() -> None:
+    """010/001 DoD-2 — `archived_at` is nullable (NULL until archived)."""
+    assert _setups().c.archived_at.nullable is True
+
+
+@pytest.mark.parametrize(
+    "column", ["id", "user_id", "character_id", "name", "description", "created_at", "updated_at"]
+)
+def test_setups_other_columns_are_not_nullable__S010_001_DoD2(column: str) -> None:
+    """010/001 DoD-2 — every column but `archived_at` is NOT NULL."""
+    assert _setups().c[column].nullable is False
+
+
+@pytest.mark.parametrize("column", FORBIDDEN_SETUPS_COLUMNS)
+def test_setups_declares_no_configuration_or_default_column__S010_001_DoD2(column: str) -> None:
+    """010/001 DoD-2 — D7/R2: no configuration override columns and no default-setup flag."""
+    assert column not in _setups().c
+
+
+# --- 010/001 DoD-3: the two foreign keys and the composite index -------------------------
+
+
+def test_setups_user_id_declares_a_foreign_key_to_users_id__S010_001_DoD3() -> None:
+    """010/001 DoD-3 — `user_id` carries a declared foreign key targeting `users.id`."""
+    targets = {fk.target_fullname for fk in _setups().c.user_id.foreign_keys}
+    assert targets == {"users.id"}
+
+
+def test_setups_character_id_declares_a_foreign_key_to_characters_id__S010_001_DoD3() -> None:
+    """010/001 DoD-3 — `character_id` carries a declared foreign key targeting `characters.id`."""
+    targets = {fk.target_fullname for fk in _setups().c.character_id.foreign_keys}
+    assert targets == {"characters.id"}
+
+
+def test_setups_declares_a_non_unique_index_on_user_id_then_character_id__S010_001_DoD3() -> None:
+    """010/001 DoD-3 — D7: one index whose columns are exactly `user_id`, `character_id` in
+    that order, and it is not unique."""
+    indexes = _indexes_over(_setups(), ["user_id", "character_id"])
+    assert indexes != []
+    assert not any(index.unique for index in indexes)
+
+
+# --- 010/001 DoD-4: `create_all` creates the table, and both FKs are enforced ------------
+
+
+def test_create_all_creates_setups_and_accepts_a_row_with_both_parents__S010_001_DoD4(
+    db_engine: Engine,
+) -> None:
+    """010/001 DoD-4 — `create_all` on a fresh engine creates `setups`, and a row naming an
+    existing user and an existing character is accepted."""
+    with _seeded_setups_connection(db_engine) as connection:
+        assert "setups" in _created_table_names(connection)
+
+        connection.execute(RAW_SETUP_INSERT, _raw_setup(id=20, user_id=1, character_id=10))
+        connection.commit()
+        assert connection.execute(text("SELECT COUNT(*) FROM setups")).scalar_one() == 1
+
+
+def test_setups_refuses_a_row_whose_character_id_names_no_character__S010_001_DoD4(
+    db_engine: Engine,
+) -> None:
+    """010/001 DoD-4 — with foreign keys on, the `characters` FK is enforced."""
+    with _seeded_setups_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(RAW_SETUP_INSERT, _raw_setup(id=21, user_id=1, character_id=999_999))
+
+
+def test_setups_refuses_a_row_whose_user_id_names_no_user__S010_001_DoD4(db_engine: Engine) -> None:
+    """010/001 DoD-4 — with foreign keys on, the `users` FK is enforced too."""
+    with _seeded_setups_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(RAW_SETUP_INSERT, _raw_setup(id=22, user_id=999_999, character_id=10))
+
+
+# --- 010/001 DoD-8: 006's and 009's deltas still mean what they meant --------------------
+
+
+def test_the_006_delta_still_holds_with_setups_registered__S010_001_DoD8() -> None:
+    """010/001 DoD-8 — 006's registry delta still means "006 added exactly `llm_servers` and
+    `models`" now that `setups` exists."""
+    assert PRE_006_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_006_TABLES - LATER_THAN_006_TABLES == NEW_006_TABLES
+
+
+def test_the_009_delta_still_holds_with_setups_registered__S010_001_DoD8() -> None:
+    """010/001 DoD-8 — 009's registry delta still means "009 added exactly `characters`" now
+    that `setups` exists."""
+    assert PRE_009_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_009_TABLES - LATER_THAN_009_TABLES == NEW_009_TABLES

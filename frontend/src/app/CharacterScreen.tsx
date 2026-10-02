@@ -36,6 +36,7 @@ import {
   submitRestore,
   submitSave,
 } from "./characterScreenState";
+import { SetupsSection } from "./SetupsSection";
 
 /** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
 const ICON_SIZE = 18;
@@ -240,6 +241,15 @@ export const CharacterScreen = observer(function CharacterScreen(
             </Button>
           )}
         </Group>
+        {/* 010 D1: the interim "Setups" section, between the persona/actions block and
+            the Sessions heading, and only here — new mode, loading, not-found and failed
+            render none. Keyed by the character id (010 D11) so a different character
+            builds fresh section state even if this screen is ever rendered unkeyed. The
+            id is the route's string, used verbatim; the null test is only strictness
+            (existing mode returned above when it was null). */}
+        {state.characterId !== null && (
+          <SetupsSection key={state.characterId} characterId={state.characterId} />
+        )}
         {/* Heading only; 011 fills the section with the character's sessions. */}
         <Title order={3}>Sessions</Title>
       </Stack>

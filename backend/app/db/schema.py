@@ -186,3 +186,40 @@ characters = Table(
     Column("updated_at", Text, nullable=False),
     Index("ix_characters_user_id", "user_id"),
 )
+
+
+#: A character's reusable situation descriptions (`data-model.md` § `setups`). Feature `010`'s
+#: D7 declares exactly the eight columns that section names and **no configuration overrides**
+#: (R1) — a setup is a name plus one markdown `description`. `user_id` is the direct owner
+#: column every read scopes by (R5); `character_id` is the parent character, fixed for the
+#: setup's life (D5). Both foreign keys are bare, with **no `ON DELETE`**: nothing deletes a
+#: user, a character or a setup (R6), so a cascade would describe an event that cannot happen.
+#: One **non-unique composite** index on `(user_id, character_id)` — the working-list query
+#: filters both, and the leftmost `user_id` prefix also serves every by-owner scan, so one
+#: index instead of two. `description` is NOT NULL with **no server default**: the service
+#: always writes it, `""` when the request omits it. `archived_at` is NULL for a working setup
+#: and holds the instant it was archived otherwise; there is no delete path (R6). Timestamps
+#: are the fixed-width UTC text form.
+setups = Table(
+    "setups",
+    metadata,
+    Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=False),
+    Column(
+        "user_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("users.id"),
+        nullable=False,
+    ),
+    Column(
+        "character_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("characters.id"),
+        nullable=False,
+    ),
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=False),
+    Column("archived_at", Text, nullable=True),
+    Column("created_at", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    Index("ix_setups_user_id_character_id", "user_id", "character_id"),
+)

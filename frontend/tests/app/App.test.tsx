@@ -17,6 +17,18 @@
 // integration clauses at the bottom drive the character screen and assert what the tree shows
 // (009 D11: the screen applies the server's returned row to the one workspace state, so a
 // mutation never refetches the list).
+//
+// Amended by feature 010, step 006 (DoD-13): the character screen's "ready" render now carries
+// the "Setups" section (010 D1), which loads `GET /api/characters/<id>/setups` on mount. Every
+// stub whose character load succeeds answers that path with `{ "setups": [] }` — routed by URL,
+// because `stubWorkspace`'s fallback would otherwise answer it 404 `character_not_found` and
+// drive the section into its failed state. An empty listing renders no setup rows, so no setup
+// badge, row menu or setups-side control exists and every assertion below keeps its meaning.
+// `listRequests` stays keyed on the **exact** path `/api/characters`, so the section's listing
+// is correctly not counted and 009 step 008 DoD-8 survives as written. `/characters/new` mounts
+// no section (010 D1), so its stub — which rejects every other URL — is unchanged. The tree's
+// switch is "Show archived" and the section's is "Show archived setups", so the anchored
+// `/^show archived$/i` of `archivedSwitch()` still matches only the tree's.
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -195,6 +207,15 @@ function notFoundResponse(): Response {
   return jsonResponse({ error: { code: "character_not_found", message: "", detail: {} } }, 404);
 }
 
+// ------------------------------------------- 010 step 006: the Setups section's listing
+/** The section's own URL, a different path than the character's (010 wire contract). */
+function setupsPath(characterId: string): string {
+  return `${COLLECTION_PATH}/${characterId}/setups`;
+}
+
+const SETUPS_PATTERN = /^\/api\/characters\/([^/]+)\/setups$/;
+const EMPTY_SETUPS = { setups: [] };
+
 /**
  * The wire contract of `/api/characters` over an in-memory row set (009 context.md), with
  * every request recorded in order. Only the listing honours the include-archived flag; a
@@ -228,6 +249,14 @@ function stubWorkspace(rows: Character[]) {
       };
       store.set(created.id, created);
       return jsonResponse(created, 201);
+    }
+
+    // 010 step 006: a loaded character's screen mounts the Setups section, which lists that
+    // character's setups. Answered empty, so no setup row renders anywhere in this file.
+    const setupsMatch = SETUPS_PATTERN.exec(url.pathname);
+    if (setupsMatch !== null && method === "GET") {
+      if (!store.has(setupsMatch[1])) return notFoundResponse();
+      return jsonResponse(EMPTY_SETUPS, 200);
     }
 
     const match = /^\/api\/characters\/([^/]+)(\/archive|\/restore)?$/.exec(url.pathname);
@@ -380,6 +409,10 @@ describe("the character routes render the character screen in the same shell (00
       // 009 step 008: the shell's tree lists the characters on every route.
       if (path === COLLECTION_PATH) {
         return Promise.resolve(jsonResponse({ characters: [CHARACTER] }, 200));
+      }
+      // 010 step 006: the ready screen mounts the Setups section, which lists its setups.
+      if (path === setupsPath(CHARACTER.id)) {
+        return Promise.resolve(jsonResponse(EMPTY_SETUPS, 200));
       }
       return Promise.resolve(
         jsonResponse({ error: { code: "character_not_found", message: "", detail: {} } }, 404),

@@ -287,6 +287,24 @@ class CharacterNotFoundError(DomainError):
         super().__init__(message, detail)
 
 
+class SetupNotFoundError(DomainError):
+    """An id-addressed setup operation names no setup the caller owns.
+
+    Raised by `app.services.setups` (feature `010`, `context.md` D8) for both "no such id"
+    and "another user's id" — the two are indistinguishable on the wire, which is R5's
+    no-existence-leak posture. `detail` carries nothing. The status is 404.
+    """
+
+    code = "setup_not_found"
+    http_status = 404
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "That setup does not exist."
+        super().__init__(message, detail)
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later

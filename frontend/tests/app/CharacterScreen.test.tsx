@@ -24,6 +24,19 @@
 // - `src/shared/MarkdownEditor` is replaced by the sanctioned stub (context.md "Test
 //   conventions — TipTap in jsdom"): a labelled `<textarea>` honouring `label`, `value`,
 //   `onChange` and `readOnly`, so persona edits are typed reliably in jsdom.
+//
+// Amended by feature 010, step 006 (DoD-13 and DoD-10..DoD-12): existing mode's "ready" render
+// now carries the "Setups" section (010 D1), which loads `GET /api/characters/<id>/setups` on
+// mount. Every stub whose character load succeeds therefore answers that path too, with
+// `{ "setups": [] }` — an empty listing renders no setup rows, so no setup "Archived" badge, no
+// row menu and no setups-side "Create" / "Save" / "Archive" / "Restore" / "Retry" control
+// exists, and every 009 query below keeps its exact meaning. No 009 assertion was dropped: the
+// one document-wide `loaders()` clause now waits for the section's own listing to settle as
+// well. New mode and the loading / not-found / failed states mount no section (010 D1), so
+// their stubs and their "no request at all" clauses are untouched. The three clauses at the
+// bottom of this file are 010 step 006's own DoD-10..DoD-12; they scope every section
+// assertion through `within(getByRole("region", { name: "Setups" }))` and reach the setup
+// modal through `screen`, because Mantine renders it into a portal (010 context.md).
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -31,6 +44,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChangeEvent } from "react";
 import { CharacterRoute, CharacterScreen } from "../../src/app/CharacterScreen";
 import type { Character } from "../../src/app/charactersApi";
+import type { Setup } from "../../src/app/setupsApi";
 import { CharactersState } from "../../src/app/charactersState";
 import { documentNavigation } from "../../src/shared/api";
 import { AppProviders } from "../../src/shared/AppProviders";
@@ -83,6 +97,11 @@ const SAVE_FAILED_TEXT = "Could not save the character.";
 
 const LOADER = ".mantine-Loader-root";
 const NOTIFICATION = ".mantine-Notification-root";
+
+// ------------------------------------- 010 step 006: the Setups section's own names (D1, D4)
+const SETUPS_REGION = /^setups$/i;
+const NEW_SETUP_NAME = /^new setup$/i;
+const SHOW_ARCHIVED_SETUPS_NAME = /^show archived setups$/i;
 
 // ---------------------------------------------------------------- fixtures
 // Ids are decimal strings; CREATED_ID is past Number.MAX_SAFE_INTEGER, so any coercion of
@@ -342,6 +361,23 @@ function loaders(): Element[] {
 
 function notificationsShown(): Element[] {
   return Array.from(document.querySelectorAll(NOTIFICATION));
+}
+
+// ------------------------------------- 010 step 006: the Setups section inside the screen
+function setupsRegion(): HTMLElement {
+  return screen.getByRole("region", { name: SETUPS_REGION });
+}
+
+function querySetupsRegion(): HTMLElement | null {
+  return screen.queryByRole("region", { name: SETUPS_REGION });
+}
+
+function setupsSwitch(): HTMLElement {
+  const scope = within(setupsRegion());
+  return (
+    scope.queryByRole("switch", { name: SHOW_ARCHIVED_SETUPS_NAME }) ??
+    scope.getByRole("checkbox", { name: SHOW_ARCHIVED_SETUPS_NAME })
+  );
 }
 
 /** True when `first` comes before `second` in document order. */
@@ -697,5 +733,156 @@ describe("moving between characters builds a fresh screen (CharacterRoute is key
     expect(nameInput()).toHaveValue(CHAR_B.name);
     expect(personaInput()).toHaveValue(CHAR_B.sheet);
     expect(within(mainRegion()).queryByDisplayValue(DRAFT_ONLY)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 010, step 006 — the "Setups" section's place on this screen (010 DoD-10..DoD-12).
+// Expected behaviour comes from 010's step file and context.md: D1 (existing mode and "ready"
+// only, between the persona block and the "Sessions" heading), D5 (an archived character
+// carries the section too) and D11 (the section is keyed by the character id, so moving
+// between characters builds fresh state — including the switch).
+const SETUP_OF_A: Setup = {
+  id: "7250000000000000031",
+  character_id: ID_A,
+  name: "Tavern brawl",
+  description: "Someone has already thrown the first stool.",
+  archived_at: null,
+  created_at: "2026-05-03T09:26:53.000000+00:00",
+  updated_at: "2026-05-03T09:26:53.000000+00:00",
+};
+
+const SETUP_OF_B: Setup = {
+  id: "7250000000000000032",
+  character_id: ID_B,
+  name: "Harbour at dusk",
+  description: "Lanterns, tar, and a ship that should not be here.",
+  archived_at: null,
+  created_at: "2026-04-02T08:15:42.000000+00:00",
+  updated_at: "2026-04-02T08:15:42.000000+00:00",
+};
+
+const CREATED_SETUP: Setup = {
+  id: "7250000000000000033",
+  character_id: ID_A,
+  name: "Night market",
+  description: "",
+  archived_at: null,
+  created_at: "2026-06-01T12:00:00.000000+00:00",
+  updated_at: "2026-06-01T12:00:00.000000+00:00",
+};
+
+const TYPED_SETUP_NAME = "Night market";
+
+describe("the Setups section's place on the character screen (010 D1)", () => {
+  it("renders the Setups region between the Persona editor and the Sessions heading — DoD-10", async () => {
+    await renderLoaded(CHAR_A);
+
+    const section = setupsRegion();
+    expect(section).toBeInTheDocument();
+    expect(within(section).getByRole("heading", { name: SETUPS_REGION })).toBeInTheDocument();
+    expect(precedes(personaInput(), section)).toBe(true);
+    expect(precedes(section, heading(SESSIONS_HEADING))).toBe(true);
+  });
+
+  it("new mode at /characters/new renders no Setups region — DoD-10", async () => {
+    const { calls } = stubBackend(() => notFoundResponse());
+    renderScreen(NEW_PATH);
+    await flush();
+
+    expect(querySetupsRegion()).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it("the Character not found state renders no Setups region — DoD-10", async () => {
+    stubBackend(() => notFoundResponse());
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(NOT_FOUND_TEXT)).toBeInTheDocument();
+    expect(querySetupsRegion()).toBeNull();
+  });
+
+  it("the Could not load the character state renders no Setups region — DoD-10", async () => {
+    stubBackend(() => serverError());
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(LOAD_FAILED_TEXT)).toBeInTheDocument();
+    expect(querySetupsRegion()).toBeNull();
+  });
+});
+
+describe("an archived character still carries the Setups section (010 D5)", () => {
+  it("renders the region and creates a setup under that character — DoD-11", async () => {
+    const user = newUser();
+    const { calls } = stubBackend((request) => {
+      if (request.method === "GET" && request.path === itemPath(ID_A)) {
+        return jsonResponse(ARCHIVED_A, 200);
+      }
+      if (request.method === "GET" && request.path === setupsPath(ID_A)) {
+        return jsonResponse(EMPTY_SETUPS, 200);
+      }
+      if (request.method === "POST" && request.path === setupsPath(ID_A)) {
+        return jsonResponse(CREATED_SETUP, 201);
+      }
+      return notFoundResponse();
+    });
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
+    expect(button(RESTORE_NAME)).toBeInTheDocument();
+    expect(setupsRegion()).toBeInTheDocument();
+
+    // The modal is a Mantine portal, so it is reached through `screen` (010 context.md).
+    await user.click(within(setupsRegion()).getByRole("button", { name: NEW_SETUP_NAME }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByRole("textbox", { name: NAME_LABEL }), TYPED_SETUP_NAME);
+    await user.click(within(dialog).getByRole("button", { name: CREATE_NAME }));
+    await flush();
+
+    const posts = matching(calls, "POST", setupsPath(ID_A));
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({ name: TYPED_SETUP_NAME });
+  });
+});
+
+describe("moving between characters builds a fresh Setups section (010 D11)", () => {
+  it("requests the second character's setups, shows only its rows and resets the switch — DoD-12", async () => {
+    const user = newUser();
+    const { calls } = stubBackend((request) => {
+      if (request.method === "GET" && request.path === itemPath(ID_A)) {
+        return jsonResponse(CHAR_A, 200);
+      }
+      if (request.method === "GET" && request.path === itemPath(ID_B)) {
+        return jsonResponse(CHAR_B, 200);
+      }
+      if (request.method === "GET" && request.path === setupsPath(ID_A)) {
+        return jsonResponse({ setups: [SETUP_OF_A] }, 200);
+      }
+      if (request.method === "GET" && request.path === setupsPath(ID_B)) {
+        return jsonResponse({ setups: [SETUP_OF_B] }, 200);
+      }
+      return notFoundResponse();
+    });
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+    expect(within(setupsRegion()).getByText(SETUP_OF_A.name)).toBeInTheDocument();
+
+    await user.click(setupsSwitch());
+    await flush();
+    expect(setupsSwitch()).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: PROBE_NAVIGATE }));
+    await flush();
+
+    expect(locationPath()).toBe(`/characters/${ID_B}`);
+    const listings = matching(calls, "GET", setupsPath(ID_B));
+    expect(listings).toHaveLength(1);
+    expect(listings[0].search).toBe("");
+    expect(within(setupsRegion()).getByText(SETUP_OF_B.name)).toBeInTheDocument();
+    expect(within(setupsRegion()).queryByText(SETUP_OF_A.name)).toBeNull();
+    expect(setupsSwitch()).not.toBeChecked();
   });
 });
