@@ -305,6 +305,46 @@ class SetupNotFoundError(DomainError):
         super().__init__(message, detail)
 
 
+class SessionNotFoundError(DomainError):
+    """An id-addressed RP-session operation names no session the caller owns.
+
+    Raised by `app.services.sessions` (feature `011`, `context.md` D12) for both "no such
+    id" and "another user's id" — the two are indistinguishable on the wire, which is R5's
+    no-existence-leak posture. This is the **RP session** (`sessions`), never the login
+    session (`auth_sessions`). `detail` carries nothing. The status is 404.
+    """
+
+    code = "session_not_found"
+    http_status = 404
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "That session does not exist."
+        super().__init__(message, detail)
+
+
+class SetupArchivedError(DomainError):
+    """A session was asked to start on a setup the caller owns but which is archived.
+
+    Raised by `app.services.sessions` (feature `011`, `context.md` D12). **409, not 404**:
+    the setup exists for this caller, so answering `setup_not_found` would be false. **Not
+    422**: no field is malformed — the request is well formed and the conflict is the
+    setup's state, the same shape as `username_taken` and `self_role_change_refused`. An
+    archived setup is never offered as a choice, so a request naming one is stale or
+    hand-made. `detail` carries nothing.
+    """
+
+    code = "setup_archived"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "That setup is archived."
+        super().__init__(message, detail)
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later

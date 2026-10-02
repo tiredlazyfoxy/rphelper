@@ -30,7 +30,11 @@ The factory's order is therefore fixed:
    (feature `010`), which carries no prefix of its own and declares the full paths
    `/api/characters/{character_id}/setups` and `/api/setups/{setup_id}...`. It is
    registered **after** the characters router on purpose: Starlette matches routes in
-   registration order, so 009's routes keep matching first.
+   registration order, so 009's routes keep matching first. Last comes
+   `app.include_router(sessions_router)` (feature `011`), which likewise carries no prefix
+   and declares the full paths `/api/sessions...` and
+   `/api/characters/{character_id}/sessions`, registered **after** the setups router for
+   the same reason: 009's and 010's routes keep matching first.
 
 **The lifespan runs no DDL.** No table creation, no upgrade, no schema check, and no
 create-if-missing convenience. Remediation is admin-triggered and belongs to feature
@@ -63,6 +67,7 @@ from app.routers.auth import router as auth_router
 from app.routers.bootstrap import router as bootstrap_router
 from app.routers.characters import router as characters_router
 from app.routers.health import router as health_router
+from app.routers.sessions import router as sessions_router
 from app.routers.setups import router as setups_router
 
 
@@ -87,8 +92,9 @@ def create_app() -> FastAPI:
     `app.include_router(health_router)`, `app.include_router(bootstrap_router)`,
     `app.include_router(auth_router)`, `app.include_router(admin_users_router)`,
     `app.include_router(admin_llm_router)`, `app.include_router(admin_db_router)`,
-    `app.include_router(characters_router)` and `app.include_router(setups_router)` —
-    the setups router last, immediately after the characters router.
+    `app.include_router(characters_router)`, `app.include_router(setups_router)` and
+    `app.include_router(sessions_router)` — the setups router immediately after the
+    characters router, and the sessions router last, immediately after setups.
 
     Constructed with `FastAPI(lifespan=lifespan)`.
 
@@ -112,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_db_router)
     app.include_router(characters_router)
     app.include_router(setups_router)
+    app.include_router(sessions_router)
     return app
 
 

@@ -223,3 +223,52 @@ setups = Table(
     Column("updated_at", Text, nullable=False),
     Index("ix_setups_user_id_character_id", "user_id", "character_id"),
 )
+
+
+#: One RP session — a run under one character (`data-model.md` § `sessions`). Feature `011`'s
+#: D8 declares exactly **eight** of the columns that section names. Deliberately absent:
+#: `title` and `partner_label` (D4 — no product id lets the roleplayer set either, and a
+#: column with no writer would be a stored empty string forever; `session_fts` lands with the
+#: feature that gives a session text), and `rp_language`, `preferred_language`, `model_ref`,
+#: `system_prompt`, `tools` (deferred to `017`, whose plan settles `model_ref`'s encoding).
+#: There is **no status or state column** — `data-model.md` says a session is never finished,
+#: so the only state is `archived_at`. `user_id` is the direct owner column every read scopes
+#: by (R5); `character_id` is the parent character. `setup_id` is **nullable with no server
+#: default and no sentinel** (R2): a session started with no setup simply has NULL, and no
+#: flow makes choosing a setup a precondition. All three foreign keys are bare, with **no
+#: `ON DELETE`**: nothing deletes a user, a character, a setup or a session (R6), so a cascade
+#: would describe an event that cannot happen. One **non-unique composite** index on
+#: `(user_id, character_id)` — the per-character list filters both, and the leftmost `user_id`
+#: prefix also serves the all-sessions list and every by-owner scan, so one index instead of
+#: two; `setup_id` carries none, because no query filters by it. `last_used_at` is set at
+#: creation and bumped only by content writes (D3), which is a different instant from
+#: `updated_at`; `archived_at` is NULL for a working session and holds the instant it was
+#: archived otherwise. Timestamps are the fixed-width UTC text form.
+sessions = Table(
+    "sessions",
+    metadata,
+    Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=False),
+    Column(
+        "user_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("users.id"),
+        nullable=False,
+    ),
+    Column(
+        "character_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("characters.id"),
+        nullable=False,
+    ),
+    Column(
+        "setup_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("setups.id"),
+        nullable=True,
+    ),
+    Column("last_used_at", Text, nullable=False),
+    Column("archived_at", Text, nullable=True),
+    Column("created_at", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    Index("ix_sessions_user_id_character_id", "user_id", "character_id"),
+)

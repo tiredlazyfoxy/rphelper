@@ -15,6 +15,10 @@
 // shell's expanded column mounts the character tree, which issues `GET /api/characters`.
 // The stubs below are routed by URL so that request is answered with an empty list instead
 // of hanging or being served the `/api/me` body. No assertion about a boot outcome changes.
+//
+// Amended by feature 011, step 006 (DoD-12), stubs only: that same tree now also issues
+// `GET /api/sessions`, so `stubSequence` answers it with an empty list, by exact pathname.
+// Again no assertion about a boot outcome changes; one clause below names the widening.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
@@ -31,6 +35,14 @@ const ME_PATH = "/api/me";
 
 /** 009 step 008, DoD-11: the workspace tree's listing, answered empty everywhere here. */
 const CHARACTERS_PATH = "/api/characters";
+
+/**
+ * 011 step 006, DoD-12: the tree also loads the workspace sessions once the gate renders `App`.
+ * Answered empty everywhere here, by **exact** pathname — without this branch the request would
+ * hang forever (`stubSequence`'s fallback) and the tree would sit in its loading state. No
+ * assertion about a boot outcome changes.
+ */
+const SESSIONS_PATH = "/api/sessions";
 
 const ROLES: Array<CurrentUser["role"]> = ["roleplayer", "admin"];
 
@@ -109,6 +121,9 @@ function stubSequence(handlers: FetchFn[]) {
     const path = requestPath(input);
     if (path === CHARACTERS_PATH) {
       return Promise.resolve(jsonResponse({ characters: [] }, 200));
+    }
+    if (path === SESSIONS_PATH) {
+      return Promise.resolve(jsonResponse({ sessions: [] }, 200));
     }
     if (path !== ME_PATH) return new Promise<Response>(() => {});
     const handler = handlers[Math.min(index, handlers.length - 1)];
@@ -218,6 +233,22 @@ describe("a successful probe renders the shell for either role", () => {
       expect(navigate).not.toHaveBeenCalled();
     },
   );
+
+  // 011 step 006, DoD-12: stub widening only. The boot outcome is still 008's — the shell and
+  // the user menu — and the new sessions listing is answered rather than left hanging.
+  it("the booted shell's workspace sessions listing is answered — DoD-12", async () => {
+    const fetchMock = stubSequence([answerIdentity("roleplayer")]);
+    renderBoot();
+    await flush();
+
+    expect(shellNav()).not.toBeNull();
+    expect(screen.getByRole("button", { name: USER_MENU_NAME })).toBeInTheDocument();
+    expectNoBootScreen();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.map(([input]) => requestPath(input)).filter((p) => p === SESSIONS_PATH),
+    ).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -37,6 +37,8 @@ import {
   submitSave,
 } from "./characterScreenState";
 import { SetupsSection } from "./SetupsSection";
+import { SessionsSection } from "./SessionsSection";
+import type { SessionsState } from "./sessionsState";
 
 /** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
 const ICON_SIZE = 18;
@@ -47,18 +49,25 @@ export type CharacterScreenProps = {
   characters: CharactersState;
   /** The `:id` route parameter verbatim, or `null` for new mode. Never parsed. */
   characterId: string | null;
+  /**
+   * The one workspace sessions state `App` creates (011 D15), handed to the Sessions
+   * section so starting or archiving a session updates the tree with no refetch. Required
+   * in both modes even though new mode renders no section: one prop, no optional branch.
+   */
+  sessions: SessionsState;
 };
 
 /**
  * The character screen. New mode renders "New character" with Name, Persona and Create;
  * existing mode loads on mount and renders loading / not-found / failed / ready, where
  * ready carries the saved name heading, the Archived badge, Name, Persona, Save,
- * Archive-or-Restore and an empty "Sessions" section. Failures render inline (D12).
+ * Archive-or-Restore, 010's "Setups" section and 011's "Sessions" section. Failures render
+ * inline (D12).
  */
 export const CharacterScreen = observer(function CharacterScreen(
   props: CharacterScreenProps,
 ): React.JSX.Element {
-  const { characters, characterId } = props;
+  const { characters, characterId, sessions } = props;
   // Created once, never with `useMemo`; the route keys this component by the id, so a
   // different character mounts a fresh screen rather than reusing this draft.
   const [state] = useState(() => new CharacterScreenState(characterId));
@@ -250,8 +259,20 @@ export const CharacterScreen = observer(function CharacterScreen(
         {state.characterId !== null && (
           <SetupsSection key={state.characterId} characterId={state.characterId} />
         )}
-        {/* Heading only; 011 fills the section with the character's sessions. */}
-        <Title order={3}>Sessions</Title>
+        {/* 011 D1 / step 008: the real Sessions section, in the place 009's heading-only
+            one held — after 010's Setups section and only here, so new mode, loading,
+            not-found and failed render none. Its own "Sessions" heading (same
+            `Title order={3}` level) takes the old heading's place, so 010's "Setups
+            precedes the Sessions heading" stays true. Keyed by the character id (D15) so a
+            different character builds fresh section state; the id is the route's string,
+            used verbatim, and the null test is only strictness. */}
+        {state.characterId !== null && (
+          <SessionsSection
+            key={state.characterId}
+            characterId={state.characterId}
+            sessions={sessions}
+          />
+        )}
       </Stack>
     </Container>
   );
@@ -260,6 +281,8 @@ export const CharacterScreen = observer(function CharacterScreen(
 export type CharacterRouteProps = {
   /** Passed straight through to `CharacterScreen`. */
   characters: CharactersState;
+  /** Passed straight through to `CharacterScreen` (011 D15). */
+  sessions: SessionsState;
 };
 
 /**
@@ -268,9 +291,16 @@ export type CharacterRouteProps = {
  * fresh screen state rather than reusing the previous character's draft.
  */
 export function CharacterRoute(props: CharacterRouteProps): React.JSX.Element {
-  const { characters } = props;
+  const { characters, sessions } = props;
   const params = useParams();
   const characterId = params.id ?? "";
 
-  return <CharacterScreen key={characterId} characters={characters} characterId={characterId} />;
+  return (
+    <CharacterScreen
+      key={characterId}
+      characters={characters}
+      characterId={characterId}
+      sessions={sessions}
+    />
+  );
 }

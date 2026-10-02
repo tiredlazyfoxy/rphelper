@@ -29,6 +29,39 @@
 // no section (010 D1), so its stub — which rejects every other URL — is unchanged. The tree's
 // switch is "Show archived" and the section's is "Show archived setups", so the anchored
 // `/^show archived$/i` of `archivedSwitch()` still matches only the tree's.
+//
+// Amended by feature 011, step 006 (DoD-11): `App` now creates the one workspace
+// `SessionsState` and the tree loads it on mount, so **every** route mounts a tree that issues
+// `GET /api/sessions`. Every stub in this file answers that path — routed by the **exact**
+// pathname, because `/api/characters` and `/api/characters/<id>/sessions` share a prefix — and
+// `listRequests` stays keyed on the exact `/api/characters`, so 009 step 008 DoD-8's
+// "no list request after the create" survives untouched. No 009 or 010 assertion is dropped,
+// and `EMPTY_CENTRE_ROUTES` keeps `/sessions/1`: the centre is still empty in this step (the
+// tree lives in the nav column), and removing that entry is step 009's edit.
+//
+// Amended by feature 011, step 008 (DoD-16): the character screen's "ready" render now carries
+// the "Sessions" region (011 D1), which loads `GET /api/characters/<id>/sessions` on mount and
+// a second `GET /api/characters/<id>/setups` for its Select's choices. Every stub whose
+// character load succeeds answers both — routed by the **exact** pathname, because
+// `/api/sessions`, `/api/characters` and `/api/characters/<id>/sessions` share prefixes — and
+// `stubWorkspace` grew the rest of the sessions wire contract (start, archive, restore) for the
+// DoD-15 block at the bottom. `listRequests` stays keyed on the exact `/api/characters`, so 009
+// step 008 DoD-8's "no list request after the create" survives as written, and DoD-15's "no
+// second `GET /api/sessions`" is written the same way, keyed on that exact path.
+// `/characters/new` mounts no section (011 D1), so its stub — which rejects every other URL —
+// is unchanged, and `EMPTY_CENTRE_ROUTES` is untouched (its `/sessions/1` entry is step 009's
+// edit). No 009, 010 or 011 step 006 assertion is dropped.
+//
+// Amended by feature 011, step 009 (DoD-11): `/sessions/:id` is no longer an empty centre — it
+// renders the session screen (011 D17), which loads `GET /api/sessions/<id>` on mount. So
+// `EMPTY_CENTRE_ROUTES` **loses its `/sessions/1` entry**, which the two clauses at the bottom
+// of this file cover instead; `/`, `/settings`, `/search` and the `*` "Page not found" clause
+// are unchanged, as is every 009, 010 and 011 step 006 / 008 assertion. `stubWorkspace` gained
+// one branch — a GET of `/api/sessions/<id>`, answered from the sessions it holds (archived or
+// not) and 404 `session_not_found` otherwise — routed by the **exact** pathname, beside the
+// tree's `/api/sessions` listing and the archive/restore action paths it already served. The
+// DoD-15 clause above therefore also sees the started session's screen load; it asserts the
+// location and the tree, which are untouched by that.
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -36,6 +69,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChangeEvent } from "react";
 import { App } from "../../src/app/App";
 import type { Character } from "../../src/app/charactersApi";
+import type { Session } from "../../src/app/sessionsApi";
 import { AppProviders } from "../../src/shared/AppProviders";
 import type { CurrentUser } from "../../src/shared/currentUser";
 
@@ -72,8 +106,12 @@ type User = ReturnType<typeof userEvent.setup>;
 const NAV_NAME = /^workspace navigation$/i;
 const NOT_FOUND_TEXT = /page not found/i;
 
-/** The declared routes whose centre is still empty (009 fills the two character routes). */
-const EMPTY_CENTRE_ROUTES = ["/", "/sessions/1", "/settings", "/search"];
+/**
+ * The declared routes whose centre is still empty: 009 filled the two character routes, and
+ * 011 step 009 filled `/sessions/:id` (D17), which is why that path is no longer listed here —
+ * this step's own clauses at the bottom of the file cover it.
+ */
+const EMPTY_CENTRE_ROUTES = ["/", "/settings", "/search"];
 
 const UNDECLARED_ROUTE = "/nope";
 
@@ -122,6 +160,66 @@ const CHAR_A: Character = {
   archived_at: null,
   created_at: "2026-02-01T08:15:42.000000+00:00",
   updated_at: "2026-02-01T08:15:42.000000+00:00",
+};
+
+// ------------------------------------------- 011 step 006: the tree's sessions listing
+/** The workspace sessions listing, answered empty everywhere but DoD-11's own clause. */
+const SESSIONS_PATH = "/api/sessions";
+const EMPTY_SESSIONS = { sessions: [] };
+
+const SESSION_A_ID = "9007199254740993001";
+
+// ------------------------------------------- 011 step 008: the Sessions section on the screen
+/** The section's own listing — a different path than the tree's `/api/sessions`. */
+function characterSessionsPath(characterId: string): string {
+  return `${COLLECTION_PATH}/${characterId}/sessions`;
+}
+
+const CHARACTER_SESSIONS_PATTERN = /^\/api\/characters\/([^/]+)\/sessions$/;
+const SESSION_ACTION_PATTERN = /^\/api\/sessions\/([^/]+)\/(archive|restore)$/;
+
+// ------------------------------------------- 011 step 009: the session screen's own read
+/** One session by id — the session screen's single source (011 D17), archived or not. */
+const SESSION_ITEM_PATTERN = /^\/api\/sessions\/([^/]+)$/;
+
+const SESSION_NOT_FOUND_TEXT = "Session not found";
+const NO_ENTRIES_TEXT = "No entries yet.";
+const START_LABEL_HEADING = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+
+/** DoD-11's own route: `/sessions/1`, the entry `EMPTY_CENTRE_ROUTES` no longer lists. */
+const SESSION_ONE_ROUTE = "/sessions/1";
+const SESSION_ONE_ID = "1";
+
+const SESSIONS_REGION = /^sessions$/i;
+const START_SESSION_NAME = /^start session$/i;
+const ROW_TRIGGER_NAME = /^actions for /i;
+const ARCHIVE_ITEM = /^archive$/i;
+
+/** Past Number.MAX_SAFE_INTEGER, so a coerced id would show in the location and the href. */
+const STARTED_SESSION_ID = "9007199254740995";
+const STARTED_STAMP = "2026-06-01T12:00:00.000000+00:00";
+
+/** 011 step 009: the session behind `/sessions/1`, under the character the tree shows. */
+const SESSION_ONE: Session = {
+  id: SESSION_ONE_ID,
+  character_id: ID_A,
+  setup_id: null,
+  setup_name: null,
+  archived_at: null,
+  last_used_at: "2026-05-09T08:00:00.000000+00:00",
+  created_at: "2026-05-09T08:00:00.000000+00:00",
+  updated_at: "2026-05-09T08:00:00.000000+00:00",
+};
+
+const SESSION_A: Session = {
+  id: SESSION_A_ID,
+  character_id: ID_A,
+  setup_id: null,
+  setup_name: null,
+  archived_at: null,
+  last_used_at: "2026-05-10T09:00:00.000000+00:00",
+  created_at: "2026-05-10T09:00:00.000000+00:00",
+  updated_at: "2026-05-10T09:00:00.000000+00:00",
 };
 
 afterEach(() => {
@@ -221,14 +319,80 @@ const EMPTY_SETUPS = { setups: [] };
  * every request recorded in order. Only the listing honours the include-archived flag; a
  * mutation answers the single row it changed.
  */
-function stubWorkspace(rows: Character[]) {
+function stubWorkspace(rows: Character[], sessions: Session[] = []) {
   const store = new Map<string, Character>(rows.map((row) => [row.id, row]));
+  /** 011 step 008: the sessions the wire holds, mutated by start / archive / restore. */
+  const sessionOrder: Session[] = [...sessions];
   const calls: Seen[] = [];
   const mock = vi.fn<FetchFn>(async (input, init) => {
     const url = requestUrl(input);
     const method = requestMethod(input, init);
     const body = parseBody(init);
     calls.push({ method, path: url.pathname, search: url.search, body });
+
+    // 011 step 006: every route mounts the tree, which loads the workspace sessions on mount.
+    // Matched on the exact pathname — the fallback 404 would otherwise drive the tree into its
+    // failed sessions state. The tree only ever asks for the working list.
+    if (url.pathname === SESSIONS_PATH && method === "GET") {
+      return jsonResponse({ sessions: sessionOrder.filter((row) => row.archived_at === null) }, 200);
+    }
+
+    // 011 step 008: the character screen's Sessions section lists, starts, archives and
+    // restores. All four are matched on the exact pathname, beside the tree's own listing.
+    const characterSessions = CHARACTER_SESSIONS_PATTERN.exec(url.pathname);
+    if (characterSessions !== null) {
+      const characterId = characterSessions[1];
+      if (!store.has(characterId)) return notFoundResponse();
+      if (method === "GET") {
+        const includeArchived = url.search === INCLUDE_ARCHIVED_SEARCH;
+        const listed = sessionOrder.filter(
+          (row) => row.character_id === characterId && (includeArchived || row.archived_at === null),
+        );
+        return jsonResponse({ sessions: listed }, 200);
+      }
+      if (method === "POST") {
+        const sent = (body ?? {}) as { setup_id?: string | null };
+        const started: Session = {
+          id: STARTED_SESSION_ID,
+          character_id: characterId,
+          setup_id: sent.setup_id ?? null,
+          setup_name: null,
+          archived_at: null,
+          last_used_at: STARTED_STAMP,
+          created_at: STARTED_STAMP,
+          updated_at: STARTED_STAMP,
+        };
+        sessionOrder.unshift(started);
+        return jsonResponse(started, 201);
+      }
+    }
+
+    // 011 step 009: the session screen reads its one session by id, archived or not (D17).
+    // Matched on the exact pathname, so the action paths below and the listing above are
+    // unaffected; an unknown id answers the backend's own 404 code.
+    const sessionItem = SESSION_ITEM_PATTERN.exec(url.pathname);
+    if (sessionItem !== null && method === "GET") {
+      const row = sessionOrder.find((candidate) => candidate.id === sessionItem[1]);
+      if (row === undefined) {
+        return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
+      }
+      return jsonResponse(row, 200);
+    }
+
+    const sessionAction = SESSION_ACTION_PATTERN.exec(url.pathname);
+    if (sessionAction !== null && method === "POST") {
+      const index = sessionOrder.findIndex((row) => row.id === sessionAction[1]);
+      if (index < 0) {
+        return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
+      }
+      const next: Session = {
+        ...sessionOrder[index],
+        archived_at: sessionAction[2] === "archive" ? LATER_STAMP : null,
+        updated_at: LATER_STAMP,
+      };
+      sessionOrder[index] = next;
+      return jsonResponse(next, 200);
+    }
 
     if (url.pathname === COLLECTION_PATH && method === "GET") {
       const includeArchived = url.search === INCLUDE_ARCHIVED_SEARCH;
@@ -386,11 +550,13 @@ describe("an undeclared path is a 404 inside the same shell (D5)", () => {
 describe("the character routes render the character screen in the same shell (009 D1, D11)", () => {
   // 009 step 008: the tree's listing is the only request new mode makes.
   it("renders the New character screen in the main region at /characters/new — DoD-13", async () => {
-    stubFetch((input) =>
-      requestPath(input) === COLLECTION_PATH
-        ? Promise.resolve(jsonResponse({ characters: [] }, 200))
-        : Promise.reject(new Error("no other request is expected in new mode")),
-    );
+    stubFetch((input) => {
+      const path = requestPath(input);
+      if (path === COLLECTION_PATH) return Promise.resolve(jsonResponse({ characters: [] }, 200));
+      // 011 step 006: the shell's tree loads the workspace sessions on every route.
+      if (path === SESSIONS_PATH) return Promise.resolve(jsonResponse(EMPTY_SESSIONS, 200));
+      return Promise.reject(new Error("no other request is expected in new mode"));
+    });
     renderApp(NEW_CHARACTER_ROUTE);
     await flush();
 
@@ -411,8 +577,17 @@ describe("the character routes render the character screen in the same shell (00
         return Promise.resolve(jsonResponse({ characters: [CHARACTER] }, 200));
       }
       // 010 step 006: the ready screen mounts the Setups section, which lists its setups.
+      // 011 step 008: the Sessions section's Select asks the same path a second time.
       if (path === setupsPath(CHARACTER.id)) {
         return Promise.resolve(jsonResponse(EMPTY_SETUPS, 200));
+      }
+      // 011 step 008: the ready screen mounts the Sessions section, which lists its sessions.
+      if (path === characterSessionsPath(CHARACTER.id)) {
+        return Promise.resolve(jsonResponse(EMPTY_SESSIONS, 200));
+      }
+      // 011 step 006: the shell's tree loads the workspace sessions on every route.
+      if (path === SESSIONS_PATH) {
+        return Promise.resolve(jsonResponse(EMPTY_SESSIONS, 200));
       }
       return Promise.resolve(
         jsonResponse({ error: { code: "character_not_found", message: "", detail: {} } }, 404),
@@ -500,5 +675,190 @@ describe("saving a new name shows it in the tree (US-021.AC-1)", () => {
 
     expect(queryTreeRow(EDITED_NAME)).not.toBeNull();
     expect(queryTreeRow(CHAR_A.name)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 011, step 006 — `App` creates the one workspace `SessionsState` and the tree shows
+// its rows under the characters (D15, D16).
+/** Session rows in the nav column, by their `/sessions/<id>` href. */
+function navSessionHrefs(): string[] {
+  return within(navElement())
+    .queryAllByRole("link")
+    .map((link) => link.getAttribute("href") ?? "")
+    .filter((value) => value.startsWith("/sessions/"));
+}
+
+describe("the app's tree shows the workspace sessions under their characters (011 D15, D16)", () => {
+  it("at / the stubbed session renders as a row under its character — DoD-11", async () => {
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_A]);
+    renderApp("/");
+    await flush();
+
+    expect(queryTreeRow(CHAR_A.name)).not.toBeNull();
+    expect(navSessionHrefs()).toEqual([`/sessions/${SESSION_A_ID}`]);
+    // One characters listing and one sessions listing: the two effects are separate.
+    expect(listRequests(calls)).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.method === "GET" && call.path === SESSIONS_PATH),
+    ).toHaveLength(1);
+  });
+
+  it("the centre at / stays empty while the tree carries the session rows — DoD-11", async () => {
+    stubWorkspace([CHAR_A], [SESSION_A]);
+    renderApp("/");
+    await flush();
+
+    expect(mainText()).toBe("");
+    expect(navSessionHrefs()).toEqual([`/sessions/${SESSION_A_ID}`]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 011, step 008 — the character screen's Sessions section and the tree share the one
+// workspace `SessionsState` (D15), so a start or an archive shows in the tree with no second
+// listing request. The section's own behaviour is `SessionsSection.test.tsx`'s; what this block
+// asserts is the wiring `App` provides.
+/** The section on the character screen — a region named "Sessions" (011 D1). */
+function sessionsRegion(): HTMLElement {
+  return screen.getByRole("region", { name: SESSIONS_REGION });
+}
+
+function startSessionButton(): HTMLElement {
+  return within(sessionsRegion()).getByRole("button", { name: START_SESSION_NAME });
+}
+
+/** The nested session list under one character in the tree (011 step 006). */
+function treeSessionsListFor(characterName: string): HTMLElement {
+  return within(navElement()).getByRole("list", {
+    name: new RegExp(`^sessions of ${characterName}$`, "i"),
+  });
+}
+
+function queryTreeSessionRow(sessionId: string): HTMLElement | null {
+  return (
+    within(navElement())
+      .queryAllByRole("link")
+      .find((link) => link.getAttribute("href") === `/sessions/${sessionId}`) ?? null
+  );
+}
+
+/** One of the section's rows, located by its link's href (008.context.md). */
+function sectionRow(sessionId: string): HTMLElement {
+  const link = within(sessionsRegion())
+    .getAllByRole("link")
+    .find((candidate) => candidate.getAttribute("href") === `/sessions/${sessionId}`);
+  if (link === undefined) throw new Error(`no section row for /sessions/${sessionId}`);
+  const row = link.closest("tr");
+  if (row === null) throw new Error(`the section row for /sessions/${sessionId} is not a table row`);
+  return row;
+}
+
+/** Every workspace sessions listing — the tree's own `GET /api/sessions`, by exact path. */
+function sessionsListRequests(calls: Seen[]): Seen[] {
+  return calls.filter((call) => call.method === "GET" && call.path === SESSIONS_PATH);
+}
+
+describe("starting a session from the character screen lands on it and shows it in the tree (US-026.AC-1, D15)", () => {
+  it("navigates to /sessions/<new id>, marks that tree row current and issues no second GET /api/sessions — DoD-15", async () => {
+    const user = newUser();
+    const { calls } = stubWorkspace([CHAR_A]);
+    renderApp(`/characters/${ID_A}`);
+    await flush();
+    expect(sessionsListRequests(calls)).toHaveLength(1);
+
+    await user.click(startSessionButton());
+    await flush();
+
+    expect(currentPath()).toBe(`/sessions/${STARTED_SESSION_ID}`);
+    const started = queryTreeSessionRow(STARTED_SESSION_ID);
+    expect(started).not.toBeNull();
+    expect(started).toHaveAttribute("aria-current", "page");
+    expect(
+      within(treeSessionsListFor(CHAR_A.name))
+        .queryAllByRole("link")
+        .map((link) => link.getAttribute("href") ?? ""),
+    ).toEqual([`/sessions/${STARTED_SESSION_ID}`]);
+
+    const postIndex = calls.findIndex(
+      (call) => call.method === "POST" && call.path === characterSessionsPath(ID_A),
+    );
+    expect(postIndex).toBeGreaterThanOrEqual(0);
+    expect(sessionsListRequests(calls.slice(postIndex + 1))).toEqual([]);
+    expect(sessionsListRequests(calls)).toHaveLength(1);
+  });
+});
+
+describe("archiving a session from the section removes its row from the tree (US-027.AC-1, D15)", () => {
+  it("the archived row is gone from the tree with no second GET /api/sessions — DoD-15", async () => {
+    const user = newUser();
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_A]);
+    renderApp(`/characters/${ID_A}`);
+    await flush();
+    expect(queryTreeSessionRow(SESSION_A_ID)).not.toBeNull();
+
+    await user.click(within(sectionRow(SESSION_A_ID)).getByRole("button", { name: ROW_TRIGGER_NAME }));
+    await user.click(await screen.findByRole("menuitem", { name: ARCHIVE_ITEM }));
+    await flush();
+
+    expect(
+      calls.filter(
+        (call) => call.method === "POST" && call.path === `/api/sessions/${SESSION_A_ID}/archive`,
+      ),
+    ).toHaveLength(1);
+    expect(queryTreeSessionRow(SESSION_A_ID)).toBeNull();
+    expect(sessionsListRequests(calls)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 011, step 009 — `/sessions/:id` is a real centre now (D17): the session screen, keyed
+// by the id, inside the same shell. The screen's own behaviour is SessionScreen.test.tsx's; what
+// these two clauses assert is the route `App` declares and the tree's way into it. The empty
+// centres (`/`, `/settings`, `/search`) and the `*` clause are the untouched block at the top.
+/** Every read of one session by id — the screen's own request, by exact path. */
+function sessionItemRequests(calls: Seen[], sessionId: string): Seen[] {
+  return calls.filter((call) => call.method === "GET" && call.path === `/api/sessions/${sessionId}`);
+}
+
+describe("the session route renders the session screen in the same shell (D17, UC-024)", () => {
+  it("at /sessions/1 the main region holds that session's screen — DoD-11", async () => {
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp(SESSION_ONE_ROUTE);
+    await flush();
+
+    expect(navElement()).toBeInTheDocument();
+    const main = within(mainElement());
+    expect(main.getByRole("link", { name: CHAR_A.name })).toHaveAttribute(
+      "href",
+      `/characters/${ID_A}`,
+    );
+    expect(main.getByRole("heading", { name: START_LABEL_HEADING })).toBeInTheDocument();
+    expect(main.getByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(main.queryByText(SESSION_NOT_FOUND_TEXT)).toBeNull();
+    expect(main.queryByText(NOT_FOUND_TEXT)).toBeNull();
+    expect(sessionItemRequests(calls, SESSION_ONE_ID)).toHaveLength(1);
+  });
+
+  it("from / a click on a session row in the tree opens that session's screen — DoD-11", async () => {
+    const user = newUser();
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_A]);
+    renderApp("/");
+    await flush();
+    expect(mainText()).toBe("");
+
+    const row = queryTreeSessionRow(SESSION_A_ID);
+    expect(row).not.toBeNull();
+    await user.click(row as HTMLElement);
+    await flush();
+
+    expect(currentPath()).toBe(`/sessions/${SESSION_A_ID}`);
+    expect(sessionItemRequests(calls, SESSION_A_ID)).toHaveLength(1);
+    const main = within(mainElement());
+    expect(main.getByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(main.getByRole("link", { name: CHAR_A.name })).toHaveAttribute(
+      "href",
+      `/characters/${ID_A}`,
+    );
   });
 });

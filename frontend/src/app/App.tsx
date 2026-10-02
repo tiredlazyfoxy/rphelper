@@ -12,7 +12,9 @@ import type { CurrentUser } from "../shared/currentUser";
 import type { LayoutStorage } from "./workspaceLayout";
 import { WorkspaceShell } from "./WorkspaceShell";
 import { CharacterRoute, CharacterScreen } from "./CharacterScreen";
+import { SessionRoute } from "./SessionScreen";
 import { CharactersState } from "./charactersState";
+import { SessionsState } from "./sessionsState";
 
 export type AppProps = {
   /** The signed-in identity, handed to `WorkspaceShell`. */
@@ -27,26 +29,41 @@ export type AppProps = {
  * the `*` catch-all whose centre reads "Page not found".
  *
  * `/characters/new` is listed before `/characters/:id` for readability only; React Router
- * 7 ranks the static segment above the dynamic one regardless. Later features (011, 013,
- * 017, 018, 029) fill the remaining centres; their elements are empty on purpose — no
- * placeholder pretends a feature exists. 009 fills the two character routes.
+ * 7 ranks the static segment above the dynamic one regardless. Later features (013, 017,
+ * 018, 029) fill the remaining centres; their elements are empty on purpose — no
+ * placeholder pretends a feature exists. 009 fills the two character routes, and 011 step
+ * 009 fills `/sessions/:id` with `SessionRoute`.
  */
 export function App(props: AppProps): React.JSX.Element {
   const { user, storage } = props;
   // The one workspace characters state (009 D11): created here, passed to the character
   // screen and (from 009 step 008) to the tree, so a mutation updates both.
   const [characters] = useState(() => new CharactersState());
+  // The one workspace sessions state (011 D15): created here exactly once, passed down as a
+  // prop — never a context and never a module singleton. The tree loads it; 011 step 008's
+  // section applies mutated rows to it, so the tree updates with no refetch.
+  const [sessions] = useState(() => new SessionsState());
 
   return (
-    <WorkspaceShell user={user} storage={storage} characters={characters}>
+    <WorkspaceShell
+      user={user}
+      storage={storage}
+      characters={characters}
+      sessions={sessions}
+    >
       <Routes>
         <Route path="/" element={null} />
-        <Route path="/sessions/:id" element={null} />
+        <Route path="/sessions/:id" element={<SessionRoute characters={characters} />} />
         <Route
           path="/characters/new"
-          element={<CharacterScreen characters={characters} characterId={null} />}
+          element={
+            <CharacterScreen characters={characters} characterId={null} sessions={sessions} />
+          }
         />
-        <Route path="/characters/:id" element={<CharacterRoute characters={characters} />} />
+        <Route
+          path="/characters/:id"
+          element={<CharacterRoute characters={characters} sessions={sessions} />}
+        />
         <Route path="/settings" element={null} />
         <Route path="/search" element={null} />
         <Route path="*" element={<Text p="md">Page not found</Text>} />

@@ -614,7 +614,7 @@ NEW_006_TABLES = {"llm_servers", "models"}
 # "the registry, minus what pre-dated it, minus what later features added". A feature
 # that adds a table appends it here and gives its own delta a `LATER_THAN_<n>_TABLES`
 # set of its own, so the shape stays the same for 010 and beyond.
-LATER_THAN_006_TABLES = {"characters", "setups"}  # 009/001, 010/001
+LATER_THAN_006_TABLES = {"characters", "setups", "sessions"}  # 009/001, 010/001, 011/001
 
 # context.md D1: the "active" switch admin-surfaces.md describes is deliberately dropped.
 FORBIDDEN_SERVER_FLAG_COLUMNS = ("active", "is_active", "enabled")
@@ -1048,8 +1048,9 @@ def test_no_other_app_module_defines_its_own_table__S006_001_DoD7() -> None:
 PRE_009_TABLES = PRE_006_TABLES | NEW_006_TABLES
 NEW_009_TABLES = {"characters"}
 # DoD-1/DoD-11's shared shape: features after 009 append their tables here (010/001 DoD-8
-# added "setups"), so this delta keeps meaning "009 added exactly `characters`".
-LATER_THAN_009_TABLES: set[str] = {"setups"}
+# added "setups"; 011/001 DoD-9 added "sessions"), so this delta keeps meaning "009 added
+# exactly `characters`".
+LATER_THAN_009_TABLES: set[str] = {"setups", "sessions"}
 
 CHARACTERS_COLUMNS = {"id", "user_id", "name", "sheet", "archived_at", "created_at", "updated_at"}
 
@@ -1182,7 +1183,8 @@ PRE_010_TABLES = PRE_009_TABLES | NEW_009_TABLES
 NEW_010_TABLES = {"setups"}
 # 010/001 DoD-1, in 009/001 DoD-11's shape: features after 010 append their tables here, so
 # this delta keeps meaning "010 added exactly `setups`" once a later feature declares one.
-LATER_THAN_010_TABLES: set[str] = set()
+# 011/001 DoD-9 appended "sessions" — the first entry this set ever needed.
+LATER_THAN_010_TABLES: set[str] = {"sessions"}
 
 SETUPS_COLUMNS = {
     "id",
@@ -1384,3 +1386,282 @@ def test_the_009_delta_still_holds_with_setups_registered__S010_001_DoD8() -> No
     that `setups` exists."""
     assert PRE_009_TABLES <= set(schema.metadata.tables)
     assert set(schema.metadata.tables) - PRE_009_TABLES - LATER_THAN_009_TABLES == NEW_009_TABLES
+
+
+# ======================================================================================
+# Feature 011, step 001 (`001.table-errors-models.md`) — the `sessions` table.
+# Expected values come from that step's DoD-1..4 and DoD-9 and feature 011's context.md D8
+# (eight columns, three bare FKs, one non-unique composite index, no `ON DELETE`, no status
+# column), D4 (no `title` / `partner_label`) and R2 (`setup_id` nullable, no server default,
+# no sentinel). Tests are suffixed `__S011_001_DoD<n>`.
+# ======================================================================================
+
+# The registry as it stood before this step (003/001 + 005/001, 004/001, 006/001, 009/001,
+# 010/001).
+PRE_011_TABLES = PRE_010_TABLES | NEW_010_TABLES
+NEW_011_TABLES = {"sessions"}
+# 011/001 DoD-1, in 009/001 DoD-11's shape: features after 011 append their tables here, so
+# this delta keeps meaning "011 added exactly `sessions`" once a later feature declares one.
+LATER_THAN_011_TABLES: set[str] = set()
+
+SESSIONS_COLUMNS = {
+    "id",
+    "user_id",
+    "character_id",
+    "setup_id",
+    "last_used_at",
+    "archived_at",
+    "created_at",
+    "updated_at",
+}
+
+# 011/001 DoD-2 — D4 (title/partner_label deferred to the feature that labels a session),
+# R4 (model capture deferred to 017) and data-model.md `sessions` (no status column).
+FORBIDDEN_SESSIONS_COLUMNS = (
+    "title",
+    "partner_label",
+    "rp_language",
+    "preferred_language",
+    "model_ref",
+    "system_prompt",
+    "tools",
+    "status",
+    "state",
+)
+
+# Named for the `sessions` table (not `RAW_SESSION_INSERT`): feature 004 already owns a
+# module-level `RAW_SESSION_INSERT`/`_raw_session` pair for `auth_sessions`, and a same-named
+# pair here would shadow it for the whole module.
+RAW_SESSIONS_INSERT = text(
+    "INSERT INTO sessions "
+    "(id, user_id, character_id, setup_id, last_used_at, archived_at, created_at, updated_at) "
+    "VALUES (:id, :user_id, :character_id, :setup_id, :last_used_at, :archived_at, :created_at, :updated_at)"
+)
+
+
+def _sessions() -> Table:
+    return schema.metadata.tables["sessions"]
+
+
+def _raw_sessions_row(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": 30,
+        "user_id": 1,
+        "character_id": 10,
+        "setup_id": None,
+        "last_used_at": TIMESTAMP,
+        "archived_at": None,
+        "created_at": TIMESTAMP,
+        "updated_at": TIMESTAMP,
+    }
+    row.update(overrides)
+    return row
+
+
+def _seeded_sessions_connection(db_engine: Engine) -> Connection:
+    """A connection on a fresh file: whole registry created, foreign keys **on**, one owner
+    (`id=1`), one of their characters (`id=10`) and one of their setups (`id=20`) committed, so
+    a valid session row has every parent a row can name."""
+    with db_engine.connect() as setup:
+        schema.metadata.create_all(setup)
+        setup.commit()
+
+    connection = db_engine.connect()
+    connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+    assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+    connection.execute(RAW_INSERT, _raw_row(id=1, username="owner"))
+    connection.execute(RAW_CHARACTER_INSERT, _raw_character(id=10, user_id=1))
+    connection.execute(RAW_SETUP_INSERT, _raw_setup(id=20, user_id=1, character_id=10))
+    connection.commit()
+    return connection
+
+
+# --- 011/001 DoD-1: the registry gains `sessions` and nothing else ----------------------
+
+
+def test_registry_gains_exactly_the_sessions_table__S011_001_DoD1() -> None:
+    """011/001 DoD-1 — `sessions` is registered, and it is the only table 011 declares."""
+    assert "sessions" in schema.metadata.tables
+    assert isinstance(_sessions(), Table)
+    assert _sessions().name == "sessions"
+    assert set(schema.metadata.tables) - PRE_011_TABLES - LATER_THAN_011_TABLES == NEW_011_TABLES
+
+
+def test_registry_still_carries_every_pre_011_table__S011_001_DoD1() -> None:
+    """011/001 DoD-1 — 011 only adds: every table declared before it is still registered."""
+    assert PRE_011_TABLES <= set(schema.metadata.tables)
+
+
+def test_the_011_delta_survives_a_table_a_later_feature_declares__S011_001_DoD1() -> None:
+    """011/001 DoD-1 — the delta is later-table-proof: it reads "the registry, minus what
+    pre-dated 011, minus what later features declared", so a future table named in the
+    later-features set leaves it meaning "011 added exactly `sessions`"."""
+    future_table = "a_table_a_later_feature_declares"
+    future_registry = set(schema.metadata.tables) | {future_table}
+    future_later = LATER_THAN_011_TABLES | {future_table}
+
+    assert future_registry - PRE_011_TABLES - future_later == NEW_011_TABLES
+
+
+# --- 011/001 DoD-2: exactly eight columns, the primary key and nullability ---------------
+
+
+def test_sessions_has_exactly_the_eight_declared_columns__S011_001_DoD2() -> None:
+    """011/001 DoD-2 — exactly id, user_id, character_id, setup_id, last_used_at, archived_at,
+    created_at, updated_at."""
+    names = [column.name for column in _sessions().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == SESSIONS_COLUMNS
+
+
+def test_sessions_id_is_the_primary_key__S011_001_DoD2() -> None:
+    """011/001 DoD-2 — `id` alone is the primary key."""
+    assert [column.name for column in _sessions().primary_key.columns] == ["id"]
+    assert _sessions().c.id.primary_key is True
+
+
+@pytest.mark.parametrize("column", ["setup_id", "archived_at"])
+def test_sessions_setup_id_and_archived_at_are_nullable__S011_001_DoD2(column: str) -> None:
+    """011/001 DoD-2 — R2: a session with no setup has `setup_id` NULL; a working session has
+    `archived_at` NULL."""
+    assert _sessions().c[column].nullable is True
+
+
+@pytest.mark.parametrize(
+    "column", ["id", "user_id", "character_id", "last_used_at", "created_at", "updated_at"]
+)
+def test_sessions_other_columns_are_not_nullable__S011_001_DoD2(column: str) -> None:
+    """011/001 DoD-2 — every column but `setup_id` and `archived_at` is NOT NULL."""
+    assert _sessions().c[column].nullable is False
+
+
+@pytest.mark.parametrize("column", FORBIDDEN_SESSIONS_COLUMNS)
+def test_sessions_declares_no_deferred_or_status_column__S011_001_DoD2(column: str) -> None:
+    """011/001 DoD-2 — D8/D4/R4: the deferred columns are absent, and there is no status or
+    state column at all."""
+    assert column not in _sessions().c
+
+
+# --- 011/001 DoD-3: the three foreign keys, no default, and the composite index -----------
+
+
+def test_sessions_user_id_declares_a_foreign_key_to_users_id__S011_001_DoD3() -> None:
+    """011/001 DoD-3 — `user_id` carries a declared foreign key targeting `users.id`."""
+    targets = {fk.target_fullname for fk in _sessions().c.user_id.foreign_keys}
+    assert targets == {"users.id"}
+
+
+def test_sessions_character_id_declares_a_foreign_key_to_characters_id__S011_001_DoD3() -> None:
+    """011/001 DoD-3 — `character_id` carries a declared foreign key targeting `characters.id`."""
+    targets = {fk.target_fullname for fk in _sessions().c.character_id.foreign_keys}
+    assert targets == {"characters.id"}
+
+
+def test_sessions_setup_id_declares_a_foreign_key_to_setups_id__S011_001_DoD3() -> None:
+    """011/001 DoD-3 — `setup_id` carries a declared foreign key targeting `setups.id`."""
+    targets = {fk.target_fullname for fk in _sessions().c.setup_id.foreign_keys}
+    assert targets == {"setups.id"}
+
+
+def test_sessions_setup_id_declares_no_server_default__S011_001_DoD3() -> None:
+    """011/001 DoD-3 — R2: "no default, no sentinel" is a column property here, not only a
+    service habit."""
+    assert _sessions().c.setup_id.server_default is None
+    assert _sessions().c.setup_id.default is None
+
+
+def test_sessions_declares_exactly_one_non_unique_composite_index__S011_001_DoD3() -> None:
+    """011/001 DoD-3 — D8: exactly one index, whose columns are `user_id`, `character_id` in
+    that order, and it is not unique."""
+    assert len(_sessions().indexes) == 1
+    indexes = _indexes_over(_sessions(), ["user_id", "character_id"])
+    assert len(indexes) == 1
+    assert not any(index.unique for index in indexes)
+
+
+# --- 011/001 DoD-4: `create_all` creates the table, and all three FKs are enforced --------
+
+
+def test_create_all_creates_sessions_and_accepts_a_row_with_no_setup__S011_001_DoD4(
+    db_engine: Engine,
+) -> None:
+    """011/001 DoD-4 — `create_all` on a fresh engine creates `sessions`, and R2's session with
+    no setup (`setup_id` NULL) inserts."""
+    with _seeded_sessions_connection(db_engine) as connection:
+        assert "sessions" in _created_table_names(connection)
+
+        connection.execute(RAW_SESSIONS_INSERT, _raw_sessions_row(id=30, user_id=1, character_id=10, setup_id=None))
+        connection.commit()
+        assert connection.execute(text("SELECT COUNT(*) FROM sessions")).scalar_one() == 1
+        assert connection.execute(text("SELECT setup_id FROM sessions WHERE id = 30")).scalar_one() is None
+
+
+def test_sessions_accepts_a_row_naming_an_existing_setup__S011_001_DoD4(db_engine: Engine) -> None:
+    """011/001 DoD-4 — a row whose `setup_id` names an existing setup is accepted, so the
+    nullable FK is a real reference and not merely an unconstrained column."""
+    with _seeded_sessions_connection(db_engine) as connection:
+        connection.execute(RAW_SESSIONS_INSERT, _raw_sessions_row(id=31, user_id=1, character_id=10, setup_id=20))
+        connection.commit()
+        assert connection.execute(text("SELECT setup_id FROM sessions WHERE id = 31")).scalar_one() == 20
+
+
+def test_sessions_refuses_a_row_whose_character_id_names_no_character__S011_001_DoD4(
+    db_engine: Engine,
+) -> None:
+    """011/001 DoD-4 — with foreign keys on, the `characters` FK is enforced."""
+    with _seeded_sessions_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                RAW_SESSIONS_INSERT, _raw_sessions_row(id=32, user_id=1, character_id=999_999, setup_id=None)
+            )
+
+
+def test_sessions_refuses_a_row_whose_setup_id_names_no_setup__S011_001_DoD4(db_engine: Engine) -> None:
+    """011/001 DoD-4 — with foreign keys on, the `setups` FK is enforced for a non-NULL value."""
+    with _seeded_sessions_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                RAW_SESSIONS_INSERT, _raw_sessions_row(id=33, user_id=1, character_id=10, setup_id=999_999)
+            )
+
+
+def test_sessions_refuses_a_row_whose_user_id_names_no_user__S011_001_DoD4(db_engine: Engine) -> None:
+    """011/001 DoD-4 — with foreign keys on, the `users` FK is enforced too."""
+    with _seeded_sessions_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                RAW_SESSIONS_INSERT, _raw_sessions_row(id=34, user_id=999_999, character_id=10, setup_id=None)
+            )
+
+
+# --- 011/001 DoD-9: 006's, 009's and 010's deltas still mean what they meant --------------
+
+
+def test_the_006_delta_still_holds_with_sessions_registered__S011_001_DoD9() -> None:
+    """011/001 DoD-9 — 006's registry delta still means "006 added exactly `llm_servers` and
+    `models`" now that `sessions` exists."""
+    assert PRE_006_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_006_TABLES - LATER_THAN_006_TABLES == NEW_006_TABLES
+
+
+def test_the_009_delta_still_holds_with_sessions_registered__S011_001_DoD9() -> None:
+    """011/001 DoD-9 — 009's registry delta still means "009 added exactly `characters`" now
+    that `sessions` exists."""
+    assert PRE_009_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_009_TABLES - LATER_THAN_009_TABLES == NEW_009_TABLES
+
+
+def test_the_010_delta_still_holds_with_sessions_registered__S011_001_DoD9() -> None:
+    """011/001 DoD-9 — 010's registry delta still means "010 added exactly `setups`" now that
+    `sessions` exists."""
+    assert PRE_010_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_010_TABLES - LATER_THAN_010_TABLES == NEW_010_TABLES
+
+
+def test_every_earlier_later_features_set_now_names_sessions__S011_001_DoD9() -> None:
+    """011/001 DoD-9 — the later-table-proof shape is kept by *adding* to each earlier delta's
+    later-features set rather than by rewriting its assertion."""
+    assert "sessions" in LATER_THAN_006_TABLES
+    assert "sessions" in LATER_THAN_009_TABLES
+    assert "sessions" in LATER_THAN_010_TABLES
+    assert "sessions" not in PRE_011_TABLES

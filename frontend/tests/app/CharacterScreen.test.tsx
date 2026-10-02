@@ -37,6 +37,26 @@
 // bottom of this file are 010 step 006's own DoD-10..DoD-12; they scope every section
 // assertion through `within(getByRole("region", { name: "Setups" }))` and reach the setup
 // modal through `screen`, because Mantine renders it into a portal (010 context.md).
+//
+// Amended by feature 011, step 008 (DoD-16): `CharacterScreen` and `CharacterRoute` each take
+// one required `sessions` prop — the one workspace `SessionsState` (011 D15) — so every render
+// here passes a fresh instance, and 009's empty "Sessions" heading is now the "Sessions"
+// region's own heading (011 D1). Consequences, all mechanical:
+// - every stub whose character load succeeds answers `GET /api/characters/<id>/sessions` with
+//   `{ "sessions": [] }` **and** tolerates a SECOND `GET /api/characters/<id>/setups` (the
+//   section's Select choices beside 010's section's own listing), both routed by exact path —
+//   the fallback 404/500 would otherwise drive the section into its failed state and put
+//   "Could not load sessions" and a second "Retry" inside the main region;
+// - 009 DoD-5's `expect(heading(SESSIONS_HEADING))` is unchanged and still passes: the region
+//   carries a `Title order={3}` "Sessions" heading in the old heading's place;
+// - 009 DoD-1's "no 'Sessions' heading at /characters/new" is unchanged and still passes: new
+//   mode mounts no section (011 D1);
+// - 010 DoD-12's `expect(listings).toHaveLength(1)` counted the Setups section's own listing;
+//   with two sections on the screen that path is now requested by both, so the clause keeps
+//   what it means — B's setups were requested, and never with `include_archived` — without
+//   counting the Sessions section's request as the Setups section's;
+// - no other 009 or 010 assertion changed. 011 step 008's own DoD-12..DoD-14 are the three
+//   blocks at the bottom of this file.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -44,8 +64,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChangeEvent } from "react";
 import { CharacterRoute, CharacterScreen } from "../../src/app/CharacterScreen";
 import type { Character } from "../../src/app/charactersApi";
+import type { Session } from "../../src/app/sessionsApi";
 import type { Setup } from "../../src/app/setupsApi";
 import { CharactersState } from "../../src/app/charactersState";
+import { SessionsState } from "../../src/app/sessionsState";
 import { documentNavigation } from "../../src/shared/api";
 import { AppProviders } from "../../src/shared/AppProviders";
 
@@ -102,6 +124,11 @@ const NOTIFICATION = ".mantine-Notification-root";
 const SETUPS_REGION = /^setups$/i;
 const NEW_SETUP_NAME = /^new setup$/i;
 const SHOW_ARCHIVED_SETUPS_NAME = /^show archived setups$/i;
+
+// ------------------------------------- 011 step 008: the Sessions section's own names (D1, D5)
+const SESSIONS_REGION = /^sessions$/i;
+const SHOW_ARCHIVED_SESSIONS_NAME = /^show archived sessions$/i;
+const START_SESSION_NAME = /^start session$/i;
 
 // ---------------------------------------------------------------- fixtures
 // Ids are decimal strings; CREATED_ID is past Number.MAX_SAFE_INTEGER, so any coercion of
@@ -175,8 +202,29 @@ function setupsPath(characterId: string): string {
   return `${itemPath(characterId)}/setups`;
 }
 
+/** 011 step 008: the Sessions section's listing, a third URL under the same character. */
+function sessionsPath(characterId: string): string {
+  return `${itemPath(characterId)}/sessions`;
+}
+
 /** Every character route whose load succeeds now also answers the section's listing. */
 const EMPTY_SETUPS = { setups: [] };
+
+/** 011 step 008: the Sessions section's own listing, answered empty everywhere. */
+const EMPTY_SESSIONS = { sessions: [] };
+
+/**
+ * 010 / 011: the two sections a loaded character's screen mounts ask for three listings under
+ * that character — 010's setups, 011's sessions, and 011's own second request for the same
+ * setups (the Select's choices). Answers all of them empty, any number of times, routed by the
+ * exact path; returns null when the request is not one of them.
+ */
+function sectionListing(request: Seen, characterId: string): Response | null {
+  if (request.method !== "GET") return null;
+  if (request.path === setupsPath(characterId)) return jsonResponse(EMPTY_SETUPS, 200);
+  if (request.path === sessionsPath(characterId)) return jsonResponse(EMPTY_SESSIONS, 200);
+  return null;
+}
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -232,16 +280,18 @@ function stubBackend(handler: (request: Seen) => Response | Promise<Response>) {
 }
 
 /**
- * Answers GET of each given character and an empty setups listing for each (010 step 006),
- * and 404s everything else.
+ * Answers GET of each given character, an empty setups listing for each (010 step 006) and an
+ * empty sessions listing for each (011 step 008), and 404s everything else.
  */
 function serveCharacters(...rows: Character[]) {
   return stubBackend((request) => {
     if (request.method === "GET") {
       const row = rows.find((candidate) => request.path === itemPath(candidate.id));
       if (row !== undefined) return jsonResponse(row, 200);
-      const owner = rows.find((candidate) => request.path === setupsPath(candidate.id));
-      if (owner !== undefined) return jsonResponse(EMPTY_SETUPS, 200);
+      for (const candidate of rows) {
+        const listing = sectionListing(request, candidate.id);
+        if (listing !== null) return listing;
+      }
     }
     return notFoundResponse();
   });
@@ -293,10 +343,12 @@ function Probe(props: { to: string }) {
 
 /**
  * The two routes of this step, in the `<main>` landmark the shell gives them, with one
- * workspace `CharactersState` (D11) and a location/navigation probe beside them.
+ * workspace `CharactersState` (D11), one workspace `SessionsState` (011 D15, a required prop of
+ * both since 011 step 008) and a location/navigation probe beside them.
  */
 function renderScreen(initialPath: string, probeTo = `/characters/${ID_B}`) {
   const characters = new CharactersState();
+  const sessions = new SessionsState();
   const view = render(
     <AppProviders>
       <MemoryRouter initialEntries={[initialPath]}>
@@ -304,16 +356,21 @@ function renderScreen(initialPath: string, probeTo = `/characters/${ID_B}`) {
           <Routes>
             <Route
               path="/characters/new"
-              element={<CharacterScreen characters={characters} characterId={null} />}
+              element={
+                <CharacterScreen characters={characters} characterId={null} sessions={sessions} />
+              }
             />
-            <Route path="/characters/:id" element={<CharacterRoute characters={characters} />} />
+            <Route
+              path="/characters/:id"
+              element={<CharacterRoute characters={characters} sessions={sessions} />}
+            />
           </Routes>
         </main>
         <Probe to={probeTo} />
       </MemoryRouter>
     </AppProviders>,
   );
-  return { characters, view };
+  return { characters, sessions, view };
 }
 
 // ---------------------------------------------------------------- queries
@@ -380,6 +437,31 @@ function setupsSwitch(): HTMLElement {
   );
 }
 
+// ------------------------------------- 011 step 008: the Sessions section inside the screen
+function sessionsRegion(): HTMLElement {
+  return screen.getByRole("region", { name: SESSIONS_REGION });
+}
+
+function querySessionsRegion(): HTMLElement | null {
+  return screen.queryByRole("region", { name: SESSIONS_REGION });
+}
+
+function sessionsSwitch(): HTMLElement {
+  const scope = within(sessionsRegion());
+  return (
+    scope.queryByRole("switch", { name: SHOW_ARCHIVED_SESSIONS_NAME }) ??
+    scope.getByRole("checkbox", { name: SHOW_ARCHIVED_SESSIONS_NAME })
+  );
+}
+
+/** The section's session rows, in document order, by their `/sessions/<id>` href. */
+function sessionHrefs(): string[] {
+  return within(sessionsRegion())
+    .queryAllByRole("link")
+    .map((link) => link.getAttribute("href") ?? "")
+    .filter((value) => value.startsWith("/sessions/"));
+}
+
 /** True when `first` comes before `second` in document order. */
 function precedes(first: Element, second: Element): boolean {
   return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
@@ -437,10 +519,9 @@ describe("Create posts once and hands the route over to the new id (D1, US-020.A
       if (request.method === "GET" && request.path === itemPath(CREATED_ID)) {
         return jsonResponse(CREATED, 200);
       }
-      // 010 step 006: the created character's screen mounts the Setups section.
-      if (request.method === "GET" && request.path === setupsPath(CREATED_ID)) {
-        return jsonResponse(EMPTY_SETUPS, 200);
-      }
+      // 010 step 006 / 011 step 008: the created character's screen mounts both sections.
+      const listing = sectionListing(request, CREATED_ID);
+      if (listing !== null) return listing;
       return notFoundResponse();
     });
     renderScreen(NEW_PATH);
@@ -466,10 +547,9 @@ describe("Create posts once and hands the route over to the new id (D1, US-020.A
       if (request.method === "GET" && request.path === itemPath(CREATED_ID)) {
         return jsonResponse(CREATED, 200);
       }
-      // 010 step 006: the created character's screen mounts the Setups section.
-      if (request.method === "GET" && request.path === setupsPath(CREATED_ID)) {
-        return jsonResponse(EMPTY_SETUPS, 200);
-      }
+      // 010 step 006 / 011 step 008: the created character's screen mounts both sections.
+      const listing = sectionListing(request, CREATED_ID);
+      if (listing !== null) return listing;
       return notFoundResponse();
     });
     renderScreen(NEW_PATH);
@@ -509,10 +589,9 @@ describe("existing mode at /characters/:id", () => {
       if (request.method === "GET" && request.path === itemPath(ID_A)) {
         return gate.promise;
       }
-      // 010 step 006: once the character is ready the Setups section loads its listing.
-      if (request.method === "GET" && request.path === setupsPath(ID_A)) {
-        return jsonResponse(EMPTY_SETUPS, 200);
-      }
+      // 010 step 006 / 011 step 008: once the character is ready both sections load.
+      const listing = sectionListing(request, ID_A);
+      if (listing !== null) return listing;
       return notFoundResponse();
     });
     renderScreen(`/characters/${ID_A}`);
@@ -545,10 +624,9 @@ describe("existing mode at /characters/:id", () => {
       if (request.method === "PATCH" && request.path === itemPath(ID_A)) {
         return jsonResponse(SAVED_A, 200);
       }
-      // 010 step 006: the ready screen mounts the Setups section.
-      if (request.method === "GET" && request.path === setupsPath(ID_A)) {
-        return jsonResponse(EMPTY_SETUPS, 200);
-      }
+      // 010 step 006 / 011 step 008: the ready screen mounts both sections.
+      const listing = sectionListing(request, ID_A);
+      if (listing !== null) return listing;
       return notFoundResponse();
     });
     renderScreen(`/characters/${ID_A}`);
@@ -580,10 +658,9 @@ describe("existing mode at /characters/:id", () => {
       if (request.method === "POST" && request.path === `${itemPath(ID_A)}/restore`) {
         return jsonResponse(CHAR_A, 200);
       }
-      // 010 step 006: the ready screen mounts the Setups section.
-      if (request.method === "GET" && request.path === setupsPath(ID_A)) {
-        return jsonResponse(EMPTY_SETUPS, 200);
-      }
+      // 010 step 006 / 011 step 008: the ready screen mounts both sections.
+      const listing = sectionListing(request, ID_A);
+      if (listing !== null) return listing;
       return notFoundResponse();
     });
     renderScreen(`/characters/${ID_A}`);
@@ -666,10 +743,9 @@ describe("existing mode at /characters/:id", () => {
         }
         return jsonResponse(CHAR_A, 200);
       }
-      // 010 step 006: the ready screen mounts the Setups section.
-      if (request.method === "GET" && request.path === setupsPath(ID_A)) {
-        return jsonResponse(EMPTY_SETUPS, 200);
-      }
+      // 010 step 006 / 011 step 008: the ready screen mounts both sections.
+      const listing = sectionListing(request, ID_A);
+      if (listing !== null) return listing;
       return notFoundResponse();
     });
     renderScreen(`/characters/${ID_A}`);
@@ -691,11 +767,11 @@ describe("existing mode at /characters/:id", () => {
       if (request.method === "GET" && request.path === itemPath(ID_A)) {
         return jsonResponse(CHAR_A, 200);
       }
-      // 010 step 006: the section's listing must not fall through to the 500 below, or the
-      // section would render its own failure text and "Retry" inside the main region.
-      if (request.method === "GET" && request.path === setupsPath(ID_A)) {
-        return jsonResponse(EMPTY_SETUPS, 200);
-      }
+      // 010 step 006 / 011 step 008: neither section's listing may fall through to the 500
+      // below, or a section would render its own failure text and "Retry" inside the main
+      // region.
+      const listing = sectionListing(request, ID_A);
+      if (listing !== null) return listing;
       return serverError();
     });
     renderScreen(`/characters/${ID_A}`);
@@ -820,12 +896,12 @@ describe("an archived character still carries the Setups section (010 D5)", () =
       if (request.method === "GET" && request.path === itemPath(ID_A)) {
         return jsonResponse(ARCHIVED_A, 200);
       }
-      if (request.method === "GET" && request.path === setupsPath(ID_A)) {
-        return jsonResponse(EMPTY_SETUPS, 200);
-      }
       if (request.method === "POST" && request.path === setupsPath(ID_A)) {
         return jsonResponse(CREATED_SETUP, 201);
       }
+      // 010 step 006 / 011 step 008: both sections' listings.
+      const listing = sectionListing(request, ID_A);
+      if (listing !== null) return listing;
       return notFoundResponse();
     });
     renderScreen(`/characters/${ID_A}`);
@@ -864,6 +940,13 @@ describe("moving between characters builds a fresh Setups section (010 D11)", ()
       if (request.method === "GET" && request.path === setupsPath(ID_B)) {
         return jsonResponse({ setups: [SETUP_OF_B] }, 200);
       }
+      // 011 step 008: the Sessions section lists each character's sessions, answered empty.
+      if (request.method === "GET" && request.path === sessionsPath(ID_A)) {
+        return jsonResponse(EMPTY_SESSIONS, 200);
+      }
+      if (request.method === "GET" && request.path === sessionsPath(ID_B)) {
+        return jsonResponse(EMPTY_SESSIONS, 200);
+      }
       return notFoundResponse();
     });
     renderScreen(`/characters/${ID_A}`);
@@ -878,11 +961,177 @@ describe("moving between characters builds a fresh Setups section (010 D11)", ()
     await flush();
 
     expect(locationPath()).toBe(`/characters/${ID_B}`);
+    // 011 step 008: this path is now requested by both sections on the screen (010's listing
+    // and 011's Select choices), so the clause asserts what it means — B's setups were
+    // requested, and never with `include_archived` — instead of counting one request.
     const listings = matching(calls, "GET", setupsPath(ID_B));
-    expect(listings).toHaveLength(1);
-    expect(listings[0].search).toBe("");
+    expect(listings.length).toBeGreaterThan(0);
+    for (const call of listings) {
+      expect(call.search).toBe("");
+    }
     expect(within(setupsRegion()).getByText(SETUP_OF_B.name)).toBeInTheDocument();
     expect(within(setupsRegion()).queryByText(SETUP_OF_A.name)).toBeNull();
     expect(setupsSwitch()).not.toBeChecked();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 011, step 008 — the "Sessions" region's place on this screen (011 DoD-12..DoD-14).
+// Expected behaviour comes from 011's step file and context.md: D1 (existing mode and "ready"
+// only, in the old empty heading's position after the "Setups" region; absent in new mode and
+// in every non-ready state), D2 (an archived character may still start a session) and D15 (the
+// section is keyed by the character id, so moving between characters builds fresh state —
+// including the switch). Rows are identified by their `/sessions/<id>` href; the section's own
+// behaviour is `SessionsSection.test.tsx`'s.
+const SESSION_OF_A: Session = {
+  id: "7250000000000000101",
+  character_id: ID_A,
+  setup_id: null,
+  setup_name: null,
+  archived_at: null,
+  last_used_at: "2026-05-10T09:26:53.000000+00:00",
+  created_at: "2026-05-10T09:26:53.000000+00:00",
+  updated_at: "2026-05-10T09:26:53.000000+00:00",
+};
+
+const SESSION_OF_B: Session = {
+  id: "7250000000000000102",
+  character_id: ID_B,
+  setup_id: null,
+  setup_name: null,
+  archived_at: null,
+  last_used_at: "2026-04-02T08:15:42.000000+00:00",
+  created_at: "2026-04-02T08:15:42.000000+00:00",
+  updated_at: "2026-04-02T08:15:42.000000+00:00",
+};
+
+/** Past Number.MAX_SAFE_INTEGER, so a coerced id would show in the POST and the location. */
+const STARTED_ID = "9007199254740995";
+
+const STARTED_UNDER_A: Session = {
+  id: STARTED_ID,
+  character_id: ID_A,
+  setup_id: null,
+  setup_name: null,
+  archived_at: null,
+  last_used_at: "2026-06-01T12:00:00.000000+00:00",
+  created_at: "2026-06-01T12:00:00.000000+00:00",
+  updated_at: "2026-06-01T12:00:00.000000+00:00",
+};
+
+describe("the Sessions section's place on the character screen (011 D1)", () => {
+  it("renders the Sessions region after the Persona editor and the Setups region — DoD-12", async () => {
+    await renderLoaded(CHAR_A);
+
+    const section = sessionsRegion();
+    expect(section).toBeInTheDocument();
+    expect(within(section).getByRole("heading", { name: SESSIONS_REGION })).toBeInTheDocument();
+    expect(precedes(personaInput(), section)).toBe(true);
+    expect(precedes(setupsRegion(), section)).toBe(true);
+  });
+
+  it("new mode at /characters/new renders no Sessions region or heading — DoD-12", async () => {
+    const { calls } = stubBackend(() => notFoundResponse());
+    renderScreen(NEW_PATH);
+    await flush();
+
+    expect(querySessionsRegion()).toBeNull();
+    expect(queryHeading(SESSIONS_HEADING)).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it("the Character not found state renders no Sessions region or heading — DoD-12", async () => {
+    stubBackend(() => notFoundResponse());
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(NOT_FOUND_TEXT)).toBeInTheDocument();
+    expect(querySessionsRegion()).toBeNull();
+    expect(queryHeading(SESSIONS_HEADING)).toBeNull();
+  });
+
+  it("the Could not load the character state renders no Sessions region or heading — DoD-12", async () => {
+    stubBackend(() => serverError());
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(LOAD_FAILED_TEXT)).toBeInTheDocument();
+    expect(querySessionsRegion()).toBeNull();
+    expect(queryHeading(SESSIONS_HEADING)).toBeNull();
+  });
+});
+
+describe("an archived character still carries the Sessions section (011 D2)", () => {
+  it("renders the region and starts a session under that character — DoD-13", async () => {
+    const user = newUser();
+    const { calls } = stubBackend((request) => {
+      if (request.method === "GET" && request.path === itemPath(ID_A)) {
+        return jsonResponse(ARCHIVED_A, 200);
+      }
+      if (request.method === "POST" && request.path === sessionsPath(ID_A)) {
+        return jsonResponse(STARTED_UNDER_A, 201);
+      }
+      const listing = sectionListing(request, ID_A);
+      if (listing !== null) return listing;
+      return notFoundResponse();
+    });
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
+    expect(button(RESTORE_NAME)).toBeInTheDocument();
+    expect(sessionsRegion()).toBeInTheDocument();
+
+    await user.click(within(sessionsRegion()).getByRole("button", { name: START_SESSION_NAME }));
+    await flush();
+
+    const posts = matching(calls, "POST", sessionsPath(ID_A));
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toEqual({ setup_id: null });
+    expect(locationPath()).toBe(`/sessions/${STARTED_ID}`);
+  });
+});
+
+describe("moving between characters builds a fresh Sessions section (011 D15)", () => {
+  it("requests the second character's sessions, shows only its rows and resets the switch — DoD-14", async () => {
+    const user = newUser();
+    const { calls } = stubBackend((request) => {
+      if (request.method === "GET" && request.path === itemPath(ID_A)) {
+        return jsonResponse(CHAR_A, 200);
+      }
+      if (request.method === "GET" && request.path === itemPath(ID_B)) {
+        return jsonResponse(CHAR_B, 200);
+      }
+      if (request.method === "GET" && request.path === sessionsPath(ID_A)) {
+        return jsonResponse({ sessions: [SESSION_OF_A] }, 200);
+      }
+      if (request.method === "GET" && request.path === sessionsPath(ID_B)) {
+        return jsonResponse({ sessions: [SESSION_OF_B] }, 200);
+      }
+      if (
+        request.method === "GET" &&
+        (request.path === setupsPath(ID_A) || request.path === setupsPath(ID_B))
+      ) {
+        return jsonResponse(EMPTY_SETUPS, 200);
+      }
+      return notFoundResponse();
+    });
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+    expect(sessionHrefs()).toEqual([`/sessions/${SESSION_OF_A.id}`]);
+
+    await user.click(sessionsSwitch());
+    await flush();
+    expect(sessionsSwitch()).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: PROBE_NAVIGATE }));
+    await flush();
+
+    expect(locationPath()).toBe(`/characters/${ID_B}`);
+    const listings = matching(calls, "GET", sessionsPath(ID_B));
+    expect(listings).toHaveLength(1);
+    expect(listings[0].search).toBe("");
+    expect(sessionHrefs()).toEqual([`/sessions/${SESSION_OF_B.id}`]);
+    expect(sessionsSwitch()).not.toBeChecked();
   });
 });

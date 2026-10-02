@@ -14,6 +14,17 @@
 // render, and the entry no longer renders a `data-entry` marker of its own — its clauses
 // assert the workspace shell instead (the "Workspace navigation" nav), or that nothing at
 // all is rendered on a 401. The bootstrap, login and admin clauses are unchanged.
+//
+// Feature 011, step 006 DoD-12 widens the `app` entry's stub only: the shell's tree now also
+// issues GET /api/sessions, answered with an empty list by exact pathname. No assertion about
+// any entry's outcome changes.
+//
+// Feature 011, step 009 DoD-12 widens the `app` entry's stub only, again: `/sessions/:id` now
+// mounts the session screen (011 D17), which reads GET /api/sessions/abc123 at the two places
+// this file mounts the `app` entry at `/sessions/abc123` (the "deep link too" clause and the
+// `APP_PATHS` block). The stub answers that one path by exact pathname — with the backend's own
+// 404 envelope, because both clauses assert the shell and the nav, never the centre's content.
+// No assertion about any entry's outcome changes, and no clause is dropped.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { act, screen, within } from "@testing-library/react";
@@ -30,6 +41,10 @@ const MARKER_ENTRIES: Entry[] = ["bootstrap", "login", "admin"];
 const MARKER_NON_ADMIN_ENTRIES: Entry[] = ["bootstrap", "login"];
 
 const SHELL_NAV_NAME = "Workspace navigation";
+
+/** 011 step 009 (DoD-12): the deep session path this file mounts the `app` entry at. */
+const DEEP_SESSION_ROUTE = "/sessions/abc123";
+const DEEP_SESSION_ITEM_PATH = "/api/sessions/abc123";
 
 const FRONTEND_ROOT = path.resolve(__dirname, "..");
 const SRC_ROOT = path.join(FRONTEND_ROOT, "src");
@@ -106,14 +121,38 @@ const notAuthenticated = (): Response =>
  * and answers it with an empty list; every other request is still a test failure, and no
  * assertion about the entry's outcome changes.
  */
+/**
+ * Feature 011, step 006 (DoD-12): every pathname the app entry's stub saw, in order, reset by
+ * each `stubAppIdentity` call. The widening below is only observable this way — the stub
+ * rejects anything it does not know, so a missing branch is a failure, not a silent pass.
+ */
+let appEntryRequests: string[] = [];
+
 function stubAppIdentity(answer: () => Response): void {
+  appEntryRequests = [];
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
       const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const pathname = new URL(raw, "http://localhost").pathname;
+      appEntryRequests.push(pathname);
       if (pathname === "/api/characters") {
         return Promise.resolve(jsonResponse({ characters: [] }, 200));
+      }
+      // Feature 011, step 006 (DoD-12), stubs only: that same tree now also issues
+      // `GET /api/sessions`. Matched on the exact pathname; every other request is still a
+      // test failure, and no assertion about the entry's outcome changes.
+      if (pathname === "/api/sessions") {
+        return Promise.resolve(jsonResponse({ sessions: [] }, 200));
+      }
+      // Feature 011, step 009 (DoD-12), stubs only: the `/sessions/abc123` mounts now also read
+      // that one session. Matched on the exact pathname and answered with the backend's own 404
+      // envelope — the clauses here assert the shell, not the screen — so every other request is
+      // still a test failure and no assertion about the entry's outcome changes.
+      if (pathname === DEEP_SESSION_ITEM_PATH) {
+        return Promise.resolve(
+          jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404),
+        );
       }
       if (pathname !== "/api/me") {
         return Promise.reject(new TypeError("unexpected request in app entry test"));
@@ -442,5 +481,28 @@ describe("the app entry gates on GET /api/me", () => {
 
   it("src/app/main.tsx declares no basename — DoD-12", () => {
     expect(stripComments(readSource(entryMain("app")))).not.toMatch(/\bbasename\b/);
+  });
+
+  // Feature 011, step 006 — DoD-12 (stub widening only). `stubAppIdentity` rejects any path it
+  // does not know, so the clause below is the proof that the tree's new `GET /api/sessions`
+  // is answered and that the entry's own outcome — the shell in #root — is unchanged.
+  it("the app entry still boots with the workspace sessions listing answered — DoD-12", async () => {
+    await mountEntry("app", HOME_PATH.app, signedIn);
+
+    expect(shellNavIn(mountElement())).not.toBeNull();
+    expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
+    expect(appEntryRequests).toContain("/api/sessions");
+  });
+
+  // Feature 011, step 009 — DoD-12 (stub widening only). `stubAppIdentity` rejects any path it
+  // does not know, so this clause is the proof that the session screen's own
+  // `GET /api/sessions/abc123` is answered and that the entry's outcome at that deep path — the
+  // shell in #root — is exactly what 008 step 005 asserted.
+  it("the app entry still boots at the deep session path with its session read answered — DoD-12", async () => {
+    await mountEntry("app", DEEP_SESSION_ROUTE, signedIn);
+
+    expect(shellNavIn(mountElement())).not.toBeNull();
+    expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
+    expect(appEntryRequests).toContain(DEEP_SESSION_ITEM_PATH);
   });
 });

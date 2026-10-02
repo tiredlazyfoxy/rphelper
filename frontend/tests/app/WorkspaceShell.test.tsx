@@ -14,6 +14,15 @@
 // clauses (persistence, the narrow overlay, the two-child grid) are unchanged. The rail and
 // the expanded column are mutually exclusive, so the rail clauses keep their meaning; their
 // control lookups are scoped to the nav column to say so.
+//
+// Amended by feature 011, step 006 (DoD-10): `WorkspaceShellProps` gains the required
+// `sessions` prop, which the shell hands — with its existing `storage` — to the tree, so every
+// render below supplies a **fresh** `SessionsState` and `stubCharactersFetch` now also answers
+// `GET /api/sessions`, routed by the exact pathname (it rejects anything else, so without the
+// branch every clause in this file would fail on an unexpected request). 008's and 009's own
+// assertions are unchanged: the tree's chevron labels are "Collapse <name>", never the
+// anchored "Collapse tree" the shell's own control carries, and reading the collapsed set
+// writes nothing, so the "writes nothing to the storage" clauses keep their meaning.
 import type * as React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -23,6 +32,8 @@ import { WorkspaceShell } from "../../src/app/WorkspaceShell";
 import { NARROW_VIEWPORT_QUERY } from "../../src/app/shellState";
 import { CharactersState } from "../../src/app/charactersState";
 import type { Character } from "../../src/app/charactersApi";
+import type { Session } from "../../src/app/sessionsApi";
+import { SessionsState } from "../../src/app/sessionsState";
 import { WORKSPACE_LAYOUT_KEY } from "../../src/app/workspaceLayout";
 import { documentNavigation } from "../../src/shared/api";
 import { AppProviders } from "../../src/shared/AppProviders";
@@ -89,12 +100,31 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-function stubCharactersFetch(): void {
+// 011 step 006: the tree also loads the workspace sessions on mount (D16). The stub answers
+// that one too, by exact pathname; `sessions` defaults to empty, so the 008 / 009 clauses see
+// the tree they always saw, and DoD-10 re-stubs with a row.
+const SESSIONS_PATH = "/api/sessions";
+
+const TREE_SESSION: Session = {
+  id: "9007199254740993001",
+  character_id: TREE_CHARACTER.id,
+  setup_id: null,
+  setup_name: null,
+  archived_at: null,
+  last_used_at: "2026-05-10T09:00:00.000000+00:00",
+  created_at: "2026-05-10T09:00:00.000000+00:00",
+  updated_at: "2026-05-10T09:00:00.000000+00:00",
+};
+
+function stubCharactersFetch(sessions: Session[] = []): void {
   vi.stubGlobal(
     "fetch",
     vi.fn<FetchFn>((input) => {
       const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const url = new URL(raw, "http://localhost");
+      if (url.pathname === SESSIONS_PATH) {
+        return Promise.resolve(jsonResponse({ sessions }, 200));
+      }
       if (url.pathname !== CHARACTERS_PATH) {
         return Promise.reject(new TypeError(`unexpected request in shell test: ${url.pathname}`));
       }
@@ -183,7 +213,13 @@ function renderShell(store: ReturnType<typeof fakeStorage>) {
   return render(
     <AppProviders>
       <MemoryRouter initialEntries={["/"]}>
-        <WorkspaceShell user={USER} storage={store} characters={new CharactersState()}>
+        {/* 011 step 006: `sessions` is required; a fresh workspace state per render (D15). */}
+        <WorkspaceShell
+          user={USER}
+          storage={store}
+          characters={new CharactersState()}
+          sessions={new SessionsState()}
+        >
           <p>{CENTRE_TEXT}</p>
         </WorkspaceShell>
         <LocationProbe />
@@ -599,5 +635,57 @@ describe("the expanded column carries the character tree (009 D13)", () => {
     expectRail();
     expect(queryArchivedSwitch()).toBeNull();
     expect(queryCharactersList()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 011, step 006 — the shell hands the workspace sessions state to the tree (D15, D16).
+/** Session rows anywhere in the nav column, identified by their `/sessions/<id>` href. */
+function navSessionHrefs(): string[] {
+  return within(navElement())
+    .queryAllByRole("link")
+    .map((link) => link.getAttribute("href") ?? "")
+    .filter((value) => value.startsWith("/sessions/"));
+}
+
+describe("the expanded column's tree carries the session level (011 D16)", () => {
+  it("the nav holds Collapse tree, the switch, the Characters list, the User menu and the session rows — DoD-10", async () => {
+    stubCharactersFetch([TREE_SESSION]);
+    renderShell(fakeStorage());
+    await flush();
+
+    expect(navControl(COLLAPSE_NAME)).toBeInTheDocument();
+    expect(queryArchivedSwitch()).not.toBeNull();
+    expect(queryCharactersList()).not.toBeNull();
+    expect(navControl(USER_MENU_NAME)).toBeInTheDocument();
+    expect(navSessionHrefs()).toEqual([`/sessions/${TREE_SESSION.id}`]);
+  });
+
+  it("the rail shows no session rows — DoD-10", async () => {
+    const user = newUser();
+    stubCharactersFetch([TREE_SESSION]);
+    renderShell(fakeStorage());
+    await flush();
+    expect(navSessionHrefs()).toHaveLength(1);
+
+    await user.click(navControl(COLLAPSE_NAME));
+    await waitFor(() => {
+      expect(navMissingControl(COLLAPSE_NAME)).toBeNull();
+    });
+
+    expectRail();
+    expect(navSessionHrefs()).toEqual([]);
+  });
+
+  it("the centre column and the two-child grid are unchanged beside the session rows — DoD-10", async () => {
+    stubCharactersFetch([TREE_SESSION]);
+    renderShell(fakeStorage());
+    await flush();
+
+    expect(within(mainElement()).getByText(CENTRE_TEXT)).toBeInTheDocument();
+    const children = Array.from(gridElement().children);
+    expect(children).toHaveLength(2);
+    expect(children[0]).toBe(navElement());
+    expect(children[1]).toBe(mainElement());
   });
 });
