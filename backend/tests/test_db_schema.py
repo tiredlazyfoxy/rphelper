@@ -16,7 +16,18 @@ from enum import Enum
 from typing import Any
 
 import pytest
-from sqlalchemy import BigInteger, Boolean, Connection, Engine, MetaData, String, Table, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Connection,
+    Engine,
+    MetaData,
+    Select,
+    String,
+    Table,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.schema import CreateTable
@@ -614,7 +625,7 @@ NEW_006_TABLES = {"llm_servers", "models"}
 # "the registry, minus what pre-dated it, minus what later features added". A feature
 # that adds a table appends it here and gives its own delta a `LATER_THAN_<n>_TABLES`
 # set of its own, so the shape stays the same for 010 and beyond.
-LATER_THAN_006_TABLES = {"characters", "setups", "sessions"}  # 009/001, 010/001, 011/001
+LATER_THAN_006_TABLES = {"characters", "setups", "sessions", "messages"}  # 009/001, 010/001, 011/001, 012/001
 
 # context.md D1: the "active" switch admin-surfaces.md describes is deliberately dropped.
 FORBIDDEN_SERVER_FLAG_COLUMNS = ("active", "is_active", "enabled")
@@ -1048,9 +1059,9 @@ def test_no_other_app_module_defines_its_own_table__S006_001_DoD7() -> None:
 PRE_009_TABLES = PRE_006_TABLES | NEW_006_TABLES
 NEW_009_TABLES = {"characters"}
 # DoD-1/DoD-11's shared shape: features after 009 append their tables here (010/001 DoD-8
-# added "setups"; 011/001 DoD-9 added "sessions"), so this delta keeps meaning "009 added
-# exactly `characters`".
-LATER_THAN_009_TABLES: set[str] = {"setups", "sessions"}
+# added "setups"; 011/001 DoD-9 added "sessions"; 012/001 DoD-1 added "messages"), so this
+# delta keeps meaning "009 added exactly `characters`".
+LATER_THAN_009_TABLES: set[str] = {"setups", "sessions", "messages"}
 
 CHARACTERS_COLUMNS = {"id", "user_id", "name", "sheet", "archived_at", "created_at", "updated_at"}
 
@@ -1183,8 +1194,9 @@ PRE_010_TABLES = PRE_009_TABLES | NEW_009_TABLES
 NEW_010_TABLES = {"setups"}
 # 010/001 DoD-1, in 009/001 DoD-11's shape: features after 010 append their tables here, so
 # this delta keeps meaning "010 added exactly `setups`" once a later feature declares one.
-# 011/001 DoD-9 appended "sessions" — the first entry this set ever needed.
-LATER_THAN_010_TABLES: set[str] = {"sessions"}
+# 011/001 DoD-9 appended "sessions" — the first entry this set ever needed; 012/001 DoD-1
+# appended "messages".
+LATER_THAN_010_TABLES: set[str] = {"sessions", "messages"}
 
 SETUPS_COLUMNS = {
     "id",
@@ -1402,7 +1414,8 @@ PRE_011_TABLES = PRE_010_TABLES | NEW_010_TABLES
 NEW_011_TABLES = {"sessions"}
 # 011/001 DoD-1, in 009/001 DoD-11's shape: features after 011 append their tables here, so
 # this delta keeps meaning "011 added exactly `sessions`" once a later feature declares one.
-LATER_THAN_011_TABLES: set[str] = set()
+# 012/001 DoD-1 appended "messages" — the first entry this set ever needed.
+LATER_THAN_011_TABLES: set[str] = {"messages"}
 
 SESSIONS_COLUMNS = {
     "id",
@@ -1665,3 +1678,439 @@ def test_every_earlier_later_features_set_now_names_sessions__S011_001_DoD9() ->
     assert "sessions" in LATER_THAN_009_TABLES
     assert "sessions" in LATER_THAN_010_TABLES
     assert "sessions" not in PRE_011_TABLES
+
+
+# ======================================================================================
+# Feature 012, step 001 (`001.table-selectables-errors-models.md`) — the `messages` table and
+# its three named read selectables. Expected values come from that step's DoD-1..6 and
+# feature 012's context.md "The `messages` table" (twelve columns, three bare FKs including
+# the self-reference, one named CHECK, two non-unique indexes, no `ON DELETE`), D1 (the
+# selectables are Core `select()`s, not SQL views) and D7 (`message_states` projects only
+# the five state columns). Tests are suffixed `__S012_001_DoD<n>`.
+# ======================================================================================
+
+# The registry as it stood before this step (003/001 + 005/001, 004/001, 006/001, 009/001,
+# 010/001, 011/001).
+PRE_012_TABLES = PRE_011_TABLES | NEW_011_TABLES
+NEW_012_TABLES = {"messages"}
+# 012/001 DoD-1, in 009/001 DoD-11's shape: features after 012 append their tables here, so
+# this delta keeps meaning "012 added exactly `messages`" once a later feature declares one.
+LATER_THAN_012_TABLES: set[str] = set()
+
+MESSAGES_COLUMNS = {
+    "id",
+    "user_id",
+    "session_id",
+    "role",
+    "kind",
+    "text",
+    "related_to",
+    "settled_at",
+    "tool_name",
+    "tool_payload",
+    "created_at",
+    "updated_at",
+}
+MESSAGES_NULLABLE_COLUMNS = ("kind", "related_to", "settled_at", "tool_name", "tool_payload")
+MESSAGES_NOT_NULL_COLUMNS = ("id", "user_id", "session_id", "role", "text", "created_at", "updated_at")
+
+# 012/001 DoD-2 — data-model.md: `ORDER BY id` is stream order (no position), no discussion
+# table, no per-message language, and the four states are column predicates (no status).
+FORBIDDEN_MESSAGES_COLUMNS = ("position", "discussion_id", "language", "status")
+
+# D7: `message_states` can classify a row's state but carries no content.
+MESSAGE_STATES_COLUMNS = {"id", "user_id", "session_id", "related_to", "settled_at"}
+
+SELECTABLE_NAMES = ("settled_entries", "current_zone", "message_states")
+
+SETTLED_AT = "2026-09-30T08:15:30.123456+00:00"
+
+RAW_MESSAGES_INSERT = text(
+    "INSERT INTO messages "
+    "(id, user_id, session_id, role, kind, text, related_to, settled_at, tool_name, tool_payload, "
+    "created_at, updated_at) "
+    "VALUES (:id, :user_id, :session_id, :role, :kind, :text, :related_to, :settled_at, :tool_name, "
+    ":tool_payload, :created_at, :updated_at)"
+)
+
+
+def _messages() -> Table:
+    return schema.metadata.tables["messages"]
+
+
+def _raw_message(**overrides: Any) -> dict[str, Any]:
+    """A current-zone row (NULL/NULL) by default, owned by user 1 in session 30."""
+    row: dict[str, Any] = {
+        "id": 100,
+        "user_id": 1,
+        "session_id": 30,
+        "role": "user",
+        "kind": None,
+        "text": "She leans on the rail.",
+        "related_to": None,
+        "settled_at": None,
+        "tool_name": None,
+        "tool_payload": None,
+        "created_at": TIMESTAMP,
+        "updated_at": TIMESTAMP,
+    }
+    row.update(overrides)
+    return row
+
+
+def _seeded_messages_connection(db_engine: Engine) -> Connection:
+    """A connection on a fresh file: whole registry created, foreign keys **on**, one owner
+    (`id=1`), one of their characters (`id=10`) and one of their sessions (`id=30`, no setup)
+    committed, so a valid `messages` row has every parent it can name (001.context.md
+    "Test seeding")."""
+    with db_engine.connect() as setup:
+        schema.metadata.create_all(setup)
+        setup.commit()
+
+    connection = db_engine.connect()
+    connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+    assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+    connection.execute(RAW_INSERT, _raw_row(id=1, username="owner"))
+    connection.execute(RAW_CHARACTER_INSERT, _raw_character(id=10, user_id=1))
+    connection.execute(RAW_SESSIONS_INSERT, _raw_sessions_row(id=30, user_id=1, character_id=10, setup_id=None))
+    connection.commit()
+    return connection
+
+
+def _message_ids(connection: Connection) -> set[int]:
+    return {row[0] for row in connection.execute(text("SELECT id FROM messages")).all()}
+
+
+# --- 012/001 DoD-1: the registry gains `messages` and nothing else ----------------------
+
+
+def test_registry_gains_exactly_the_messages_table__S012_001_DoD1() -> None:
+    """012/001 DoD-1 — `messages` is registered, and it is the only table 012 declares."""
+    assert "messages" in schema.metadata.tables
+    assert isinstance(_messages(), Table)
+    assert _messages().name == "messages"
+    assert set(schema.metadata.tables) - PRE_012_TABLES - LATER_THAN_012_TABLES == NEW_012_TABLES
+
+
+def test_registry_still_carries_every_pre_012_table__S012_001_DoD1() -> None:
+    """012/001 DoD-1 — 012 only adds: every table declared before it is still registered."""
+    assert PRE_012_TABLES <= set(schema.metadata.tables)
+
+
+def test_the_012_delta_survives_a_table_a_later_feature_declares__S012_001_DoD1() -> None:
+    """012/001 DoD-1 — the delta is later-table-proof: a future table named in the
+    later-features set leaves it meaning "012 added exactly `messages`"."""
+    future_table = "a_table_a_later_feature_declares"
+    future_registry = set(schema.metadata.tables) | {future_table}
+    future_later = LATER_THAN_012_TABLES | {future_table}
+
+    assert future_registry - PRE_012_TABLES - future_later == NEW_012_TABLES
+
+
+def test_the_006_delta_still_holds_with_messages_registered__S012_001_DoD1() -> None:
+    """012/001 DoD-1 — 006's delta still means "006 added exactly `llm_servers` and `models`"."""
+    assert PRE_006_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_006_TABLES - LATER_THAN_006_TABLES == NEW_006_TABLES
+
+
+def test_the_009_delta_still_holds_with_messages_registered__S012_001_DoD1() -> None:
+    """012/001 DoD-1 — 009's delta still means "009 added exactly `characters`"."""
+    assert PRE_009_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_009_TABLES - LATER_THAN_009_TABLES == NEW_009_TABLES
+
+
+def test_the_010_delta_still_holds_with_messages_registered__S012_001_DoD1() -> None:
+    """012/001 DoD-1 — 010's delta still means "010 added exactly `setups`"."""
+    assert PRE_010_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_010_TABLES - LATER_THAN_010_TABLES == NEW_010_TABLES
+
+
+def test_the_011_delta_still_holds_with_messages_registered__S012_001_DoD1() -> None:
+    """012/001 DoD-1 — 011's delta still means "011 added exactly `sessions`"."""
+    assert PRE_011_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_011_TABLES - LATER_THAN_011_TABLES == NEW_011_TABLES
+
+
+def test_every_earlier_later_features_set_now_names_messages__S012_001_DoD1() -> None:
+    """012/001 DoD-1 — the later-table-proof shape is kept by *adding* `messages` to each
+    earlier delta's later-features set rather than by rewriting its assertion."""
+    assert "messages" in LATER_THAN_006_TABLES
+    assert "messages" in LATER_THAN_009_TABLES
+    assert "messages" in LATER_THAN_010_TABLES
+    assert "messages" in LATER_THAN_011_TABLES
+    assert "messages" not in PRE_012_TABLES
+
+
+# --- 012/001 DoD-2: exactly twelve columns, the primary key and nullability ---------------
+
+
+def test_messages_has_exactly_the_twelve_declared_columns__S012_001_DoD2() -> None:
+    """012/001 DoD-2 — exactly id, user_id, session_id, role, kind, text, related_to,
+    settled_at, tool_name, tool_payload, created_at, updated_at."""
+    names = [column.name for column in _messages().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == MESSAGES_COLUMNS
+
+
+def test_messages_id_is_the_primary_key__S012_001_DoD2() -> None:
+    """012/001 DoD-2 — `id` alone is the primary key."""
+    assert [column.name for column in _messages().primary_key.columns] == ["id"]
+    assert _messages().c.id.primary_key is True
+
+
+@pytest.mark.parametrize("column", MESSAGES_NULLABLE_COLUMNS)
+def test_messages_state_kind_and_tool_columns_are_nullable__S012_001_DoD2(column: str) -> None:
+    """012/001 DoD-2 — `kind`, `related_to`, `settled_at`, `tool_name`, `tool_payload` are
+    nullable."""
+    assert _messages().c[column].nullable is True
+
+
+@pytest.mark.parametrize("column", MESSAGES_NOT_NULL_COLUMNS)
+def test_messages_other_columns_are_not_nullable__S012_001_DoD2(column: str) -> None:
+    """012/001 DoD-2 — every other column is NOT NULL."""
+    assert _messages().c[column].nullable is False
+
+
+@pytest.mark.parametrize("column", FORBIDDEN_MESSAGES_COLUMNS)
+def test_messages_declares_no_position_discussion_language_or_status_column__S012_001_DoD2(
+    column: str,
+) -> None:
+    """012/001 DoD-2 — there is no `position`, `discussion_id`, `language` or `status` column."""
+    assert column not in _messages().c
+
+
+# --- 012/001 DoD-3: the three bare foreign keys and the two indexes -----------------------
+
+
+def test_messages_user_id_declares_a_foreign_key_to_users_id__S012_001_DoD3() -> None:
+    """012/001 DoD-3 — `user_id` carries a declared foreign key targeting `users.id`."""
+    targets = {fk.target_fullname for fk in _messages().c.user_id.foreign_keys}
+    assert targets == {"users.id"}
+
+
+def test_messages_session_id_declares_a_foreign_key_to_sessions_id__S012_001_DoD3() -> None:
+    """012/001 DoD-3 — `session_id` carries a declared foreign key targeting `sessions.id`."""
+    targets = {fk.target_fullname for fk in _messages().c.session_id.foreign_keys}
+    assert targets == {"sessions.id"}
+
+
+def test_messages_related_to_declares_a_self_foreign_key_to_messages_id__S012_001_DoD3() -> None:
+    """012/001 DoD-3 — `related_to` carries a declared foreign key targeting `messages.id`."""
+    targets = {fk.target_fullname for fk in _messages().c.related_to.foreign_keys}
+    assert targets == {"messages.id"}
+
+
+def test_messages_declares_exactly_the_three_foreign_keys__S012_001_DoD3() -> None:
+    """012/001 DoD-3 — the table's foreign keys are those three and no other."""
+    pairs = {(fk.parent.name, fk.target_fullname) for fk in _messages().foreign_keys}
+    assert pairs == {("user_id", "users.id"), ("session_id", "sessions.id"), ("related_to", "messages.id")}
+
+
+def test_messages_foreign_keys_declare_no_on_delete_action__S012_001_DoD3() -> None:
+    """012/001 DoD-3 — the archive rule: no foreign key declares an `ON DELETE` action."""
+    assert _messages().foreign_keys
+    for fk in _messages().foreign_keys:
+        assert fk.ondelete is None, f"{fk.parent.name} declares ON DELETE {fk.ondelete}"
+
+
+def test_messages_declares_exactly_two_indexes__S012_001_DoD3() -> None:
+    """012/001 DoD-3 — the table declares exactly two indexes, and neither is unique."""
+    assert len(_messages().indexes) == 2
+    assert not any(index.unique for index in _messages().indexes)
+
+
+def test_messages_declares_a_non_unique_index_on_session_id_then_settled_at__S012_001_DoD3() -> None:
+    """012/001 DoD-3 — one non-unique index whose columns are `session_id`, `settled_at` in
+    that order."""
+    indexes = _indexes_over(_messages(), ["session_id", "settled_at"])
+    assert len(indexes) == 1
+    assert not indexes[0].unique
+
+
+def test_messages_declares_a_non_unique_index_on_related_to__S012_001_DoD3() -> None:
+    """012/001 DoD-3 — one non-unique index on `related_to` alone."""
+    indexes = _indexes_over(_messages(), ["related_to"])
+    assert len(indexes) == 1
+    assert not indexes[0].unique
+
+
+# --- 012/001 DoD-4: the CHECK and the foreign keys hold in a real database ----------------
+
+
+def test_create_all_creates_messages_and_accepts_a_settled_row__S012_001_DoD4(db_engine: Engine) -> None:
+    """012/001 DoD-4 — `related_to` NULL and `settled_at` set (the record state) inserts."""
+    with _seeded_messages_connection(db_engine) as connection:
+        assert "messages" in _created_table_names(connection)
+
+        connection.execute(
+            RAW_MESSAGES_INSERT, _raw_message(id=100, kind="turn", related_to=None, settled_at=SETTLED_AT)
+        )
+        connection.commit()
+        assert _message_ids(connection) == {100}
+
+
+def test_messages_accepts_a_buried_row_under_an_existing_message__S012_001_DoD4(db_engine: Engine) -> None:
+    """012/001 DoD-4 — `related_to` naming an existing message and `settled_at` NULL (the
+    buried state) inserts."""
+    with _seeded_messages_connection(db_engine) as connection:
+        connection.execute(
+            RAW_MESSAGES_INSERT, _raw_message(id=100, kind="turn", related_to=None, settled_at=SETTLED_AT)
+        )
+        connection.execute(RAW_MESSAGES_INSERT, _raw_message(id=101, related_to=100, settled_at=None))
+        connection.commit()
+        assert _message_ids(connection) == {100, 101}
+        assert connection.execute(text("SELECT related_to FROM messages WHERE id = 101")).scalar_one() == 100
+
+
+def test_messages_refuses_a_row_both_buried_and_settled__S012_001_DoD4(db_engine: Engine) -> None:
+    """012/001 DoD-4 — the CHECK: a row with **both** `related_to` and `settled_at` set is
+    rejected by the database."""
+    with _seeded_messages_connection(db_engine) as connection:
+        connection.execute(
+            RAW_MESSAGES_INSERT, _raw_message(id=100, kind="turn", related_to=None, settled_at=SETTLED_AT)
+        )
+        connection.commit()
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                RAW_MESSAGES_INSERT, _raw_message(id=101, kind="turn", related_to=100, settled_at=SETTLED_AT)
+            )
+
+
+def test_messages_refuses_a_row_whose_session_id_names_no_session__S012_001_DoD4(db_engine: Engine) -> None:
+    """012/001 DoD-4 — with foreign keys on, the `sessions` FK is enforced."""
+    with _seeded_messages_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(RAW_MESSAGES_INSERT, _raw_message(id=102, session_id=999_999))
+
+
+def test_messages_refuses_a_row_whose_related_to_names_no_message__S012_001_DoD4(db_engine: Engine) -> None:
+    """012/001 DoD-4 — with foreign keys on, the self-referencing `related_to` FK is enforced."""
+    with _seeded_messages_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(RAW_MESSAGES_INSERT, _raw_message(id=103, related_to=999_999, settled_at=None))
+
+
+def test_messages_accepts_an_assistant_row_with_no_kind__S012_001_DoD4(db_engine: Engine) -> None:
+    """012/001 DoD-4 — no DB CHECK on `role` / `kind`: `role` 'assistant' with `kind` NULL
+    inserts."""
+    with _seeded_messages_connection(db_engine) as connection:
+        connection.execute(RAW_MESSAGES_INSERT, _raw_message(id=104, role="assistant", kind=None))
+        connection.commit()
+        row = connection.execute(text("SELECT role, kind FROM messages WHERE id = 104")).one()
+        assert row[0] == "assistant"
+        assert row[1] is None
+
+
+# --- 012/001 DoD-5: the three selectables split the four states ---------------------------
+
+ZONE_ID = 200
+SETTLED_ID = 201
+BURIED_ID = 202
+
+
+def _three_state_connection(db_engine: Engine) -> Connection:
+    """One session (30) holding a zone row (NULL/NULL), a settled row (NULL/set) and a buried
+    row (set/NULL) whose `related_to` is the settled row."""
+    connection = _seeded_messages_connection(db_engine)
+    connection.execute(RAW_MESSAGES_INSERT, _raw_message(id=ZONE_ID, related_to=None, settled_at=None))
+    connection.execute(
+        RAW_MESSAGES_INSERT,
+        _raw_message(id=SETTLED_ID, kind="turn", related_to=None, settled_at=SETTLED_AT),
+    )
+    connection.execute(RAW_MESSAGES_INSERT, _raw_message(id=BURIED_ID, related_to=SETTLED_ID, settled_at=None))
+    connection.commit()
+    return connection
+
+
+def test_settled_entries_returns_exactly_the_settled_row__S012_001_DoD5(db_engine: Engine) -> None:
+    """012/001 DoD-5 — `settled_entries` returns the settled row and neither the zone nor the
+    buried row."""
+    with _three_state_connection(db_engine) as connection:
+        rows = connection.execute(schema.settled_entries).all()
+        assert [row._mapping["id"] for row in rows] == [SETTLED_ID]
+
+
+def test_current_zone_returns_exactly_the_zone_row__S012_001_DoD5(db_engine: Engine) -> None:
+    """012/001 DoD-5 — `current_zone` returns the zone row and neither the settled nor the
+    buried row."""
+    with _three_state_connection(db_engine) as connection:
+        rows = connection.execute(schema.current_zone).all()
+        assert [row._mapping["id"] for row in rows] == [ZONE_ID]
+
+
+def test_message_states_returns_all_three_rows__S012_001_DoD5(db_engine: Engine) -> None:
+    """012/001 DoD-5 — `message_states` has no filter: zone, settled and buried rows all come
+    back."""
+    with _three_state_connection(db_engine) as connection:
+        rows = connection.execute(schema.message_states).all()
+        ids = [row._mapping["id"] for row in rows]
+        assert len(ids) == 3
+        assert set(ids) == {ZONE_ID, SETTLED_ID, BURIED_ID}
+
+
+@pytest.mark.parametrize("name", ["settled_entries", "current_zone"])
+def test_settled_entries_and_current_zone_return_every_messages_column__S012_001_DoD5(
+    db_engine: Engine, name: str
+) -> None:
+    """012/001 DoD-5 — the two reading selectables return every `messages` column, under the
+    table's own column names."""
+    with _three_state_connection(db_engine) as connection:
+        result = connection.execute(getattr(schema, name))
+        keys = list(result.keys())
+        result.close()
+        assert len(keys) == len(set(keys))
+        assert set(keys) == MESSAGES_COLUMNS
+        assert set(keys) == {column.name for column in _messages().columns}
+
+
+def test_message_states_returns_only_the_five_state_columns__S012_001_DoD5(db_engine: Engine) -> None:
+    """012/001 DoD-5 — D7: `message_states` projects exactly `id`, `user_id`, `session_id`,
+    `related_to`, `settled_at` — no `text`, no `kind`."""
+    with _three_state_connection(db_engine) as connection:
+        result = connection.execute(schema.message_states)
+        keys = list(result.keys())
+        result.close()
+        assert len(keys) == len(set(keys))
+        assert set(keys) == MESSAGE_STATES_COLUMNS
+        assert "text" not in keys
+        assert "kind" not in keys
+
+
+def test_settled_entries_returns_the_settled_rows_values__S012_001_DoD5(db_engine: Engine) -> None:
+    """012/001 DoD-5 — the settled row comes back as stored (state and content columns)."""
+    with _three_state_connection(db_engine) as connection:
+        row = connection.execute(schema.settled_entries).one()._mapping
+        assert row["id"] == SETTLED_ID
+        assert row["session_id"] == 30
+        assert row["kind"] == "turn"
+        assert row["related_to"] is None
+        assert row["settled_at"] == SETTLED_AT
+
+
+# --- 012/001 DoD-6: the selectables are not views and not tables --------------------------
+
+
+@pytest.mark.parametrize("name", SELECTABLE_NAMES)
+def test_each_selectable_is_a_module_level_core_select__S012_001_DoD6(name: str) -> None:
+    """012/001 DoD-6 — D1: each name is a module-level Core `select()`, not a `Table`."""
+    value = getattr(schema, name)
+    assert isinstance(value, Select)
+    assert not isinstance(value, Table)
+
+
+@pytest.mark.parametrize("name", SELECTABLE_NAMES)
+def test_no_selectable_name_is_a_registry_table__S012_001_DoD6(name: str) -> None:
+    """012/001 DoD-6 — none of the three selectable names is a key of `metadata.tables`."""
+    assert name not in schema.metadata.tables
+
+
+def test_create_all_creates_no_sql_view__S012_001_DoD6(db_engine: Engine) -> None:
+    """012/001 DoD-6 — D1: after `create_all`, `sqlite_master` holds no row of type `view`."""
+    with db_engine.connect() as connection:
+        schema.metadata.create_all(connection)
+        connection.commit()
+        views = connection.execute(text("SELECT name FROM sqlite_master WHERE type = 'view'")).all()
+        assert views == []
+        names = {row[0] for row in connection.execute(text("SELECT name FROM sqlite_master")).all()}
+        for name in SELECTABLE_NAMES:
+            assert name not in names

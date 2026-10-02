@@ -8,8 +8,9 @@ source of truth and `db/drift.py` walks it directly".
 The rule every later feature binds to, and which this module exists to state:
 
 - **Every table in RPHelper is declared as a `Table(...)` literal in this file**, bound
-  to the `metadata` object below. The two SQL views `data-model.md` declares live here
-  too, with the features that own them.
+  to the `metadata` object below. The stream's named read selectables (`settled_entries`,
+  `current_zone`, `message_states`) live here too: they are SQLAlchemy Core `select()`
+  objects over `messages`, not SQL views, and execute no DDL (feature `012`, D1).
 - There are **no per-feature table modules**, no import-side-effect registration and no
   `build_registry()` builder callable. A single file has no import-order hazard, and
   nothing can be silently absent from the drift report because nobody imported it.
@@ -24,6 +25,7 @@ their own tables here; DDL only ever runs through `007`'s admin-triggered `Creat
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Enum,
     ForeignKey,
@@ -35,6 +37,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
+    select,
 )
 
 from app.roles import Role
@@ -271,4 +274,74 @@ sessions = Table(
     Column("created_at", Text, nullable=False),
     Column("updated_at", Text, nullable=False),
     Index("ix_sessions_user_id_character_id", "user_id", "character_id"),
+)
+
+
+#: Every row of a session's stream (`data-model.md` § `messages`; feature `012`, D1). `id` is
+#: a snowflake and `ORDER BY id` **is** stream order — there is no position column. `user_id`
+#: is the owner (R5), `session_id` the parent session, `related_to` a self-reference to the
+#: settled head a buried row lies under. `role` and `kind` are plain text with **no** CHECK:
+#: the pydantic boundary constrains what is written. `kind` and `settled_at` are NULL until a
+#: row is settled; `tool_name` / `tool_payload` serve `role='tool'` rows only (R9) and have no
+#: writer yet. The four states: NULL/NULL = current zone; `related_to` NULL + `settled_at` set
+#: = record; `related_to` set + `settled_at` NULL = buried; both set = illegal (the named
+#: CHECK). Every foreign key is bare, with **no `ON DELETE`** — nothing deletes a message
+#: (R6). Two non-unique indexes: `(session_id, settled_at)` for the stream reads and
+#: `(related_to)` for the group lookups of settle / re-open. Timestamps are the fixed-width
+#: UTC text form.
+messages = Table(
+    "messages",
+    metadata,
+    Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=False),
+    Column(
+        "user_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("users.id"),
+        nullable=False,
+    ),
+    Column(
+        "session_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("sessions.id"),
+        nullable=False,
+    ),
+    Column("role", Text, nullable=False),
+    Column("kind", Text, nullable=True),
+    Column("text", Text, nullable=False),
+    Column(
+        "related_to",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("messages.id"),
+        nullable=True,
+    ),
+    Column("settled_at", Text, nullable=True),
+    Column("tool_name", Text, nullable=True),
+    Column("tool_payload", Text, nullable=True),
+    Column("created_at", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    CheckConstraint("related_to IS NULL OR settled_at IS NULL", name="ck_messages_buried_or_settled"),
+    Index("ix_messages_session_id_settled_at", "session_id", "settled_at"),
+    Index("ix_messages_related_to", "related_to"),
+)
+
+
+#: The settled record (D1): every `messages` column of every row whose `settled_at` is set.
+#: No session filter and no ordering — callers narrow and order it on its own columns.
+settled_entries = select(messages).where(messages.c.settled_at.is_not(None))
+
+#: The current zone (D1): every `messages` column of every row with `related_to` and
+#: `settled_at` both NULL. No session filter and no ordering.
+current_zone = select(messages).where(
+    messages.c.related_to.is_(None),
+    messages.c.settled_at.is_(None),
+)
+
+#: A row's state without its content (D7): only `id`, `user_id`, `session_id`, `related_to`
+#: and `settled_at` — never `text` or `kind`. No filter and no ordering.
+message_states = select(
+    messages.c.id,
+    messages.c.user_id,
+    messages.c.session_id,
+    messages.c.related_to,
+    messages.c.settled_at,
 )

@@ -1,0 +1,155 @@
+"""`/api/sessions/{session_id}/entries|zone|settle|reopen` and `/api/messages/{message_id}`.
+
+Feature `012`, step `004` — the stream router, transport layer only. Seven JSON routes
+(`context.md` Wire contract), each calling exactly one operation of `app.services.messages`
+or `app.services.settle` and converting its value into the `app.models.stream` models.
+`require_user` is attached to the **router** (D12); each handler also names it as a
+parameter to receive the `CurrentUser` whose `id` scopes the service call. The router
+declares no prefix and carries full paths. Path ids are inbound snowflakes, so a
+non-numeric id answers 422.
+
+The router owns HTTP and nothing else: no SQL, no `app.db.schema` import, no
+`app.services.parens` import (R12 parse-once lives in the settle service). Domain errors
+propagate to the one registered `DomainError` handler; the router catches nothing. No
+discard, stop, compose or delete route exists (R11, UC-086).
+"""
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import Connection
+
+from app.db.engine import get_connection
+from app.dependencies import CurrentUser, require_user
+from app.ids import SnowflakeGenerator
+from app.models.ids import SnowflakeIn
+from app.models.stream import (
+    AppendMessageRequest,
+    EditMessageRequest,
+    EntryListResponse,
+    FilePartnerRequest,
+    MessageResponse,
+    ReopenResponse,
+    SettleResponse,
+    ZoneResponse,
+)
+from app.routers.bootstrap import get_id_generator
+from app.services.messages import (
+    StreamMessage,
+    append_message,
+    edit_message_text,
+    file_partner_entry,
+    list_entries,
+    list_zone,
+)
+from app.services.settle import ReopenResult, SettleResult, reopen, settle
+
+router = APIRouter(
+    tags=["stream"],
+    dependencies=[Depends(require_user)],
+)
+
+
+def _message_to_response(message: StreamMessage) -> MessageResponse:
+    """Render one service `StreamMessage` as the wire `MessageResponse`."""
+    return MessageResponse.model_validate(message, from_attributes=True)
+
+
+def _settle_to_response(result: SettleResult) -> SettleResponse:
+    """Render a service `SettleResult` as the wire `SettleResponse`."""
+    return SettleResponse(
+        entry_id=result.entry_id,
+        kind=result.kind,
+        buried_ids=list(result.buried_ids),
+    )
+
+
+def _reopen_to_response(result: ReopenResult) -> ReopenResponse:
+    """Render a service `ReopenResult` as the wire `ReopenResponse`."""
+    return ReopenResponse(
+        reopened_id=result.reopened_id,
+        restored_ids=list(result.restored_ids),
+    )
+
+
+@router.get("/api/sessions/{session_id}/entries", status_code=200)
+def list_session_entries(
+    session_id: SnowflakeIn,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+) -> EntryListResponse:
+    """The session's settled entries via `list_entries(connection, user_id, session_id)`."""
+    entries = list_entries(connection, current_user.id, session_id)
+    return EntryListResponse(entries=[_message_to_response(entry) for entry in entries])
+
+
+@router.post("/api/sessions/{session_id}/entries", status_code=201)
+def file_partner(
+    session_id: SnowflakeIn,
+    body: FilePartnerRequest,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+    generator: Annotated[SnowflakeGenerator, Depends(get_id_generator)],
+) -> MessageResponse:
+    """File a partner block via `file_partner_entry(..., body.text)`; answers 201.
+
+    The body's `kind` is validated by the model and not passed on.
+    """
+    message = file_partner_entry(connection, generator, current_user.id, session_id, body.text)
+    return _message_to_response(message)
+
+
+@router.get("/api/sessions/{session_id}/zone", status_code=200)
+def list_session_zone(
+    session_id: SnowflakeIn,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+) -> ZoneResponse:
+    """The session's current zone via `list_zone(connection, user_id, session_id)`."""
+    zone = list_zone(connection, current_user.id, session_id)
+    return ZoneResponse(messages=[_message_to_response(message) for message in zone])
+
+
+@router.post("/api/sessions/{session_id}/zone/messages", status_code=201)
+def append_zone_message(
+    session_id: SnowflakeIn,
+    body: AppendMessageRequest,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+    generator: Annotated[SnowflakeGenerator, Depends(get_id_generator)],
+) -> MessageResponse:
+    """Append a user message to the zone via `append_message(..., body.text)`; answers 201."""
+    message = append_message(connection, generator, current_user.id, session_id, body.text)
+    return _message_to_response(message)
+
+
+@router.post("/api/sessions/{session_id}/settle", status_code=200)
+def settle_zone(
+    session_id: SnowflakeIn,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+) -> SettleResponse:
+    """Settle the current zone via `settle(connection, user_id, session_id)`. No body."""
+    return _settle_to_response(settle(connection, current_user.id, session_id))
+
+
+@router.post("/api/sessions/{session_id}/reopen", status_code=200)
+def reopen_group(
+    session_id: SnowflakeIn,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+) -> ReopenResponse:
+    """Re-open the last settled group via `reopen(connection, user_id, session_id)`. No body."""
+    return _reopen_to_response(reopen(connection, current_user.id, session_id))
+
+
+@router.patch("/api/messages/{message_id}", status_code=200)
+def edit_message(
+    message_id: SnowflakeIn,
+    body: EditMessageRequest,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+) -> MessageResponse:
+    """Replace a zone message's text via `edit_message_text(..., body.text)`."""
+    message = edit_message_text(connection, current_user.id, message_id, body.text)
+    return _message_to_response(message)

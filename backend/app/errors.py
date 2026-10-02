@@ -345,6 +345,91 @@ class SetupArchivedError(DomainError):
         super().__init__(message, detail)
 
 
+class ZoneEmptyError(DomainError):
+    """Settle was asked of a session whose current zone holds no message.
+
+    Raised by `app.services.settle` (feature `012`, `context.md` D13). 409: the caller owns
+    the session, but the stream's state conflicts with the operation. `detail` carries nothing.
+    """
+
+    code = "zone_empty"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "There is nothing in the current zone to settle."
+        super().__init__(message, detail)
+
+
+class ZoneNotEmptyError(DomainError):
+    """Re-open was asked of a session whose current zone holds a message.
+
+    Raised by `app.services.settle` (feature `012`, `context.md` D10, D13). 409. `detail`
+    carries nothing.
+    """
+
+    code = "zone_not_empty"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "The current zone still holds a message; re-open needs an empty zone."
+        super().__init__(message, detail)
+
+
+class NothingToReopenError(DomainError):
+    """Re-open found no settled row, or the last settled row has no buried group.
+
+    Raised by `app.services.settle` (feature `012`, `context.md` D10, D13). 409. `detail`
+    carries nothing.
+    """
+
+    code = "nothing_to_reopen"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "There is no settled group to re-open."
+        super().__init__(message, detail)
+
+
+class MessageNotEditableError(DomainError):
+    """An edit named a message the caller owns that is buried or (until `014`) settled.
+
+    Raised by `app.services.messages` (feature `012`, `context.md` D2, D13). 409. `detail`
+    carries nothing.
+    """
+
+    code = "message_not_editable"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "That message cannot be edited."
+        super().__init__(message, detail)
+
+
+class MessageNotFoundError(DomainError):
+    """An id-addressed message operation names no message the caller owns.
+
+    Raised by `app.services.messages` (feature `012`, `context.md` D13) for both "no such id"
+    and "another user's id" — indistinguishable on the wire (R5). `detail` carries nothing.
+    """
+
+    code = "message_not_found"
+    http_status = 404
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "That message does not exist."
+        super().__init__(message, detail)
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later
