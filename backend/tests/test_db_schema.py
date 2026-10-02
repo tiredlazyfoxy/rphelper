@@ -608,6 +608,14 @@ MODELS_COLUMNS = {
 PRE_006_TABLES = {"users", "auth_sessions"}
 NEW_006_TABLES = {"llm_servers", "models"}
 
+# 009/001 DoD-11: tables declared by features *after* 006. A delta written as
+# `set(tables) - PRE == NEW` is only true until the next feature adds a table, which is
+# what registering `characters` broke. Every feature's delta below is therefore
+# "the registry, minus what pre-dated it, minus what later features added". A feature
+# that adds a table appends it here and gives its own delta a `LATER_THAN_<n>_TABLES`
+# set of its own, so the shape stays the same for 010 and beyond.
+LATER_THAN_006_TABLES = {"characters", "setups"}  # 009/001, 010/001
+
 # context.md D1: the "active" switch admin-surfaces.md describes is deliberately dropped.
 FORBIDDEN_SERVER_FLAG_COLUMNS = ("active", "is_active", "enabled")
 
@@ -885,17 +893,28 @@ def test_models_flags_default_to_false_when_not_supplied__S006_001_DoD4(llm_conn
 
 
 def test_registry_gains_exactly_the_two_new_tables__S006_001_DoD5() -> None:
-    """006/001 DoD-5 — beside the tables that pre-date this step, only the two new ones exist."""
-    assert set(schema.metadata.tables) - PRE_006_TABLES == NEW_006_TABLES
+    """006/001 DoD-5 — beside the tables that pre-date this step, only the two new ones exist.
+
+    009/001 DoD-11 — rescoped: the tables later features declare are subtracted too, so the
+    assertion still means "006 added exactly these two" once `characters` and its successors
+    exist. It still fails if either 006 table is removed, and if a pre-006 table disappears.
+    """
+    assert PRE_006_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_006_TABLES - LATER_THAN_006_TABLES == NEW_006_TABLES
 
 
 def test_create_all_on_a_fresh_file_database_creates_both_tables__S006_001_DoD5(
     llm_connection: Connection,
 ) -> None:
-    """006/001 DoD-5 — `create_all` against a fresh file creates both, and no other new table."""
+    """006/001 DoD-5 — `create_all` against a fresh file creates both, and no other new table.
+
+    009/001 DoD-11 — rescoped the same way as the registry delta above: later features'
+    tables are subtracted, 006's two must still be there.
+    """
     created = _created_table_names(llm_connection)
     assert NEW_006_TABLES <= created
-    assert created - PRE_006_TABLES == NEW_006_TABLES
+    assert PRE_006_TABLES <= created
+    assert created - PRE_006_TABLES - LATER_THAN_006_TABLES == NEW_006_TABLES
 
 
 def test_duplicate_server_and_model_name_pair_is_refused__S006_001_DoD5(llm_connection: Connection) -> None:
@@ -1017,3 +1036,135 @@ def test_no_other_app_module_defines_its_own_table__S006_001_DoD7() -> None:
                 assert any(value is table for table in registry_tables), (module_name, value.name)
             if isinstance(value, MetaData):
                 assert value is schema.metadata, module_name
+
+
+# ======================================================================================
+# Feature 009, step 001 (`001.table-error-models.md`) — the `characters` table.
+# Expected values come from that step's DoD-1..4 and feature 009's context.md D5.
+# Tests are suffixed `__S009_001_DoD<n>`.
+# ======================================================================================
+
+# The registry as it stood before this step (003/001 + 005/001, 004/001, 006/001).
+PRE_009_TABLES = PRE_006_TABLES | NEW_006_TABLES
+NEW_009_TABLES = {"characters"}
+# DoD-1/DoD-11's shared shape: features after 009 append their tables here (010/001 DoD-8
+# added "setups"), so this delta keeps meaning "009 added exactly `characters`".
+LATER_THAN_009_TABLES: set[str] = {"setups"}
+
+CHARACTERS_COLUMNS = {"id", "user_id", "name", "sheet", "archived_at", "created_at", "updated_at"}
+
+# D5 / data-model.md R1: columns 009 must NOT declare — three deferred to 017, two never.
+FORBIDDEN_CHARACTERS_COLUMNS = ("model_ref", "system_prompt", "tools", "rp_language", "preferred_language")
+
+RAW_CHARACTER_INSERT = text(
+    "INSERT INTO characters (id, user_id, name, sheet, archived_at, created_at, updated_at) "
+    "VALUES (:id, :user_id, :name, :sheet, :archived_at, :created_at, :updated_at)"
+)
+
+
+def _characters() -> Table:
+    return schema.metadata.tables["characters"]
+
+
+def _raw_character(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": 10,
+        "user_id": 1,
+        "name": "Aria",
+        "sheet": "# Aria\n",
+        "archived_at": None,
+        "created_at": TIMESTAMP,
+        "updated_at": TIMESTAMP,
+    }
+    row.update(overrides)
+    return row
+
+
+# --- 009/001 DoD-1: the registry gains `characters` and nothing else --------------------
+
+
+def test_registry_gains_exactly_the_characters_table__S009_001_DoD1() -> None:
+    """009/001 DoD-1 — `characters` is registered, and it is the only table 009 declares."""
+    assert "characters" in schema.metadata.tables
+    assert isinstance(_characters(), Table)
+    assert _characters().name == "characters"
+    assert set(schema.metadata.tables) - PRE_009_TABLES - LATER_THAN_009_TABLES == NEW_009_TABLES
+
+
+def test_registry_still_carries_every_pre_009_table__S009_001_DoD1() -> None:
+    """009/001 DoD-1 — 009 only adds: every table declared before it is still registered."""
+    assert PRE_009_TABLES <= set(schema.metadata.tables)
+
+
+# --- 009/001 DoD-2: exactly seven columns, the primary key and nullability --------------
+
+
+def test_characters_has_exactly_the_seven_declared_columns__S009_001_DoD2() -> None:
+    """009/001 DoD-2 — exactly id, user_id, name, sheet, archived_at, created_at, updated_at."""
+    names = [column.name for column in _characters().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == CHARACTERS_COLUMNS
+
+
+def test_characters_id_is_the_primary_key__S009_001_DoD2() -> None:
+    """009/001 DoD-2 — `id` alone is the primary key."""
+    assert [column.name for column in _characters().primary_key.columns] == ["id"]
+    assert _characters().c.id.primary_key is True
+
+
+def test_characters_archived_at_is_nullable__S009_001_DoD2() -> None:
+    """009/001 DoD-2 — `archived_at` is nullable (NULL until archived)."""
+    assert _characters().c.archived_at.nullable is True
+
+
+@pytest.mark.parametrize("column", ["id", "user_id", "name", "sheet", "created_at", "updated_at"])
+def test_characters_other_columns_are_not_nullable__S009_001_DoD2(column: str) -> None:
+    """009/001 DoD-2 — every column but `archived_at` is NOT NULL."""
+    assert _characters().c[column].nullable is False
+
+
+@pytest.mark.parametrize("column", FORBIDDEN_CHARACTERS_COLUMNS)
+def test_characters_declares_no_deferred_or_forbidden_column__S009_001_DoD2(column: str) -> None:
+    """009/001 DoD-2 — D5/R1: model_ref, system_prompt and tools are 017's; the two language
+    columns are never declared."""
+    assert column not in _characters().c
+
+
+# --- 009/001 DoD-3: the owner foreign key and the `user_id` index -----------------------
+
+
+def test_characters_user_id_declares_a_foreign_key_to_users_id__S009_001_DoD3() -> None:
+    """009/001 DoD-3 — `user_id` carries a declared foreign key targeting `users.id`."""
+    targets = {fk.target_fullname for fk in _characters().c.user_id.foreign_keys}
+    assert targets == {"users.id"}
+
+
+def test_characters_declares_a_non_unique_index_on_user_id__S009_001_DoD3() -> None:
+    """009/001 DoD-3 — an index covers exactly `user_id`, and it is not unique (D5)."""
+    indexes = _single_column_indexes(_characters(), "user_id")
+    assert indexes != []
+    assert not any(index.unique for index in indexes)
+
+
+# --- 009/001 DoD-4: `create_all` creates the table, and the FK is enforced ---------------
+
+
+def test_create_all_creates_characters_and_enforces_the_user_fk__S009_001_DoD4(db_engine: Engine) -> None:
+    """009/001 DoD-4 — `create_all` on a fresh engine creates `characters`; with foreign keys on,
+    a row whose `user_id` names no `users` row is refused."""
+    with db_engine.connect() as setup:
+        schema.metadata.create_all(setup)
+        setup.commit()
+
+    with db_engine.connect() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+        assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+        assert "characters" in _created_table_names(connection)
+
+        connection.execute(RAW_INSERT, _raw_row(id=1, username="owner"))
+        connection.execute(RAW_CHARACTER_INSERT, _raw_character(id=10, user_id=1))
+        connection.commit()
+        assert connection.execute(text("SELECT COUNT(*) FROM characters")).scalar_one() == 1
+
+        with pytest.raises(IntegrityError):
+            connection.execute(RAW_CHARACTER_INSERT, _raw_character(id=11, user_id=999_999))

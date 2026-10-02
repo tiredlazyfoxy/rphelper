@@ -6,13 +6,23 @@
 // controls are found by those names and never by glyph, test id or structure (D10).
 // jsdom applies no stylesheet, so the layout contract asserted here is the grid element's
 // classes and the rendered content — never a computed width (004.context.md).
+//
+// Amended by feature 009, step 008 (DoD-7): `WorkspaceShellProps` gains the required
+// `characters` prop, and the expanded column's body is now the character tree (009 D13), so
+// every render supplies a fresh `CharactersState` and a `fetch` answering
+// `GET /api/characters`. The block at the bottom of this file adds DoD-7's clauses; 008's own
+// clauses (persistence, the narrow overlay, the two-child grid) are unchanged. The rail and
+// the expanded column are mutually exclusive, so the rail clauses keep their meaning; their
+// control lookups are scoped to the nav column to say so.
 import type * as React from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { WorkspaceShell } from "../../src/app/WorkspaceShell";
 import { NARROW_VIEWPORT_QUERY } from "../../src/app/shellState";
+import { CharactersState } from "../../src/app/charactersState";
+import type { Character } from "../../src/app/charactersApi";
 import { WORKSPACE_LAYOUT_KEY } from "../../src/app/workspaceLayout";
 import { documentNavigation } from "../../src/shared/api";
 import { AppProviders } from "../../src/shared/AppProviders";
@@ -24,6 +34,10 @@ const EXPAND_NAME = /^expand tree$/i;
 const SEARCH_NAME = /^search$/i;
 const NEW_CHARACTER_NAME = /^new character$/i;
 const USER_MENU_NAME = /^user menu$/i;
+
+// 009 step 008 (D4, D13): the tree's own names inside the expanded column.
+const SHOW_ARCHIVED_NAME = /^show archived$/i;
+const CHARACTERS_LIST_NAME = /^characters$/i;
 
 const SETTINGS_ITEM = /^settings$/i;
 const LOGOUT_ITEM = /^log out$/i;
@@ -44,6 +58,7 @@ const OVERLAY_CLASS = "nav-overlay-open";
 const SHELL_CLASS = "app";
 
 type User = ReturnType<typeof userEvent.setup>;
+type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /** Mantine's floating layers set pointer-events; the house workaround for user-event. */
 function newUser(): User {
@@ -51,6 +66,51 @@ function newUser(): User {
 }
 
 const USER: CurrentUser = { id: "9007199254740993", username: USERNAME, role: "roleplayer" };
+
+// ------------------------------------------------- 009 step 008: the tree's one request
+// The expanded column mounts the tree, which lists the characters on mount (009 D13), so
+// every render here needs that one GET answered. Anything else is a test failure.
+
+const CHARACTERS_PATH = "/api/characters";
+
+const TREE_CHARACTER: Character = {
+  id: "7250000000000000011",
+  name: "Aria Vance",
+  sheet: "A scribe who never finishes a sentence.",
+  archived_at: null,
+  created_at: "2026-03-14T09:26:53.000000+00:00",
+  updated_at: "2026-03-14T09:26:53.000000+00:00",
+};
+
+function jsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function stubCharactersFetch(): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<FetchFn>((input) => {
+      const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const url = new URL(raw, "http://localhost");
+      if (url.pathname !== CHARACTERS_PATH) {
+        return Promise.reject(new TypeError(`unexpected request in shell test: ${url.pathname}`));
+      }
+      return Promise.resolve(jsonResponse({ characters: [TREE_CHARACTER] }, 200));
+    }),
+  );
+}
+
+/** Lets the tree's listing settle so the expanded column reaches its ready state. */
+async function flush(rounds = 6): Promise<void> {
+  for (let i = 0; i < rounds; i += 1) {
+    await act(async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+  }
+}
 
 // ----------------------------------------------------------------- the storage
 // A fake LayoutStorage with spy-able getItem/setItem, never jsdom's localStorage, so
@@ -117,11 +177,13 @@ function currentPath(): string {
   return screen.getByTestId("probe-location").textContent ?? "";
 }
 
+// 009 step 008: the one render call site, now supplying the required `characters` prop —
+// a fresh workspace state per render (009 D11).
 function renderShell(store: ReturnType<typeof fakeStorage>) {
   return render(
     <AppProviders>
       <MemoryRouter initialEntries={["/"]}>
-        <WorkspaceShell user={USER} storage={store}>
+        <WorkspaceShell user={USER} storage={store} characters={new CharactersState()}>
           <p>{CENTRE_TEXT}</p>
         </WorkspaceShell>
         <LocationProbe />
@@ -157,6 +219,37 @@ function missingControl(name: RegExp): HTMLElement | null {
   return screen.queryByRole("button", { name });
 }
 
+/**
+ * 009 step 008: the left column's own control. The rail and the expanded column are two
+ * exclusive branches of the same nav, and from 009 both offer "Search" / "New character", so
+ * the clauses about one branch say which element they mean.
+ */
+function navControl(name: RegExp): HTMLElement {
+  return within(navElement()).getByRole("button", { name });
+}
+
+function navMissingControl(name: RegExp): HTMLElement | null {
+  return within(navElement()).queryByRole("button", { name });
+}
+
+/** The tree's "Show archived" switch, however Mantine exposes it (role switch or checkbox). */
+function queryArchivedSwitch(): HTMLElement | null {
+  const nav = within(navElement());
+  return (
+    nav.queryByRole("switch", { name: SHOW_ARCHIVED_NAME }) ??
+    nav.queryByRole("checkbox", { name: SHOW_ARCHIVED_NAME })
+  );
+}
+
+/** The tree's character level, by its accessible name (a list or the equivalent landmark). */
+function queryCharactersList(): HTMLElement | null {
+  const nav = within(navElement());
+  return (
+    nav.queryByRole("list", { name: CHARACTERS_LIST_NAME }) ??
+    nav.queryByRole("navigation", { name: CHARACTERS_LIST_NAME })
+  );
+}
+
 /** The menu item carrying `name`: the activatable element its label sits in. */
 function item(name: RegExp): HTMLElement {
   const label = screen.getByText(name);
@@ -175,24 +268,25 @@ function hasClass(name: string): boolean {
 
 /** The rail: expand, search, create and the user menu; no collapse control. */
 function expectRail(): void {
-  expect(control(EXPAND_NAME)).toBeInTheDocument();
-  expect(control(SEARCH_NAME)).toBeInTheDocument();
-  expect(control(NEW_CHARACTER_NAME)).toBeInTheDocument();
-  expect(control(USER_MENU_NAME)).toBeInTheDocument();
-  expect(missingControl(COLLAPSE_NAME)).toBeNull();
+  expect(navControl(EXPAND_NAME)).toBeInTheDocument();
+  expect(navControl(SEARCH_NAME)).toBeInTheDocument();
+  expect(navControl(NEW_CHARACTER_NAME)).toBeInTheDocument();
+  expect(navControl(USER_MENU_NAME)).toBeInTheDocument();
+  expect(navMissingControl(COLLAPSE_NAME)).toBeNull();
 }
 
 /** The expanded column: the collapse control and the user menu; no expand control. */
 function expectExpandedColumn(): void {
-  expect(control(COLLAPSE_NAME)).toBeInTheDocument();
-  expect(control(USER_MENU_NAME)).toBeInTheDocument();
-  expect(missingControl(EXPAND_NAME)).toBeNull();
+  expect(navControl(COLLAPSE_NAME)).toBeInTheDocument();
+  expect(navControl(USER_MENU_NAME)).toBeInTheDocument();
+  expect(navMissingControl(EXPAND_NAME)).toBeNull();
 }
 
 let navigate: MockInstance<(url: string) => void>;
 
 beforeEach(() => {
   navigate = vi.spyOn(documentNavigation, "assign").mockImplementation(() => {});
+  stubCharactersFetch(); // 009 step 008: the expanded column's tree lists on mount
 });
 
 afterEach(() => {
@@ -475,5 +569,35 @@ describe("the grid is two columns and nothing else (no wall in 008)", () => {
     renderShell(fakeStorage(true));
 
     expect(missingControl(/wall/i)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 009, step 008 — the expanded column's body is the character tree (009 D13).
+describe("the expanded column carries the character tree (009 D13)", () => {
+  it("the nav holds Collapse tree, the Show archived switch, the Characters list and the User menu — DoD-7", async () => {
+    renderShell(fakeStorage());
+    await flush();
+
+    expect(navControl(COLLAPSE_NAME)).toBeInTheDocument();
+    expect(queryArchivedSwitch()).not.toBeNull();
+    expect(queryCharactersList()).not.toBeNull();
+    expect(navControl(USER_MENU_NAME)).toBeInTheDocument();
+  });
+
+  it("the rail keeps Search, New character, Expand tree and User menu, and loses the switch — DoD-7", async () => {
+    const user = newUser();
+    renderShell(fakeStorage());
+    await flush();
+    expect(queryArchivedSwitch()).not.toBeNull();
+
+    await user.click(navControl(COLLAPSE_NAME));
+    await waitFor(() => {
+      expect(navMissingControl(COLLAPSE_NAME)).toBeNull();
+    });
+
+    expectRail();
+    expect(queryArchivedSwitch()).toBeNull();
+    expect(queryCharactersList()).toBeNull();
   });
 });

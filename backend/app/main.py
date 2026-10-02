@@ -1,36 +1,36 @@
 """The application factory, the lifespan, and the uvicorn target.
 
-`backend-structure.md` § "The logging call site — once, in the app factory":
+`backend-structure.md` Â§ "The logging call site â€” once, in the app factory":
 `configure_logging(settings)` is called **exactly once, from `main.py`'s app factory,
-before any router is registered** — early enough that a failure during registration is
+before any router is registered** â€” early enough that a failure during registration is
 already captured by both sinks. No other module in the backend adds, removes or
 reconfigures a sink.
 
 The factory's order is therefore fixed:
 
 1. resolve settings (`get_settings()`);
-2. `configure_logging(settings)` — once, **before any router is registered**;
+2. `configure_logging(settings)` â€” once, **before any router is registered**;
 3. `build_id_generator(settings)` once, and hold that **single instance** on
    `app.state.id_generator`. That is the code-level half of `data-model.md`'s "exactly
    one generator process per node id" guarantee: one generator per process, never one
    per request and never a module-level singleton;
-4. `register_exception_handlers(app)` — step `003`'s entry point, which installs the one
+4. `register_exception_handlers(app)` â€” step `003`'s entry point, which installs the one
    handler for `DomainError` so every subclass is covered by one registration;
-5. `app.include_router(health_router)` — the health router already carries its own
-   `/api` prefix — then `app.include_router(bootstrap_router)`, which carries its own
+5. `app.include_router(health_router)` â€” the health router already carries its own
+   `/api` prefix â€” then `app.include_router(bootstrap_router)`, which carries its own
    `/api/bootstrap` prefix and its router-level `require_unconfigured` guard, then
    `app.include_router(auth_router)` (feature `004`), which carries its own `/api` prefix
    and declares `POST /api/auth/login`, `POST /api/auth/logout` and `GET /api/me`, then
    `app.include_router(admin_users_router)` (feature `005`), which carries its own
    `/api/admin/users` prefix and its router-level `require_role(Role.ADMIN)` guard, then
    `app.include_router(admin_llm_router)` (feature `006`, `/api/admin/llm-servers`), then
-   `app.include_router(admin_db_router)` (feature `007`, `/api/admin/database`) — each with
+   `app.include_router(admin_db_router)` (feature `007`, `/api/admin/database`) â€” each with
    the same router-level admin guard.
 
 **The lifespan runs no DDL.** No table creation, no upgrade, no schema check, and no
 create-if-missing convenience. Remediation is admin-triggered and belongs to feature
 `007`; DoD-11 asserts `sqlite_master` holds no application table after startup. It also
-opens no database and touches no engine — importing this module must not either.
+opens no database and touches no engine â€” importing this module must not either.
 
 `configure_logging`, `build_id_generator` and `register_exception_handlers` are imported
 as **names into this module's namespace** on purpose: `app.main.configure_logging` is
@@ -56,6 +56,7 @@ from app.routers.admin_llm import router as admin_llm_router
 from app.routers.admin_users import router as admin_users_router
 from app.routers.auth import router as auth_router
 from app.routers.bootstrap import router as bootstrap_router
+from app.routers.characters import router as characters_router
 from app.routers.health import router as health_router
 
 
@@ -101,8 +102,9 @@ def create_app() -> FastAPI:
     app.include_router(admin_users_router)
     app.include_router(admin_llm_router)
     app.include_router(admin_db_router)
+    app.include_router(characters_router)
     return app
 
 
-#: The uvicorn target — `uvicorn app.main:app`, built by the factory.
+#: The uvicorn target â€” `uvicorn app.main:app`, built by the factory.
 app = create_app()

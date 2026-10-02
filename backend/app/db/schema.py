@@ -157,3 +157,32 @@ models = Table(
     Column("updated_at", Text, nullable=False),
     UniqueConstraint("server_id", "model_name", name="uq_models_server_id_model_name"),
 )
+
+
+#: The roleplayer's characters (`data-model.md` § `characters`). Feature `009`'s D5 declares
+#: **seven** of the ten columns that section names: `model_ref`, `system_prompt` and `tools`
+#: are deferred to `017`, whose encodings are not settled yet. There is deliberately **no**
+#: `rp_language` or `preferred_language` column — those live on `users` alone (R1).
+#: `user_id` is a foreign key to `users.id` with **no `ON DELETE`**: nothing deletes a user
+#: or a character (R6), so a cascade would describe an event that cannot happen. One
+#: non-unique index on `user_id`, because every read is scoped by the owner (R5). `sheet` is
+#: NOT NULL with **no server default** — the service always writes it, `""` when the request
+#: omits it. `archived_at` is NULL for a working character and holds the instant it was
+#: archived otherwise. Timestamps are the fixed-width UTC text form.
+characters = Table(
+    "characters",
+    metadata,
+    Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=False),
+    Column(
+        "user_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("users.id"),
+        nullable=False,
+    ),
+    Column("name", Text, nullable=False),
+    Column("sheet", Text, nullable=False),
+    Column("archived_at", Text, nullable=True),
+    Column("created_at", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    Index("ix_characters_user_id", "user_id"),
+)

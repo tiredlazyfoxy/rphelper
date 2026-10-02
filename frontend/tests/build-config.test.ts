@@ -283,14 +283,15 @@ describe("package.json — excluded dependencies", () => {
     const pkg = readPackageJson();
     const names = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
 
+    // Rescoped by feature 009 step 005 (context.md D3): the markdown editor un-defers
+    // `@mantine/tiptap`, `@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`,
+    // `@tiptap/extension-link` and `tiptap-markdown`, which are now sanctioned runtime
+    // dependencies. Everything else this clause forbade stays forbidden.
     const forbidden = names.filter(
       (n) =>
         n === "@mantine/form" ||
         n === "eslint" ||
         n.startsWith("eslint-") ||
-        n.startsWith("@tiptap/") ||
-        n === "tiptap-markdown" ||
-        n === "@mantine/tiptap" ||
         n === "react-markdown" ||
         n.startsWith("@dnd-kit/"),
     );

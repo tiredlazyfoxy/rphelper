@@ -10,6 +10,11 @@
 // stays real and is what `flush` uses. `shared/notifyFailure` is replaced by a mock module,
 // so `@mantine/notifications` is never reached from here: both boot states are full-page
 // states and raise no notification (context.md D2).
+//
+// Amended by feature 009, step 008 (DoD-11), stubs only: once the gate renders `App`, the
+// shell's expanded column mounts the character tree, which issues `GET /api/characters`.
+// The stubs below are routed by URL so that request is answered with an empty list instead
+// of hanging or being served the `/api/me` body. No assertion about a boot outcome changes.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
@@ -23,6 +28,9 @@ const notifyFailureSpy = vi.hoisted(() => vi.fn());
 vi.mock("../../src/shared/notifyFailure", () => ({ notifyFailure: notifyFailureSpy }));
 
 const ME_PATH = "/api/me";
+
+/** 009 step 008, DoD-11: the workspace tree's listing, answered empty everywhere here. */
+const CHARACTERS_PATH = "/api/characters";
 
 const ROLES: Array<CurrentUser["role"]> = ["roleplayer", "admin"];
 
@@ -91,13 +99,18 @@ function requestPath(input: RequestInfo | URL): string {
 }
 
 /**
- * Answers the n-th GET /api/me probe with the n-th handler (the last repeats); every other
- * request gets a promise that never settles.
+ * Answers the n-th GET /api/me probe with the n-th handler (the last repeats). The rendered
+ * shell's character listing is answered with an empty list (009 step 008, DoD-11); every
+ * other request gets a promise that never settles.
  */
 function stubSequence(handlers: FetchFn[]) {
   let index = 0;
   return stubFetch((input, init) => {
-    if (requestPath(input) !== ME_PATH) return new Promise<Response>(() => {});
+    const path = requestPath(input);
+    if (path === CHARACTERS_PATH) {
+      return Promise.resolve(jsonResponse({ characters: [] }, 200));
+    }
+    if (path !== ME_PATH) return new Promise<Response>(() => {});
     const handler = handlers[Math.min(index, handlers.length - 1)];
     index += 1;
     return handler(input, init);
@@ -181,7 +194,8 @@ describe("a successful probe renders the shell for either role", () => {
   it.each(ROLES)(
     "a %s sees the workspace navigation and the user menu with the username — DoD-5",
     async (role) => {
-      stubFetch(answerIdentity(role));
+      // 009 step 008, DoD-11: routed by URL, so the shell's tree listing is answered too.
+      stubSequence([answerIdentity(role)]);
       renderBoot();
       await flush();
 
@@ -195,7 +209,8 @@ describe("a successful probe renders the shell for either role", () => {
   it.each(ROLES)(
     "a %s is not denied: no document navigation — DoD-5",
     async (role) => {
-      stubFetch(answerIdentity(role));
+      // 009 step 008, DoD-11: routed by URL, so the shell's tree listing is answered too.
+      stubSequence([answerIdentity(role)]);
       renderBoot();
       await flush();
 

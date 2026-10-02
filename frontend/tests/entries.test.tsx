@@ -100,13 +100,22 @@ const notAuthenticated = (): Response =>
  * Feature 008, step 005 — DoD-11 (context.md D2): from 008/005 the app entry awaits a
  * GET /api/me gate before it renders anything, so its clauses stub that request. Any other
  * request is a test failure.
+ *
+ * Amended by feature 009, step 008 (DoD-11), stubs only: the shell the entry mounts now
+ * carries the character tree, which issues `GET /api/characters`. The stub is routed by URL
+ * and answers it with an empty list; every other request is still a test failure, and no
+ * assertion about the entry's outcome changes.
  */
 function stubAppIdentity(answer: () => Response): void {
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
       const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      if (new URL(raw, "http://localhost").pathname !== "/api/me") {
+      const pathname = new URL(raw, "http://localhost").pathname;
+      if (pathname === "/api/characters") {
+        return Promise.resolve(jsonResponse({ characters: [] }, 200));
+      }
+      if (pathname !== "/api/me") {
         return Promise.reject(new TypeError("unexpected request in app entry test"));
       }
       return Promise.resolve(answer());

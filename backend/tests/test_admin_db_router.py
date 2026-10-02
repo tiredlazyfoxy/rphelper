@@ -985,7 +985,11 @@ def test_apply_routes_declare_no_request_body_and_no_query_parameter__DoD10(appl
 
 
 UNDECLARED_NAMES = [
-    "characters",
+    # 010/001 DoD-9: was "characters" (009 registers it), then "setups" (010 registers it).
+    # The chain ends here: "no_such_table" is a valid table identifier that belongs to no
+    # feature's domain, so no planned feature will ever declare it and no later feature has
+    # to swap this entry again.
+    "no_such_table",
     "legacy_notes",
     "sqlite_master",
     'users"; DROP TABLE users; --',

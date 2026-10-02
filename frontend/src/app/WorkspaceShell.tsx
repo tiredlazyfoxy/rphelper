@@ -26,6 +26,8 @@ import {
   showsRail,
 } from "./shellState";
 import { UserMenu } from "./UserMenu";
+import { CharacterTree } from "./CharacterTree";
+import type { CharactersState } from "./charactersState";
 
 /**
  * Both columns carry the body background as a Mantine style prop, so the `.app` element's
@@ -42,6 +44,8 @@ export type WorkspaceShellProps = {
   user: CurrentUser;
   /** The persisted-layout storage, or `null` when none is available (005 supplies it). */
   storage: LayoutStorage | null;
+  /** The one workspace characters state `App` creates (009 D11); fed to `CharacterTree`. */
+  characters: CharactersState;
   /** The centre column's content — the active route's element. */
   children: React.ReactNode;
 };
@@ -56,7 +60,7 @@ export type WorkspaceShellProps = {
 export const WorkspaceShell = observer(function WorkspaceShell(
   props: WorkspaceShellProps,
 ): React.JSX.Element {
-  const { user, storage, children } = props;
+  const { user, storage, characters, children } = props;
   const [shell] = useState(() => createShellState(storage));
   const navigate = useNavigate();
   const location = useLocation();
@@ -124,8 +128,10 @@ export const WorkspaceShell = observer(function WorkspaceShell(
                 }}
               />
             </Group>
-            {/* The tree's header and rows are 011's; in 008 the body is empty. */}
-            <Box flex={1} />
+            {/* The tree's header and character level (009 step 008); 011 adds sessions. */}
+            <Box flex={1}>
+              <CharacterTree characters={characters} />
+            </Box>
             <Box w="100%">
               <UserMenu user={user} compact={false} />
             </Box>
