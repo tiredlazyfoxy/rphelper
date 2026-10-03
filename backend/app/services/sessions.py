@@ -17,15 +17,23 @@ nothing in this module shadows them (D11).
 
 The six operations below are the whole surface. Nothing here ever removes a row (R6), nothing
 here writes a row in any table but `sessions` (R2 — no setup is ever created, and there is no
-sentinel "no setup" row), nothing here resolves or stores a model reference (R4 stays `017`'s),
-and there is no update and no "touch" operation: `last_used_at` is stamped once at creation and
-bumped only by the content writes `012` brings (D3), so a read — `get_session` included — never
-writes. A session leaves the working lists by `archive_session` and comes back by
+sentinel "no setup" row), and there is no "touch" operation: `last_used_at` is stamped once at
+creation and bumped only by the content writes `012` brings (D3), so a read — `get_session`
+included — never writes.
+
+Creation captures the session's model in its one transaction, after the character and setup
+checks (`017` D1): the character's own configured pair, taken as-is and never checked against
+the registry (R4); otherwise the first enabled model (`017` D7, through `llm_registry`'s
+transaction-neutral `first_enabled_chat_model` — the one service import, `017` D12); otherwise
+NULL. Nothing else is copied from the character — prompt and tools resolve live. Every
+configuration write after creation lives in `services/configuration.py` (`017` step `004`), not
+here. A session leaves the working lists by `archive_session` and comes back by
 `restore_session`, and the row survives both unchanged (D13).
 
 Statements run against the `sessions` Table from `app.db.schema`, the parent check against the
 `characters` Table and the setup check plus the `setup_name` label against `setups`, all from
-that same module — this service never calls the characters or setups service (D11). `setup_name`
+that same module — this service never calls the characters or setups service (D11), and calls
+the registry only for the capture above. `setup_name`
 is joined at read time by an owner-scoped LEFT OUTER JOIN with no `archived_at` predicate on the
 setup, so an archived setup still labels its sessions (D10). Reads end the transaction they
 autobegan, on the normal return **and** on the raise, so a later `connection.begin()` on the
@@ -44,6 +52,7 @@ from sqlalchemy import Connection, Row, Select, Update, select
 from app.db.schema import characters, sessions, setups
 from app.errors import CharacterNotFoundError, SessionNotFoundError, SetupArchivedError, SetupNotFoundError
 from app.ids import SnowflakeGenerator
+from app.services.llm_registry import first_enabled_chat_model
 
 
 @dataclass(frozen=True)
@@ -92,10 +101,21 @@ def start_session(
     # parent character first, then the setup's existence under that same parent, then its
     # archive state.
     with connection.begin():
-        _require_parent_character(connection, user_id, character_id)
+        character_model = _require_parent_character(connection, user_id, character_id)
         setup_name: str | None = None
         if setup_id is not None:
             setup_name = _require_choosable_setup(connection, user_id, character_id, setup_id)
+        # 017 D1, after every check so a refusal costs no registry read: the character's own
+        # pair as-is (never validated, R4); else the first enabled model (D7); else NULL.
+        model_server_id: int | None = None
+        model_name: str | None = None
+        if character_model is not None:
+            model_server_id, model_name = character_model
+        else:
+            first_enabled = first_enabled_chat_model(connection)
+            if first_enabled is not None:
+                model_server_id = first_enabled.server.id
+                model_name = first_enabled.model_name
         new_id = generator.next_id()
         now = _now_text()
         connection.execute(
@@ -104,6 +124,8 @@ def start_session(
                 user_id=user_id,
                 character_id=character_id,
                 setup_id=setup_id,
+                model_server_id=model_server_id,
+                model_name=model_name,
                 last_used_at=now,
                 archived_at=None,
                 created_at=now,
@@ -279,18 +301,25 @@ def _fetch_existing(connection: Connection, user_id: int, session_id: int) -> Rp
     return _to_session(row)
 
 
-def _require_parent_character(connection: Connection, user_id: int, character_id: int) -> None:
+def _require_parent_character(connection: Connection, user_id: int, character_id: int) -> tuple[int, str] | None:
     """This module's own scoped parent check, or `CharacterNotFoundError` (D11).
 
     Its own `SELECT` against the `characters` Table — never a call into the characters service,
     and never a join with `sessions`, which could not tell "no sessions yet" from "not your
-    character". No `archived_at` predicate (D2).
+    character". No `archived_at` predicate (D2). Answers the character's own configured model
+    pair as stored, or `None` when it has none (017 D1); the pair is never checked against the
+    registry here.
     """
     row = connection.execute(
-        select(characters.c.id).where(characters.c.id == character_id, characters.c.user_id == user_id)
+        select(characters.c.id, characters.c.model_server_id, characters.c.model_name).where(
+            characters.c.id == character_id, characters.c.user_id == user_id
+        )
     ).first()
     if row is None:
         raise CharacterNotFoundError()
+    if row.model_server_id is None or row.model_name is None:
+        return None
+    return (row.model_server_id, row.model_name)
 
 
 def _require_choosable_setup(connection: Connection, user_id: int, character_id: int, setup_id: int) -> str:

@@ -136,6 +136,39 @@ def test_users_table_carries_no_removed_or_forbidden_column__DoD1() -> None:
         assert forbidden not in names
 
 
+# 017/001 DoD-3 (feature 017 context.md R1): the user level carries the two languages only.
+USERS_FORBIDDEN_ASSISTANT_COLUMNS = ("model_server_id", "model_name", "model_ref", "system_prompt", "tools")
+
+
+@pytest.mark.parametrize("column", USERS_FORBIDDEN_ASSISTANT_COLUMNS)
+def test_users_declares_no_assistant_chain_column__S017_001_DoD3(column: str) -> None:
+    """017/001 DoD-3 — R1: `users` has no model, system-prompt or tools column."""
+    assert column not in {c.name for c in _users().columns}
+
+
+def test_users_declares_no_tool_switch_column__S017_001_DoD3() -> None:
+    """017/001 DoD-3 — R1: no `tool_*` column at the user level (tools have no user level)."""
+    assert [c.name for c in _users().columns if c.name.startswith("tool_")] == []
+
+
+def test_users_still_carries_both_language_columns__S017_001_DoD3() -> None:
+    """017/001 DoD-3 — UC-047: the user level keeps `rp_language` and `preferred_language`."""
+    names = {c.name for c in _users().columns}
+    assert "rp_language" in names
+    assert "preferred_language" in names
+
+
+def test_users_created_in_a_real_database_has_no_assistant_chain_column__S017_001_DoD3(
+    users_connection: Connection,
+) -> None:
+    """017/001 DoD-3 — the created SQLite `users` table agrees: languages yes, assistant chain no."""
+    names = {row[1] for row in users_connection.execute(text("PRAGMA table_info(users)")).all()}
+    for column in USERS_FORBIDDEN_ASSISTANT_COLUMNS:
+        assert column not in names
+    assert not any(name.startswith("tool_") for name in names)
+    assert {"rp_language", "preferred_language"} <= names
+
+
 def test_users_table_created_in_a_real_database_has_exactly_the_columns__DoD1(
     users_connection: Connection,
 ) -> None:
@@ -1063,10 +1096,23 @@ NEW_009_TABLES = {"characters"}
 # delta keeps meaning "009 added exactly `characters`".
 LATER_THAN_009_TABLES: set[str] = {"setups", "sessions", "messages", "memos"}
 
-CHARACTERS_COLUMNS = {"id", "user_id", "name", "sheet", "archived_at", "created_at", "updated_at"}
+# 017/001 DoD-5 (feature 017 001.context.md "Amending the schema tests"): 009's seven
+# columns, widened deliberately by 017's six assistant-chain columns (D4, D5).
+CHARACTERS_009_COLUMNS = {"id", "user_id", "name", "sheet", "archived_at", "created_at", "updated_at"}
+CHARACTERS_017_COLUMNS = {
+    "model_server_id",
+    "model_name",
+    "system_prompt",
+    "tool_memo_search",
+    "tool_session_search",
+    "tool_web_search",
+}
+CHARACTERS_COLUMNS = CHARACTERS_009_COLUMNS | CHARACTERS_017_COLUMNS
 
-# D5 / data-model.md R1: columns 009 must NOT declare — three deferred to 017, two never.
-FORBIDDEN_CHARACTERS_COLUMNS = ("model_ref", "system_prompt", "tools", "rp_language", "preferred_language")
+# D5 / data-model.md R1: columns `characters` must NOT declare. 017/001 DoD-5 removed
+# `system_prompt` (017 now declares it); `model_ref` and `tools` stay forbidden (017 D4 —
+# the rejected shapes) and the two languages stay forbidden (R1).
+FORBIDDEN_CHARACTERS_COLUMNS = ("model_ref", "tools", "rp_language", "preferred_language")
 
 RAW_CHARACTER_INSERT = text(
     "INSERT INTO characters (id, user_id, name, sheet, archived_at, created_at, updated_at) "
@@ -1111,8 +1157,12 @@ def test_registry_still_carries_every_pre_009_table__S009_001_DoD1() -> None:
 # --- 009/001 DoD-2: exactly seven columns, the primary key and nullability --------------
 
 
-def test_characters_has_exactly_the_seven_declared_columns__S009_001_DoD2() -> None:
-    """009/001 DoD-2 — exactly id, user_id, name, sheet, archived_at, created_at, updated_at."""
+def test_characters_has_exactly_the_thirteen_declared_columns__S009_001_DoD2() -> None:
+    """009/001 DoD-2 — exactly id, user_id, name, sheet, archived_at, created_at, updated_at.
+
+    017/001 DoD-5 — amended deliberately from seven to thirteen: plus model_server_id,
+    model_name, system_prompt, tool_memo_search, tool_session_search, tool_web_search.
+    """
     names = [column.name for column in _characters().columns]
     assert len(names) == len(set(names))
     assert set(names) == CHARACTERS_COLUMNS
@@ -1131,14 +1181,21 @@ def test_characters_archived_at_is_nullable__S009_001_DoD2() -> None:
 
 @pytest.mark.parametrize("column", ["id", "user_id", "name", "sheet", "created_at", "updated_at"])
 def test_characters_other_columns_are_not_nullable__S009_001_DoD2(column: str) -> None:
-    """009/001 DoD-2 — every column but `archived_at` is NOT NULL."""
+    """009/001 DoD-2 — every 009 column but `archived_at` is NOT NULL.
+
+    017/001 DoD-5 — reworded: 017's six new columns are nullable (asserted in the 017
+    section below), so "every column" now means every one of 009's seven.
+    """
     assert _characters().c[column].nullable is False
 
 
 @pytest.mark.parametrize("column", FORBIDDEN_CHARACTERS_COLUMNS)
 def test_characters_declares_no_deferred_or_forbidden_column__S009_001_DoD2(column: str) -> None:
-    """009/001 DoD-2 — D5/R1: model_ref, system_prompt and tools are 017's; the two language
-    columns are never declared."""
+    """009/001 DoD-2 — D5/R1: the two language columns are never declared.
+
+    017/001 DoD-5 — amended: `system_prompt` left this list (017 declares it); `model_ref` and
+    `tools` stay forbidden by 017 D4.
+    """
     assert column not in _characters().c
 
 
@@ -1417,7 +1474,10 @@ NEW_011_TABLES = {"sessions"}
 # 012/001 DoD-1 appended "messages" — the first entry this set ever needed.
 LATER_THAN_011_TABLES: set[str] = {"messages", "memos"}
 
-SESSIONS_COLUMNS = {
+# 017/001 DoD-5 (feature 017 001.context.md "Amending the schema tests"): 011's eight
+# columns, widened deliberately by 017's six assistant-chain columns and two language
+# columns (D4, D5, D6).
+SESSIONS_011_COLUMNS = {
     "id",
     "user_id",
     "character_id",
@@ -1427,16 +1487,26 @@ SESSIONS_COLUMNS = {
     "created_at",
     "updated_at",
 }
+SESSIONS_017_COLUMNS = {
+    "model_server_id",
+    "model_name",
+    "system_prompt",
+    "tool_memo_search",
+    "tool_session_search",
+    "tool_web_search",
+    "rp_language",
+    "preferred_language",
+}
+SESSIONS_COLUMNS = SESSIONS_011_COLUMNS | SESSIONS_017_COLUMNS
 
-# 011/001 DoD-2 — D4 (title/partner_label deferred to the feature that labels a session),
-# R4 (model capture deferred to 017) and data-model.md `sessions` (no status column).
+# 011/001 DoD-2 — D4 (title/partner_label deferred to the feature that labels a session)
+# and data-model.md `sessions` (no status column). 017/001 DoD-5 removed `rp_language`,
+# `preferred_language` and `system_prompt` (017 declares them); `model_ref` and `tools`
+# stay forbidden by 017 D4.
 FORBIDDEN_SESSIONS_COLUMNS = (
     "title",
     "partner_label",
-    "rp_language",
-    "preferred_language",
     "model_ref",
-    "system_prompt",
     "tools",
     "status",
     "state",
@@ -1519,9 +1589,13 @@ def test_the_011_delta_survives_a_table_a_later_feature_declares__S011_001_DoD1(
 # --- 011/001 DoD-2: exactly eight columns, the primary key and nullability ---------------
 
 
-def test_sessions_has_exactly_the_eight_declared_columns__S011_001_DoD2() -> None:
+def test_sessions_has_exactly_the_sixteen_declared_columns__S011_001_DoD2() -> None:
     """011/001 DoD-2 — exactly id, user_id, character_id, setup_id, last_used_at, archived_at,
-    created_at, updated_at."""
+    created_at, updated_at.
+
+    017/001 DoD-5 — amended deliberately from eight to sixteen: plus model_server_id,
+    model_name, system_prompt, the three tool_* columns, rp_language, preferred_language.
+    """
     names = [column.name for column in _sessions().columns]
     assert len(names) == len(set(names))
     assert set(names) == SESSIONS_COLUMNS
@@ -1544,14 +1618,21 @@ def test_sessions_setup_id_and_archived_at_are_nullable__S011_001_DoD2(column: s
     "column", ["id", "user_id", "character_id", "last_used_at", "created_at", "updated_at"]
 )
 def test_sessions_other_columns_are_not_nullable__S011_001_DoD2(column: str) -> None:
-    """011/001 DoD-2 — every column but `setup_id` and `archived_at` is NOT NULL."""
+    """011/001 DoD-2 — every 011 column but `setup_id` and `archived_at` is NOT NULL.
+
+    017/001 DoD-5 — reworded: 017's eight new columns are nullable (asserted in the 017
+    section below), so "every column" now means every one of 011's eight.
+    """
     assert _sessions().c[column].nullable is False
 
 
 @pytest.mark.parametrize("column", FORBIDDEN_SESSIONS_COLUMNS)
 def test_sessions_declares_no_deferred_or_status_column__S011_001_DoD2(column: str) -> None:
-    """011/001 DoD-2 — D8/D4/R4: the deferred columns are absent, and there is no status or
-    state column at all."""
+    """011/001 DoD-2 — D8/D4: the deferred columns are absent, and there is no status or
+    state column at all.
+
+    017/001 DoD-5 — amended: the three columns 017 declares left this list.
+    """
     assert column not in _sessions().c
 
 
@@ -2418,3 +2499,356 @@ def test_memos_accepts_two_rows_at_the_same_level_and_sort_key__S015_001_DoD5(db
         )
         connection.commit()
         assert _memo_ids(connection) == {505, 506}
+
+
+# ======================================================================================
+# Feature 017, step 001 (`001.columns-errors-models.md`) — the configuration columns on
+# `characters` and `sessions`. Expected values come from that step's DoD-1..5 and feature
+# 017's context.md R1, D4 (two columns, no FK, both-or-neither, `model_ref` / `tools`
+# forbidden), D5 (one nullable boolean per tool, no default) and D6 (languages on the
+# session only). The 009 / 011 assertions this step changes are amended in place above
+# (DoD-5). No table is added, so every `LATER_THAN_*_TABLES` set is unchanged. Tests are
+# suffixed `__S017_001_DoD<n>`.
+# ======================================================================================
+
+ASSISTANT_CHAIN_COLUMNS = (
+    "model_server_id",
+    "model_name",
+    "system_prompt",
+    "tool_memo_search",
+    "tool_session_search",
+    "tool_web_search",
+)
+SESSION_LANGUAGE_COLUMNS = ("rp_language", "preferred_language")
+SESSIONS_NEW_017_COLUMNS = ASSISTANT_CHAIN_COLUMNS + SESSION_LANGUAGE_COLUMNS
+
+# D4: the rejected shapes stay out of both tables; R1: no language on the character.
+STILL_FORBIDDEN_CHARACTERS_017 = ("rp_language", "preferred_language", "model_ref", "tools")
+STILL_FORBIDDEN_SESSIONS_017 = ("title", "partner_label", "status", "state", "model_ref", "tools")
+
+CONFIGURED_TABLES = ("characters", "sessions")
+
+EXISTING_SERVER_ID = 500
+MISSING_SERVER_ID = 999_999
+
+RAW_017_CHARACTER_INSERT = text(
+    "INSERT INTO characters "
+    "(id, user_id, name, sheet, archived_at, created_at, updated_at, model_server_id, model_name) "
+    "VALUES (:id, :user_id, :name, :sheet, :archived_at, :created_at, :updated_at, "
+    ":model_server_id, :model_name)"
+)
+
+RAW_017_SESSIONS_INSERT = text(
+    "INSERT INTO sessions "
+    "(id, user_id, character_id, setup_id, last_used_at, archived_at, created_at, updated_at, "
+    "model_server_id, model_name) "
+    "VALUES (:id, :user_id, :character_id, :setup_id, :last_used_at, :archived_at, :created_at, "
+    ":updated_at, :model_server_id, :model_name)"
+)
+
+
+def _configured_table(name: str) -> Table:
+    return schema.metadata.tables[name]
+
+
+def _seeded_017_connection(db_engine: Engine) -> Connection:
+    """A fresh file: whole registry created via `metadata.create_all`, foreign keys **on**, one
+    owner (`id=1`), one of their characters (`id=10`) and one registered LLM server (`id=500`)
+    committed, so a model-referencing row has every parent it may name."""
+    with db_engine.connect() as setup:
+        schema.metadata.create_all(setup)
+        setup.commit()
+
+    connection = db_engine.connect()
+    connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+    assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+    connection.execute(RAW_INSERT, _raw_row(id=1, username="owner"))
+    connection.execute(RAW_CHARACTER_INSERT, _raw_character(id=10, user_id=1))
+    _insert_server(connection, EXISTING_SERVER_ID)
+    connection.commit()
+    return connection
+
+
+def _insert_with_model_ref(
+    connection: Connection, table: str, row_id: int, model_server_id: int | None, model_name: str | None
+) -> None:
+    model_values = {"model_server_id": model_server_id, "model_name": model_name}
+    if table == "characters":
+        connection.execute(RAW_017_CHARACTER_INSERT, {**_raw_character(id=row_id, user_id=1), **model_values})
+    else:
+        connection.execute(
+            RAW_017_SESSIONS_INSERT,
+            {**_raw_sessions_row(id=row_id, user_id=1, character_id=10, setup_id=None), **model_values},
+        )
+
+
+def _stored_model_ref(connection: Connection, table: str, row_id: int) -> tuple[Any, Any]:
+    row = connection.execute(
+        text(f"SELECT model_server_id, model_name FROM {table} WHERE id = :id"), {"id": row_id}
+    ).one()
+    return (row[0], row[1])
+
+
+def _new_column_fk_rows(connection: Connection, table: str, columns: tuple[str, ...]) -> list[Any]:
+    # PRAGMA foreign_key_list columns: id, seq, table, from, to, on_update, on_delete, match
+    rows = connection.execute(text(f"PRAGMA foreign_key_list({table})")).all()
+    return [row for row in rows if row[3] in columns]
+
+
+# --- 017/001 DoD-1: `characters` gains exactly the six assistant-chain columns ------------
+
+
+def test_characters_has_exactly_the_009_columns_plus_the_six_new_ones__S017_001_DoD1() -> None:
+    """017/001 DoD-1 — the seven existing columns plus model_server_id, model_name,
+    system_prompt, tool_memo_search, tool_session_search, tool_web_search, and no others."""
+    names = [column.name for column in _characters().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == {
+        "id",
+        "user_id",
+        "name",
+        "sheet",
+        "archived_at",
+        "created_at",
+        "updated_at",
+        "model_server_id",
+        "model_name",
+        "system_prompt",
+        "tool_memo_search",
+        "tool_session_search",
+        "tool_web_search",
+    }
+
+
+@pytest.mark.parametrize("column", ASSISTANT_CHAIN_COLUMNS)
+def test_characters_new_column_is_nullable__S017_001_DoD1(column: str) -> None:
+    """017/001 DoD-1 — each new column is nullable (NULL = no character-level override)."""
+    assert _characters().c[column].nullable is True
+
+
+@pytest.mark.parametrize("column", ASSISTANT_CHAIN_COLUMNS)
+def test_characters_new_column_declares_no_default__S017_001_DoD1(column: str) -> None:
+    """017/001 DoD-1 — D5: no default of either kind (a tool no level sets is resolved, not stored)."""
+    assert _characters().c[column].default is None
+    assert _characters().c[column].server_default is None
+
+
+@pytest.mark.parametrize("column", ASSISTANT_CHAIN_COLUMNS)
+def test_characters_new_column_declares_no_foreign_key__S017_001_DoD1(column: str) -> None:
+    """017/001 DoD-1 — D4: `model_server_id` (and every other new column) has no foreign key."""
+    assert not _characters().c[column].foreign_keys
+    assert not any(fk.parent.name == column for fk in _characters().foreign_keys)
+
+
+@pytest.mark.parametrize("column", STILL_FORBIDDEN_CHARACTERS_017)
+def test_characters_still_declares_no_language_or_rejected_shape_column__S017_001_DoD1(column: str) -> None:
+    """017/001 DoD-1 — R1 / US-061.AC-3: no language column on `characters`; D4: no
+    `model_ref` and no `tools`."""
+    assert column not in {c.name for c in _characters().columns}
+
+
+def test_characters_new_columns_are_nullable_without_default_or_fk_in_a_real_database__S017_001_DoD1(
+    db_engine: Engine,
+) -> None:
+    """017/001 DoD-1 — the created SQLite `characters` table agrees: the six new columns carry no
+    NOT NULL flag, no default and no foreign key; the forbidden names are absent."""
+    with _seeded_017_connection(db_engine) as connection:
+        info = connection.execute(text("PRAGMA table_info(characters)")).all()
+        # PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
+        by_name = {row[1]: row for row in info}
+        assert set(by_name) == CHARACTERS_009_COLUMNS | set(ASSISTANT_CHAIN_COLUMNS)
+        for column in ASSISTANT_CHAIN_COLUMNS:
+            assert by_name[column][3] == 0, column
+            assert by_name[column][4] is None, column
+        for column in STILL_FORBIDDEN_CHARACTERS_017:
+            assert column not in by_name
+        assert _new_column_fk_rows(connection, "characters", ASSISTANT_CHAIN_COLUMNS) == []
+
+
+# --- 017/001 DoD-2: `sessions` gains the six plus the two languages ------------------------
+
+
+def test_sessions_has_exactly_the_011_columns_plus_the_eight_new_ones__S017_001_DoD2() -> None:
+    """017/001 DoD-2 — the eight existing columns plus model_server_id, model_name,
+    system_prompt, the three tool_* columns, rp_language and preferred_language."""
+    names = [column.name for column in _sessions().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == {
+        "id",
+        "user_id",
+        "character_id",
+        "setup_id",
+        "last_used_at",
+        "archived_at",
+        "created_at",
+        "updated_at",
+        "model_server_id",
+        "model_name",
+        "system_prompt",
+        "tool_memo_search",
+        "tool_session_search",
+        "tool_web_search",
+        "rp_language",
+        "preferred_language",
+    }
+
+
+@pytest.mark.parametrize("column", SESSIONS_NEW_017_COLUMNS)
+def test_sessions_new_column_is_nullable__S017_001_DoD2(column: str) -> None:
+    """017/001 DoD-2 — each new column is nullable (NULL = inherit / no captured model)."""
+    assert _sessions().c[column].nullable is True
+
+
+@pytest.mark.parametrize("column", SESSIONS_NEW_017_COLUMNS)
+def test_sessions_new_column_declares_no_default__S017_001_DoD2(column: str) -> None:
+    """017/001 DoD-2 — no default of either kind on any new column."""
+    assert _sessions().c[column].default is None
+    assert _sessions().c[column].server_default is None
+
+
+@pytest.mark.parametrize("column", SESSIONS_NEW_017_COLUMNS)
+def test_sessions_new_column_declares_no_foreign_key__S017_001_DoD2(column: str) -> None:
+    """017/001 DoD-2 — D4: no new foreign key; `model_server_id` references no table."""
+    assert not _sessions().c[column].foreign_keys
+    assert not any(fk.parent.name == column for fk in _sessions().foreign_keys)
+
+
+def test_sessions_keeps_exactly_its_three_011_foreign_keys__S017_001_DoD2() -> None:
+    """017/001 DoD-2 — "no new foreign key": the table's foreign keys are still only 011's
+    `user_id`, `character_id` and `setup_id`."""
+    pairs = {(fk.parent.name, fk.target_fullname) for fk in _sessions().foreign_keys}
+    assert pairs == {
+        ("user_id", "users.id"),
+        ("character_id", "characters.id"),
+        ("setup_id", "setups.id"),
+    }
+
+
+@pytest.mark.parametrize("column", STILL_FORBIDDEN_SESSIONS_017)
+def test_sessions_still_declares_no_label_status_or_rejected_shape_column__S017_001_DoD2(column: str) -> None:
+    """017/001 DoD-2 — `title`, `partner_label`, `status`, `state`, `model_ref` and `tools`
+    are still absent."""
+    assert column not in {c.name for c in _sessions().columns}
+
+
+def test_sessions_new_columns_are_nullable_without_default_or_fk_in_a_real_database__S017_001_DoD2(
+    db_engine: Engine,
+) -> None:
+    """017/001 DoD-2 — the created SQLite `sessions` table agrees: the eight new columns carry no
+    NOT NULL flag, no default and no foreign key; the forbidden names are absent."""
+    with _seeded_017_connection(db_engine) as connection:
+        info = connection.execute(text("PRAGMA table_info(sessions)")).all()
+        by_name = {row[1]: row for row in info}
+        assert set(by_name) == SESSIONS_011_COLUMNS | set(SESSIONS_NEW_017_COLUMNS)
+        for column in SESSIONS_NEW_017_COLUMNS:
+            assert by_name[column][3] == 0, column
+            assert by_name[column][4] is None, column
+        for column in STILL_FORBIDDEN_SESSIONS_017:
+            assert column not in by_name
+        assert _new_column_fk_rows(connection, "sessions", SESSIONS_NEW_017_COLUMNS) == []
+
+
+# --- 017/001 DoD-4: both-or-neither CHECK, and no FK on `model_server_id` -----------------
+
+
+@pytest.mark.parametrize("table", CONFIGURED_TABLES)
+def test_a_server_id_without_a_model_name_fails_to_insert__S017_001_DoD4(db_engine: Engine, table: str) -> None:
+    """017/001 DoD-4 — D4: `model_server_id` set and `model_name` NULL is refused."""
+    with _seeded_017_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            _insert_with_model_ref(connection, table, 101, EXISTING_SERVER_ID, None)
+
+
+@pytest.mark.parametrize("table", CONFIGURED_TABLES)
+def test_a_model_name_without_a_server_id_fails_to_insert__S017_001_DoD4(db_engine: Engine, table: str) -> None:
+    """017/001 DoD-4 — D4: the reverse, `model_name` set and `model_server_id` NULL, is refused."""
+    with _seeded_017_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            _insert_with_model_ref(connection, table, 102, None, "llama-3")
+
+
+@pytest.mark.parametrize("table", CONFIGURED_TABLES)
+def test_a_row_with_both_model_columns_set_inserts__S017_001_DoD4(db_engine: Engine, table: str) -> None:
+    """017/001 DoD-4 — both set inserts, and the pair reads back as written."""
+    with _seeded_017_connection(db_engine) as connection:
+        _insert_with_model_ref(connection, table, 103, EXISTING_SERVER_ID, "llama-3")
+        connection.commit()
+        assert _stored_model_ref(connection, table, 103) == (EXISTING_SERVER_ID, "llama-3")
+
+
+@pytest.mark.parametrize("table", CONFIGURED_TABLES)
+def test_a_row_with_both_model_columns_null_inserts__S017_001_DoD4(db_engine: Engine, table: str) -> None:
+    """017/001 DoD-4 — both NULL inserts (no model configured / captured)."""
+    with _seeded_017_connection(db_engine) as connection:
+        _insert_with_model_ref(connection, table, 104, None, None)
+        connection.commit()
+        assert _stored_model_ref(connection, table, 104) == (None, None)
+
+
+@pytest.mark.parametrize("table", CONFIGURED_TABLES)
+def test_a_server_id_naming_no_llm_server_inserts__S017_001_DoD4(db_engine: Engine, table: str) -> None:
+    """017/001 DoD-4 — D4: with foreign keys on, a `model_server_id` naming no `llm_servers` row
+    still inserts (no FK; the dead reference stays and is caught at use)."""
+    with _seeded_017_connection(db_engine) as connection:
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM llm_servers WHERE id = :id"), {"id": MISSING_SERVER_ID}
+        ).scalar_one() == 0
+        _insert_with_model_ref(connection, table, 105, MISSING_SERVER_ID, "gone-model")
+        connection.commit()
+        assert _stored_model_ref(connection, table, 105) == (MISSING_SERVER_ID, "gone-model")
+
+
+@pytest.mark.parametrize("table", CONFIGURED_TABLES)
+def test_a_row_that_names_no_model_column_inserts_with_both_null__S017_001_DoD4(
+    db_engine: Engine, table: str
+) -> None:
+    """017/001 DoD-4 — an insert that omits both model columns (the pre-017 shape) passes the
+    CHECK and stores NULL in both."""
+    with _seeded_017_connection(db_engine) as connection:
+        if table == "characters":
+            connection.execute(RAW_CHARACTER_INSERT, _raw_character(id=106, user_id=1))
+        else:
+            connection.execute(
+                RAW_SESSIONS_INSERT, _raw_sessions_row(id=106, user_id=1, character_id=10, setup_id=None)
+            )
+        connection.commit()
+        assert _stored_model_ref(connection, table, 106) == (None, None)
+
+
+# --- 017/001 DoD-5: the 009 / 011 deltas were amended in place, as 001.context.md says -----
+
+
+def test_characters_column_set_was_widened_not_replaced__S017_001_DoD5() -> None:
+    """017/001 DoD-5 — the amended `CHARACTERS_COLUMNS` is 009's seven plus 017's six."""
+    assert CHARACTERS_009_COLUMNS == {"id", "user_id", "name", "sheet", "archived_at", "created_at", "updated_at"}
+    assert CHARACTERS_COLUMNS == CHARACTERS_009_COLUMNS | set(ASSISTANT_CHAIN_COLUMNS)
+    assert len(CHARACTERS_COLUMNS) == 13
+
+
+def test_forbidden_characters_columns_dropped_only_system_prompt__S017_001_DoD5() -> None:
+    """017/001 DoD-5 — `system_prompt` left the forbidden list; `model_ref`, `tools` and the two
+    languages stay forbidden."""
+    assert "system_prompt" not in FORBIDDEN_CHARACTERS_COLUMNS
+    assert set(FORBIDDEN_CHARACTERS_COLUMNS) == {"model_ref", "tools", "rp_language", "preferred_language"}
+
+
+def test_sessions_column_set_was_widened_not_replaced__S017_001_DoD5() -> None:
+    """017/001 DoD-5 — the amended `SESSIONS_COLUMNS` is 011's eight plus 017's eight."""
+    assert SESSIONS_011_COLUMNS == {
+        "id",
+        "user_id",
+        "character_id",
+        "setup_id",
+        "last_used_at",
+        "archived_at",
+        "created_at",
+        "updated_at",
+    }
+    assert SESSIONS_COLUMNS == SESSIONS_011_COLUMNS | set(SESSIONS_NEW_017_COLUMNS)
+    assert len(SESSIONS_COLUMNS) == 16
+
+
+def test_forbidden_sessions_columns_dropped_only_the_three_017_declares__S017_001_DoD5() -> None:
+    """017/001 DoD-5 — `rp_language`, `preferred_language` and `system_prompt` left the list;
+    the rest stay."""
+    assert set(FORBIDDEN_SESSIONS_COLUMNS) == {"title", "partner_label", "model_ref", "tools", "status", "state"}

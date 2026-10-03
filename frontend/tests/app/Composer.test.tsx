@@ -12,6 +12,13 @@
 //   - one fixed preview sentence under the composer on *my turn* when there is a settle target;
 //   - "Discard empty zone" present only with an empty zone and a blank draft; pressing it makes
 //     no request and returns the switch to its computed default.
+//
+// Amended by feature 017, step 011 (DoD-6, DoD-7): `ComposerProps` gained an optional
+// `sendBlockedReason` (017 D17). Every 013 case above renders without it and is unchanged. The
+// gate cases are in the last block, under a describe naming 017 step 011, so their "— DoD-N"
+// tags are 017 step 011's: on *my turn* a non-null reason disables Send whatever the draft and
+// shows the sentence; Settle is never gated; on *partner* the reason is not shown and Send and
+// the paste file as before; a null reason changes nothing.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
@@ -176,6 +183,15 @@ function renderComposer(state: StreamState): void {
   render(
     <AppProviders>
       <Composer state={state} />
+    </AppProviders>,
+  );
+}
+
+/** 017 step 011: the composer with the gate prop (a sentence or null). */
+function renderGatedComposer(state: StreamState, sendBlockedReason: string | null): void {
+  render(
+    <AppProviders>
+      <Composer state={state} sendBlockedReason={sendBlockedReason} />
     </AppProviders>,
   );
 }
@@ -558,5 +574,197 @@ describe("Composer — Discard empty zone (D3)", () => {
     expect(effectiveKind(state)).toBe("turn");
     expect(screen.getByRole("radio", { name: "My turn" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "Partner" })).not.toBeChecked();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 017, step 011 — the Send gate (US-107, D17). Every "— DoD-N" here is 017 step 011's.
+const NO_MODEL_REASON = "Cannot send: no model is enabled on this instance.";
+
+describe("017 step 011 — Composer's sendBlockedReason gate (US-107.AC-1, US-107.AC-2, US-135.AC-1, D17)", () => {
+  it('on my turn with the reason and draft "Hello": Send is disabled, the sentence is shown and Settle is enabled — DoD-6', () => {
+    stubFetch(() => undefined);
+    const state = seeded({ draft: "Hello" });
+    renderGatedComposer(state, NO_MODEL_REASON);
+
+    expect(effectiveKind(state)).toBe("turn");
+    expect(composer()).toHaveValue("Hello");
+    expect(sendButton()).toBeDisabled();
+    expect(screen.getByText(NO_MODEL_REASON)).toBeInTheDocument();
+    expect(settleButton()).toBeEnabled();
+  });
+
+  it("on my turn with the reason, typing a draft never enables Send, and pressing it sends nothing — DoD-6", async () => {
+    const log = happyBackend();
+    const user = newUser();
+    const state = seeded();
+    renderGatedComposer(state, NO_MODEL_REASON);
+
+    await user.type(composer(), "Hello");
+    expect(sendButton()).toBeDisabled();
+
+    await user.click(sendButton());
+    await flush();
+    expect(posts(log)).toEqual([]);
+  });
+
+  it('on my turn with the reason, pressing "Settle" with draft "Hello" still appends then settles — DoD-6', async () => {
+    const log = happyBackend({ entries: [entry("7250000000000000303", "turn", "Hello")] });
+    const user = newUser();
+    const state = seeded({ draft: "Hello" });
+    renderGatedComposer(state, NO_MODEL_REASON);
+
+    await user.click(settleButton());
+    await waitFor(() => {
+      expect(lines(log)).toContain(`POST ${SETTLE_PATH}`);
+    });
+    await flush();
+
+    const sent = posts(log);
+    expect(sent.map((s) => s.line)).toEqual([`POST ${APPEND_PATH}`, `POST ${SETTLE_PATH}`]);
+    expect(sent[0]?.body).toBe('{"text":"Hello"}');
+    expect(composer()).toHaveValue("");
+  });
+
+  it("on my turn with the reason and one zone row, Settle with a blank draft settles alone — DoD-6", async () => {
+    const log = happyBackend({ entries: [entry("7250000000000000303", "turn", "Mine")] });
+    const user = newUser();
+    const state = seeded({ zone: [zoneRow("7250000000000000101", "user", "Mine")] });
+    renderGatedComposer(state, NO_MODEL_REASON);
+
+    expect(settleButton()).toBeEnabled();
+    await user.click(settleButton());
+    await waitFor(() => {
+      expect(lines(log)).toContain(`POST ${SETTLE_PATH}`);
+    });
+    await flush();
+
+    expect(posts(log).map((s) => s.line)).toEqual([`POST ${SETTLE_PATH}`]);
+  });
+
+  it('on partner with the same reason: no reason text, and "Send" with draft "Typed partner text" files the partner block — DoD-7', async () => {
+    const log = happyBackend({ entries: partnerDefaultEntries() });
+    const user = newUser();
+    const state = seeded({ entries: partnerDefaultEntries(), draft: "Typed partner text" });
+    renderGatedComposer(state, NO_MODEL_REASON);
+    expect(effectiveKind(state)).toBe("partner");
+
+    expect(screen.queryByText(NO_MODEL_REASON)).toBeNull();
+    expect(sendButton()).toBeEnabled();
+
+    await user.click(sendButton());
+    await waitFor(() => {
+      expect(posts(log)).toHaveLength(1);
+    });
+    await flush();
+
+    const sent = posts(log);
+    expect(sent.map((s) => s.line)).toEqual([`POST ${ENTRIES_PATH}`]);
+    expect(sent[0]?.body).toBe('{"kind":"partner","text":"Typed partner text"}');
+  });
+
+  it("on partner with the same reason, a paste still files immediately and leaves the draft — DoD-7", async () => {
+    const log = happyBackend({
+      entries: [...partnerDefaultEntries(), entry("7250000000000000301", "partner", "Partner text ((ooc?))")],
+    });
+    const state = seeded({ entries: partnerDefaultEntries(), draft: "Earlier draft" });
+    renderGatedComposer(state, NO_MODEL_REASON);
+    expect(effectiveKind(state)).toBe("partner");
+    // DoD-7: while still on partner, the reason is not shown. After the paste files a
+    // partner entry the default position returns to my turn (013), where D17 shows the
+    // reason, so its absence is asserted only before the paste.
+    expect(screen.queryByText(NO_MODEL_REASON)).toBeNull();
+
+    const notPrevented = paste("Partner text ((ooc?))");
+    await waitFor(() => {
+      expect(lines(log)).toContain(`POST ${ENTRIES_PATH}`);
+    });
+    await flush();
+
+    expect(notPrevented).toBe(false);
+    const sent = posts(log);
+    expect(sent.map((s) => s.line)).toEqual([`POST ${ENTRIES_PATH}`]);
+    expect(sent[0]?.body).toBe('{"kind":"partner","text":"Partner text ((ooc?))"}');
+    expect(composer()).toHaveValue("Earlier draft");
+  });
+
+  it("on partner with the same reason, Settle stays disabled exactly as without it — DoD-7", () => {
+    const state = seeded({ entries: partnerDefaultEntries(), draft: "Some partner text" });
+    renderGatedComposer(state, NO_MODEL_REASON);
+
+    expect(settleButton()).toBeDisabled();
+  });
+
+  it("switching from partner to my turn with the reason shows it and disables Send — DoD-7", async () => {
+    stubFetch(() => undefined);
+    const user = newUser();
+    const state = seeded({ entries: partnerDefaultEntries(), draft: "Typed text" });
+    render(
+      <AppProviders>
+        <KindSwitch state={state} />
+        <Composer state={state} sendBlockedReason={NO_MODEL_REASON} />
+      </AppProviders>,
+    );
+    expect(screen.queryByText(NO_MODEL_REASON)).toBeNull();
+    expect(sendButton()).toBeEnabled();
+
+    await user.click(screen.getByRole("radio", { name: "My turn" }));
+
+    expect(effectiveKind(state)).toBe("turn");
+    expect(screen.getByText(NO_MODEL_REASON)).toBeInTheDocument();
+    expect(sendButton()).toBeDisabled();
+  });
+
+  it("with sendBlockedReason null on my turn, Send is enabled with a draft and POSTs …/zone/messages; no reason is shown — DoD-7", async () => {
+    const log = happyBackend();
+    const user = newUser();
+    const state = seeded({ draft: "Discussion line" });
+    renderGatedComposer(state, null);
+
+    expect(sendButton()).toBeEnabled();
+    expect(settleButton()).toBeEnabled();
+    expect(screen.queryByText(NO_MODEL_REASON)).toBeNull();
+    expect(screen.queryByText(/^Cannot send:/)).toBeNull();
+
+    await user.click(sendButton());
+    await waitFor(() => {
+      expect(posts(log)).toHaveLength(1);
+    });
+    await flush();
+
+    const sent = posts(log);
+    expect(sent.map((s) => s.line)).toEqual([`POST ${APPEND_PATH}`]);
+    expect(sent[0]?.body).toBe('{"text":"Discussion line"}');
+  });
+
+  it("with sendBlockedReason null, a blank draft keeps Send disabled and the preview line still follows the draft — DoD-7", () => {
+    const state = seeded();
+    renderGatedComposer(state, null);
+
+    expect(sendButton()).toBeDisabled();
+    expect(shownPreviews()).toEqual([]);
+    expect(screen.getByRole("button", { name: DISCARD_NAME })).toBeInTheDocument();
+
+    fireEvent.change(composer(), { target: { value: "She walks." } });
+    expect(sendButton()).toBeEnabled();
+    expect(shownPreviews()).toEqual([PREVIEW_TURN]);
+    expect(screen.queryByRole("button", { name: DISCARD_NAME })).toBeNull();
+  });
+
+  it("with sendBlockedReason null on partner, a paste files immediately — DoD-7", async () => {
+    const log = happyBackend({
+      entries: [...partnerDefaultEntries(), entry("7250000000000000301", "partner", "Pasted")],
+    });
+    const state = seeded({ entries: partnerDefaultEntries() });
+    renderGatedComposer(state, null);
+
+    paste("Pasted");
+    await waitFor(() => {
+      expect(lines(log)).toContain(`POST ${ENTRIES_PATH}`);
+    });
+    await flush();
+
+    expect(posts(log).map((s) => s.line)).toEqual([`POST ${ENTRIES_PATH}`]);
+    expect(posts(log)[0]?.body).toBe('{"kind":"partner","text":"Pasted"}');
   });
 });

@@ -15,7 +15,8 @@
 // Deliberately absent, per D5 / D17 / D18: any Archive, Restore or "Actions for …" control
 // (archiving a session lives on the character screen only), the wall outside the ready
 // branch (016 D1), and any notification API import — the failure branch renders its one
-// fixed sentence inline with a Retry. The header's only button is 016's "Open notes".
+// fixed sentence inline with a Retry. The header's title-row button is 016's "Open notes";
+// 017's `SessionConfigBar` (model picker, tool badges, gear) follows the title row.
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
@@ -45,6 +46,8 @@ import { MemoChainSection } from "./MemoChainSection";
 import { NoteWallLayout } from "./NoteWallLayout";
 import { createNoteWallState, isWallVisible, openWall } from "./noteWallState";
 import { NARROW_VIEWPORT_QUERY } from "./shellState";
+import { SessionConfigState, sendBlockedReason } from "./sessionConfigState";
+import { SessionConfigBar } from "./SessionConfigBar";
 import { IconButton } from "../shared/IconButton";
 
 /** The link text when the workspace list does not hold this session's character (D17). */
@@ -81,6 +84,9 @@ export const SessionScreen = observer(function SessionScreen(
   // 016 D2: one wall state per mount (pin re-read from the record, `open` starts false).
   // Hooks run in every branch; only the ready branch renders anything from them.
   const [wall] = useState(() => createNoteWallState(storage));
+  // 017 D16: one configuration state shared by the header bar and the composer's Send gate.
+  // The screen makes no request for it; the bar loads it when it mounts (ready render only).
+  const [configState] = useState(() => new SessionConfigState(props.sessionId));
   const narrow =
     useMediaQuery(NARROW_VIEWPORT_QUERY, false, { getInitialValueInEffect: false }) ?? false;
   const controllerRef = useRef<AbortController | null>(null);
@@ -181,10 +187,16 @@ export const SessionScreen = observer(function SessionScreen(
               />
             )}
           </Group>
+          {/* 017 D16: the session configuration bar, the header's last child. */}
+          <SessionConfigBar state={configState} />
         </Stack>
         {/* 013 D13: the stream (record, ruler, kind switch, zone, composer) — for archived
-            sessions too (R6). "No entries yet." is now the record's empty line. */}
-        <SessionStream sessionId={props.sessionId} />
+            sessions too (R6). "No entries yet." is now the record's empty line. 017 D17: the
+            Send gate's reason comes from the configuration state. */}
+        <SessionStream
+          sessionId={props.sessionId}
+          sendBlockedReason={sendBlockedReason(configState)}
+        />
       </Stack>
     </Container>
   );

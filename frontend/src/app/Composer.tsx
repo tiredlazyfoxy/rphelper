@@ -29,6 +29,11 @@ export type ComposerProps = {
   state: StreamState;
   /** Passed on to `sendComposer`, `filePastedPartner` and `settleComposer`. */
   signal?: AbortSignal;
+  /**
+   * 017 D17: when non-null on *my turn*, Send is disabled and this sentence is shown.
+   * Ignored on *partner*. Defaults to null.
+   */
+  sendBlockedReason?: string | null;
 };
 
 /** The fixed preview sentence for a settle preview (D1). */
@@ -45,8 +50,11 @@ function previewSentence(preview: SettlePreview): string {
 export const Composer = observer(function Composer(
   props: ComposerProps,
 ): React.JSX.Element {
-  const { state, signal } = props;
+  const { state, signal, sendBlockedReason = null } = props;
   const preview = settlePreviewOf(state);
+  // 017 D17: on *my turn* a non-null reason disables Send and is shown; Settle is never gated.
+  const blockedReason =
+    sendBlockedReason !== null && effectiveKind(state) === "turn" ? sendBlockedReason : null;
 
   function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>): void {
     // Read for both positions now; guarded so a paste event without clipboard data on
@@ -83,6 +91,11 @@ export const Composer = observer(function Composer(
           </Text>
         ) : null}
         <Group gap="xs" justify="flex-end">
+          {blockedReason !== null ? (
+            <Text size="sm" c="dimmed">
+              {blockedReason}
+            </Text>
+          ) : null}
           {showsDiscard(state) ? (
             <IconButton
               icon={IconX}
@@ -94,7 +107,7 @@ export const Composer = observer(function Composer(
           ) : null}
           <Button
             variant="default"
-            disabled={!canSend(state)}
+            disabled={!canSend(state) || blockedReason !== null}
             onClick={() => {
               void sendComposer(state, signal);
             }}

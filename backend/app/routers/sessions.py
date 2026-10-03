@@ -31,9 +31,11 @@ before the handler runs. Because the parameter carries a default it is declared 
 after the dependencies, the same way `include_archived` is on the two list routes. `018`
 later adds an optional opening-message field to this same model and route.
 
-**No `PATCH` and no `DELETE` handler exists** (`context.md` R6, D9). Nothing in 011 is
-editable and nothing deletes a session; Starlette answers 405 for either method on any
-matching path, with no code of ours.
+**No `PATCH` and no `DELETE` handler exists here** (`context.md` R6, D9). Nothing in this
+router edits a session and nothing deletes one; Starlette answers 405 for either method on
+any matching path, with no code of ours. Since `017`, a session's configuration is edited
+through `routers/configuration.py`'s `PATCH /api/sessions/{id}/configuration`;
+`PATCH /api/sessions/{id}` itself still does not exist.
 
 The router translates no error by hand: `SessionNotFoundError`, `CharacterNotFoundError`,
 `SetupNotFoundError` and `SetupArchivedError` propagate to the one `DomainError` handler

@@ -566,6 +566,40 @@ def validate_chat_model(
     return EnabledChatModel(server=server, model_name=model_name)
 
 
+def list_enabled_chat_models(connection: Connection) -> list[EnabledChatModel]:
+    """The enabled set (017 D7): every `models` row with `is_enabled` whose server exists.
+
+    Ordered by server id, then `models.id`, ascending; an enabled embedding-designated model
+    is included. Empty when nothing is enabled. Safe inside a caller's open transaction and,
+    standalone, leaves none open (017 D12).
+    """
+    # `_reading` only ends a transaction it autobegan, so inside a caller's `begin()` block the
+    # selects simply join that transaction (D12). The inner join drops a model whose server is gone.
+    with _reading(connection):
+        rows = connection.execute(
+            select(models.c.server_id, models.c.model_name)
+            .select_from(models.join(llm_servers, llm_servers.c.id == models.c.server_id))
+            .where(models.c.is_enabled)
+            .order_by(llm_servers.c.id, models.c.id)
+        ).all()
+        servers: dict[int, LlmServer] = {}
+        for row in rows:
+            if row.server_id not in servers:
+                server = _fetch_server(connection, row.server_id)
+                assert server is not None
+                servers[row.server_id] = server
+    return [EnabledChatModel(server=servers[row.server_id], model_name=row.model_name) for row in rows]
+
+
+def first_enabled_chat_model(connection: Connection) -> EnabledChatModel | None:
+    """The first item of `list_enabled_chat_models`'s order, or `None` when nothing is enabled.
+
+    Same transaction posture as `list_enabled_chat_models` (017 D12).
+    """
+    enabled = list_enabled_chat_models(connection)
+    return enabled[0] if enabled else None
+
+
 def validate_embedding_model(connection: Connection) -> DesignatedEmbeddingModel:
     """Use-time check: a designation exists and that model is enabled — no substitute, ever.
 

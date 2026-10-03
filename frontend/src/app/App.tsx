@@ -13,6 +13,7 @@ import type { LayoutStorage } from "./workspaceLayout";
 import { WorkspaceShell } from "./WorkspaceShell";
 import { CharacterRoute, CharacterScreen } from "./CharacterScreen";
 import { SessionRoute } from "./SessionScreen";
+import { SettingsScreen } from "./SettingsScreen";
 import { CharactersState } from "./charactersState";
 import { SessionsState } from "./sessionsState";
 
@@ -64,7 +65,7 @@ export function App(props: AppProps): React.JSX.Element {
           path="/characters/:id"
           element={<CharacterRoute characters={characters} sessions={sessions} />}
         />
-        <Route path="/settings" element={null} />
+        <Route path="/settings" element={<SettingsScreen />} />
         <Route path="/search" element={null} />
         <Route path="*" element={<Text p="md">Page not found</Text>} />
       </Routes>

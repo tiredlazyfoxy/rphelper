@@ -65,6 +65,20 @@
 // stub matching exactly `(width < 820px)`, restored after each test (WorkspaceShell.test.tsx's
 // shape). A "reload" is `unmount()` then rendering again with the same storage fake. No other 011
 // / 013 / 015 assertion changes.
+//
+// Amended by feature 017, step 011 (DoD-8..DoD-11; D16, D17): the ready render's header now ends
+// with the "Session configuration" bar, which on mount reads `GET /api/sessions/<id>/configuration`
+// and `GET /api/models`. `streamAnswer` answers both by exact pathname — a seven-key configuration
+// whose captured model is listed in the one-model answer, so the session's model is usable and the
+// composer's Send gate never blocks — so every ready-state case keeps its meaning. Two 011
+// assertions see the new reads or the new header content and are amended in place: 011 DoD-5's
+// exact request list gains the two GETs, and 011 DoD-4's "nothing else in the header" residue
+// check subtracts the bar's own text (the bar is 017's, not the setup label's place). This file
+// holds no "no button outside the Notes region / wall controls" clause any more (013 step 007
+// replaced it with the Archive / Restore / "Actions for …" absence checks, which no bar control is
+// named like), so there is nothing else to exclude. The 017 clauses are in the last block, under a
+// describe naming 017 step 011, so their "— DoD-N" tags are 017 step 011's. No other 011 / 013 /
+// 015 / 016 assertion changes.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
@@ -73,6 +87,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionRoute, SessionScreen } from "../../src/app/SessionScreen";
 import type { Character } from "../../src/app/charactersApi";
+import type { EnabledModel, ModelRef, SessionConfiguration, Setting } from "../../src/app/configurationApi";
 import { CharactersState } from "../../src/app/charactersState";
 import type { Memo, MemoChainLevel, MemoScope } from "../../src/app/memosApi";
 import type { Session } from "../../src/app/sessionsApi";
@@ -296,10 +311,49 @@ function memoChainPath(sessionId: string): string {
   return `/api/sessions/${sessionId}/memo-chain`;
 }
 
+/** 017 step 011: the header bar's two reads, by exact path. */
+function configurationPath(sessionId: string): string {
+  return `/api/sessions/${sessionId}/configuration`;
+}
+
+const MODELS_PATH = "/api/models";
+
+// 017 step 011: file-local payload builders (context.md "Test conventions").
+const S1_ID = "7250000000000000401";
+const S2_ID = "7250000000000000402";
+const MODEL_A: EnabledModel = { server_id: S1_ID, server_name: "S1", model_name: "A" };
+const MODEL_B: EnabledModel = { server_id: S2_ID, server_name: "S2", model_name: "B" };
+const REF_A: ModelRef = { server_id: S1_ID, model_name: "A" };
+const REF_B: ModelRef = { server_id: S2_ID, model_name: "B" };
+
+/** A text setting no level supplies: everything null (the Wire contract's level rules). */
+function emptyTextSetting(): Setting<string> {
+  return { session: null, inherited: null, inherited_level: null, value: null, level: null };
+}
+
+function defaultToolSetting(): Setting<boolean> {
+  return { session: null, inherited: true, inherited_level: "default", value: true, level: "default" };
+}
+
+/** A seven-key configuration with nothing overridden and the given captured model. */
+function sessionConfiguration(model: ModelRef | null): SessionConfiguration {
+  return {
+    model: model === null ? null : { ...model },
+    system_prompt: emptyTextSetting(),
+    tool_memo_search: defaultToolSetting(),
+    tool_session_search: defaultToolSetting(),
+    tool_web_search: defaultToolSetting(),
+    rp_language: emptyTextSetting(),
+    preferred_language: emptyTextSetting(),
+  };
+}
+
 /**
  * 013 step 007: answers a GET of `<id>/entries` or `<id>/zone` for any of the given session
  * ids (entries from `entriesBy`, else empty; the zone always empty), or undefined.
  * 015 step 008: also a GET of `<id>/memo-chain` (levels from `chainsBy`, else none).
+ * 017 step 011: also a GET of `<id>/configuration` (captured model A) and of `/api/models`
+ * (`[A]`), so the session's model is usable and Send is never gated.
  */
 function streamAnswer(
   request: Seen,
@@ -312,7 +366,11 @@ function streamAnswer(
     if (request.path === entriesPath(id)) return jsonResponse({ entries: entriesBy[id] ?? [] }, 200);
     if (request.path === zonePath(id)) return jsonResponse({ messages: [] }, 200);
     if (request.path === memoChainPath(id)) return jsonResponse({ levels: chainsBy[id] ?? [] }, 200);
+    if (request.path === configurationPath(id)) {
+      return jsonResponse(sessionConfiguration(REF_A), 200);
+    }
   }
+  if (request.path === MODELS_PATH) return jsonResponse({ models: [MODEL_A] }, 200);
   return undefined;
 }
 
@@ -554,7 +612,11 @@ describe("the ready header names the character, the start time and the empty run
     // The header's pieces and nothing else: the character's name and a start-time label of the
     // fixed shape. Whatever is left over is the setup's place. (013 step 007: scoped to the
     // header block, because the stream's own texts now share the main region.)
-    const text = (headerBlock().textContent ?? "").trim();
+    // (017 step 011: the header's last child is now the "Session configuration" bar; its own
+    // text — the picker's label and the tool badges — is 017's, so it is subtracted first.)
+    const header = headerBlock();
+    const configBar = within(header).queryByRole("group", { name: "Session configuration" });
+    const text = (header.textContent ?? "").replace(configBar?.textContent ?? "", "").trim();
     expect(text).toContain(CHAR_A.name);
     expect(text).toMatch(START_LABEL_ANYWHERE);
     const residue = text.replace(CHAR_A.name, "").replace(START_LABEL_ANYWHERE, "").trim();
@@ -573,12 +635,15 @@ describe("the ready header names the character, the start time and the empty run
     expect(sessionRequests(calls, SESSION_A_ID)).toHaveLength(1);
     // 013 step 007: exactly the stream's two GETs besides the session's own.
     // 015 step 008: and the Notes section's one memo-chain GET.
+    // 017 step 011: and the header bar's configuration and models GETs.
     expect(calls.map((call) => `${call.method} ${call.path}`).sort()).toEqual(
       [
         `GET ${sessionPath(SESSION_A_ID)}`,
         `GET ${entriesPath(SESSION_A_ID)}`,
         `GET ${zonePath(SESSION_A_ID)}`,
         `GET ${memoChainPath(SESSION_A_ID)}`,
+        `GET ${configurationPath(SESSION_A_ID)}`,
+        `GET ${MODELS_PATH}`,
       ].sort(),
     );
   });
@@ -1594,5 +1659,344 @@ describe("016 step 006 — the screen is constructed with a storage prop (D2 re-
 
     expect(wallIsAccessible()).toBe(true);
     expect(queryOpenNotes()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 017, step 011 — the session header bar and the Send gate (D16, D17; US-105, US-107).
+// Every "— DoD-N" in this block is 017 step 011's. The bar is the group "Session configuration";
+// the picker is the field labelled "Model" inside it; its options render in a portal and are
+// read off `screen` by role "option". Gate sentences are the strings table's, asserted exactly.
+const BAR_NAME = "Session configuration";
+const MODEL_LABEL = "Model";
+const LABEL_A = "A (S1)";
+const LABEL_B = "B (S2)";
+const REASON_NO_MODEL = "Cannot send: no model is enabled on this instance.";
+const REASON_NOT_CHOSEN = "Cannot send: choose a model for this session.";
+const REASON_NOT_ENABLED = "Cannot send: this session's model is not enabled. Choose another model.";
+const ANY_REASON = /^Cannot send:/;
+
+type Answer = () => Response | Promise<Response>;
+
+type ConfigServe = {
+  /** The configuration GET per session id. */
+  config: Record<string, Answer>;
+  /** The `/api/models` GET. */
+  models: Answer;
+  /** A configuration PATCH for a served session, given its id and parsed body. */
+  patch?: (sessionId: string, body: unknown) => Response | Promise<Response>;
+};
+
+/**
+ * The given sessions and their streams (as `streamAnswer`), with the bar's configuration and
+ * models reads and the configuration PATCH answered from `serve` by exact method + pathname.
+ * Everything else 404s.
+ */
+function serveConfigured(serve: ConfigServe, ...rows: Session[]) {
+  const ids = rows.map((row) => row.id);
+  return stubBackend((request) => {
+    if (request.search === "") {
+      if (request.method === "GET") {
+        const row = rows.find((candidate) => request.path === sessionPath(candidate.id));
+        if (row !== undefined) return jsonResponse(row, 200);
+        const configFor = ids.find((id) => request.path === configurationPath(id));
+        if (configFor !== undefined) {
+          const answer = serve.config[configFor];
+          if (answer !== undefined) return answer();
+        }
+        if (request.path === MODELS_PATH) return serve.models();
+      }
+      if (request.method === "PATCH" && serve.patch !== undefined) {
+        const patchFor = ids.find((id) => request.path === configurationPath(id));
+        if (patchFor !== undefined) return serve.patch(patchFor, request.body);
+      }
+    }
+    return streamAnswer(request, ids) ?? notFoundResponse();
+  });
+}
+
+function configBar(): HTMLElement {
+  return within(mainRegion()).getByRole("group", { name: BAR_NAME });
+}
+
+function queryAnyConfigBar(): HTMLElement | null {
+  return screen.queryByRole("group", { name: BAR_NAME, hidden: true });
+}
+
+function modelPicker(): HTMLElement {
+  const scope = within(configBar());
+  return (
+    scope.queryByRole("combobox", { name: MODEL_LABEL }) ??
+    scope.queryByRole("textbox", { name: MODEL_LABEL }) ??
+    scope.getByLabelText(MODEL_LABEL)
+  );
+}
+
+function shownModel(): string {
+  const element = modelPicker();
+  const shown = element instanceof HTMLInputElement ? element.value : element.textContent ?? "";
+  return shown.trim();
+}
+
+async function chooseModelOption(user: User, name: string): Promise<void> {
+  await user.click(modelPicker());
+  await waitFor(() => {
+    expect(screen.queryAllByRole("option").length).toBeGreaterThan(0);
+  });
+  await flush();
+  await user.click(screen.getByRole("option", { name }));
+  await flush();
+}
+
+function mainSend(): HTMLElement {
+  return within(mainRegion()).getByRole("button", { name: "Send" });
+}
+
+function configRequests(calls: Seen[]): Seen[] {
+  return calls.filter((call) => /^\/api\/sessions\/[^/]+\/configuration$/.test(call.path));
+}
+
+function modelsRequests(calls: Seen[]): Seen[] {
+  return calls.filter((call) => call.path === MODELS_PATH);
+}
+
+describe("017 step 011 — the header bar and the Send gate on the ready screen (US-107, US-105.AC-1, D16, D17)", () => {
+  it("captured model null and models []: the bar sits in the header after the heading and before the composer; the composer shows the no-model reason and Send stays disabled after typing — DoD-8", async () => {
+    const user = newUser();
+    serveConfigured(
+      {
+        config: { [SESSION_A_ID]: () => jsonResponse(sessionConfiguration(null), 200) },
+        models: () => jsonResponse({ models: [] }, 200),
+      },
+      SESSION_A,
+    );
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    const bar = configBar();
+    const heading = within(mainRegion()).getByRole("heading", { name: START_LABEL_HEADING });
+    expect(headerBlock().contains(bar)).toBe(true);
+    expect(isAfter(heading, bar)).toBe(true);
+    expect(isAfter(bar, mainComposer())).toBe(true);
+    expect(bar.contains(mainComposer())).toBe(false);
+
+    expect(await within(mainRegion()).findByText(REASON_NO_MODEL)).toBeInTheDocument();
+    expect(configBar().contains(within(mainRegion()).getByText(REASON_NO_MODEL))).toBe(false);
+
+    await user.type(mainComposer(), "Hello");
+    expect(mainComposer()).toHaveValue("Hello");
+    expect(mainSend()).toBeDisabled();
+    expect(within(mainRegion()).getByRole("button", { name: "Settle" })).toBeEnabled();
+  });
+
+  it('models [A] and captured model null: the composer shows the choose-a-model reason; choosing "A" clears it and Send is enabled with the draft — DoD-8', async () => {
+    const user = newUser();
+    const { calls } = serveConfigured(
+      {
+        config: { [SESSION_A_ID]: () => jsonResponse(sessionConfiguration(null), 200) },
+        models: () => jsonResponse({ models: [MODEL_A] }, 200),
+        patch: () => jsonResponse(sessionConfiguration(REF_A), 200),
+      },
+      SESSION_A,
+    );
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    expect(await within(mainRegion()).findByText(REASON_NOT_CHOSEN)).toBeInTheDocument();
+    await user.type(mainComposer(), "Hello");
+    expect(mainSend()).toBeDisabled();
+
+    await chooseModelOption(user, LABEL_A);
+
+    const patches = calls.filter((call) => call.method === "PATCH");
+    expect(patches).toHaveLength(1);
+    expect(patches[0].path).toBe(configurationPath(SESSION_A_ID));
+    expect(patches[0].body).toEqual({ model: { server_id: S1_ID, model_name: "A" } });
+
+    await waitFor(() => {
+      expect(within(mainRegion()).queryByText(REASON_NOT_CHOSEN)).toBeNull();
+    });
+    expect(within(mainRegion()).queryByText(ANY_REASON)).toBeNull();
+    expect(shownModel()).toBe(LABEL_A);
+    expect(mainComposer()).toHaveValue("Hello");
+    expect(mainSend()).toBeEnabled();
+  });
+
+  it("captured model A not in the list [B]: the composer shows the not-enabled reason and Send is disabled with a draft — DoD-9", async () => {
+    const user = newUser();
+    serveConfigured(
+      {
+        config: { [SESSION_A_ID]: () => jsonResponse(sessionConfiguration(REF_A), 200) },
+        models: () => jsonResponse({ models: [MODEL_B] }, 200),
+      },
+      SESSION_A,
+    );
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    expect(await within(mainRegion()).findByText(REASON_NOT_ENABLED)).toBeInTheDocument();
+    await user.type(mainComposer(), "Hello");
+    expect(mainSend()).toBeDisabled();
+  });
+
+  it("while /configuration is pending (models []), Send is enabled with a draft and no reason is shown — DoD-9", async () => {
+    const user = newUser();
+    const gate = deferred<Response>();
+    serveConfigured(
+      {
+        config: { [SESSION_A_ID]: () => gate.promise },
+        models: () => jsonResponse({ models: [] }, 200),
+      },
+      SESSION_A,
+    );
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    await user.type(mainComposer(), "Hello");
+    expect(mainSend()).toBeEnabled();
+    expect(within(mainRegion()).queryByText(ANY_REASON)).toBeNull();
+
+    gate.resolve(jsonResponse(sessionConfiguration(null), 200));
+    await flush();
+  });
+
+  type FailedRead = [label: string, serve: () => ConfigServe];
+
+  const FAILED_READS: FailedRead[] = [
+    [
+      "/configuration answers 500 (models [])",
+      () => ({
+        config: { [SESSION_A_ID]: serverError },
+        models: () => jsonResponse({ models: [] }, 200),
+      }),
+    ],
+    [
+      "/configuration fails in transport (models [])",
+      () => ({
+        config: {
+          [SESSION_A_ID]: () => {
+            throw new TypeError("Failed to fetch");
+          },
+        },
+        models: () => jsonResponse({ models: [] }, 200),
+      }),
+    ],
+    [
+      "/api/models answers 500 (captured model null)",
+      () => ({
+        config: { [SESSION_A_ID]: () => jsonResponse(sessionConfiguration(null), 200) },
+        models: serverError,
+      }),
+    ],
+  ];
+
+  it.each(FAILED_READS)(
+    "after %s, Send is enabled with a draft and no reason is shown — DoD-9",
+    async (_label, serve) => {
+      const user = newUser();
+      serveConfigured(serve(), SESSION_A);
+      renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+      await flush();
+
+      await user.type(mainComposer(), "Hello");
+      expect(mainSend()).toBeEnabled();
+      expect(within(mainRegion()).queryByText(ANY_REASON)).toBeNull();
+    },
+  );
+
+  it("while the session is loading there is no Session configuration group and no configuration or models request — DoD-10", async () => {
+    const gate = deferred<Response>();
+    const { calls } = stubBackend(
+      (request) =>
+        streamAnswer(request, [SESSION_A_ID]) ??
+        (request.method === "GET" && request.path === sessionPath(SESSION_A_ID)
+          ? gate.promise
+          : notFoundResponse()),
+    );
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    expect(loaders().length).toBeGreaterThan(0);
+    expect(queryAnyConfigBar()).toBeNull();
+    expect(configRequests(calls)).toEqual([]);
+    expect(modelsRequests(calls)).toEqual([]);
+
+    gate.resolve(jsonResponse(SESSION_A, 200));
+    await flush();
+    expect(configBar()).toBeInTheDocument();
+  });
+
+  it("Session not found renders no Session configuration group and makes no configuration or models request — DoD-10", async () => {
+    const { calls } = stubBackend((request) => streamAnswer(request, [SESSION_A_ID]) ?? notFoundResponse());
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    expect(within(mainRegion()).getByText(NOT_FOUND_TEXT)).toBeInTheDocument();
+    expect(queryAnyConfigBar()).toBeNull();
+    expect(configRequests(calls)).toEqual([]);
+    expect(modelsRequests(calls)).toEqual([]);
+  });
+
+  type LoadFailure = [label: string, answer: () => Response];
+
+  const SESSION_LOAD_FAILURES: LoadFailure[] = [
+    ["a 500 envelope", serverError],
+    [
+      "a transport failure",
+      () => {
+        throw new TypeError("Failed to fetch");
+      },
+    ],
+  ];
+
+  it.each(SESSION_LOAD_FAILURES)(
+    "%s: Could not load the session renders no Session configuration group and makes no configuration or models request — DoD-10",
+    async (_label, answer) => {
+      const { calls } = stubBackend((request) =>
+        request.method === "GET" && request.path === sessionPath(SESSION_A_ID)
+          ? answer()
+          : (streamAnswer(request, [SESSION_A_ID]) ?? notFoundResponse()),
+      );
+      renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+      await flush();
+
+      expect(within(mainRegion()).getByText(LOAD_FAILED_TEXT)).toBeInTheDocument();
+      expect(queryAnyConfigBar()).toBeNull();
+      expect(configRequests(calls)).toEqual([]);
+      expect(modelsRequests(calls)).toEqual([]);
+    },
+  );
+
+  it("navigating in-entry from a to b requests b's configuration and shows b's captured model — DoD-10", async () => {
+    const user = newUser();
+    const { calls } = serveConfigured(
+      {
+        config: {
+          [SESSION_A_ID]: () => jsonResponse(sessionConfiguration(REF_A), 200),
+          [SESSION_B_ID]: () => jsonResponse(sessionConfiguration(REF_B), 200),
+        },
+        models: () => jsonResponse({ models: [MODEL_A, MODEL_B] }, 200),
+      },
+      SESSION_A,
+      SESSION_B,
+    );
+    renderRoute(
+      sessionRoutePath(SESSION_A_ID),
+      workspaceWith(CHAR_A, CHAR_B),
+      sessionRoutePath(SESSION_B_ID),
+    );
+    await flush();
+    expect(shownModel()).toBe(LABEL_A);
+    expect(getRequests(calls, configurationPath(SESSION_B_ID))).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: /^probe navigate$/i }));
+    await flush();
+
+    expect(screen.getByTestId("location").textContent).toBe(sessionRoutePath(SESSION_B_ID));
+    expect(getRequests(calls, configurationPath(SESSION_B_ID))).toHaveLength(1);
+    await waitFor(() => {
+      expect(shownModel()).toBe(LABEL_B);
+    });
+    expect(within(mainRegion()).getAllByRole("group", { name: BAR_NAME })).toHaveLength(1);
   });
 });

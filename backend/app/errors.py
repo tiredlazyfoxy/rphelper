@@ -235,6 +235,42 @@ class ModelNotEnabledError(DomainError):
     http_status = 409
 
 
+class NoModelEnabledError(DomainError):
+    """A use needs a model and no model is enabled on the instance at all.
+
+    Feature `017` (`context.md` D2): the first check of the use-time model resolution,
+    outranking the session's own state (US-107.AC-2). A configuration conflict, hence 409.
+    `detail` is empty; the message is fixed.
+    """
+
+    code = "no_model_enabled"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "No model is enabled on this instance."
+        super().__init__(message, detail)
+
+
+class ModelNotChosenError(DomainError):
+    """A use needs the session's model and the session has none captured.
+
+    Feature `017` (`context.md` D2): the second check of the use-time model resolution — the
+    session was created when no model was enabled and nobody has picked one since. 409;
+    `detail` is empty; the message is fixed.
+    """
+
+    code = "model_not_chosen"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "No model is chosen for this session."
+        super().__init__(message, detail)
+
+
 class LlmServerNotFoundError(DomainError):
     """An id-addressed LLM-server operation names no existing registration.
 

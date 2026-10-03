@@ -98,6 +98,25 @@
 // `wallPinned: true`, no wall and no "Open notes" at `/`, `/characters/<id>`, `/settings` and
 // `/search`, and a pinned wall inside the main region at `/sessions/1` with the shell's `.app`
 // grid still holding exactly the nav and the main. No other assertion changes.
+//
+// Amended by feature 017, step 007 (DoD-8, DoD-9): `/settings` is no longer an empty centre — it
+// renders the settings screen (017 D15), which reads `GET /api/me/settings` and the user-level
+// notes listing `GET /api/memos?scope=user` on mount. So `EMPTY_CENTRE_ROUTES` **loses its
+// `/settings` entry**; `/` and `/search` keep their empty-centre clauses unchanged. `stubWorkspace`
+// gained two branches, matched on the exact pathname and query: `GET /api/me/settings` (both
+// languages null) and `GET /api/memos?scope=user` (`{ "memos": [] }`), so 016's `/settings` entry
+// in `NO_SESSION_ROUTES` sees a well-formed screen and keeps its assertions. Two clauses are added
+// at the bottom: `/settings` renders the screen inside the main region with the tree present
+// (DoD-8), and the user menu's "Settings" item navigates there in-entry (DoD-9). "— DoD-8" and
+// "— DoD-9" there are 017 step 007's. No other assertion changes.
+//
+// Amended by feature 017, step 011 (DoD-11): the session screen's ready header now ends with the
+// "Session configuration" bar (017 D16), which reads `GET /api/sessions/<id>/configuration` and
+// `GET /api/models` on mount. `stubWorkspace` gained two branches answering both by exact
+// pathname (a seven-key configuration whose captured model is in the one-model list, for a held
+// session; 404 `session_not_found` otherwise), so the `/sessions/1` clauses, the tree-click clause
+// and the DoD-15 started-session clause all see a loaded bar. One clause is added at the bottom
+// ("— DoD-11" there is 017 step 011's); no other assertion changes.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -146,9 +165,10 @@ const NOT_FOUND_TEXT = /page not found/i;
 /**
  * The declared routes whose centre is still empty: 009 filled the two character routes, and
  * 011 step 009 filled `/sessions/:id` (D17), which is why that path is no longer listed here —
- * this step's own clauses at the bottom of the file cover it.
+ * this step's own clauses at the bottom of the file cover it. 017 step 007 filled `/settings`
+ * (D15), so it is no longer listed either; its clauses are at the bottom of the file.
  */
-const EMPTY_CENTRE_ROUTES = ["/", "/settings", "/search"];
+const EMPTY_CENTRE_ROUTES = ["/", "/search"];
 
 const UNDECLARED_ROUTE = "/nope";
 
@@ -247,7 +267,44 @@ const EMPTY_NOTES = { memos: [] };
 function characterNotesSearch(characterId: string): string {
   return `?scope=character&scope_id=${characterId}`;
 }
+
+// ------------------------------------------- 017 step 007: the settings screen's two reads
+const SETTINGS_ROUTE = "/settings";
+const USER_SETTINGS_PATH = "/api/me/settings";
+const EMPTY_USER_SETTINGS = { rp_language: null, preferred_language: null };
+const USER_NOTES_SEARCH = "?scope=user";
+const SETTINGS_HEADING = "Settings";
+const LANGUAGES_REGION = "Languages";
+const YOUR_NOTES_REGION = "Your notes";
+const USER_MENU_NAME = /^user menu$/i;
+const SETTINGS_ITEM = /^settings$/i;
 const RULER_NAME = "Current zone";
+
+// ------------------------------------------- 017 step 011: the session header bar's two reads
+/** `GET /api/sessions/<id>/configuration`, anchored both ends. */
+const SESSION_CONFIGURATION_PATTERN = /^\/api\/sessions\/([^/]+)\/configuration$/;
+const MODELS_PATH = "/api/models";
+const CONFIG_BAR_NAME = "Session configuration";
+const MODEL_REF = { server_id: "7250000000000000401", model_name: "A" };
+const ENABLED_MODELS = [{ server_id: "7250000000000000401", server_name: "S1", model_name: "A" }];
+const EMPTY_TEXT_SETTING = { session: null, inherited: null, inherited_level: null, value: null, level: null };
+const DEFAULT_TOOL_SETTING = {
+  session: null,
+  inherited: true,
+  inherited_level: "default",
+  value: true,
+  level: "default",
+};
+/** Seven keys, nothing overridden, the captured model listed in `ENABLED_MODELS`. */
+const USABLE_CONFIGURATION = {
+  model: MODEL_REF,
+  system_prompt: EMPTY_TEXT_SETTING,
+  tool_memo_search: DEFAULT_TOOL_SETTING,
+  tool_session_search: DEFAULT_TOOL_SETTING,
+  tool_web_search: DEFAULT_TOOL_SETTING,
+  rp_language: EMPTY_TEXT_SETTING,
+  preferred_language: EMPTY_TEXT_SETTING,
+};
 
 const SESSION_NOT_FOUND_TEXT = "Session not found";
 const NO_ENTRIES_TEXT = "No entries yet.";
@@ -404,6 +461,17 @@ function stubWorkspace(rows: Character[], sessions: Session[] = []) {
       return jsonResponse({ sessions: sessionOrder.filter((row) => row.archived_at === null) }, 200);
     }
 
+    // 017 step 007: `/settings` renders the settings screen, which reads the user's settings.
+    // Matched on the exact pathname and an empty query — `/api/me` shares the prefix.
+    if (url.pathname === USER_SETTINGS_PATH && url.search === "" && method === "GET") {
+      return jsonResponse(EMPTY_USER_SETTINGS, 200);
+    }
+    // 017 step 007: the settings screen's "Your notes" lists the user-level notes. Matched on the
+    // exact pathname and query string, answered empty.
+    if (url.pathname === MEMOS_PATH && url.search === USER_NOTES_SEARCH && method === "GET") {
+      return jsonResponse(EMPTY_NOTES, 200);
+    }
+
     // 015 step 009: the character screen's Notes section lists that character's notes. Matched
     // on the exact pathname and query string; answered empty for a held character, the
     // backend's own 404 code otherwise.
@@ -475,6 +543,21 @@ function stubWorkspace(rows: Character[], sessions: Session[] = []) {
         return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
       }
       return jsonResponse({ levels: [] }, 200);
+    }
+
+    // 017 step 011: the session screen's ready header mounts the "Session configuration" bar,
+    // which reads that session's configuration and the enabled models. Matched on the exact
+    // pathname; the configuration is answered for a held session (captured model listed in the
+    // models answer), the backend's own 404 code otherwise.
+    const sessionConfiguration = SESSION_CONFIGURATION_PATTERN.exec(url.pathname);
+    if (sessionConfiguration !== null && method === "GET") {
+      if (!sessionOrder.some((candidate) => candidate.id === sessionConfiguration[1])) {
+        return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
+      }
+      return jsonResponse(USABLE_CONFIGURATION, 200);
+    }
+    if (url.pathname === MODELS_PATH && url.search === "" && method === "GET") {
+      return jsonResponse({ models: ENABLED_MODELS }, 200);
     }
 
     const sessionAction = SESSION_ACTION_PATTERN.exec(url.pathname);
@@ -1115,5 +1198,85 @@ describe("016 step 006 — a stored pin shows the wall only on a session (US-095
     expect(children).toHaveLength(2);
     expect(children[0]).toBe(navElement());
     expect(children[1]).toBe(mainElement());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 017, step 007 — `/settings` renders the settings screen inside the shell (D15,
+// US-092.AC-1). The screen's own behaviour is SettingsScreen.test.tsx's; these clauses assert the
+// route `App` declares and the user menu's way into it. "— DoD-8" / "— DoD-9" are 017 step 007's.
+/** Every request for one exact method + pathname + query. */
+function requestsFor(calls: Seen[], method: string, path: string, search: string): Seen[] {
+  return calls.filter((call) => call.method === method && call.path === path && call.search === search);
+}
+
+describe("017 step 007 — /settings renders the settings screen in the same shell (D15)", () => {
+  it("at /settings the main region holds the Settings heading, the Languages and Your notes regions, with the tree still present — DoD-8", async () => {
+    const { calls } = stubWorkspace([CHAR_A]);
+    renderApp(SETTINGS_ROUTE);
+    await flush();
+
+    expect(navElement()).toBeInTheDocument();
+    expect(queryTreeRow(CHAR_A.name)).not.toBeNull();
+    const main = within(mainElement());
+    expect(await main.findByRole("heading", { name: SETTINGS_HEADING })).toBeInTheDocument();
+    expect(main.getByRole("region", { name: LANGUAGES_REGION })).toBeInTheDocument();
+    expect(main.getByRole("region", { name: YOUR_NOTES_REGION })).toBeInTheDocument();
+    expect(within(navElement()).queryByRole("heading", { name: SETTINGS_HEADING })).toBeNull();
+    expect(main.queryByText(NOT_FOUND_TEXT)).toBeNull();
+    expect(mainText()).not.toBe("");
+
+    expect(requestsFor(calls, "GET", USER_SETTINGS_PATH, "")).toHaveLength(1);
+    expect(requestsFor(calls, "GET", MEMOS_PATH, USER_NOTES_SEARCH)).toHaveLength(1);
+  });
+
+  it("the user menu's Settings item navigates in-entry to /settings, and the settings screen renders — DoD-9", async () => {
+    const user = newUser();
+    stubWorkspace([CHAR_A]);
+    renderApp("/");
+    await flush();
+    expect(mainText()).toBe("");
+
+    await user.click(within(navElement()).getByRole("button", { name: USER_MENU_NAME }));
+    await user.click(await screen.findByRole("menuitem", { name: SETTINGS_ITEM }));
+    await flush();
+
+    expect(currentPath()).toBe(SETTINGS_ROUTE);
+    const main = within(mainElement());
+    expect(await main.findByRole("heading", { name: SETTINGS_HEADING })).toBeInTheDocument();
+    expect(main.getByRole("region", { name: LANGUAGES_REGION })).toBeInTheDocument();
+    expect(navElement()).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 017, step 011 — the session screen's header bar at the route (D16). The bar's own
+// behaviour is SessionConfigBar.test.tsx's; this clause proves the amended stub answers its two
+// reads and the bar sits in the main region. "— DoD-11" is 017 step 011's.
+describe("017 step 011 — /sessions/1 renders the session configuration bar", () => {
+  it("at /sessions/1 the main region holds the Session configuration group, from one configuration read and one models read — DoD-11", async () => {
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp(SESSION_ONE_ROUTE);
+    await flush();
+
+    const main = within(mainElement());
+    expect(await main.findByRole("group", { name: CONFIG_BAR_NAME })).toBeInTheDocument();
+    expect(main.getByRole("heading", { name: START_LABEL_HEADING })).toBeInTheDocument();
+    expect(
+      calls.filter(
+        (call) => call.method === "GET" && call.path === `/api/sessions/${SESSION_ONE_ID}/configuration`,
+      ),
+    ).toHaveLength(1);
+    expect(calls.filter((call) => call.method === "GET" && call.path === MODELS_PATH)).toHaveLength(1);
+  });
+
+  it("at / no configuration or models read is made — DoD-11", async () => {
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp("/");
+    await flush();
+
+    expect(mainText()).toBe("");
+    expect(calls.filter((call) => SESSION_CONFIGURATION_PATTERN.test(call.path))).toEqual([]);
+    expect(calls.filter((call) => call.path === MODELS_PATH)).toEqual([]);
   });
 });

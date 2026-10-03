@@ -163,10 +163,16 @@ models = Table(
 )
 
 
-#: The roleplayer's characters (`data-model.md` § `characters`). Feature `009`'s D5 declares
-#: **seven** of the ten columns that section names: `model_ref`, `system_prompt` and `tools`
-#: are deferred to `017`, whose encodings are not settled yet. There is deliberately **no**
-#: `rp_language` or `preferred_language` column — those live on `users` alone (R1).
+#: The roleplayer's characters (`data-model.md` § `characters`). Feature `009`'s D5 declared
+#: seven columns; feature `017` adds the character level of the **assistant chain** (R1):
+#: the model override as two columns (`017` D4) — `model_server_id` (the registry's id type,
+#: **no foreign key**, so deleting an LLM server never cascades into or silently nulls a
+#: reference, R4) and `model_name` — held both-NULL or both-non-NULL by the named CHECK;
+#: `system_prompt`; and one nullable boolean per tool (`017` D5: `tool_memo_search`,
+#: `tool_session_search`, `tool_web_search`). All six are nullable with no default — NULL
+#: is "no override". The character's model matters only when a session is created (R4: it
+#: is captured then, never re-walked). There is deliberately **no** `rp_language` or
+#: `preferred_language` column — the language chain skips this level (R1).
 #: `user_id` is a foreign key to `users.id` with **no `ON DELETE`**: nothing deletes a user
 #: or a character (R6), so a cascade would describe an event that cannot happen. One
 #: non-unique index on `user_id`, because every read is scoped by the owner (R5). `sheet` is
@@ -188,7 +194,18 @@ characters = Table(
     Column("archived_at", Text, nullable=True),
     Column("created_at", Text, nullable=False),
     Column("updated_at", Text, nullable=False),
+    Column("model_server_id", BigInteger().with_variant(Integer(), "sqlite"), nullable=True),
+    Column("model_name", Text, nullable=True),
+    Column("system_prompt", Text, nullable=True),
+    Column("tool_memo_search", Boolean, nullable=True),
+    Column("tool_session_search", Boolean, nullable=True),
+    Column("tool_web_search", Boolean, nullable=True),
     Index("ix_characters_user_id", "user_id"),
+    CheckConstraint(
+        "(model_server_id IS NULL AND model_name IS NULL)"
+        " OR (model_server_id IS NOT NULL AND model_name IS NOT NULL)",
+        name="ck_characters_model_both_or_neither",
+    ),
 )
 
 
@@ -233,9 +250,14 @@ setups = Table(
 #: D8 declares exactly **eight** of the columns that section names. Deliberately absent:
 #: `title` and `partner_label` (D4 — no product id lets the roleplayer set either, and a
 #: column with no writer would be a stored empty string forever; `session_fts` lands with the
-#: feature that gives a session text), and `rp_language`, `preferred_language`, `model_ref`,
-#: `system_prompt`, `tools` (deferred to `017`, whose plan settles `model_ref`'s encoding).
-#: There is **no status or state column** — `data-model.md` says a session is never finished,
+#: feature that gives a session text). Feature `017` adds the session level of both chains
+#: (R1): the **captured model** (R4, `017` D1 — written at creation and by the header picker
+#: only, read as-is and validated at use) as `model_server_id` (the registry's id type, **no
+#: foreign key**, D4) and `model_name`, held both-NULL or both-non-NULL by the named CHECK;
+#: `system_prompt` and one nullable boolean per tool (D5), resolved live over the character;
+#: and `rp_language` / `preferred_language` (D6: trimmed, blank stored as NULL), resolved over
+#: the user. All eight are nullable with no default — NULL is "inherit" (or, for the model,
+#: "none chosen"). There is **no status or state column** — `data-model.md` says a session is never finished,
 #: so the only state is `archived_at`. `user_id` is the direct owner column every read scopes
 #: by (R5); `character_id` is the parent character. `setup_id` is **nullable with no server
 #: default and no sentinel** (R2): a session started with no setup simply has NULL, and no
@@ -274,7 +296,20 @@ sessions = Table(
     Column("archived_at", Text, nullable=True),
     Column("created_at", Text, nullable=False),
     Column("updated_at", Text, nullable=False),
+    Column("model_server_id", BigInteger().with_variant(Integer(), "sqlite"), nullable=True),
+    Column("model_name", Text, nullable=True),
+    Column("system_prompt", Text, nullable=True),
+    Column("tool_memo_search", Boolean, nullable=True),
+    Column("tool_session_search", Boolean, nullable=True),
+    Column("tool_web_search", Boolean, nullable=True),
+    Column("rp_language", Text, nullable=True),
+    Column("preferred_language", Text, nullable=True),
     Index("ix_sessions_user_id_character_id", "user_id", "character_id"),
+    CheckConstraint(
+        "(model_server_id IS NULL AND model_name IS NULL)"
+        " OR (model_server_id IS NOT NULL AND model_name IS NOT NULL)",
+        name="ck_sessions_model_both_or_neither",
+    ),
 )
 
 

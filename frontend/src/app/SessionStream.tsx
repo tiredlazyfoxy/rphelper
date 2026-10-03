@@ -16,6 +16,8 @@ import { StreamState, loadStream } from "./streamState";
 
 export type SessionStreamProps = {
   sessionId: string;
+  /** 017 D17: passed unchanged to `Composer`. Defaults to null. */
+  sendBlockedReason?: string | null;
 };
 
 /** The ruler's visible label and accessible name — the stream's only separator (D12). */
@@ -76,7 +78,11 @@ export const SessionStream = observer(function SessionStream(
         <Divider label={RULER_LABEL} labelPosition="center" aria-label={RULER_LABEL} />
         <KindSwitch state={state} />
         <ZoneList state={state} signal={signal} />
-        <Composer state={state} signal={signal} />
+        <Composer
+          state={state}
+          signal={signal}
+          sendBlockedReason={props.sendBlockedReason ?? null}
+        />
       </Stack>
     </Box>
   );

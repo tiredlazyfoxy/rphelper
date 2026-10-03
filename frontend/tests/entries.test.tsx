@@ -31,6 +31,20 @@
 // `/api/sessions/abc123/zone`. The stub answers both exact paths with the backend's own 404
 // envelope (the session here is not found, so the stream never mounts — the answers only keep
 // the stub total). No assertion about any entry's outcome changes, and no clause is dropped.
+//
+// Feature 017, step 007 DoD-8 widens the `app` entry's stub only, once more: `/settings` (one of
+// `APP_PATHS`) now mounts the settings screen, which reads `GET /api/me/settings` and
+// `GET /api/memos?scope=user`. The stub answers both by exact pathname and query with well-formed
+// empty answers. One clause is added at the bottom proving the entry boots at `/settings` with
+// both reads answered and the screen's "Settings" heading inside the shell; no assertion about any
+// entry's outcome changes, and no clause is dropped.
+//
+// Feature 017, step 011 DoD-11 widens the `app` entry's stub only, once more: the session
+// screen's ready header mounts the "Session configuration" bar, which reads
+// `/api/sessions/abc123/configuration` and `/api/models`. The stub answers both exact paths with
+// the backend's own 404 envelope (the session here is not found, so the bar never mounts — the
+// answers only keep the stub total). One clause is added at the bottom; no assertion about any
+// entry's outcome changes, and no clause is dropped.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { act, screen, within } from "@testing-library/react";
@@ -53,6 +67,12 @@ const DEEP_SESSION_ROUTE = "/sessions/abc123";
 const DEEP_SESSION_ITEM_PATH = "/api/sessions/abc123";
 /** 013 step 007 (DoD-10): the stream's two reads for that session. */
 const DEEP_SESSION_STREAM_PATHS = ["/api/sessions/abc123/entries", "/api/sessions/abc123/zone"];
+/** 017 step 011 (DoD-11): the session header bar's two reads for that session. */
+const DEEP_SESSION_CONFIG_PATHS = ["/api/sessions/abc123/configuration", "/api/models"];
+/** 017 step 007 (DoD-8): the settings screen's two reads at `/settings`. */
+const SETTINGS_ROUTE = "/settings";
+const USER_SETTINGS_PATH = "/api/me/settings";
+const USER_NOTES_SEARCH = "?scope=user";
 
 const FRONTEND_ROOT = path.resolve(__dirname, "..");
 const SRC_ROOT = path.join(FRONTEND_ROOT, "src");
@@ -142,8 +162,19 @@ function stubAppIdentity(answer: () => Response): void {
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
       const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const pathname = new URL(raw, "http://localhost").pathname;
+      const requested = new URL(raw, "http://localhost");
+      const pathname = requested.pathname;
       appEntryRequests.push(pathname);
+      // Feature 017, step 007 (DoD-8), stubs only: `/settings` now mounts the settings screen,
+      // which reads the user's settings and the user-level notes listing. Matched on the exact
+      // pathname and query string (`/api/me/settings` shares a prefix with `/api/me`, and
+      // `/api/memos` is shared by every level's listing); any other request is still a failure.
+      if (pathname === USER_SETTINGS_PATH && requested.search === "") {
+        return Promise.resolve(jsonResponse({ rp_language: null, preferred_language: null }, 200));
+      }
+      if (pathname === "/api/memos" && requested.search === USER_NOTES_SEARCH) {
+        return Promise.resolve(jsonResponse({ memos: [] }, 200));
+      }
       if (pathname === "/api/characters") {
         return Promise.resolve(jsonResponse({ characters: [] }, 200));
       }
@@ -159,7 +190,13 @@ function stubAppIdentity(answer: () => Response): void {
       // still a test failure and no assertion about the entry's outcome changes.
       // Feature 013, step 007 (DoD-10), stubs only: the stream under that session's ready
       // render reads its entries and zone. Exact pathnames, the same 404 envelope.
-      if (pathname === DEEP_SESSION_ITEM_PATH || DEEP_SESSION_STREAM_PATHS.includes(pathname)) {
+      // Feature 017, step 011 (DoD-11), stubs only: that session's ready header would also
+      // read its configuration and the enabled models. Exact pathnames, the same 404 envelope.
+      if (
+        pathname === DEEP_SESSION_ITEM_PATH ||
+        DEEP_SESSION_STREAM_PATHS.includes(pathname) ||
+        DEEP_SESSION_CONFIG_PATHS.includes(pathname)
+      ) {
         return Promise.resolve(
           jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404),
         );
@@ -528,6 +565,35 @@ describe("the app entry gates on GET /api/me", () => {
     expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
     for (const streamPath of DEEP_SESSION_STREAM_PATHS) {
       const answered = await fetch(streamPath, { method: "GET" });
+      expect(answered).toBeInstanceOf(Response);
+    }
+  });
+
+  // Feature 017, step 007 — DoD-8 (stub widening). `stubAppIdentity` rejects any request it does
+  // not know, so this clause proves the settings screen's two reads are answered and that the
+  // entry's outcome at `/settings` is still the shell in #root, now around the "Settings" heading.
+  it("the app entry still boots at /settings with the settings screen's reads answered — DoD-8", async () => {
+    await mountEntry("app", SETTINGS_ROUTE, signedIn);
+
+    expect(shellNavIn(mountElement())).not.toBeNull();
+    expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
+    expect(appEntryRequests).toContain(USER_SETTINGS_PATH);
+    expect(appEntryRequests).toContain("/api/memos");
+    expect(
+      await within(mountElement()).findByRole("heading", { name: "Settings" }),
+    ).toBeInTheDocument();
+  });
+
+  // Feature 017, step 011 — DoD-11 (stub widening only). The deep session path's outcome is the
+  // shell in #root, exactly as before, and the app entry's own stub answers the header bar's
+  // configuration and models GETs by exact path — any status, never the rejecting fallback.
+  it("the app entry still boots at the deep session path with the header bar's reads answered — DoD-11", async () => {
+    await mountEntry("app", DEEP_SESSION_ROUTE, signedIn);
+
+    expect(shellNavIn(mountElement())).not.toBeNull();
+    expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
+    for (const configPath of DEEP_SESSION_CONFIG_PATHS) {
+      const answered = await fetch(configPath, { method: "GET" });
       expect(answered).toBeInstanceOf(Response);
     }
   });

@@ -23,6 +23,12 @@
 // assertions are unchanged: the tree's chevron labels are "Collapse <name>", never the
 // anchored "Collapse tree" the shell's own control carries, and reading the collapsed set
 // writes nothing, so the "writes nothing to the storage" clauses keep their meaning.
+//
+// Reviewed by feature 017, step 007 (DoD-8): this file renders the shell around its own fixed
+// children, never through `App`'s route table, so no clause here pins `/settings` as an empty
+// centre — DoD-7's user-menu clause asserts only the location `/settings`. Nothing in this file
+// mounts the settings screen, so no stub is added and no assertion changes; the route-level
+// `/settings` clauses are App.test.tsx's.
 import type * as React from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

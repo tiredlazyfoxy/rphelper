@@ -952,9 +952,25 @@ def test_the_service_module_has_no_delete_path_and_no_fastapi_import__S011_002_D
     assert _FASTAPI_IMPORT.search(source) is None
 
 
-def test_the_service_module_imports_no_other_service__S011_002_DoD16() -> None:
+def test_the_service_module_imports_no_other_service__S011_002_DoD16__S017_002_DoD11() -> None:
     """DoD-16 — D11: the parent and setup checks are this module's own scoped selects, so
-    nothing is imported from any `app.services.` module (nor relatively from the package)."""
+    nothing is imported from any `app.services.` module (nor relatively from the package).
+
+    Amended by 017 step 002 DoD-11 (017 D12): the one exception is
+    `from app.services.llm_registry import ...` naming only the transaction-neutral reads,
+    `ModelRefLevel`, `EnabledChatModel` and the `UNSET` / `Unset` sentinel. Any other
+    `app.services.*` import, any other name from `llm_registry`, a star import, or a
+    module-level import of `llm_registry` (which would expose every name) still fails."""
+    allowed_module = "app.services.llm_registry"
+    allowed_names = {
+        "list_enabled_chat_models",
+        "first_enabled_chat_model",
+        "validate_chat_model",
+        "ModelRefLevel",
+        "EnabledChatModel",
+        "UNSET",
+        "Unset",
+    }
     tree = ast.parse(inspect.getsource(sessions_module))
 
     offenders: list[str] = []
@@ -962,6 +978,10 @@ def test_the_service_module_imports_no_other_service__S011_002_DoD16() -> None:
         if isinstance(node, ast.ImportFrom):
             if node.level > 0:
                 offenders.append(f"relative import, level {node.level}")
+            elif node.module == allowed_module:
+                for alias in node.names:
+                    if alias.name not in allowed_names:
+                        offenders.append(f"from {node.module} import {alias.name}")
             elif node.module is not None and (
                 node.module == _FORBIDDEN_IMPORT_ROOT
                 or node.module.startswith(_FORBIDDEN_IMPORT_ROOT + ".")
