@@ -21,16 +21,43 @@
 // - A Mantine `Loader`: `.mantine-Loader-root`. A notification: `.mantine-Notification-root`.
 // - `fetch` is stubbed per test; requests are recorded by exact method + pathname + query
 //   string with the parsed JSON body, so whole-object comparison catches a stray key.
+//
+// Feature 016, step 003 (DoD-1..DoD-10; DoD-11 is [manual/live] and carries no test).
+// Expected behaviour comes from 016's step file 003.sortable-level-group.md, its
+// 003.context.md and 016's context.md: D5 (the new note renders first — 015 007 DoD-11,
+// DoD-12, DoD-13 amended here), D7 (reorder in flight / failure), D8 (opt-in sortable cards,
+// the keyboard filter, the disabled conditions, jsdom limits), D9 (autoFocus) and the strings
+// table ("Note <n> of <total>", "Could not reorder the notes.").
+// - The MarkdownEditor stub also records `autoFocus` and mirrors it on the textarea as
+//   `data-autofocus` ("true" / "false") so a test can tell which rendered editor got it.
+// - Reorderable groups render inside a test-built DndContext with only a KeyboardSensor and an
+//   onDragStart spy. Keyboard activation is Space keydown on the card; movement is never
+//   asserted (jsdom rects are zero-size).
+// - Negative keyboard checks run before the positive control in the same render, because a
+//   successful activation leaves a drag in progress.
+import { DndContext, KeyboardSensor, useSensor, useSensors, type DragStartEvent } from "@dnd-kit/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoLevelGroup } from "../../src/app/MemoLevelGroup";
 import type { Memo, MemoScope } from "../../src/app/memosApi";
-import { loadMemoLevel, MemoLevelState, populateMemoLevel } from "../../src/app/memoLevelState";
+import {
+  isReorderInFlight,
+  loadMemoLevel,
+  MemoLevelState,
+  populateMemoLevel,
+  reorderFailure,
+  reorderMemoLevel,
+} from "../../src/app/memoLevelState";
 import { AppProviders } from "../../src/shared/AppProviders";
 
-type EditorCall = { label: string; value: string; onChangeIsFunction: boolean };
+type EditorCall = {
+  label: string;
+  value: string;
+  onChangeIsFunction: boolean;
+  autoFocus: boolean | undefined;
+};
 
 const editorRecord = vi.hoisted(() => ({ received: [] as EditorCall[] }));
 
@@ -41,6 +68,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
     value: string;
     onChange: (markdown: string) => void;
     readOnly?: boolean;
+    autoFocus?: boolean;
   };
   return {
     MarkdownEditor: (props: StubProps) => {
@@ -48,6 +76,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
         label: props.label,
         value: props.value,
         onChangeIsFunction: typeof props.onChange === "function",
+        autoFocus: props.autoFocus,
       });
       const id = `markdown-editor-${useId()}`;
       return createElement(
@@ -58,6 +87,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
           id,
           value: props.value,
           readOnly: props.readOnly ?? false,
+          "data-autofocus": props.autoFocus === true ? "true" : "false",
           onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
         }),
       );
@@ -87,6 +117,9 @@ const LOAD_FAILED = "Could not load notes";
 const SAVE_FAILURE = "Could not save the note.";
 const DELETE_FAILURE = "Could not delete the note.";
 const CHANGE_FAILURE = "Could not change the note.";
+const REORDER_FAILURE = "Could not reorder the notes.";
+const POSITION_NAME = /^Note \d+ of \d+$/;
+const ORDER_PATH = "/api/memos/order";
 
 const LOADER = ".mantine-Loader-root";
 const NOTIFICATION = ".mantine-Notification-root";
@@ -219,17 +252,31 @@ function stubHeld() {
   return { ...backend, held };
 }
 
-type Failing = { patch?: boolean; delete?: boolean; post?: boolean };
+type Failing = { patch?: boolean; delete?: boolean; post?: boolean; put?: boolean };
 
 /**
  * A server answering as the backend would: PATCH merges the supplied keys into the held row
  * with a later updated_at; DELETE answers 204; POST creates CREATED_ID (enabled, not forced)
- * from the sent scope, scope_id and body. A method named in `failing` answers 500 instead.
+ * from the sent scope, scope_id and body; PUT /api/memos/order answers the level's rows in
+ * the sent order with sort_key 0..n-1 and updated_at unmoved (016 D6). A method named in
+ * `failing` answers 500 instead; `failing` is read at request time, so a test may flip it.
  */
 function serveNotes(rows: Memo[], failing: Failing = {}) {
   const byId = new Map<string, Memo>(rows.map((row) => [row.id, row]));
   let tick = 0;
   return stubBackend((request) => {
+    if (request.method === "PUT" && request.path === ORDER_PATH && request.search === "") {
+      if (failing.put === true) return serverError();
+      const sent = request.body as { memo_ids: string[] };
+      const ordered: Memo[] = [];
+      for (const [index, id] of sent.memo_ids.entries()) {
+        const current = byId.get(id);
+        if (current === undefined) return envelope("memo_order_mismatch", 409);
+        ordered.push({ ...current, sort_key: index });
+      }
+      for (const row of ordered) byId.set(row.id, row);
+      return jsonResponse({ memos: ordered }, 200);
+    }
     if (request.method === "PATCH" && request.search === "") {
       if (failing.patch === true) return serverError();
       const current = [...byId.values()].find((row) => memoPath(row.id) === request.path);
@@ -317,10 +364,6 @@ function itemAt(index: number): HTMLElement {
   return item;
 }
 
-function lastItem(): HTMLElement {
-  return itemAt(items().length - 1);
-}
-
 function noteBox(item: HTMLElement): HTMLTextAreaElement {
   return within(item).getByRole("textbox", { name: NOTE_LABEL }) as HTMLTextAreaElement;
 }
@@ -335,6 +378,54 @@ function hasButton(scope: HTMLElement, name: string): boolean {
 
 function newNoteButton(): HTMLElement {
   return button(region(), NEW_NOTE);
+}
+
+// ---------------------------------------------------------------- sortable helpers (016 003)
+function KeyboardDnd(props: { onDragStart: (event: DragStartEvent) => void; children: ReactNode }) {
+  const sensors = useSensors(useSensor(KeyboardSensor));
+  return (
+    <DndContext sensors={sensors} onDragStart={props.onDragStart}>
+      {props.children}
+    </DndContext>
+  );
+}
+
+/** A reorderable group inside a DndContext with only a KeyboardSensor and an onDragStart spy. */
+function renderSortable(state: MemoLevelState) {
+  const onDragStart = vi.fn<(event: DragStartEvent) => void>();
+  const onRetry = vi.fn<() => void>();
+  const result = render(
+    <AppProviders>
+      <KeyboardDnd onDragStart={onDragStart}>
+        <MemoLevelGroup state={state} title={TITLE} headingOrder={3} onRetry={onRetry} reorderable />
+      </KeyboardDnd>
+    </AppProviders>,
+  );
+  return { ...result, onDragStart, onRetry };
+}
+
+function startedIds(spy: { mock: { calls: Array<[DragStartEvent]> } }): string[] {
+  return spy.mock.calls.map(([event]) => String(event.active.id));
+}
+
+function pressSpace(target: HTMLElement): void {
+  fireEvent.keyDown(target, { code: "Space", key: " " });
+}
+
+function pressEnter(target: HTMLElement): void {
+  fireEvent.keyDown(target, { code: "Enter", key: "Enter" });
+}
+
+function threeNotes(): Memo[] {
+  return [
+    memo(MEMO_A, { body: BODY_A, sort_key: 0 }),
+    memo(MEMO_B, { body: BODY_B, sort_key: 1 }),
+    memo(MEMO_C, { body: BODY_C, sort_key: 2 }),
+  ];
+}
+
+function textsInOrder(): string[] {
+  return items().map((item) => noteBox(item).value);
 }
 
 // ===========================================================================
@@ -639,40 +730,43 @@ describe("failures render inside the note's listitem", () => {
 // ===========================================================================
 describe("the new note", () => {
   async function expectBlankNewNoteDropped(blankText: string | null): Promise<void> {
-    const { calls } = serveNotes([memo(MEMO_A, { body: BODY_A })]);
-    renderGroup(readyLevel(memo(MEMO_A, { body: BODY_A })));
+    const { calls } = serveNotes([memo(MEMO_A, { body: BODY_A }), memo(MEMO_B, { body: BODY_B, sort_key: 1 })]);
+    renderGroup(readyLevel(memo(MEMO_A, { body: BODY_A }), memo(MEMO_B, { body: BODY_B, sort_key: 1 })));
     const user = newUser();
 
     await user.click(newNoteButton());
     await waitFor(() => {
-      expect(items()).toHaveLength(2);
+      expect(items()).toHaveLength(3);
     });
+    // 016 D5: the new note's listitem is the first one.
+    expect(noteBox(itemAt(0)).value).toBe("");
     if (blankText !== null) {
-      fireEvent.change(noteBox(lastItem()), { target: { value: blankText } });
+      fireEvent.change(noteBox(itemAt(0)), { target: { value: blankText } });
     }
-    fireEvent.blur(noteBox(lastItem()));
+    fireEvent.blur(noteBox(itemAt(0)));
 
     await waitFor(() => {
-      expect(items()).toHaveLength(1);
+      expect(items()).toHaveLength(2);
     });
     expect(newNoteButton()).toBeEnabled();
     expect(noteBox(itemAt(0)).value).toBe(BODY_A);
+    expect(noteBox(itemAt(1)).value).toBe(BODY_B);
     await settle();
     expect(calls).toEqual([]);
   }
 
-  it("New note adds a last listitem with one empty Note textbox, no flag controls, no reach line, and disables New note — DoD-11", async () => {
-    const { calls } = serveNotes([memo(MEMO_A, { body: BODY_A })]);
-    renderGroup(readyLevel(memo(MEMO_A, { body: BODY_A })));
+  it("New note (015 007 DoD-11, amended) on a level with two saved notes adds a FIRST listitem with one empty Note textbox, no flag controls, no reach line, and disables New note — DoD-1", async () => {
+    const { calls } = serveNotes([memo(MEMO_A, { body: BODY_A }), memo(MEMO_B, { body: BODY_B, sort_key: 1 })]);
+    renderGroup(readyLevel(memo(MEMO_A, { body: BODY_A }), memo(MEMO_B, { body: BODY_B, sort_key: 1 })));
     const user = newUser();
 
     expect(newNoteButton()).toBeEnabled();
     await user.click(newNoteButton());
 
     await waitFor(() => {
-      expect(items()).toHaveLength(2);
+      expect(items()).toHaveLength(3);
     });
-    const fresh = lastItem();
+    const fresh = itemAt(0);
     const boxes = within(fresh).getAllByRole("textbox");
     expect(boxes).toHaveLength(1);
     expect(noteBox(fresh).value).toBe("");
@@ -683,20 +777,56 @@ describe("the new note", () => {
       expect(within(fresh).queryByText(line)).toBeNull();
     }
     expect(newNoteButton()).toBeDisabled();
-    expect(noteBox(itemAt(0)).value).toBe(BODY_A);
+    // The saved notes follow, in state order.
+    expect(noteBox(itemAt(1)).value).toBe(BODY_A);
+    expect(noteBox(itemAt(2)).value).toBe(BODY_B);
     await settle();
     expect(calls).toEqual([]);
   });
 
-  it("blurring the new note while empty removes it, re-enables New note and sends no request — DoD-11", async () => {
+  it("blurring the first-placed new note while empty removes it, re-enables New note and sends no request (015 007 DoD-11) — DoD-1", async () => {
     await expectBlankNewNoteDropped(null);
   });
 
-  it("blurring the new note holding only spaces and a newline removes it, re-enables New note and sends no request — DoD-11", async () => {
+  it("blurring the first-placed new note holding only spaces and a newline removes it, re-enables New note and sends no request (015 007 DoD-11) — DoD-1", async () => {
     await expectBlankNewNoteDropped("  \n");
   });
 
-  it("typing Plan and blurring POSTs exactly scope, scope_id and body; after the 201 the last listitem is a searchable saved note and New note is enabled — DoD-12", async () => {
+  it("the new note's editor receives autoFocus true; saved notes' editors never do, before or after the new note is saved — DoD-2", async () => {
+    serveNotes([memo(MEMO_A, { body: BODY_A }), memo(MEMO_B, { body: BODY_B, sort_key: 1 })]);
+    renderGroup(readyLevel(memo(MEMO_A, { body: BODY_A }), memo(MEMO_B, { body: BODY_B, sort_key: 1 })));
+    const user = newUser();
+
+    // Saved notes only: no editor got autoFocus true.
+    expect(editorRecord.received.length).toBeGreaterThan(0);
+    expect(editorRecord.received.filter((call) => call.autoFocus === true)).toEqual([]);
+
+    await user.click(newNoteButton());
+    await waitFor(() => {
+      expect(items()).toHaveLength(3);
+    });
+
+    expect(noteBox(itemAt(0)).getAttribute("data-autofocus")).toBe("true");
+    expect(noteBox(itemAt(1)).getAttribute("data-autofocus")).toBe("false");
+    expect(noteBox(itemAt(2)).getAttribute("data-autofocus")).toBe("false");
+    const savedCalls = editorRecord.received.filter((call) => call.value === BODY_A || call.value === BODY_B);
+    expect(savedCalls.length).toBeGreaterThan(0);
+    expect(savedCalls.every((call) => call.autoFocus !== true)).toBe(true);
+    expect(editorRecord.received.some((call) => call.value === "" && call.autoFocus === true)).toBe(true);
+
+    // Once saved, the note is a saved note: its editor no longer gets autoFocus true.
+    fireEvent.change(noteBox(itemAt(0)), { target: { value: "Plan" } });
+    fireEvent.blur(noteBox(itemAt(0)));
+    await waitFor(() => {
+      expect(hasButton(itemAt(0), DISABLE_NOTE)).toBe(true);
+    });
+    expect(items()).toHaveLength(3);
+    for (const item of items()) {
+      expect(noteBox(item).getAttribute("data-autofocus")).toBe("false");
+    }
+  });
+
+  it("typing Plan and blurring POSTs exactly scope, scope_id and body; after the 201 the FIRST listitem is a searchable saved note and New note is enabled (015 007 DoD-12, amended) — DoD-3", async () => {
     const { calls } = serveNotes([memo(MEMO_A, { body: BODY_A })]);
     renderGroup(readyLevel(memo(MEMO_A, { body: BODY_A })));
     const user = newUser();
@@ -705,11 +835,11 @@ describe("the new note", () => {
     await waitFor(() => {
       expect(items()).toHaveLength(2);
     });
-    fireEvent.change(noteBox(lastItem()), { target: { value: "Plan" } });
-    fireEvent.blur(noteBox(lastItem()));
+    fireEvent.change(noteBox(itemAt(0)), { target: { value: "Plan" } });
+    fireEvent.blur(noteBox(itemAt(0)));
 
     await waitFor(() => {
-      expect(hasButton(lastItem(), DISABLE_NOTE)).toBe(true);
+      expect(hasButton(itemAt(0), DISABLE_NOTE)).toBe(true);
     });
     expect(calls).toEqual([
       {
@@ -720,11 +850,12 @@ describe("the new note", () => {
       },
     ]);
     expect(items()).toHaveLength(2);
-    const saved = lastItem();
+    const saved = itemAt(0);
     expect(noteBox(saved).value).toBe("Plan");
     expect(button(saved, DISABLE_NOTE)).toBeInTheDocument();
     expect(button(saved, FORCE_NOTE)).toBeInTheDocument();
     expect(within(saved).getByText(SEARCHABLE_LINE)).toBeInTheDocument();
+    expect(noteBox(itemAt(1)).value).toBe(BODY_A);
     expect(newNoteButton()).toBeEnabled();
   });
 
@@ -752,7 +883,7 @@ describe("the new note", () => {
     expect(button(region("Your notes"), NEW_NOTE)).toBeEnabled();
   });
 
-  it("a failed create keeps the new listitem with its typed text and Could not save the note., and New note stays disabled — DoD-13", async () => {
+  it("a failed create keeps the FIRST listitem with its typed text and Could not save the note., and New note stays disabled (015 007 DoD-13, amended) — DoD-3", async () => {
     serveNotes([memo(MEMO_A, { body: BODY_A })], { post: true });
     renderGroup(readyLevel(memo(MEMO_A, { body: BODY_A })));
     const user = newUser();
@@ -761,15 +892,16 @@ describe("the new note", () => {
     await waitFor(() => {
       expect(items()).toHaveLength(2);
     });
-    fireEvent.change(noteBox(lastItem()), { target: { value: "Plan" } });
-    fireEvent.blur(noteBox(lastItem()));
+    fireEvent.change(noteBox(itemAt(0)), { target: { value: "Plan" } });
+    fireEvent.blur(noteBox(itemAt(0)));
 
     await waitFor(() => {
-      expect(within(lastItem()).queryByText(SAVE_FAILURE)).not.toBeNull();
+      expect(within(itemAt(0)).queryByText(SAVE_FAILURE)).not.toBeNull();
     });
     expect(items()).toHaveLength(2);
-    expect(noteBox(lastItem()).value).toBe("Plan");
-    expect(within(itemAt(0)).queryByText(SAVE_FAILURE)).toBeNull();
+    expect(noteBox(itemAt(0)).value).toBe("Plan");
+    expect(noteBox(itemAt(1)).value).toBe(BODY_A);
+    expect(within(itemAt(1)).queryByText(SAVE_FAILURE)).toBeNull();
     expect(newNoteButton()).toBeDisabled();
     expect(document.querySelector(NOTIFICATION)).toBeNull();
   });
@@ -841,7 +973,9 @@ describe("the flush on unmount", () => {
     expect(calls).toEqual([{ method: "PATCH", path: memoPath(MEMO_A), search: "", body: { body: typed } }]);
   });
 
-  it("unmounting with a new note holding Later POSTs it — DoD-16", async () => {
+  // 015 007 DoD-16, unchanged except that the new note is located as the FIRST listitem
+  // (016 D5): typing into the last listitem would now edit the saved note instead.
+  it("unmounting with a new note (the first listitem) holding Later POSTs it (015 007 DoD-16) — DoD-1", async () => {
     const { calls } = serveNotes([memo(MEMO_A, { body: BODY_A })]);
     const { unmount } = renderGroup(readyLevel(memo(MEMO_A, { body: BODY_A })));
     const user = newUser();
@@ -850,7 +984,7 @@ describe("the flush on unmount", () => {
     await waitFor(() => {
       expect(items()).toHaveLength(2);
     });
-    fireEvent.change(noteBox(lastItem()), { target: { value: "Later" } });
+    fireEvent.change(noteBox(itemAt(0)), { target: { value: "Later" } });
     await settle();
     expect(calls).toEqual([]);
 
@@ -880,5 +1014,277 @@ describe("the flush on unmount", () => {
     await settle();
 
     expect(calls).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Feature 016, step 003 — opt-in sortable cards
+// ===========================================================================
+describe("without reorderable (016 003)", () => {
+  function expectNoSortableMarks(): void {
+    for (const item of items()) {
+      expect(item).not.toHaveAttribute("tabindex");
+      expect(item).not.toHaveAttribute("aria-roledescription");
+    }
+    expect(within(region()).queryAllByRole("listitem", { name: POSITION_NAME })).toEqual([]);
+  }
+
+  it("with reorderable omitted and no DndContext ancestor, no listitem has a tabindex, an aria-roledescription or a Note <n> of <total> name, with or without a new note open — DoD-4", async () => {
+    stubBackend(() => notFoundResponse());
+    renderGroup(readyLevel(...threeNotes()));
+
+    expect(items()).toHaveLength(3);
+    expectNoSortableMarks();
+
+    await newUser().click(newNoteButton());
+    await waitFor(() => {
+      expect(items()).toHaveLength(4);
+    });
+    expectNoSortableMarks();
+  });
+
+  it("with reorderable explicitly false and no DndContext ancestor, the group renders its notes with no sortable marks — DoD-4", () => {
+    stubBackend(() => notFoundResponse());
+    render(
+      <AppProviders>
+        <MemoLevelGroup
+          state={readyLevel(...threeNotes())}
+          title={TITLE}
+          headingOrder={3}
+          onRetry={vi.fn<() => void>()}
+          reorderable={false}
+        />
+      </AppProviders>,
+    );
+
+    expect(textsInOrder()).toEqual([BODY_A, BODY_B, BODY_C]);
+    expectNoSortableMarks();
+  });
+  // DoD-4's second half — 015 007's DoD-1..DoD-10 and DoD-14..DoD-16 — is the unchanged
+  // tests above, all rendered without reorderable and without a DndContext.
+});
+
+describe("with reorderable: the sortable cards (016 003)", () => {
+  it("each saved note's listitem keeps role listitem, is focusable with tabIndex 0, is named Note 1 of 3 .. Note 3 of 3 in state order, and still holds its Note textbox and flag buttons — DoD-5", () => {
+    stubBackend(() => notFoundResponse());
+    renderSortable(readyLevel(...threeNotes()));
+
+    const listed = items();
+    expect(listed).toHaveLength(3);
+    const expected: Array<[string, string]> = [
+      ["Note 1 of 3", BODY_A],
+      ["Note 2 of 3", BODY_B],
+      ["Note 3 of 3", BODY_C],
+    ];
+    expected.forEach(([name, body], index) => {
+      const item = listed[index];
+      expect(item).toHaveAccessibleName(name);
+      expect(within(region()).getByRole("listitem", { name })).toBe(item);
+      expect(item).toHaveAttribute("tabindex", "0");
+      expect(item.tabIndex).toBe(0);
+      // Interface intent: dnd-kit's aria-roledescription and aria-describedby are on the card.
+      expect(item).toHaveAttribute("aria-roledescription");
+      expect(item).toHaveAttribute("aria-describedby");
+      expect(noteBox(item).value).toBe(body);
+      expect(button(item, DISABLE_NOTE)).toBeInTheDocument();
+      expect(button(item, FORCE_NOTE)).toBeInTheDocument();
+    });
+    // The textbox keeps its own exact name "Note" (one per card).
+    expect(within(region()).getAllByRole("textbox", { name: NOTE_LABEL })).toHaveLength(3);
+  });
+
+  it("an open new note's listitem has no tabindex and no position name, and the saved cards keep … of 3 — DoD-5", async () => {
+    stubBackend(() => notFoundResponse());
+    renderSortable(readyLevel(...threeNotes()));
+
+    await newUser().click(newNoteButton());
+    await waitFor(() => {
+      expect(items()).toHaveLength(4);
+    });
+
+    const fresh = itemAt(0);
+    expect(noteBox(fresh).value).toBe("");
+    expect(fresh).not.toHaveAttribute("tabindex");
+    expect(fresh).not.toHaveAccessibleName(POSITION_NAME);
+    const named = within(region()).getAllByRole("listitem", { name: POSITION_NAME });
+    expect(named).toEqual([itemAt(1), itemAt(2), itemAt(3)]);
+    expect(itemAt(1)).toHaveAccessibleName("Note 1 of 3");
+    expect(itemAt(2)).toHaveAccessibleName("Note 2 of 3");
+    expect(itemAt(3)).toHaveAccessibleName("Note 3 of 3");
+  });
+
+  it("Space and Enter on a card's Note textbox or flag buttons do not start a drag; Space on the focused card itself calls onDragStart with that note's id — DoD-6", async () => {
+    stubBackend(() => notFoundResponse());
+    const { onDragStart } = renderSortable(readyLevel(...threeNotes()));
+    const card = itemAt(1);
+
+    const box = noteBox(card);
+    pressSpace(box);
+    pressEnter(box);
+    for (const label of [DISABLE_NOTE, FORCE_NOTE]) {
+      const control = button(card, label);
+      pressSpace(control);
+      pressEnter(control);
+    }
+    await settle();
+    expect(onDragStart).not.toHaveBeenCalled();
+
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    pressSpace(card);
+
+    await waitFor(() => {
+      expect(onDragStart).toHaveBeenCalledTimes(1);
+    });
+    expect(startedIds(onDragStart)).toEqual([MEMO_B]);
+  });
+
+  it("while focus is in a note's Note textbox Space on that card does not start a drag; after the textbox blurs it does — DoD-7", async () => {
+    stubBackend(() => notFoundResponse());
+    const { onDragStart } = renderSortable(readyLevel(...threeNotes()));
+    const card = itemAt(0);
+    const box = noteBox(card);
+
+    box.focus();
+    fireEvent.focus(box);
+    expect(document.activeElement).toBe(box);
+    pressSpace(card);
+    await settle();
+    expect(onDragStart).not.toHaveBeenCalled();
+
+    fireEvent.blur(box);
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    pressSpace(card);
+
+    await waitFor(() => {
+      expect(onDragStart).toHaveBeenCalledTimes(1);
+    });
+    expect(startedIds(onDragStart)).toEqual([MEMO_A]);
+  });
+
+  it("while a reorder is in flight Space on any saved card does not start a drag and each note's textbox and flag buttons stay usable; once it settles Space starts a drag again — DoD-8", async () => {
+    const order = deferred<Response>();
+    const { calls } = stubBackend((request) => {
+      if (request.method === "PUT" && request.path === ORDER_PATH && request.search === "") return order.promise;
+      return notFoundResponse();
+    });
+    const state = readyLevel(...threeNotes());
+    const { onDragStart } = renderSortable(state);
+
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    });
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    expect(isReorderInFlight(state)).toBe(true);
+
+    for (const item of items()) {
+      item.focus();
+      pressSpace(item);
+    }
+    await settle();
+    expect(onDragStart).not.toHaveBeenCalled();
+
+    for (const item of items()) {
+      const box = noteBox(item);
+      expect(box).not.toHaveAttribute("readonly");
+      expect(button(item, DISABLE_NOTE)).toBeEnabled();
+      expect(button(item, FORCE_NOTE)).toBeEnabled();
+    }
+    const first = noteBox(itemAt(0));
+    const original = first.value;
+    fireEvent.change(first, { target: { value: "Typed while the reorder is in flight." } });
+    expect(noteBox(itemAt(0)).value).toBe("Typed while the reorder is in flight.");
+    fireEvent.change(noteBox(itemAt(0)), { target: { value: original } });
+    expect(noteBox(itemAt(0)).value).toBe(original);
+
+    await act(async () => {
+      order.resolve(
+        jsonResponse(
+          {
+            memos: [
+              memo(MEMO_C, { body: BODY_C, sort_key: 0 }),
+              memo(MEMO_A, { body: BODY_A, sort_key: 1 }),
+              memo(MEMO_B, { body: BODY_B, sort_key: 2 }),
+            ],
+          },
+          200,
+        ),
+      );
+      await pending;
+    });
+    expect(isReorderInFlight(state)).toBe(false);
+
+    const card = itemAt(0);
+    card.focus();
+    pressSpace(card);
+    await waitFor(() => {
+      expect(onDragStart).toHaveBeenCalledTimes(1);
+    });
+    expect(startedIds(onDragStart)).toEqual([MEMO_C]);
+  });
+});
+
+describe("with reorderable: the reorder failure and the state's order (016 003)", () => {
+  it("a failed reorder shows Could not reorder the notes. in the group's region outside every listitem, with no notification; a later successful reorder removes it — DoD-9", async () => {
+    const failing: Failing = { put: true };
+    serveNotes(threeNotes(), failing);
+    const state = readyLevel(...threeNotes());
+    renderSortable(state);
+
+    expect(within(region()).queryByText(REORDER_FAILURE)).toBeNull();
+
+    await act(async () => {
+      await reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    });
+    expect(reorderFailure(state)).not.toBeNull();
+
+    await waitFor(() => {
+      expect(within(region()).queryByText(REORDER_FAILURE)).not.toBeNull();
+    });
+    expect(screen.getAllByText(REORDER_FAILURE)).toHaveLength(1);
+    for (const item of items()) {
+      expect(within(item).queryByText(REORDER_FAILURE)).toBeNull();
+    }
+    expect(document.querySelector(NOTIFICATION)).toBeNull();
+
+    failing.put = false;
+    await act(async () => {
+      await reorderMemoLevel(state, [MEMO_B, MEMO_A, MEMO_C]);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(REORDER_FAILURE)).toBeNull();
+    });
+    expect(document.querySelector(NOTIFICATION)).toBeNull();
+  });
+
+  it("after reorderMemoLevel the listitems render in the state's new order, each textbox holding its own note's text, and follow a second reorder too — DoD-10", async () => {
+    serveNotes(threeNotes());
+    const state = readyLevel(...threeNotes());
+    renderSortable(state);
+    expect(textsInOrder()).toEqual([BODY_A, BODY_B, BODY_C]);
+
+    await act(async () => {
+      await reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    });
+    await waitFor(() => {
+      expect(textsInOrder()).toEqual([BODY_C, BODY_A, BODY_B]);
+    });
+    expect(itemAt(0)).toHaveAccessibleName("Note 1 of 3");
+    expect(itemAt(1)).toHaveAccessibleName("Note 2 of 3");
+    expect(itemAt(2)).toHaveAccessibleName("Note 3 of 3");
+
+    await act(async () => {
+      await reorderMemoLevel(state, [MEMO_B, MEMO_C, MEMO_A]);
+    });
+    await waitFor(() => {
+      expect(textsInOrder()).toEqual([BODY_B, BODY_C, BODY_A]);
+    });
+    expect(within(region()).getByRole("listitem", { name: "Note 1 of 3" })).toBe(itemAt(0));
+    expect(noteBox(within(region()).getByRole("listitem", { name: "Note 3 of 3" })).value).toBe(BODY_A);
   });
 });

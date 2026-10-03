@@ -5,7 +5,7 @@
 // Mutations take no abort signal (D5).
 // Ids are decimal strings and are never parsed, coerced or compared numerically.
 // Failures are the shared client's `ApiError`s, rethrown unchanged.
-import { apiDelete, apiGet, apiPatch, apiPost } from "../shared/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "../shared/api";
 
 /** The four levels a note can live at. */
 export type MemoScope = "user" | "character" | "setup" | "session";
@@ -97,6 +97,23 @@ export async function updateMemo(memoId: string, patch: MemoPatch): Promise<Memo
 /** `DELETE /api/memos/<memoId>` — resolves to `undefined` on 204. */
 export async function deleteMemo(memoId: string): Promise<void> {
   await apiDelete<undefined>(memoPath(memoId));
+}
+
+/**
+ * `PUT /api/memos/order` with exactly `{ scope, scope_id, memo_ids }` (016). Resolves to the
+ * payload's `memos` array, in the order received. Takes no signal (015 D5).
+ */
+export async function reorderMemos(
+  scope: MemoScope,
+  scopeId: string | null,
+  memoIds: string[],
+): Promise<Memo[]> {
+  const body = await apiPut<MemoListResponse | undefined>(`${MEMOS_PATH}/order`, {
+    scope,
+    scope_id: scopeId,
+    memo_ids: memoIds,
+  });
+  return body?.memos ?? [];
 }
 
 /**

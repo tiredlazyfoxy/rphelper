@@ -26,7 +26,7 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, model_validator
 
-from app.models.ids import SnowflakeOut
+from app.models.ids import SnowflakeIn, SnowflakeOut
 
 #: The four memo levels, in chain order (R2).
 MemoScope = Literal["user", "character", "setup", "session"]
@@ -107,6 +107,24 @@ class CreateMemoRequest(BaseModel):
         """A non-user `scope` without a `scope_id` raises `ValueError` (422)."""
         if self.scope != "user" and self.scope_id is None:
             raise ValueError(f"A {self.scope} note needs a scope_id.")
+        return self
+
+
+class ReorderMemosRequest(BaseModel):
+    """The level-reorder body (feature `016`, D6): `scope`, an optional nullable `scope_id`,
+    and `memo_ids`, the level's whole order. Unknown keys are ignored."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    scope: MemoScope
+    scope_id: OptionalScopeIdIn = None
+    memo_ids: list[SnowflakeIn]
+
+    @model_validator(mode="after")
+    def _require_scope_id_for_non_user_scope(self) -> Self:
+        """A non-user `scope` without a `scope_id` raises `ValueError` (422)."""
+        if self.scope != "user" and self.scope_id is None:
+            raise ValueError(f"A {self.scope} reorder needs a scope_id.")
         return self
 
 

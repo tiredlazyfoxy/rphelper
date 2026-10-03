@@ -7,6 +7,7 @@ import {
   apiGet,
   apiPatch,
   apiPost,
+  apiPut,
   apiRequest,
   documentNavigation,
 } from "../../src/shared/api";
@@ -526,5 +527,52 @@ describe("method helpers", () => {
     const mock = respondWith(() => jsonResponse({}, 200));
     await apiRequest("/api/things/1", "PATCH", { a: "1" });
     expect(recorded(mock).method).toBe("PATCH");
+  });
+});
+
+// ---------------------------------------------------------------- 016 step 002 — apiPut (D12)
+// Feature 016, step 002, DoD-1: apiPut has apiPatch's shape and the client's error mapping.
+
+describe("apiPut (feature 016, step 002)", () => {
+  it("sends PUT to the path with a JSON content type and the JSON body, resolving to the parsed body — DoD-1", async () => {
+    const answer = { memos: [{ id: "7250000000000000101" }] };
+    const mock = respondWith(() => jsonResponse(answer, 200));
+
+    const result = await apiPut("/api/x", { a: 1 });
+
+    expect(mock).toHaveBeenCalledTimes(1);
+    const call = recorded(mock);
+    expect(call.method).toBe("PUT");
+    expect(call.url).toBe("/api/x");
+    expect(call.headers.get("Content-Type") ?? "").toMatch(/^application\/json\b/i);
+    expect(typeof call.body).toBe("string");
+    expect(JSON.parse(call.body as string)).toStrictEqual({ a: 1 });
+    expect(result).toStrictEqual(answer);
+  });
+
+  it("resolves a 204 to undefined — DoD-1", async () => {
+    respondWith(() => new Response(null, { status: 204 }));
+    await expect(apiPut("/api/x", { a: 1 })).resolves.toBeUndefined();
+  });
+
+  it.each([404, 409, 422, 500])(
+    "rejects a non-2xx envelope (%i) with an ApiError carrying the backend's code and status — DoD-1",
+    async (status) => {
+      respondWith(() => jsonResponse(envelope("memo_order_mismatch", "The order is stale.", {}), status));
+
+      const err = expectApiError(await captureError(() => apiPut("/api/x", { a: 1 })));
+
+      expect(err.code).toBe("memo_order_mismatch");
+      expect(err.status).toBe(status);
+    },
+  );
+
+  it("rejects a transport failure with code client_transport_failed — DoD-1", async () => {
+    stubFetch(() => Promise.reject(new TypeError("Failed to fetch")));
+
+    const err = expectApiError(await captureError(() => apiPut("/api/x", { a: 1 })));
+
+    expect(err.code).toBe("client_transport_failed");
+    expect(err.code).toBe(CLIENT_TRANSPORT_FAILED);
   });
 });

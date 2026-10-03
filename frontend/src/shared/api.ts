@@ -1,6 +1,6 @@
 import { ApiError, CLIENT_MALFORMED_ERROR, CLIENT_TRANSPORT_FAILED } from "./apiError";
 
-export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
+export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 /**
  * The document-navigation seam. The 401 path navigates by calling
@@ -140,6 +140,15 @@ export async function apiPatch<T = unknown>(
   signal?: AbortSignal,
 ): Promise<T> {
   return apiRequest<T>(path, "PATCH", body, signal);
+}
+
+/** `PUT` with `apiPatch`'s exact shape and error mapping (016 D12). */
+export async function apiPut<T = unknown>(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  return apiRequest<T>(path, "PUT", body, signal);
 }
 
 export async function apiDelete<T = unknown>(path: string, signal?: AbortSignal): Promise<T> {

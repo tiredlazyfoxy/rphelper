@@ -8,6 +8,11 @@ in ``status.md`` (steps 001..004): the five full literal paths and their status 
 
 Covers step 004 DoD-1 .. DoD-15. DoD-16 is ``[manual/live]`` and carries no test.
 
+Feature 016 step 001 (``docs/plans/016.note-wall/001.reorder-backend.md``) adds
+``PUT /api/memos/order`` (D6) and amends the allocation (D5, newest first); its tests are
+suffixed ``__S016_001_DoD<n>`` (DoD-10 .. DoD-14 here), and amended 015 tests carry that
+suffix appended to their 015 name.
+
 The application is the real factory's (``create_app()``), pinned to the per-test database
 through ``dependency_overrides[get_settings]``. Each signed-in caller has its own
 ``TestClient`` carrying exactly one session cookie. Characters, setups and sessions are
@@ -15,6 +20,8 @@ created and archived through their own routes; disabled / forced states are reac
 ``PATCH /api/memos/{id}``. ``conftest.py`` is untouched: every fixture below is file-local.
 """
 
+import ast
+import inspect
 import re
 from collections.abc import Iterator
 from typing import Any
@@ -29,6 +36,7 @@ from app.config import Settings, get_settings
 from app.db import schema
 from app.main import create_app
 from app.roles import Role
+from app.routers import memos as memos_router_module
 from app.services.passwords import hash_password
 
 CHARACTERS_PATH = "/api/characters"
@@ -840,10 +848,12 @@ def test_the_chain_of_a_session_without_a_setup_has_three_levels__S015_004_DoD11
 # --- DoD-12: the owner sees disabled notes --------------------------------------------
 
 
-def test_disabled_notes_are_listed_and_in_the_chain_with_their_flags__S015_004_DoD12(
+def test_disabled_notes_are_listed_and_in_the_chain_with_their_flags__S015_004_DoD12__S016_001_DoD12(
     application: FastAPI, db_settings: Settings
 ) -> None:
-    """DoD-12 — R3: a disabled note, and a disabled forced one, stay visible to the owner."""
+    """DoD-12 — R3: a disabled note, and a disabled forced one, stay visible to the owner.
+
+    Amended by 016/001 DoD-12 (D5): the level lists newest first."""
     client = _player_a(application, db_settings)
     character_id, _setup_id, session_id = _tree(client)
 
@@ -857,12 +867,12 @@ def test_disabled_notes_are_listed_and_in_the_chain_with_their_flags__S015_004_D
     assert (disabled_forced["is_enabled"], disabled_forced["is_forced"]) == (False, True)
 
     listed = _list(client, "character", character_id)
-    assert listed == [disabled, disabled_forced]
+    assert listed == [disabled_forced, disabled]
 
     levels = _chain(client, session_id)
     character_level = [level for level in levels if level["scope"] == "character"]
     assert len(character_level) == 1
-    assert character_level[0]["memos"] == [disabled, disabled_forced]
+    assert character_level[0]["memos"] == [disabled_forced, disabled]
 
 
 # --- DoD-13: archived parents are valid targets ---------------------------------------
@@ -897,26 +907,29 @@ def test_archived_character_setup_and_session_still_list_create_and_chain__S015_
 # --- DoD-14: sort_key allocation through the route ------------------------------------
 
 
-def test_sort_keys_are_allocated_in_creation_order_and_never_reused__S015_004_DoD14(
+def test_sort_keys_are_allocated_in_creation_order_and_never_reused__S015_004_DoD14__S016_001_DoD12(
     application: FastAPI, db_settings: Settings
 ) -> None:
-    """DoD-14 — D4: 0, 1, 2; delete the middle; the next is 3 and lists last."""
+    """015 DoD-14, amended by 016/001 DoD-12 (D5): 0, -1, -2 listed newest first as -2, -1,
+    0; delete the middle; the next create answers -3 and lists first."""
     client = _player_a(application, db_settings)
     character_id = _character(client)
 
     first = _create(client, "character", character_id, "one")
     second = _create(client, "character", character_id, "two")
     third = _create(client, "character", character_id, "three")
-    assert [first["sort_key"], second["sort_key"], third["sort_key"]] == [0, 1, 2]
-    assert _ids(_list(client, "character", character_id)) == [first["id"], second["id"], third["id"]]
+    assert [first["sort_key"], second["sort_key"], third["sort_key"]] == [0, -1, -2]
+    listed = _list(client, "character", character_id)
+    assert _ids(listed) == [third["id"], second["id"], first["id"]]
+    assert [memo["sort_key"] for memo in listed] == [-2, -1, 0]
 
     assert client.delete(_memo_path(second["id"])).status_code == 204
 
     fourth = _create(client, "character", character_id, "four")
-    assert fourth["sort_key"] == 3
+    assert fourth["sort_key"] == -3
     listed = _list(client, "character", character_id)
-    assert _ids(listed) == [first["id"], third["id"], fourth["id"]]
-    assert [memo["sort_key"] for memo in listed] == [0, 2, 3]
+    assert _ids(listed) == [fourth["id"], third["id"], first["id"]]
+    assert [memo["sort_key"] for memo in listed] == [-3, -2, 0]
 
 
 # --- DoD-15: earlier routers still match first ----------------------------------------
@@ -940,3 +953,229 @@ def test_earlier_routers_still_answer_with_the_memos_router_registered__S015_004
 
     setups_response = client.get(f"{CHARACTERS_PATH}/{character_id}/setups")
     assert setups_response.status_code == 200, setups_response.text
+
+
+# ======================================================================================
+# Feature 016, step 001 — ``PUT /api/memos/order``
+# ======================================================================================
+
+ORDER_PATH = "/api/memos/order"
+MEMO_ORDER_MISMATCH = "memo_order_mismatch"
+
+
+def _reorder_request(client: TestClient, payload: dict[str, Any]) -> httpx.Response:
+    return client.put(ORDER_PATH, json=payload)
+
+
+def _level_payload(scope: str, scope_id: str | None, memo_ids: list[str]) -> dict[str, Any]:
+    payload: dict[str, Any] = {"scope": scope, "memo_ids": memo_ids}
+    if scope_id is not None:
+        payload["scope_id"] = scope_id
+    return payload
+
+
+# --- DoD-10: route success ------------------------------------------------------------
+
+
+def test_put_order_answers_the_level_in_the_given_order__S016_001_DoD10(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """016/001 DoD-10 — UC-076, US-102: 200 ``{"memos": [...]}`` in the sent order, nine wire
+    keys, decimal-string ids, ``sort_key`` 0, 1, 2; the listing and the chain agree."""
+    client = _player_a(application, db_settings)
+    _character_id, _setup_id, session_id = _tree(client)
+    for body in ("one", "two", "three"):
+        _create(client, "session", session_id, body)
+    current = _ids(_list(client, "session", session_id))
+    new_order = list(reversed(current))
+
+    response = _reorder_request(client, _level_payload("session", session_id, new_order))
+    answered = _json_object(response, 200)
+
+    assert set(answered) == {"memos"}
+    memos = answered["memos"]
+    assert isinstance(memos, list)
+    assert _ids(memos) == new_order
+    for memo in memos:
+        _assert_memo_shape(memo)
+        assert isinstance(memo["id"], str) and memo["id"].isdigit()
+        assert memo["scope"] == "session"
+        assert memo["scope_id"] == session_id
+    assert [memo["sort_key"] for memo in memos] == [0, 1, 2]
+
+    assert _ids(_list(client, "session", session_id)) == new_order
+
+    levels = _chain(client, session_id)
+    session_levels = [level for level in levels if level["scope"] == "session"]
+    assert len(session_levels) == 1
+    assert _ids(session_levels[0]["memos"]) == new_order
+
+
+# --- DoD-11: route failures -----------------------------------------------------------
+
+
+def test_put_order_without_a_login_cookie_answers_401__S016_001_DoD11(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """016/001 DoD-11 — no login cookie → 401 ``not_authenticated``; nothing changed."""
+    owner = _player_a(application, db_settings)
+    older = _create(owner, "user", None, "older")
+    newer = _create(owner, "user", None, "newer")
+    listed_before = _list(owner, "user", None)
+
+    response = _reorder_request(
+        _anonymous(application), _level_payload("user", None, [older["id"], newer["id"]])
+    )
+
+    _assert_envelope(response, 401, NOT_AUTHENTICATED)
+    assert _list(owner, "user", None) == listed_before
+
+
+def test_put_order_on_another_users_level_answers_its_not_found__S016_001_DoD11(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """016/001 DoD-11 — R5: B reordering A's character / setup / session level answers 404
+    with that level's code and an empty ``detail``; A's listing order is unchanged."""
+    client_a = _player_a(application, db_settings)
+    client_b = _player_b(application, db_settings)
+    character_id, setup_id, session_id = _tree(client_a)
+
+    cases = [
+        ("character", character_id, CHARACTER_NOT_FOUND),
+        ("setup", setup_id, SETUP_NOT_FOUND),
+        ("session", session_id, SESSION_NOT_FOUND),
+    ]
+    for scope, scope_id, _code in cases:
+        _create(client_a, scope, scope_id, f"{scope} older")
+        _create(client_a, scope, scope_id, f"{scope} newer")
+    before = {scope: _list(client_a, scope, scope_id) for scope, scope_id, _code in cases}
+
+    for scope, scope_id, code in cases:
+        reversed_ids = list(reversed(_ids(before[scope])))
+        body = _assert_envelope(
+            _reorder_request(client_b, _level_payload(scope, scope_id, reversed_ids)), 404, code
+        )
+        assert body["error"]["detail"] == {}
+
+    for scope, scope_id, _code in cases:
+        assert _list(client_a, scope, scope_id) == before[scope]
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["omit-one", "another-level", "another-users-note", "repeated-id"],
+)
+def test_put_order_with_a_stale_set_answers_409__S016_001_DoD11(
+    application: FastAPI, db_settings: Settings, engine: Engine, case: str
+) -> None:
+    """016/001 DoD-11 — US-103.AC-2, D6: a ``memo_ids`` that omits a note, includes a note of
+    another level or of user B, or repeats an id → 409 ``memo_order_mismatch``, empty
+    ``detail``; A's listing order is unchanged."""
+    client_a = _player_a(application, db_settings)
+    client_b = _player_b(application, db_settings)
+    _character_id, _setup_id, session_id = _tree(client_a)
+    for body in ("one", "two", "three"):
+        _create(client_a, "session", session_id, body)
+    other_level = _create(client_a, "user", None, "A at the user level")
+    b_note = _create(client_b, "user", None, "B's own")
+    listed_before = _list(client_a, "session", session_id)
+    count_before = _memo_count(engine)
+    full = list(reversed(_ids(listed_before)))
+
+    memo_ids = {
+        "omit-one": full[:-1],
+        "another-level": [*full, other_level["id"]],
+        "another-users-note": [*full, b_note["id"]],
+        "repeated-id": [*full, full[0]],
+    }[case]
+
+    body = _assert_envelope(
+        _reorder_request(client_a, _level_payload("session", session_id, memo_ids)), 409, MEMO_ORDER_MISMATCH
+    )
+    assert body["error"]["detail"] == {}
+    assert isinstance(body["error"]["message"], str) and body["error"]["message"].strip()
+
+    assert _list(client_a, "session", session_id) == listed_before
+    assert _list(client_a, "user", None) == [other_level]
+    assert _list(client_b, "user", None) == [b_note]
+    assert _memo_count(engine) == count_before
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["missing-memo-ids", "non-numeric-id", "unknown-scope", "non-user-scope-without-scope-id"],
+)
+def test_put_order_with_an_invalid_body_answers_422__S016_001_DoD11(
+    application: FastAPI, db_settings: Settings, engine: Engine, case: str
+) -> None:
+    """016/001 DoD-11 — a missing ``memo_ids``, a non-numeric id, scope ``"world"``, or a
+    non-user scope without ``scope_id`` → 422; nothing changed."""
+    client = _player_a(application, db_settings)
+    _character_id, _setup_id, session_id = _tree(client)
+    for body in ("one", "two"):
+        _create(client, "session", session_id, body)
+    listed_before = _list(client, "session", session_id)
+    count_before = _memo_count(engine)
+    reversed_ids = list(reversed(_ids(listed_before)))
+
+    payload: dict[str, Any] = {
+        "missing-memo-ids": {"scope": "session", "scope_id": session_id},
+        "non-numeric-id": {"scope": "session", "scope_id": session_id, "memo_ids": [reversed_ids[0], "abc"]},
+        "unknown-scope": {"scope": "world", "scope_id": session_id, "memo_ids": reversed_ids},
+        "non-user-scope-without-scope-id": {"scope": "session", "memo_ids": reversed_ids},
+    }[case]
+
+    response = _reorder_request(client, payload)
+
+    assert response.status_code == 422, response.text
+    assert _list(client, "session", session_id) == listed_before
+    assert _memo_count(engine) == count_before
+
+
+# --- DoD-13: the existing memo routes still answer ------------------------------------
+
+
+def test_the_existing_memo_routes_still_answer_with_the_order_route_declared__S016_001_DoD13(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """016/001 DoD-13 — route order: PATCH 200, DELETE 204, GET ``?scope=user`` 200."""
+    client = _player_a(application, db_settings)
+    created = _create(client, "user", None, "x")
+
+    patched = client.patch(_memo_path(created["id"]), json={"body": "y"})
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["body"] == "y"
+
+    deleted = client.delete(_memo_path(created["id"]))
+    assert deleted.status_code == 204, deleted.text
+
+    listed = client.get(f"{MEMOS_PATH}?scope=user")
+    assert listed.status_code == 200, listed.text
+
+
+# --- DoD-14: the router holds no SQL construct ----------------------------------------
+
+_SQL_CONSTRUCTS = {"select", "update", "insert", "delete"}
+
+
+def test_the_memos_router_contains_no_sql_construct__S016_001_DoD14() -> None:
+    """016/001 DoD-14 — 015 D11: no ``select(`` / ``update(`` / ``insert(`` / ``delete(``
+    construct in ``app/routers/memos.py``. The router's own route decorator
+    (``router.delete(...)``) is the HTTP method, not a SQL construct."""
+    tree = ast.parse(inspect.getsource(memos_router_module))
+
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in _SQL_CONSTRUCTS:
+                offenders.append(ast.unparse(node))
+            elif isinstance(func, ast.Attribute) and func.attr in _SQL_CONSTRUCTS:
+                receiver = func.value
+                if not (isinstance(receiver, ast.Name) and receiver.id == "router"):
+                    offenders.append(ast.unparse(node))
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("sqlalchemy"):
+            imported = {alias.name for alias in node.names}
+            offenders.extend(f"from {node.module} import {name}" for name in imported & _SQL_CONSTRUCTS)
+
+    assert offenders == []

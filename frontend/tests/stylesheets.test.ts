@@ -6,6 +6,12 @@
 // clause is replaced by those; its "exists" clause and the "exactly two
 // stylesheets" and "global.css holds resets only" clauses are unchanged.
 // jsdom applies no stylesheet, so every clause here is a scan of the source text.
+//
+// Extended by feature 016, step 005 (DoD-12; D11): `ALLOWED_SELECTORS` gains exactly the six
+// session-screen / note-wall selectors (the selector guard is retitled to cite DoD-12), and a
+// block near the end asserts the six rules exist outside the media query and that no media
+// query is added. Every other guard is unchanged and must still pass against the extended
+// shell.css.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -383,12 +389,20 @@ describe("shell.css names no colour of its own", () => {
 });
 
 describe("shell.css holds workspace layout only", () => {
+  // Amended by feature 016, step 005 (DoD-12; D11): the five shell selectors plus exactly
+  // the six session-screen / note-wall layout selectors.
   const ALLOWED_SELECTORS = [
     ".app",
     ".app.nav-collapsed",
     ".app-nav",
     ".app-main",
     ".app.nav-overlay-open .app-nav",
+    ".app-session",
+    ".app-session.wall-pinned",
+    ".app-stream",
+    ".app-wall",
+    ".app-wall.wall-open",
+    ".app-session.wall-pinned .app-wall",
   ];
   const TYPOGRAPHY_PROPERTIES = new Set([
     "line-height",
@@ -416,7 +430,7 @@ describe("shell.css holds workspace layout only", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("uses no selector beyond the shell's five — DoD-5", () => {
+  it("uses no selector beyond the shell's five and the wall's six (008 DoD-5, amended by 016 005) — DoD-12", () => {
     const selectors = parseRules(readText(SHELL_CSS)).flatMap((rule) => rule.selectors);
     // The file does carry rules (DoD-1..DoD-3), and every one of them is on the list.
     expect(selectors.length).toBeGreaterThan(0);
@@ -436,6 +450,45 @@ describe("the narrow threshold is one string", () => {
   it("shell.css spells the threshold with that very string — DoD-6", () => {
     // The constant itself is the needle, so the two can never drift.
     expect(stripComments(readText(SHELL_CSS))).toContain(NARROW_VIEWPORT_QUERY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 016, step 005 — the session screen / note wall layout rules (DoD-12; D11).
+// The narrow revert is decided in TypeScript, so no wall rule sits under a media query and
+// no new media query is added; the existing one stays byte-identical (DoD-6 above).
+
+describe("shell.css carries the note wall's six layout rules", () => {
+  const WALL_SELECTORS = [
+    ".app-session",
+    ".app-session.wall-pinned",
+    ".app-stream",
+    ".app-wall",
+    ".app-wall.wall-open",
+    ".app-session.wall-pinned .app-wall",
+  ];
+
+  it.each(WALL_SELECTORS)("declares a rule for %s outside the media query — DoD-12", (selector) => {
+    const outside = splitNarrowMedia(stripComments(readText(SHELL_CSS))).outside;
+    const declared = parseRules(outside).filter((rule) =>
+      rule.selectors.some((s) => canonicalSelector(s) === selector),
+    );
+    expect(declared.length).toBeGreaterThan(0);
+    expect(declared.some((rule) => rule.declarations.size > 0)).toBe(true);
+  });
+
+  it("puts no wall rule inside the narrow media query — DoD-12", () => {
+    const body = splitNarrowMedia(stripComments(readText(SHELL_CSS))).body;
+    const inside = parseRules(body ?? "")
+      .flatMap((rule) => rule.selectors)
+      .map(canonicalSelector)
+      .filter((selector) => WALL_SELECTORS.includes(selector));
+    expect(inside).toEqual([]);
+  });
+
+  it("adds no media query: shell.css holds exactly one @media — DoD-12", () => {
+    const css = stripComments(readText(SHELL_CSS));
+    expect(css.match(/@media\b/gi) ?? []).toHaveLength(1);
   });
 });
 

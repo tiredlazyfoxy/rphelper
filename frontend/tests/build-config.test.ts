@@ -279,7 +279,7 @@ describe("package.json — scripts", () => {
 });
 
 describe("package.json — excluded dependencies", () => {
-  it("declares none of the deferred packages, @mantine/form, or any linter (DoD-8)", () => {
+  it("declares none of the deferred packages, @mantine/form, or any linter (DoD-8; @dnd-kit core/sortable/utilities sanctioned by 016 D8)", () => {
     const pkg = readPackageJson();
     const names = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
 
@@ -290,12 +290,16 @@ describe("package.json — excluded dependencies", () => {
     // Rescoped again by feature 013 step 004 (context.md D5): `react-markdown` renders
     // message bodies and is a sanctioned runtime dependency; its presence is asserted in
     // tests/app/MessageBody.test.tsx (013 step 004 DoD-1).
+    // Rescoped again by feature 016 step 003 (context.md D8; frontend-structure.md's one
+    // sanctioned @dnd-kit use): `@dnd-kit/core`, `@dnd-kit/sortable` and `@dnd-kit/utilities`
+    // are sanctioned runtime dependencies. Any other `@dnd-kit/*` package stays forbidden.
+    const sanctionedDndKit = ["@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities"];
     const forbidden = names.filter(
       (n) =>
         n === "@mantine/form" ||
         n === "eslint" ||
         n.startsWith("eslint-") ||
-        n.startsWith("@dnd-kit/"),
+        (n.startsWith("@dnd-kit/") && !sanctionedDndKit.includes(n)),
     );
     expect(forbidden).toEqual([]);
   });

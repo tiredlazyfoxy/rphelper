@@ -4,12 +4,18 @@
 // button and the unsaved new note; the empty, loading and failed states; and the flush on
 // unmount. It does not create, load or own its state — the session screen (008) and the
 // character page (009) both mount it with a `MemoLevelState` (006).
+//
+// Feature 016, step 003 (D5 / D8 / D9): the new note renders first with focus in its body,
+// and behind the opt-in `reorderable` prop each saved note is a focusable sortable card in
+// a per-level `SortableContext`; the level's reorder failure renders inline.
 import type * as React from "react";
-import { useEffect, useId } from "react";
+import { useEffect, useId, useState } from "react";
 import { Box, Button, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import type { TitleOrder } from "@mantine/core";
 import { IconCircleCheck, IconCircleOff, IconPin, IconPlus } from "@tabler/icons-react";
 import { observer } from "mobx-react-lite";
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 import { IconButton } from "../shared/IconButton";
 import { MarkdownEditor } from "../shared/MarkdownEditor";
@@ -18,9 +24,11 @@ import { memoReach, reachStatement } from "./memoReach";
 import {
   flushMemoLevel,
   isFlagWriteInFlight,
+  isReorderInFlight,
   noteFailure,
   noteText,
   openNewNote,
+  reorderFailure,
   saveNewNote,
   saveNote,
   setNewNoteText,
@@ -59,6 +67,135 @@ function onFocusLeave(save: () => void): (event: React.FocusEvent<HTMLDivElement
   };
 }
 
+type NoteCardBodyProps = {
+  state: MemoLevelState;
+  memo: Memo;
+  /** Told when focus enters (true) and leaves (false) the editor area; sortable shell only. */
+  onEditingChange?: (editing: boolean) => void;
+};
+
+/**
+ * One saved note's card contents (015 `007`): the editor (saved on focus leave), the two
+ * flag controls, the reach line and the inline failure. Shared by both outer shells.
+ */
+const NoteCardBody = observer(function NoteCardBody(
+  props: NoteCardBodyProps,
+): React.JSX.Element {
+  const { state, memo, onEditingChange } = props;
+  const failure = noteFailure(state, memo.id);
+  const inFlight = isFlagWriteInFlight(state, memo.id);
+  const disabled = !memo.is_enabled;
+  const save = onFocusLeave(() => {
+    onEditingChange?.(false);
+    void saveNote(state, memo.id);
+  });
+  return (
+    <Stack gap={4}>
+      <Box
+        c={disabled ? "dimmed" : undefined}
+        td={disabled ? "line-through" : undefined}
+        onFocus={() => {
+          onEditingChange?.(true);
+        }}
+        onBlur={save}
+      >
+        <MarkdownEditor
+          label="Note"
+          value={noteText(state, memo.id)}
+          onChange={(markdown) => {
+            setNoteText(state, memo.id, markdown);
+          }}
+        />
+      </Box>
+      <Group gap="xs" wrap="nowrap">
+        <IconButton
+          icon={memo.is_enabled ? IconCircleCheck : IconCircleOff}
+          label={memo.is_enabled ? "Disable note" : "Enable note"}
+          sizeVariant="inline"
+          disabled={inFlight}
+          onClick={() => {
+            void toggleEnabled(state, memo.id);
+          }}
+        />
+        <IconButton
+          icon={IconPin}
+          label={memo.is_forced ? "Stop forcing note" : "Force note"}
+          sizeVariant="inline"
+          color={memo.is_forced ? FORCED_COLOR : undefined}
+          disabled={inFlight}
+          onClick={() => {
+            void toggleForced(state, memo.id);
+          }}
+        />
+        <Text c="dimmed" size="sm">
+          {reachStatement(memoReach(memo))}
+        </Text>
+      </Group>
+      {failure !== null && (
+        <Text c="red" size="sm">
+          {failure}
+        </Text>
+      )}
+    </Stack>
+  );
+});
+
+type SortableNoteCardProps = {
+  state: MemoLevelState;
+  memo: Memo;
+  /** 1-based position among the level's saved notes. */
+  position: number;
+  /** The number of saved notes in the level. */
+  total: number;
+};
+
+/**
+ * The sortable outer shell (D8): the whole `listitem` is the drag surface, focusable,
+ * named by its position, keyboard activation only from the card itself, and disabled
+ * while its editor has focus or the level's reorder is in flight.
+ */
+const SortableNoteCard = observer(function SortableNoteCard(
+  props: SortableNoteCardProps,
+): React.JSX.Element {
+  const { state, memo, position, total } = props;
+  // Component-local view state: does focus sit inside this card's editor area?
+  const [editing, setEditing] = useState(false);
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
+    id: memo.id,
+    disabled: editing || isReorderInFlight(state),
+    attributes: { role: "listitem" },
+  });
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLLIElement>): void => {
+    // Keys typed in the editor or pressed on a flag button never start a drag.
+    if (event.target !== event.currentTarget) {
+      return;
+    }
+    const forward = listeners?.onKeyDown;
+    if (forward !== undefined) {
+      forward(event);
+    }
+  };
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      aria-label={`Note ${position} of ${total}`}
+      onKeyDown={onKeyDown}
+    >
+      <NoteCardBody state={state} memo={memo} onEditingChange={setEditing} />
+    </li>
+  );
+});
+
 export type MemoLevelGroupProps = {
   /** The level's state; created, loaded and owned by the mount. */
   state: MemoLevelState;
@@ -68,12 +205,18 @@ export type MemoLevelGroupProps = {
   headingOrder: TitleOrder;
   /** Called by the failed state's "Retry" button. */
   onRetry: () => void;
+  /**
+   * When true, saved notes render as focusable sortable cards inside a per-level
+   * `SortableContext` (needs a `DndContext` ancestor). Defaults to false: no dnd-kit hook
+   * runs and no `DndContext` is needed.
+   */
+  reorderable?: boolean;
 };
 
 export const MemoLevelGroup = observer(function MemoLevelGroup(
   props: MemoLevelGroupProps,
 ): React.JSX.Element {
-  const { state, title, headingOrder, onRetry } = props;
+  const { state, title, headingOrder, onRetry, reorderable = false } = props;
   const headingId = useId();
 
   // D5: leaving keeps the edit. Flushes the state captured at mount, once, on unmount.
@@ -85,59 +228,31 @@ export const MemoLevelGroup = observer(function MemoLevelGroup(
     // Empty dependency list by design: the state captured at mount, flushed once.
   }, []);
 
-  const renderNote = (memo: Memo): React.JSX.Element => {
-    const failure = noteFailure(state, memo.id);
-    const inFlight = isFlagWriteInFlight(state, memo.id);
-    const disabled = !memo.is_enabled;
+  const renderSavedNotes = (): React.JSX.Element | React.JSX.Element[] => {
+    if (!reorderable) {
+      // The plain shell: no dnd-kit hook runs, no `DndContext` needed.
+      return state.memos.map((memo) => (
+        <Box component="li" key={memo.id}>
+          <NoteCardBody state={state} memo={memo} />
+        </Box>
+      ));
+    }
+    const total = state.memos.length;
     return (
-      <Box component="li" key={memo.id}>
-        <Stack gap={4}>
-          <Box
-            c={disabled ? "dimmed" : undefined}
-            td={disabled ? "line-through" : undefined}
-            onBlur={onFocusLeave(() => {
-              void saveNote(state, memo.id);
-            })}
-          >
-            <MarkdownEditor
-              label="Note"
-              value={noteText(state, memo.id)}
-              onChange={(markdown) => {
-                setNoteText(state, memo.id, markdown);
-              }}
-            />
-          </Box>
-          <Group gap="xs" wrap="nowrap">
-            <IconButton
-              icon={memo.is_enabled ? IconCircleCheck : IconCircleOff}
-              label={memo.is_enabled ? "Disable note" : "Enable note"}
-              sizeVariant="inline"
-              disabled={inFlight}
-              onClick={() => {
-                void toggleEnabled(state, memo.id);
-              }}
-            />
-            <IconButton
-              icon={IconPin}
-              label={memo.is_forced ? "Stop forcing note" : "Force note"}
-              sizeVariant="inline"
-              color={memo.is_forced ? FORCED_COLOR : undefined}
-              disabled={inFlight}
-              onClick={() => {
-                void toggleForced(state, memo.id);
-              }}
-            />
-            <Text c="dimmed" size="sm">
-              {reachStatement(memoReach(memo))}
-            </Text>
-          </Group>
-          {failure !== null && (
-            <Text c="red" size="sm">
-              {failure}
-            </Text>
-          )}
-        </Stack>
-      </Box>
+      <SortableContext
+        items={state.memos.map((memo) => memo.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        {state.memos.map((memo, index) => (
+          <SortableNoteCard
+            key={memo.id}
+            state={state}
+            memo={memo}
+            position={index + 1}
+            total={total}
+          />
+        ))}
+      </SortableContext>
     );
   };
 
@@ -157,6 +272,7 @@ export const MemoLevelGroup = observer(function MemoLevelGroup(
           >
             <MarkdownEditor
               label="Note"
+              autoFocus
               value={newNote.text}
               onChange={(markdown) => {
                 setNewNoteText(state, markdown);
@@ -203,8 +319,8 @@ export const MemoLevelGroup = observer(function MemoLevelGroup(
           </Text>
         ) : (
           <Box component="ul" m={0} p={0} style={LIST_STYLE}>
-            {state.memos.map(renderNote)}
             {renderNewNote()}
+            {renderSavedNotes()}
           </Box>
         )}
         <Group>
@@ -222,12 +338,19 @@ export const MemoLevelGroup = observer(function MemoLevelGroup(
     );
   };
 
+  const failedReorder = reorderFailure(state);
   return (
     <section aria-labelledby={headingId}>
       <Stack gap="xs">
         <Title order={headingOrder} id={headingId}>
           {title}
         </Title>
+        {failedReorder !== null && (
+          // The level's own failure: inside the region, outside every listitem (D7).
+          <Text c="red" size="sm">
+            {failedReorder}
+          </Text>
+        )}
         {renderContent()}
       </Stack>
     </section>

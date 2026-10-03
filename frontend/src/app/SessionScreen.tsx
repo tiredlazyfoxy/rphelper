@@ -1,7 +1,8 @@
 // The centre column of `/sessions/:id` (feature 011, step 009, D17): the session's own
 // screen — a header plus the session stream (013 step 007: the settled record, the ruler,
 // the kind switch, the zone and the composer, in `SessionStream`, which owns and loads its
-// own state); the wall is 015 / 016's. The screen holds no
+// own state); 016 step 006 makes the ready render the note wall's home (`NoteWallLayout`,
+// with 015's `MemoChainSection` inside the wall). The screen holds no
 // business logic of its own: it creates one `SessionScreenState` (this step) with `useState`
 // and calls that module's one effect. `CharacterScreen.tsx` (009 step 007) is the template.
 //
@@ -12,13 +13,15 @@
 // text is the neutral "Character" and no second request is made for a name (D17).
 //
 // Deliberately absent, per D5 / D17 / D18: any Archive, Restore or "Actions for …" control
-// (archiving a session lives on the character screen only), the wall, and any notification
-// API import — the failure branch renders its one fixed sentence inline with a Retry. The
-// header itself holds no button; every control in the ready centre is the stream's.
+// (archiving a session lives on the character screen only), the wall outside the ready
+// branch (016 D1), and any notification API import — the failure branch renders its one
+// fixed sentence inline with a Retry. The header's only button is 016's "Open notes".
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
 import { Link, useParams } from "react-router-dom";
+import { useMediaQuery } from "@mantine/hooks";
+import { IconNotes } from "@tabler/icons-react";
 import {
   Anchor,
   Badge,
@@ -33,11 +36,16 @@ import {
 } from "@mantine/core";
 
 import type { CharactersState } from "./charactersState";
+import type { LayoutStorage } from "./workspaceLayout";
 import { isSessionArchived } from "./sessionsApi";
 import { formatSessionStart } from "./sessionLabel";
 import { SessionScreenState, loadSessionScreen } from "./sessionScreenState";
 import { SessionStream } from "./SessionStream";
 import { MemoChainSection } from "./MemoChainSection";
+import { NoteWallLayout } from "./NoteWallLayout";
+import { createNoteWallState, isWallVisible, openWall } from "./noteWallState";
+import { NARROW_VIEWPORT_QUERY } from "./shellState";
+import { IconButton } from "../shared/IconButton";
 
 /** The link text when the workspace list does not hold this session's character (D17). */
 const UNKNOWN_CHARACTER = "Character";
@@ -51,6 +59,11 @@ export type SessionScreenProps = {
    * it does not (D17). The screen never writes to it.
    */
   characters: CharactersState;
+  /**
+   * The persisted-layout storage `App` holds, or `null` (016 D2). The note wall reads its
+   * pin from it and writes pin changes to it. Required.
+   */
+  storage: LayoutStorage | null;
 };
 
 /**
@@ -61,10 +74,15 @@ export type SessionScreenProps = {
 export const SessionScreen = observer(function SessionScreen(
   props: SessionScreenProps,
 ): React.JSX.Element {
-  const { characters } = props;
+  const { characters, storage } = props;
   // Created once, never with `useMemo`; `SessionRoute` keys the screen by the session id, so
   // a different session builds fresh screen state rather than reusing this one.
   const [state] = useState(() => new SessionScreenState(props.sessionId));
+  // 016 D2: one wall state per mount (pin re-read from the record, `open` starts false).
+  // Hooks run in every branch; only the ready branch renders anything from them.
+  const [wall] = useState(() => createNoteWallState(storage));
+  const narrow =
+    useMediaQuery(NARROW_VIEWPORT_QUERY, false, { getInitialValueInEffect: false }) ?? false;
   const controllerRef = useRef<AbortController | null>(null);
 
   // One read on mount; the controller aborts on unmount so a late response writes nothing.
@@ -123,7 +141,9 @@ export const SessionScreen = observer(function SessionScreen(
   const character = characters.characters.find((row) => row.id === session.character_id);
   const characterName = character === undefined ? UNKNOWN_CHARACTER : character.name;
 
-  return (
+  // 016 D1/D3: the ready render is the wall's home — header + stream in the stream column,
+  // the chain section in the always-mounted wall.
+  const stream = (
     <Container size="md" py="md">
       <Stack gap="md">
         <Stack gap="xs">
@@ -150,21 +170,42 @@ export const SessionScreen = observer(function SessionScreen(
                 Archived
               </Badge>
             )}
+            {/* 016 D10: the wall's open control, only while the wall is not visible. */}
+            {!isWallVisible(wall, narrow) && (
+              <IconButton
+                icon={IconNotes}
+                label="Open notes"
+                onClick={() => {
+                  openWall(wall);
+                }}
+              />
+            )}
           </Group>
         </Stack>
         {/* 013 D13: the stream (record, ruler, kind switch, zone, composer) — for archived
             sessions too (R6). "No entries yet." is now the record's empty line. */}
         <SessionStream sessionId={props.sessionId} />
-        {/* 015 D1: the chain's Notes section, after the stream (016 moves it to the wall). */}
-        <MemoChainSection sessionId={props.sessionId} />
       </Stack>
     </Container>
+  );
+
+  return (
+    <NoteWallLayout
+      state={wall}
+      narrow={narrow}
+      storage={storage}
+      stream={stream}
+      // 016 D4: 015's chain section, moved from the main column into the wall.
+      wall={<MemoChainSection sessionId={props.sessionId} />}
+    />
   );
 });
 
 export type SessionRouteProps = {
   /** Passed straight through to `SessionScreen`. */
   characters: CharactersState;
+  /** Passed straight through to `SessionScreen` (016 D2). */
+  storage: LayoutStorage | null;
 };
 
 /**
@@ -174,9 +215,16 @@ export type SessionRouteProps = {
  * session's header.
  */
 export function SessionRoute(props: SessionRouteProps): React.JSX.Element {
-  const { characters } = props;
+  const { characters, storage } = props;
   const params = useParams();
   const sessionId = params.id ?? "";
 
-  return <SessionScreen key={sessionId} sessionId={sessionId} characters={characters} />;
+  return (
+    <SessionScreen
+      key={sessionId}
+      sessionId={sessionId}
+      characters={characters}
+      storage={storage}
+    />
+  );
 }

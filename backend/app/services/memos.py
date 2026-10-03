@@ -15,7 +15,13 @@ from typing import Any
 from sqlalchemy import Connection, Row, Update, func, select
 
 from app.db.schema import characters, memos, sessions, setups
-from app.errors import CharacterNotFoundError, MemoNotFoundError, SessionNotFoundError, SetupNotFoundError
+from app.errors import (
+    CharacterNotFoundError,
+    MemoNotFoundError,
+    MemoOrderMismatchError,
+    SessionNotFoundError,
+    SetupNotFoundError,
+)
 from app.ids import SnowflakeGenerator
 from app.models.memos import MemoScope
 
@@ -68,8 +74,9 @@ def create_memo(
         # D12's order: target check, allocation, id minting, insert. A refusal raises before
         # `next_id()`, so it inserts nothing and mints nothing.
         stored_scope_id = _require_target(connection, user_id, scope, scope_id)
+        # New-note-first (016 D5): one below the level's minimum, or 0 for an empty level.
         sort_key: int = connection.execute(
-            select(func.coalesce(func.max(memos.c.sort_key), -1) + 1).where(
+            select(func.coalesce(func.min(memos.c.sort_key), 1) - 1).where(
                 memos.c.user_id == user_id,
                 memos.c.scope == scope,
                 memos.c.scope_id == stored_scope_id,
@@ -151,6 +158,36 @@ def delete_memo(connection: Connection, user_id: int, memo_id: int) -> None:
         result = connection.execute(memos.delete().where(memos.c.id == memo_id, memos.c.user_id == user_id))
         if result.rowcount == 0:
             raise MemoNotFoundError()
+
+
+def reorder_memos(
+    connection: Connection,
+    user_id: int,
+    scope: MemoScope,
+    scope_id: int | None,
+    memo_ids: list[int],
+) -> list[Memo]:
+    """Rewrite one level's whole order as 0..n-1 in one owner-scoped transaction (016 D6).
+
+    `MemoOrderMismatchError` unless `memo_ids` is exactly the level's notes with no repeat;
+    writes only `sort_key`. Returns the level's notes by `sort_key` then `id`.
+    """
+    with connection.begin():
+        stored_scope_id = _require_target(connection, user_id, scope, scope_id)
+        level = (
+            memos.c.user_id == user_id,
+            memos.c.scope == scope,
+            memos.c.scope_id == stored_scope_id,
+        )
+        held_ids: set[int] = set(connection.execute(select(memos.c.id).where(*level)).scalars().all())
+        # Both sets come from owner-scoped reads/arguments; a refusal raises before any write.
+        if len(memo_ids) != len(set(memo_ids)) or set(memo_ids) != held_ids:
+            raise MemoOrderMismatchError()
+        for index, memo_id in enumerate(memo_ids):
+            # `sort_key` only — `updated_at` is deliberately not touched (D6).
+            connection.execute(memos.update().where(memos.c.id == memo_id, *level).values(sort_key=index))
+        rows = connection.execute(select(memos).where(*level).order_by(memos.c.sort_key, memos.c.id)).all()
+    return [to_memo(row) for row in rows]
 
 
 def _require_target(connection: Connection, user_id: int, scope: MemoScope, scope_id: int | None) -> int:

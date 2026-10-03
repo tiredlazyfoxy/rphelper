@@ -16,6 +16,7 @@ import {
   type Memo,
   type MemoChainLevel,
   type MemoScope,
+  reorderMemos,
   updateMemo,
 } from "../../src/app/memosApi";
 
@@ -435,5 +436,81 @@ describe("abort signals (D5)", () => {
     await fetchMemoChain(SESSION_ID, controller.signal);
     expect(mock).toHaveBeenCalledTimes(1);
     expect(sentSignal(mock)).toBe(controller.signal);
+  });
+});
+
+// ===========================================================================
+// Feature 016, step 002 — reorderMemos (DoD-2, DoD-3).
+// Expected behaviour from 016 002's Interface intent / DoD and 016 context.md's
+// "Wire contract — what 016 changes" (PUT /api/memos/order).
+const ORDER_PATH = "/api/memos/order";
+const REORDER_FIRST = "7250000000000000102";
+const REORDER_SECOND = "7250000000000000101";
+
+describe("reorderMemos (feature 016, step 002)", () => {
+  it("PUTs /api/memos/order with exactly { scope, scope_id, memo_ids } for a character level — DoD-2", async () => {
+    const rows = [
+      memo(REORDER_FIRST, "character", CHARACTER_ID, { sort_key: 0 }),
+      memo(REORDER_SECOND, "character", CHARACTER_ID, { sort_key: 1 }),
+    ];
+    const mock = serve({ memos: rows });
+    await reorderMemos("character", CHARACTER_ID, [REORDER_FIRST, REORDER_SECOND]);
+    expect(seen(mock)).toEqual([{ method: "PUT", path: ORDER_PATH, search: "" }]);
+    expect(sentBody(mock)).toStrictEqual({
+      scope: "character",
+      scope_id: "7250000000000000001",
+      memo_ids: ["7250000000000000102", "7250000000000000101"],
+    });
+    expect(bodyKeys(mock).sort()).toEqual(["memo_ids", "scope", "scope_id"]);
+  });
+
+  it("sends scope_id null for the user level — DoD-2", async () => {
+    const rows = [memo(REORDER_FIRST, "user", null, { sort_key: 0 }), memo(REORDER_SECOND, "user", null, { sort_key: 1 })];
+    const mock = serve({ memos: rows });
+    await reorderMemos("user", null, [REORDER_FIRST, REORDER_SECOND]);
+    expect(seen(mock)).toEqual([{ method: "PUT", path: ORDER_PATH, search: "" }]);
+    expect(sentBody(mock)).toStrictEqual({
+      scope: "user",
+      scope_id: null,
+      memo_ids: [REORDER_FIRST, REORDER_SECOND],
+    });
+    expect(bodyKeys(mock).sort()).toEqual(["memo_ids", "scope", "scope_id"]);
+  });
+
+  it("resolves to the response's memos array in its order, every id the identical string — DoD-2", async () => {
+    const rows = [
+      memo(REORDER_FIRST, "character", CHARACTER_ID, { sort_key: 0 }),
+      memo(REORDER_SECOND, "character", CHARACTER_ID, { sort_key: 1, is_forced: true }),
+    ];
+    serve({ memos: rows });
+    const got = await reorderMemos("character", CHARACTER_ID, [REORDER_FIRST, REORDER_SECOND]);
+    expect(got).toEqual(rows);
+    expect(got.map((row) => row.id)).toEqual(["7250000000000000102", "7250000000000000101"]);
+    expect(typeof got[0].id).toBe("string");
+  });
+
+  it("the user level resolves to the response's memos array in its order — DoD-2", async () => {
+    const rows = [memo(REORDER_SECOND, "user", null, { sort_key: 0 }), memo(REORDER_FIRST, "user", null, { sort_key: 1 })];
+    serve({ memos: rows });
+    const got = await reorderMemos("user", null, [REORDER_SECOND, REORDER_FIRST]);
+    expect(got).toEqual(rows);
+    expect(got.map((row) => row.id)).toEqual([REORDER_SECOND, REORDER_FIRST]);
+  });
+
+  it("calls fetch with no abort signal — DoD-3", async () => {
+    const mock = serve({ memos: [memo(REORDER_FIRST, "character", CHARACTER_ID)] });
+    await reorderMemos("character", CHARACTER_ID, [REORDER_FIRST]);
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(sentSignal(mock) ?? undefined).toBeUndefined();
+  });
+
+  it("a 409 memo_order_mismatch envelope rejects with an ApiError of that code — DoD-3", async () => {
+    serve(envelope("memo_order_mismatch", "The notes changed."), 409);
+    const error = await rejection(() =>
+      reorderMemos("character", CHARACTER_ID, [REORDER_FIRST, REORDER_SECOND]),
+    );
+    expect(isApiError(error)).toBe(true);
+    expect(isApiError(error) ? error.code : null).toBe("memo_order_mismatch");
+    expect(isApiError(error) ? error.status : null).toBe(409);
   });
 });

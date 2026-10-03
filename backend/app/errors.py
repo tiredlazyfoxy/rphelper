@@ -447,6 +447,23 @@ class MemoNotFoundError(DomainError):
         super().__init__(message, detail)
 
 
+class MemoOrderMismatchError(DomainError):
+    """A level reorder names a set of ids other than exactly that level's notes.
+
+    Raised by `app.services.memos.reorder_memos` (feature `016`, `context.md` D6) when the
+    given ids omit a note, add one from elsewhere, or repeat one. `detail` carries nothing.
+    """
+
+    code = "memo_order_mismatch"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "The notes have changed since this order was read."
+        super().__init__(message, detail)
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later

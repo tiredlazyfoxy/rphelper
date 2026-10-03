@@ -19,12 +19,15 @@ import {
   flushMemoLevel,
   isBlank,
   isFlagWriteInFlight,
+  isReorderInFlight,
   loadMemoLevel,
   MemoLevelState,
   noteFailure,
   noteText,
   openNewNote,
   populateMemoLevel,
+  reorderFailure,
+  reorderMemoLevel,
   saveNewNote,
   saveNote,
   setNewNoteText,
@@ -569,7 +572,8 @@ describe("the new note — opening and dropping (D13, D2)", () => {
 
 // ---------------------------------------------------------------------------
 describe("saveNewNote — creating", () => {
-  it("POSTs exactly { scope: setup, scope_id: s1, body: Plan }; saving while pending; the row lands last — DoD-10", async () => {
+  // Amended by feature 016 step 002 DoD-11 (D5): the saved new note is prepended, not appended.
+  it("015 006 DoD-10: POSTs exactly { scope: setup, scope_id: s1, body: Plan }; saving while pending; the row lands first — DoD-11", async () => {
     const { calls, held } = stubHeld();
     const existing = memo(MEMO_A, { scope: "setup", scope_id: SETUP_ID });
     const state = new MemoLevelState("setup", "s1");
@@ -598,9 +602,10 @@ describe("saveNewNote — creating", () => {
     held[0].resolve(jsonResponse(created, 201));
     await pending;
     expect(state.memos).toHaveLength(2);
-    expect(state.memos[state.memos.length - 1]).toEqual(created);
-    expect(state.memos[state.memos.length - 1].is_enabled).toBe(true);
-    expect(state.memos[state.memos.length - 1].is_forced).toBe(false);
+    expect(state.memos[0]).toEqual(created);
+    expect(state.memos[0].is_enabled).toBe(true);
+    expect(state.memos[0].is_forced).toBe(false);
+    expect(state.memos[1]).toEqual(existing);
     expect(state.newNote).toBeNull();
     expect(noteText(state, NEW_MEMO)).toBe("Plan");
   });
@@ -1033,7 +1038,8 @@ describe("observability (writes are MobX actions on observable fields)", () => {
     }
   });
 
-  it("an autorun reading memos re-runs after a successful saveNewNote — DoD-18", async () => {
+  // The id-order clause is amended by feature 016 step 002 DoD-11 (D5: the new note is prepended).
+  it("015 006 DoD-18: an autorun reading memos re-runs after a successful saveNewNote, the new note first — DoD-11", async () => {
     serveEcho([]);
     const state = levelWith(memo(MEMO_A));
     let runs = 0;
@@ -1047,7 +1053,7 @@ describe("observability (writes are MobX actions on observable fields)", () => {
       const before = runs;
       await saveNewNote(state);
       expect(runs).toBeGreaterThan(before);
-      expect(state.memos.map((row) => row.id)).toEqual([MEMO_A, NEW_MEMO]);
+      expect(state.memos.map((row) => row.id)).toEqual([NEW_MEMO, MEMO_A]);
     } finally {
       dispose();
     }
@@ -1065,6 +1071,498 @@ describe("observability (writes are MobX actions on observable fields)", () => {
       setNoteText(state, MEMO_A, "Typed text");
       expect(texts[texts.length - 1]).toBe("Typed text");
       expect(texts.length).toBeGreaterThan(1);
+    } finally {
+      dispose();
+    }
+  });
+});
+
+// ===========================================================================
+// Feature 016, step 002 — the optimistic reorder (DoD-4..DoD-12).
+//
+// Expected behaviour from 016 002's Interface intent / DoD, 002.context.md ("The orders,
+// concretely", "What the effect must not do") and 016 context.md D5 (prepend) and D7
+// (optimistic, merge on success, revert on failure, "Could not reorder the notes.").
+// Stubs key on exact method + pathname + query: PUT /api/memos/order shares a prefix with
+// /api/memos and /api/memos/<id>.
+
+const ORDER_PATH = "/api/memos/order";
+const REORDER_FAILURE = "Could not reorder the notes.";
+
+function isOrderPut(request: Seen): boolean {
+  return request.method === "PUT" && request.path === ORDER_PATH && request.search === "";
+}
+
+/**
+ * PUT /api/memos/order is held open (one deferred per PUT, in order); POST /api/memos answers
+ * 201 with `created` (when given); DELETE /api/memos/<id> answers 204; anything else is a 404.
+ */
+function stubReorderBackend(created?: Memo) {
+  const puts: Deferred<Response>[] = [];
+  const backend = stubBackend((request) => {
+    if (isOrderPut(request)) {
+      const next = deferred<Response>();
+      puts.push(next);
+      return next.promise;
+    }
+    if (created !== undefined && request.method === "POST" && request.path === "/api/memos" && request.search === "") {
+      return jsonResponse(created, 201);
+    }
+    if (request.method === "DELETE" && request.path.startsWith("/api/memos/") && request.path !== ORDER_PATH) {
+      return noContent();
+    }
+    return notFoundResponse();
+  });
+  return { ...backend, puts };
+}
+
+function putCalls(calls: Seen[]): Seen[] {
+  return calls.filter(isOrderPut);
+}
+
+function ids(state: MemoLevelState): string[] {
+  return state.memos.map((row) => row.id);
+}
+
+/** A ready character level (c1) holding A, B, C with sort_key 0, 1, 2. */
+function abcLevel() {
+  const a = memo(MEMO_A, { body: "A body", sort_key: 0 });
+  const b = memo(MEMO_B, { body: "B body", sort_key: 1 });
+  const c = memo(MEMO_C, { body: "C body", sort_key: 2 });
+  return { state: levelWith(a, b, c), a, b, c };
+}
+
+/** The new note D the server creates during a pending reorder. */
+const CREATED_D = memo(MEMO_D, {
+  body: "D body",
+  is_enabled: true,
+  is_forced: false,
+  sort_key: -1,
+  created_at: LATER_STAMP,
+  updated_at: LATER_STAMP,
+});
+
+// ---------------------------------------------------------------------------
+describe("reorder fields (016 002)", () => {
+  it("a fresh MemoLevelState is not reordering and has no reorder failure — DoD-4", () => {
+    const state = new MemoLevelState("character", CHARACTER_ID);
+    expect(isReorderInFlight(state)).toBe(false);
+    expect(reorderFailure(state)).toBeNull();
+  });
+
+  it("a fresh user-level MemoLevelState is not reordering and has no reorder failure — DoD-4", () => {
+    const state = new MemoLevelState("user", null);
+    expect(isReorderInFlight(state)).toBe(false);
+    expect(reorderFailure(state)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("reorderMemoLevel — optimistic write (U1/D7)", () => {
+  it("before the response, memos are C, A, B, the reorder is in flight, and exactly one PUT carries C, A, B — DoD-5", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const { state } = abcLevel();
+
+    const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+
+    expect(ids(state)).toEqual([MEMO_C, MEMO_A, MEMO_B]);
+    expect(isReorderInFlight(state)).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("PUT");
+    expect(calls[0].path).toBe(ORDER_PATH);
+    expect(calls[0].search).toBe("");
+    expect(calls[0].body).toStrictEqual({
+      scope: "character",
+      scope_id: CHARACTER_ID,
+      memo_ids: [MEMO_C, MEMO_A, MEMO_B],
+    });
+
+    puts[0].resolve(
+      jsonResponse(
+        {
+          memos: [
+            memo(MEMO_C, { body: "C body", sort_key: 0 }),
+            memo(MEMO_A, { body: "A body", sort_key: 1 }),
+            memo(MEMO_B, { body: "B body", sort_key: 2 }),
+          ],
+        },
+        200,
+      ),
+    );
+    await pending;
+  });
+
+  it("the PUT for the user level carries scope user and scope_id null — DoD-5", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const a = memo(MEMO_A, { scope: "user", scope_id: null, sort_key: 0 });
+    const b = memo(MEMO_B, { scope: "user", scope_id: null, sort_key: 1 });
+    const state = new MemoLevelState("user", null);
+    populateMemoLevel(state, [a, b]);
+
+    const pending = reorderMemoLevel(state, [MEMO_B, MEMO_A]);
+    await untilRequests(calls, 1);
+    expect(ids(state)).toEqual([MEMO_B, MEMO_A]);
+    expect(calls[0].body).toStrictEqual({ scope: "user", scope_id: null, memo_ids: [MEMO_B, MEMO_A] });
+
+    puts[0].resolve(jsonResponse({ memos: [{ ...b, sort_key: 0 }, { ...a, sort_key: 1 }] }, 200));
+    await pending;
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("reorderMemoLevel — success (D7)", () => {
+  it("a 200 with C, A, B at sort_key 0, 1, 2 leaves those rows in that order, not in flight, no failure, no further request — DoD-6", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const { state } = abcLevel();
+
+    const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+
+    const returned = [
+      memo(MEMO_C, { body: "C body", sort_key: 0 }),
+      memo(MEMO_A, { body: "A body", sort_key: 1 }),
+      memo(MEMO_B, { body: "B body", sort_key: 2 }),
+    ];
+    puts[0].resolve(jsonResponse({ memos: returned }, 200));
+    await expect(pending).resolves.toBeUndefined();
+
+    expect(state.memos).toEqual(returned);
+    expect(state.memos.map((row) => row.sort_key)).toEqual([0, 1, 2]);
+    expect(isReorderInFlight(state)).toBe(false);
+    expect(reorderFailure(state)).toBeNull();
+
+    // No listing or chain refetch follows.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(calls).toHaveLength(1);
+    expect(calls.some((request) => request.method === "GET")).toBe(false);
+  });
+
+  it("a returned row with a later updated_at replaces the held row's body and flags — DoD-6", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const { state } = abcLevel();
+
+    const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+
+    const returned = [
+      memo(MEMO_C, { body: "C newer", sort_key: 0, updated_at: LATER_STAMP }),
+      memo(MEMO_A, { body: "A body", sort_key: 1, is_forced: true, updated_at: LATER_STAMP }),
+      memo(MEMO_B, { body: "B body", sort_key: 2 }),
+    ];
+    puts[0].resolve(jsonResponse({ memos: returned }, 200));
+    await pending;
+
+    expect(state.memos).toEqual(returned);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("reorderMemoLevel — failure reverts (U1/D7)", () => {
+  const failures: Array<[string, (held: Deferred<Response>) => void]> = [
+    ["a 500", (held) => held.resolve(serverError())],
+    ["a transport failure", (held) => held.reject(new TypeError("Failed to fetch"))],
+    ["a 409 memo_order_mismatch", (held) => held.resolve(envelope("memo_order_mismatch", 409))],
+  ];
+
+  it.each(failures)(
+    "on %s the level returns to A, B, C with the reorder failure, not in flight, resolving without throwing — DoD-7",
+    async (_label, fail) => {
+      const { calls, puts } = stubReorderBackend();
+      const { state, a, b, c } = abcLevel();
+
+      const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+      await untilRequests(calls, 1);
+      expect(ids(state)).toEqual([MEMO_C, MEMO_A, MEMO_B]);
+
+      fail(puts[0]);
+      await expect(pending).resolves.toBeUndefined();
+
+      expect(ids(state)).toEqual([MEMO_A, MEMO_B, MEMO_C]);
+      expect(state.memos).toEqual([a, b, c]);
+      expect(reorderFailure(state)).toBe(REORDER_FAILURE);
+      expect(isReorderInFlight(state)).toBe(false);
+
+      // The level is not refetched (D7's 409 case included).
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(calls).toHaveLength(1);
+    },
+  );
+
+  it("a later successful reorder clears the reorder failure — DoD-7", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const { state } = abcLevel();
+
+    const first = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+    puts[0].resolve(serverError());
+    await first;
+    expect(reorderFailure(state)).toBe(REORDER_FAILURE);
+
+    const second = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 2);
+    expect(putCalls(calls)).toHaveLength(2);
+    puts[1].resolve(
+      jsonResponse(
+        {
+          memos: [
+            memo(MEMO_C, { body: "C body", sort_key: 0 }),
+            memo(MEMO_A, { body: "A body", sort_key: 1 }),
+            memo(MEMO_B, { body: "B body", sort_key: 2 }),
+          ],
+        },
+        200,
+      ),
+    );
+    await expect(second).resolves.toBeUndefined();
+
+    expect(reorderFailure(state)).toBeNull();
+    expect(ids(state)).toEqual([MEMO_C, MEMO_A, MEMO_B]);
+    expect(isReorderInFlight(state)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("reorderMemoLevel — refusals (U1)", () => {
+  it("while a reorder is pending, a second call sends no request and leaves the optimistic order — DoD-8", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const { state } = abcLevel();
+
+    const first = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+
+    await expect(reorderMemoLevel(state, [MEMO_B, MEMO_C, MEMO_A])).resolves.toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(ids(state)).toEqual([MEMO_C, MEMO_A, MEMO_B]);
+    expect(isReorderInFlight(state)).toBe(true);
+
+    puts[0].resolve(
+      jsonResponse(
+        {
+          memos: [
+            memo(MEMO_C, { body: "C body", sort_key: 0 }),
+            memo(MEMO_A, { body: "A body", sort_key: 1 }),
+            memo(MEMO_B, { body: "B body", sort_key: 2 }),
+          ],
+        },
+        200,
+      ),
+    );
+    await first;
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a call whose order equals the current order sends no request and changes nothing — DoD-8", async () => {
+    const { mock } = stubReorderBackend();
+    const { state, a, b, c } = abcLevel();
+
+    await expect(reorderMemoLevel(state, [MEMO_A, MEMO_B, MEMO_C])).resolves.toBeUndefined();
+
+    expect(mock).not.toHaveBeenCalled();
+    expect(state.memos).toEqual([a, b, c]);
+    expect(isReorderInFlight(state)).toBe(false);
+    expect(reorderFailure(state)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("reorderMemoLevel — concurrency on revert (D7)", () => {
+  it("a note D saved while the reorder is pending stays first after the revert: D, A, B, C — DoD-9", async () => {
+    const { calls, puts } = stubReorderBackend(CREATED_D);
+    const { state } = abcLevel();
+
+    const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+
+    openNewNote(state);
+    setNewNoteText(state, "D body");
+    await saveNewNote(state);
+    expect(calls.filter((request) => request.method === "POST" && request.path === "/api/memos")).toHaveLength(1);
+    expect(state.memos.some((row) => row.id === MEMO_D)).toBe(true);
+    expect(state.newNote).toBeNull();
+
+    puts[0].resolve(serverError());
+    await expect(pending).resolves.toBeUndefined();
+
+    expect(ids(state)).toEqual([MEMO_D, MEMO_A, MEMO_B, MEMO_C]);
+    expect(heldMemo(state, MEMO_D)).toEqual(CREATED_D);
+    expect(reorderFailure(state)).toBe(REORDER_FAILURE);
+    expect(isReorderInFlight(state)).toBe(false);
+  });
+
+  it("a note B deleted while the reorder is pending stays absent after the revert — DoD-9", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const { state } = abcLevel();
+
+    const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+
+    setNoteText(state, MEMO_B, "");
+    await saveNote(state, MEMO_B);
+    expect(calls.filter((request) => request.method === "DELETE" && request.path === memoPath(MEMO_B))).toHaveLength(1);
+    expect(state.memos.some((row) => row.id === MEMO_B)).toBe(false);
+
+    puts[0].resolve(serverError());
+    await expect(pending).resolves.toBeUndefined();
+
+    expect(ids(state)).toEqual([MEMO_A, MEMO_C]);
+    expect(reorderFailure(state)).toBe(REORDER_FAILURE);
+    expect(isReorderInFlight(state)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("reorderMemoLevel — concurrency on success (D7, 015 D5 apply-a-row)", () => {
+  it("a returned row older than the held row keeps the held body and flags, at the returned position — DoD-10", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const a = memo(MEMO_A, { body: "A current", is_forced: true, sort_key: 0, updated_at: LATER_STAMP });
+    const b = memo(MEMO_B, { body: "B body", sort_key: 1 });
+    const c = memo(MEMO_C, { body: "C body", sort_key: 2 });
+    const state = levelWith(a, b, c);
+
+    const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+
+    const staleA = memo(MEMO_A, { body: "A stale", is_forced: false, is_enabled: false, sort_key: 1, updated_at: STAMP });
+    const newC = memo(MEMO_C, { body: "C body", sort_key: 0 });
+    const newB = memo(MEMO_B, { body: "B body", sort_key: 2 });
+    puts[0].resolve(jsonResponse({ memos: [newC, staleA, newB] }, 200));
+    await expect(pending).resolves.toBeUndefined();
+
+    expect(ids(state)).toEqual([MEMO_C, MEMO_A, MEMO_B]);
+    const heldA = heldMemo(state, MEMO_A);
+    expect(heldA?.body).toBe("A current");
+    expect(heldA?.is_forced).toBe(true);
+    expect(heldA?.is_enabled).toBe(true);
+    expect(heldA?.updated_at).toBe(LATER_STAMP);
+    expect(state.memos[0]).toEqual(newC);
+    expect(state.memos[2]).toEqual(newB);
+    expect(isReorderInFlight(state)).toBe(false);
+    expect(reorderFailure(state)).toBeNull();
+  });
+
+  it("a note created while pending and absent from the response stays first — DoD-10", async () => {
+    const { calls, puts } = stubReorderBackend(CREATED_D);
+    const { state } = abcLevel();
+
+    const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+
+    openNewNote(state);
+    setNewNoteText(state, "D body");
+    await saveNewNote(state);
+
+    const returned = [
+      memo(MEMO_C, { body: "C body", sort_key: 0 }),
+      memo(MEMO_A, { body: "A body", sort_key: 1 }),
+      memo(MEMO_B, { body: "B body", sort_key: 2 }),
+    ];
+    puts[0].resolve(jsonResponse({ memos: returned }, 200));
+    await expect(pending).resolves.toBeUndefined();
+
+    expect(ids(state)).toEqual([MEMO_D, MEMO_C, MEMO_A, MEMO_B]);
+    expect(heldMemo(state, MEMO_D)).toEqual(CREATED_D);
+    expect(state.memos.slice(1)).toEqual(returned);
+  });
+
+  it("a returned id no longer held (deleted while pending) is not inserted — DoD-10", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const { state } = abcLevel();
+
+    const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+    await untilRequests(calls, 1);
+
+    setNoteText(state, MEMO_B, "");
+    await saveNote(state, MEMO_B);
+    expect(state.memos.some((row) => row.id === MEMO_B)).toBe(false);
+
+    const returnedC = memo(MEMO_C, { body: "C body", sort_key: 0 });
+    const returnedA = memo(MEMO_A, { body: "A body", sort_key: 1 });
+    puts[0].resolve(
+      jsonResponse({ memos: [returnedC, returnedA, memo(MEMO_B, { body: "B body", sort_key: 2 })] }, 200),
+    );
+    await expect(pending).resolves.toBeUndefined();
+
+    expect(ids(state)).toEqual([MEMO_C, MEMO_A]);
+    expect(state.memos).toEqual([returnedC, returnedA]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("saveNewNote prepends (D5)", () => {
+  it("on a level holding A and B, the saved new note is the first entry, enabled and not forced, newNote null — DoD-11", async () => {
+    const created = memo(NEW_MEMO, {
+      body: "Plan",
+      is_enabled: true,
+      is_forced: false,
+      sort_key: -1,
+      created_at: LATER_STAMP,
+      updated_at: LATER_STAMP,
+    });
+    stubBackend((request) =>
+      request.method === "POST" && request.path === "/api/memos" && request.search === ""
+        ? jsonResponse(created, 201)
+        : notFoundResponse(),
+    );
+    const a = memo(MEMO_A, { sort_key: 0 });
+    const b = memo(MEMO_B, { sort_key: 1 });
+    const state = levelWith(a, b);
+    openNewNote(state);
+    setNewNoteText(state, "Plan");
+
+    await saveNewNote(state);
+
+    expect(state.memos).toEqual([created, a, b]);
+    expect(state.memos[0].is_enabled).toBe(true);
+    expect(state.memos[0].is_forced).toBe(false);
+    expect(state.newNote).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("reorder observability (writes are MobX actions)", () => {
+  it("an autorun reading memos re-runs after the optimistic write and after the revert — DoD-12", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const { state } = abcLevel();
+    const orders: string[][] = [];
+    const dispose = autorun(() => {
+      orders.push(state.memos.map((row) => row.id));
+    });
+    try {
+      expect(orders).toEqual([[MEMO_A, MEMO_B, MEMO_C]]);
+
+      const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+      await untilRequests(calls, 1);
+      expect(orders.length).toBeGreaterThan(1);
+      expect(orders[orders.length - 1]).toEqual([MEMO_C, MEMO_A, MEMO_B]);
+      const afterOptimistic = orders.length;
+
+      puts[0].resolve(serverError());
+      await pending;
+      expect(orders.length).toBeGreaterThan(afterOptimistic);
+      expect(orders[orders.length - 1]).toEqual([MEMO_A, MEMO_B, MEMO_C]);
+    } finally {
+      dispose();
+    }
+  });
+
+  it("an autorun reading reorderFailure re-runs when it is set — DoD-12", async () => {
+    const { calls, puts } = stubReorderBackend();
+    const { state } = abcLevel();
+    const seenFailures: Array<string | null> = [];
+    const dispose = autorun(() => {
+      seenFailures.push(reorderFailure(state));
+    });
+    try {
+      expect(seenFailures).toEqual([null]);
+
+      const pending = reorderMemoLevel(state, [MEMO_C, MEMO_A, MEMO_B]);
+      await untilRequests(calls, 1);
+      puts[0].resolve(serverError());
+      await pending;
+
+      expect(seenFailures.length).toBeGreaterThan(1);
+      expect(seenFailures[seenFailures.length - 1]).toBe(REORDER_FAILURE);
     } finally {
       dispose();
     }

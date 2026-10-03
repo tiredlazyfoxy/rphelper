@@ -19,7 +19,12 @@ from pydantic import ValidationError
 from sqlalchemy import Enum as SqlEnum
 
 from app.db import schema
-from app.errors import DomainError, MemoNotFoundError, register_exception_handlers
+from app.errors import (
+    DomainError,
+    MemoNotFoundError,
+    MemoOrderMismatchError,
+    register_exception_handlers,
+)
 from app.models.memos import (
     CreateMemoRequest,
     MemoChainLevelResponse,
@@ -27,6 +32,7 @@ from app.models.memos import (
     MemoListResponse,
     MemoResponse,
     MemoScope,
+    ReorderMemosRequest,
     UpdateMemoRequest,
 )
 
@@ -407,3 +413,124 @@ def test_update_request_ignores_unknown_keys__S015_001_DoD10() -> None:
         assert key not in dumped
         assert not hasattr(request, key)
     assert request.is_enabled is True
+
+
+# ==========================================================================================
+# Feature 016, step 001 (`docs/plans/016.note-wall/001.reorder-backend.md`) — the
+# `memo_order_mismatch` error (D6) and the reorder request model. Suffix `__S016_001_DoD<n>`.
+# ==========================================================================================
+
+
+# --- 016 DoD-8: MemoOrderMismatchError -----------------------------------------------------
+
+
+def test_memo_order_mismatch_error_is_a_domain_error_with_its_code_and_status__S016_001_DoD8() -> None:
+    """016/001 DoD-8 — a `DomainError`, code `memo_order_mismatch`, HTTP status 409."""
+    assert issubclass(MemoOrderMismatchError, DomainError)
+    assert MemoOrderMismatchError.code == "memo_order_mismatch"
+    assert MemoOrderMismatchError.http_status == 409
+
+
+def test_memo_order_mismatch_error_raised_bare_has_a_message_and_empty_detail__S016_001_DoD8() -> None:
+    """016/001 DoD-8 — D6: a fixed non-empty default message and an empty `detail`."""
+    error = MemoOrderMismatchError()
+    assert isinstance(error, DomainError)
+    assert isinstance(error.message, str)
+    assert error.message.strip()
+    assert error.detail == {}
+
+
+def test_memo_order_mismatch_error_from_a_route_answers_the_409_envelope__S016_001_DoD8() -> None:
+    """016/001 DoD-8 — raised from a route, it answers 409 with
+    `{"error": {"code": "memo_order_mismatch", "message": <non-empty>, "detail": {}}}`."""
+    response = TestClient(_app_raising(MemoOrderMismatchError())).get("/boom")
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert set(payload) == {"error"}
+    error = payload["error"]
+    assert set(error) == {"code", "message", "detail"}
+    assert error["code"] == "memo_order_mismatch"
+    assert isinstance(error["message"], str)
+    assert error["message"].strip()
+    assert error["detail"] == {}
+
+
+# --- 016 DoD-9: ReorderMemosRequest --------------------------------------------------------
+
+
+def test_reorder_request_parses_decimal_string_ids_as_ints_in_order__S016_001_DoD9() -> None:
+    """016/001 DoD-9 — `scope_id` the int; `memo_ids` the two ints in the order sent."""
+    request = ReorderMemosRequest.model_validate(
+        {
+            "scope": "character",
+            "scope_id": "7250000000000000001",
+            "memo_ids": ["7250000000000000101", "7250000000000000102"],
+        }
+    )
+    assert request.scope == "character"
+    assert request.scope_id == 7_250_000_000_000_000_001
+    assert isinstance(request.scope_id, int)
+    assert request.memo_ids == [7_250_000_000_000_000_101, 7_250_000_000_000_000_102]
+    assert all(isinstance(value, int) and not isinstance(value, bool) for value in request.memo_ids)
+
+
+def test_reorder_request_keeps_the_given_order__S016_001_DoD9() -> None:
+    """016/001 DoD-9 — the order is the request's, not sorted."""
+    request = ReorderMemosRequest.model_validate(
+        {"scope": "session", "scope_id": "30", "memo_ids": ["9", "3", "7"]}
+    )
+    assert request.memo_ids == [9, 3, 7]
+
+
+def test_reorder_request_parses_a_user_level_with_an_empty_list__S016_001_DoD9() -> None:
+    """016/001 DoD-9 — `{"scope": "user", "memo_ids": []}` parses."""
+    request = ReorderMemosRequest.model_validate({"scope": "user", "memo_ids": []})
+    assert request.scope == "user"
+    assert request.scope_id is None
+    assert request.memo_ids == []
+
+
+@pytest.mark.parametrize("scope", ["character", "setup", "session"])
+def test_reorder_request_refuses_a_non_user_scope_without_scope_id__S016_001_DoD9(scope: str) -> None:
+    """016/001 DoD-9 — `{"scope": "character", "memo_ids": []}` fails (as on create)."""
+    with pytest.raises(ValidationError):
+        ReorderMemosRequest.model_validate({"scope": scope, "memo_ids": []})
+
+
+def test_reorder_request_refuses_an_unknown_scope__S016_001_DoD9() -> None:
+    """016/001 DoD-9 — `{"scope": "world", "scope_id": "1", "memo_ids": []}` fails."""
+    with pytest.raises(ValidationError):
+        ReorderMemosRequest.model_validate({"scope": "world", "scope_id": "1", "memo_ids": []})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"scope": "user"},
+        {"scope": "user", "memo_ids": "7"},
+        {"scope": "user", "memo_ids": ["abc"]},
+    ],
+    ids=["missing-memo-ids", "memo-ids-a-string", "non-numeric-id"],
+)
+def test_reorder_request_refuses_a_bad_memo_ids__S016_001_DoD9(payload: dict[str, Any]) -> None:
+    """016/001 DoD-9 — a missing `memo_ids`, `"memo_ids": "7"` and `["abc"]` each fail."""
+    with pytest.raises(ValidationError):
+        ReorderMemosRequest.model_validate(payload)
+
+
+def test_reorder_request_ignores_unknown_keys__S016_001_DoD9() -> None:
+    """016/001 DoD-9 — `user_id` and `sort_key` are ignored."""
+    unknown = {"user_id": "99", "sort_key": 4}
+    request = ReorderMemosRequest.model_validate(
+        {"scope": "setup", "scope_id": "12", "memo_ids": ["5"], **unknown}
+    )
+
+    dumped = request.model_dump()
+    for key in unknown:
+        assert key not in dumped
+        assert key not in request.model_fields_set
+        assert not hasattr(request, key)
+    assert request.scope == "setup"
+    assert request.scope_id == 12
+    assert request.memo_ids == [5]

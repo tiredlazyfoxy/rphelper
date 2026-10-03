@@ -22,6 +22,8 @@ export type MarkdownEditorProps = {
   onChange: (markdown: string) => void;
   /** When true: no toolbar and the surface is not editable. Defaults to false. */
   readOnly?: boolean;
+  /** When true: focus moves into the editable body once the editor is ready after mounting. Defaults to false. */
+  autoFocus?: boolean;
 };
 
 /** The editor's current content, serialised back to markdown. */
@@ -30,7 +32,7 @@ function toMarkdown(editor: Editor): string {
 }
 
 export function MarkdownEditor(props: MarkdownEditorProps): React.JSX.Element {
-  const { label, value, onChange, readOnly = false } = props;
+  const { label, value, onChange, readOnly = false, autoFocus = false } = props;
 
   // The editor is created once; `onChange` is reached through a ref so a new callback
   // identity neither recreates it nor leaves `onUpdate` calling a stale function.
@@ -44,6 +46,8 @@ export function MarkdownEditor(props: MarkdownEditorProps): React.JSX.Element {
     // The Markdown extension parses a markdown string given as content.
     content: value,
     editable: !readOnly,
+    // Focus moves into the body once the editor is created; false leaves focus alone.
+    autofocus: autoFocus ? "end" : false,
     // Role, accessible name and multi-line semantics land on the ProseMirror
     // contenteditable element itself.
     editorProps: {

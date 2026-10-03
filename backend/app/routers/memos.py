@@ -36,11 +36,12 @@ from app.models.memos import (
     MemoListResponse,
     MemoResponse,
     MemoScope,
+    ReorderMemosRequest,
     UpdateMemoRequest,
 )
 from app.routers.bootstrap import get_id_generator
 from app.services.memo_chain import MemoChainLevel, resolve_chain
-from app.services.memos import Memo, create_memo, delete_memo, list_memos, update_memo
+from app.services.memos import Memo, create_memo, delete_memo, list_memos, reorder_memos, update_memo
 
 router = APIRouter(
     tags=["memos"],
@@ -104,6 +105,21 @@ def create_own_memo(
     scope_id = None if body.scope == "user" else body.scope_id
     memo = create_memo(connection, generator, current_user.id, body.scope, scope_id, body.body)
     return _to_response(memo)
+
+
+@router.put("/api/memos/order", status_code=200)
+def reorder_own_memos(
+    body: ReorderMemosRequest,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+) -> MemoListResponse:
+    """Rewrite one level's order via `reorder_memos(...)` (`scope_id` `None` for `"user"`); 200.
+
+    Declared before the `/api/memos/{memo_id}` handlers (016 D6).
+    """
+    scope_id = None if body.scope == "user" else body.scope_id
+    memos = reorder_memos(connection, current_user.id, body.scope, scope_id, body.memo_ids)
+    return MemoListResponse(memos=[_to_response(memo) for memo in memos])
 
 
 @router.patch("/api/memos/{memo_id}", status_code=200)

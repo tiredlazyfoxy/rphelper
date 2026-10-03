@@ -578,7 +578,9 @@ describe("the overlay is not persisted", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("the grid is two columns and nothing else (no wall in 008)", () => {
+// Re-titled by feature 016, step 006 (DoD-13; D1): the wall lives inside the session screen, so
+// the shell grid never holds it. Every assertion below is unchanged.
+describe("the shell grid is two columns and never holds the wall — the wall lives inside the session screen (016 006 DoD-13)", () => {
   it("the expanded shell's grid element has exactly two child elements — DoD-9", () => {
     renderShell(fakeStorage());
 

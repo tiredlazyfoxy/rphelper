@@ -10,6 +10,11 @@ interface recorded under `## Skeleton` in `docs/plans/015.memos/status.md`:
 - `update_memo(connection, user_id, memo_id, body=None, is_enabled=None, is_forced=None)`
 - `delete_memo(connection, user_id, memo_id) -> None`
 
+Feature 016 step 001 (`docs/plans/016.note-wall/001.reorder-backend.md`) amends the
+allocation (D5: `MIN(sort_key) - 1`, newest first) and adds `reorder_memos(connection,
+user_id, scope, scope_id, memo_ids) -> list[Memo]` (D6); its tests are suffixed
+`__S016_001_DoD<n>`, and amended 015 tests carry that suffix appended to their 015 name.
+
 Targets (users, characters, setups, sessions) are raw-inserted with their committed
 columns; memos are created through the service except where a DoD needs a precise state
 (another user's row, chosen `sort_key` values, a disabled or forced row).
@@ -29,13 +34,21 @@ from app.db import schema
 from app.errors import (
     CharacterNotFoundError,
     MemoNotFoundError,
+    MemoOrderMismatchError,
     SessionNotFoundError,
     SetupNotFoundError,
 )
 from app.ids import SnowflakeGenerator
 from app.roles import Role
 from app.services import memos as memos_module
-from app.services.memos import Memo, create_memo, delete_memo, list_memos, update_memo
+from app.services.memos import (
+    Memo,
+    create_memo,
+    delete_memo,
+    list_memos,
+    reorder_memos,
+    update_memo,
+)
 
 TIMESTAMP = "2026-01-01T00:00:00.000000+00:00"
 
@@ -356,15 +369,19 @@ def test_body_is_returned_stored_and_listed_verbatim__S015_002_DoD3(
 # --- DoD-4: sort_key allocation ----------------------------------------------------------
 
 
-def test_three_creates_at_one_level_get_0_1_2__S015_002_DoD4(
+# Amended by feature 016 step 001 DoD-1 (D5): allocation is one less than the level's
+# smallest `sort_key` among the caller's notes, or 0 at an empty level.
+
+
+def test_three_creates_at_one_level_get_0_1_2__S015_002_DoD4__S016_001_DoD1(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
     keys = [_create(engine, generator, USER_A, "setup", SETUP_A1).sort_key for _ in range(3)]
 
-    assert keys == [0, 1, 2]
+    assert keys == [0, -1, -2]
 
 
-def test_a_create_at_a_different_level_starts_at_0__S015_002_DoD4(
+def test_a_create_at_a_different_level_starts_at_0__S015_002_DoD4__S016_001_DoD1(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
     for _ in range(3):
@@ -375,20 +392,21 @@ def test_a_create_at_a_different_level_starts_at_0__S015_002_DoD4(
     assert _create(engine, generator, USER_A, "session", SESSION_A1).sort_key == 0
 
 
-def test_allocation_is_one_more_than_the_largest_existing_key__S015_002_DoD4(
+def test_allocation_is_one_more_than_the_largest_existing_key__S015_002_DoD4__S016_001_DoD1(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
+    # 016 D5: one less than the smallest existing key — {2, 5} gives 1.
     _insert_memo(engine, memo_id=90_001, user_id=USER_A, scope="character", scope_id=CHAR_A1, sort_key=2)
     _insert_memo(engine, memo_id=90_002, user_id=USER_A, scope="character", scope_id=CHAR_A1, sort_key=5)
 
-    assert _create(engine, generator, USER_A, "character", CHAR_A1).sort_key == 6
+    assert _create(engine, generator, USER_A, "character", CHAR_A1).sort_key == 1
 
 
 @pytest.mark.parametrize(
     ("scope", "scope_id", "stored_scope_id"),
     [("character", CHAR_A1, CHAR_A1), ("user", None, USER_A)],
 )
-def test_another_users_row_at_the_same_level_does_not_affect_allocation__S015_002_DoD4(
+def test_another_users_row_at_the_same_level_does_not_affect_allocation__S015_002_DoD4__S016_001_DoD1(
     engine: Engine,
     generator: SnowflakeGenerator,
     scope: str,
@@ -396,39 +414,45 @@ def test_another_users_row_at_the_same_level_does_not_affect_allocation__S015_00
     stored_scope_id: int,
 ) -> None:
     _insert_memo(
-        engine, memo_id=90_010, user_id=USER_B, scope=scope, scope_id=stored_scope_id, sort_key=40
+        engine, memo_id=90_010, user_id=USER_B, scope=scope, scope_id=stored_scope_id, sort_key=-40
     )
 
     assert _create(engine, generator, USER_A, scope, scope_id).sort_key == 0
-    assert _create(engine, generator, USER_A, scope, scope_id).sort_key == 1
+    assert _create(engine, generator, USER_A, scope, scope_id).sort_key == -1
+
+    stored_foreign = _stored(engine, 90_010)
+    assert stored_foreign is not None
+    assert stored_foreign["sort_key"] == -40
 
 
-def test_after_deleting_the_highest_the_next_is_one_more_than_the_remaining_max__S015_002_DoD4(
+def test_after_deleting_the_highest_the_next_is_one_more_than_the_remaining_max__S015_002_DoD4__S016_001_DoD1(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
+    # 016 D5: after deleting the caller's lowest note, the next is the remaining min - 1.
     first = _create(engine, generator, USER_A, "session", SESSION_A1)
     middle = _create(engine, generator, USER_A, "session", SESSION_A1)
     last = _create(engine, generator, USER_A, "session", SESSION_A1)
-    assert [first.sort_key, middle.sort_key, last.sort_key] == [0, 1, 2]
+    assert [first.sort_key, middle.sort_key, last.sort_key] == [0, -1, -2]
 
     _delete(engine, USER_A, last.id)
-    assert _create(engine, generator, USER_A, "session", SESSION_A1).sort_key == 2
+    assert _create(engine, generator, USER_A, "session", SESSION_A1).sort_key == -2
 
 
-def test_gaps_are_left_as_they_are__S015_002_DoD4(
+def test_gaps_are_left_as_they_are__S015_002_DoD4__S016_001_DoD1(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
     first = _create(engine, generator, USER_A, "session", SESSION_A1)
     middle = _create(engine, generator, USER_A, "session", SESSION_A1)
     last = _create(engine, generator, USER_A, "session", SESSION_A1)
+    assert [first.sort_key, middle.sort_key, last.sort_key] == [0, -1, -2]
 
     _delete(engine, USER_A, middle.id)
     after_gap = _create(engine, generator, USER_A, "session", SESSION_A1)
-    assert after_gap.sort_key == 3
+    assert after_gap.sort_key == -3
 
     _delete(engine, USER_A, after_gap.id)
     _delete(engine, USER_A, last.id)
-    assert _create(engine, generator, USER_A, "session", SESSION_A1).sort_key == 1
+    assert _create(engine, generator, USER_A, "session", SESSION_A1).sort_key == -1
 
     stored_first = _stored(engine, first.id)
     assert stored_first is not None
@@ -754,9 +778,10 @@ def test_delete_of_a_foreign_or_unknown_memo_is_refused__S015_002_DoD12(
 # --- DoD-13: delete removes the row ------------------------------------------------------
 
 
-def test_delete_removes_the_row_and_only_that_row__S015_002_DoD13(
+def test_delete_removes_the_row_and_only_that_row__S015_002_DoD13__S016_001_DoD2(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
+    # 016 D5: the level lists newest first, so the later-created note comes first.
     keep_first = _create(engine, generator, USER_A, "character", CHAR_A1, "keep one")
     doomed = _create(engine, generator, USER_A, "character", CHAR_A1, "doomed")
     keep_last = _create(engine, generator, USER_A, "character", CHAR_A1, "keep two")
@@ -765,14 +790,14 @@ def test_delete_removes_the_row_and_only_that_row__S015_002_DoD13(
 
     assert result is None
     assert _stored(engine, doomed.id) is None
-    assert _list(engine, USER_A, "character", CHAR_A1) == [keep_first, keep_last]
+    assert _list(engine, USER_A, "character", CHAR_A1) == [keep_last, keep_first]
 
     with pytest.raises(MemoNotFoundError):
         _update(engine, USER_A, doomed.id, body="revived")
     with pytest.raises(MemoNotFoundError):
         _delete(engine, USER_A, doomed.id)
 
-    assert _list(engine, USER_A, "character", CHAR_A1) == [keep_first, keep_last]
+    assert _list(engine, USER_A, "character", CHAR_A1) == [keep_last, keep_first]
 
 
 # --- DoD-14: list leaves no transaction open ---------------------------------------------
@@ -846,3 +871,360 @@ def test_the_service_module_never_mentions_archived_at_or_title__S015_002_DoD15(
 
     assert "archived_at" not in source
     assert "title" not in source
+
+
+# ==========================================================================================
+# Feature 016, step 001 — new-note-first listing and `reorder_memos`
+# ==========================================================================================
+
+
+def _reorder(
+    engine: Engine, user_id: int, scope: str, scope_id: int | None, memo_ids: list[int]
+) -> list[Memo]:
+    with engine.connect() as connection:
+        return reorder_memos(connection, user_id, scope, scope_id, memo_ids)  # type: ignore[arg-type]
+
+
+def _all_sort_keys(engine: Engine) -> dict[int, int]:
+    """Every stored row's `sort_key`, by id — the whole table, every owner."""
+    with engine.connect() as connection:
+        rows = connection.execute(select(schema.memos.c.id, schema.memos.c.sort_key)).all()
+    return {int(row[0]): int(row[1]) for row in rows}
+
+
+def _sort_keys(values: list[Memo]) -> list[int]:
+    return [value.sort_key for value in values]
+
+
+# --- DoD-2: listing after three creates is newest first ----------------------------------
+
+
+@pytest.mark.parametrize(("scope", "scope_id"), OWN_TARGETS)
+def test_list_after_three_creates_is_newest_first__S016_001_DoD2(
+    engine: Engine, generator: SnowflakeGenerator, scope: str, scope_id: int | None
+) -> None:
+    first = _create(engine, generator, USER_A, scope, scope_id, "first")
+    second = _create(engine, generator, USER_A, scope, scope_id, "second")
+    third = _create(engine, generator, USER_A, scope, scope_id, "third")
+
+    listed = _list(engine, USER_A, scope, scope_id)
+
+    assert _ids(listed) == [third.id, second.id, first.id]
+    assert _sort_keys(listed) == [-2, -1, 0]
+
+
+# --- DoD-3: a reorder rewrites sort_key only ---------------------------------------------
+
+
+_UNCHANGED_COLUMNS = ("body", "is_enabled", "is_forced", "scope", "scope_id", "created_at", "updated_at")
+
+
+def test_reorder_returns_the_new_order_with_keys_0_to_n_minus_1__S016_001_DoD3(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    one = _create(engine, generator, USER_A, "setup", SETUP_A1, "one")
+    two = _create(engine, generator, USER_A, "setup", SETUP_A1, "two")
+    three = _create(engine, generator, USER_A, "setup", SETUP_A1, "three")
+    # Give the level varied flags so "unchanged" is meaningful for both.
+    _update(engine, USER_A, one.id, is_forced=True)
+    _update(engine, USER_A, two.id, is_enabled=False)
+    assert _ids(_list(engine, USER_A, "setup", SETUP_A1)) == [three.id, two.id, one.id]
+
+    new_order = [two.id, one.id, three.id]
+    result = _reorder(engine, USER_A, "setup", SETUP_A1, new_order)
+
+    assert all(isinstance(value, Memo) for value in result)
+    assert _ids(result) == new_order
+    assert _sort_keys(result) == [0, 1, 2]
+
+    listed = _list(engine, USER_A, "setup", SETUP_A1)
+    assert _ids(listed) == new_order
+    assert _sort_keys(listed) == [0, 1, 2]
+
+
+def test_reorder_changes_no_column_but_sort_key__S016_001_DoD3(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    one = _create(engine, generator, USER_A, "session", SESSION_A1, "  # one\n")
+    two = _create(engine, generator, USER_A, "session", SESSION_A1, "two")
+    three = _create(engine, generator, USER_A, "session", SESSION_A1, "three")
+    _update(engine, USER_A, one.id, is_forced=True)
+    _update(engine, USER_A, three.id, is_enabled=False)
+    ids = [one.id, two.id, three.id]
+    stored_before = {memo_id: _stored(engine, memo_id) for memo_id in ids}
+    listed_before = {value.id: value for value in _list(engine, USER_A, "session", SESSION_A1)}
+
+    result = _reorder(engine, USER_A, "session", SESSION_A1, [three.id, one.id, two.id])
+
+    for memo_id in ids:
+        before = stored_before[memo_id]
+        after = _stored(engine, memo_id)
+        assert before is not None and after is not None
+        for column in _UNCHANGED_COLUMNS:
+            assert after[column] == before[column], column
+        assert after["user_id"] == before["user_id"]
+    for value in result:
+        held = listed_before[value.id]
+        assert value.body == held.body
+        assert value.is_enabled == held.is_enabled
+        assert value.is_forced == held.is_forced
+        assert value.scope == held.scope
+        assert value.scope_id == held.scope_id
+        assert value.created_at == held.created_at
+        assert value.updated_at == held.updated_at
+
+
+def test_reorder_leaves_the_callers_other_levels_alone__S016_001_DoD3(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    level = [_create(engine, generator, USER_A, "character", CHAR_A1).id for _ in range(3)]
+    _create(engine, generator, USER_A, "character", CHAR_A2)
+    _create(engine, generator, USER_A, "character", CHAR_A2)
+    _create(engine, generator, USER_A, "user", None)
+    _insert_memo(engine, memo_id=90_801, user_id=USER_A, scope="setup", scope_id=SETUP_A1, sort_key=17)
+    _insert_memo(engine, memo_id=90_802, user_id=USER_A, scope="session", scope_id=SESSION_A1, sort_key=-9)
+    before = _all_sort_keys(engine)
+
+    _reorder(engine, USER_A, "character", CHAR_A1, list(reversed(level)))
+
+    after = _all_sort_keys(engine)
+    for memo_id, key in before.items():
+        if memo_id not in level:
+            assert after[memo_id] == key, memo_id
+    assert set(after) == set(before)
+
+
+# --- DoD-4: every level, the user level's scope_id ignored, the empty level ---------------
+
+
+@pytest.mark.parametrize(("scope", "scope_id"), OWN_TARGETS)
+def test_reorder_succeeds_at_each_of_the_four_levels__S016_001_DoD4(
+    engine: Engine, generator: SnowflakeGenerator, scope: str, scope_id: int | None
+) -> None:
+    older = _create(engine, generator, USER_A, scope, scope_id, "older")
+    newer = _create(engine, generator, USER_A, scope, scope_id, "newer")
+    assert _ids(_list(engine, USER_A, scope, scope_id)) == [newer.id, older.id]
+
+    result = _reorder(engine, USER_A, scope, scope_id, [older.id, newer.id])
+
+    assert _ids(result) == [older.id, newer.id]
+    assert _sort_keys(result) == [0, 1]
+    assert [value.scope for value in result] == [scope, scope]
+    assert [value.scope_id for value in result] == [scope_id, scope_id]
+    assert _ids(_list(engine, USER_A, scope, scope_id)) == [older.id, newer.id]
+
+
+@pytest.mark.parametrize("other_number", [USER_B, CHAR_A1, 424_242])
+def test_user_level_reorder_ignores_the_supplied_scope_id__S016_001_DoD4(
+    engine: Engine, generator: SnowflakeGenerator, other_number: int
+) -> None:
+    older = _create(engine, generator, USER_A, "user", None, "mine, older")
+    newer = _create(engine, generator, USER_A, "user", None, "mine, newer")
+    bobs = _create(engine, generator, USER_B, "user", None, "bob's")
+    bobs_key_before = _all_sort_keys(engine)[bobs.id]
+
+    result = _reorder(engine, USER_A, "user", other_number, [older.id, newer.id])
+
+    assert _ids(result) == [older.id, newer.id]
+    assert _sort_keys(result) == [0, 1]
+    assert [value.scope_id for value in result] == [None, None]
+    assert _ids(_list(engine, USER_A, "user", None)) == [older.id, newer.id]
+    assert _all_sort_keys(engine)[bobs.id] == bobs_key_before
+    assert _ids(_list(engine, USER_B, "user", None)) == [bobs.id]
+
+
+@pytest.mark.parametrize(("scope", "scope_id"), OWN_TARGETS)
+def test_an_empty_level_accepts_an_empty_list__S016_001_DoD4(
+    engine: Engine, generator: SnowflakeGenerator, scope: str, scope_id: int | None
+) -> None:
+    # Notes elsewhere, none at the addressed level.
+    _create(engine, generator, USER_A, "character", CHAR_A2)
+    _create(engine, generator, USER_B, "user", None)
+    before = _all_sort_keys(engine)
+
+    assert _reorder(engine, USER_A, scope, scope_id, []) == []
+    assert _all_sort_keys(engine) == before
+
+
+# --- DoD-5: a set that is not exactly the level's is refused -----------------------------
+
+FOREIGN_AT_OWN_LEVEL_ID = 90_901
+FOREIGN_AT_SAME_SCOPE_ID = 90_902
+
+
+def _seed_mismatch_world(engine: Engine, generator: SnowflakeGenerator) -> dict[str, Any]:
+    """A's session level of three notes, one A note elsewhere, and B's notes (raw)."""
+    level = [_create(engine, generator, USER_A, "session", SESSION_A1).id for _ in range(3)]
+    level.reverse()  # the listed (newest-first) order
+    other_level = _create(engine, generator, USER_A, "character", CHAR_A1).id
+    _insert_memo(
+        engine,
+        memo_id=FOREIGN_AT_OWN_LEVEL_ID,
+        user_id=USER_B,
+        scope="session",
+        scope_id=SESSION_B1,
+        sort_key=4,
+    )
+    _insert_memo(
+        engine,
+        memo_id=FOREIGN_AT_SAME_SCOPE_ID,
+        user_id=USER_B,
+        scope="session",
+        scope_id=SESSION_A1,
+        sort_key=-40,
+    )
+    return {"level": level, "other_level": other_level}
+
+
+def _mismatched_ids(case: str, world: dict[str, Any]) -> list[int]:
+    level: list[int] = world["level"]
+    full = list(reversed(level))  # a genuine new order of the complete set
+    if case == "omit-one":
+        return full[:-1]
+    if case == "another-level":
+        return [*full, world["other_level"]]
+    if case == "another-users-note":
+        return [*full, FOREIGN_AT_OWN_LEVEL_ID]
+    if case == "another-users-row-at-the-same-scope":
+        return [*full, FOREIGN_AT_SAME_SCOPE_ID]
+    if case == "nobodys-id":
+        return [*full, UNKNOWN_MEMO_ID]
+    if case == "repeated-id":
+        return [*full, full[0]]
+    raise AssertionError(case)
+
+
+MISMATCH_CASES = [
+    "omit-one",
+    "another-level",
+    "another-users-note",
+    "another-users-row-at-the-same-scope",
+    "nobodys-id",
+    "repeated-id",
+]
+
+
+@pytest.mark.parametrize("case", MISMATCH_CASES)
+def test_a_mismatched_set_is_refused_and_writes_nothing__S016_001_DoD5(
+    engine: Engine, generator: SnowflakeGenerator, case: str
+) -> None:
+    world = _seed_mismatch_world(engine, generator)
+    before = _all_sort_keys(engine)
+    listed_before = _list(engine, USER_A, "session", SESSION_A1)
+
+    with pytest.raises(MemoOrderMismatchError):
+        _reorder(engine, USER_A, "session", SESSION_A1, _mismatched_ids(case, world))
+
+    assert _all_sort_keys(engine) == before
+    assert _list(engine, USER_A, "session", SESSION_A1) == listed_before
+
+
+# --- DoD-6: refused targets; another user's row at the same scope -----------------------
+
+
+def _seed_foreign_notes_at_b_targets(engine: Engine) -> dict[int, int]:
+    """One raw B note at each of B's targets; returns target id -> memo id."""
+    placements = {CHAR_B1: ("character", 91_001), SETUP_B1: ("setup", 91_002), SESSION_B1: ("session", 91_003)}
+    for target_id, (scope, memo_id) in placements.items():
+        _insert_memo(engine, memo_id=memo_id, user_id=USER_B, scope=scope, scope_id=target_id, sort_key=3)
+    return {target_id: memo_id for target_id, (_scope, memo_id) in placements.items()}
+
+
+@pytest.mark.parametrize(("scope", "scope_id", "error"), REFUSED_TARGETS)
+def test_reorder_at_a_foreign_or_unknown_target_is_refused__S016_001_DoD6(
+    engine: Engine, generator: SnowflakeGenerator, scope: str, scope_id: int, error: type[Exception]
+) -> None:
+    foreign_notes = _seed_foreign_notes_at_b_targets(engine)
+    _create(engine, generator, USER_A, "character", CHAR_A1)
+    memo_ids = [foreign_notes[scope_id]] if scope_id in foreign_notes else []
+    before = _all_sort_keys(engine)
+    stored_before = {memo_id: _stored(engine, memo_id) for memo_id in before}
+
+    with pytest.raises(error):
+        _reorder(engine, USER_A, scope, scope_id, memo_ids)
+
+    assert _all_sort_keys(engine) == before
+    assert {memo_id: _stored(engine, memo_id) for memo_id in before} == stored_before
+
+
+@pytest.mark.parametrize(
+    ("scope", "scope_id", "stored_scope_id"),
+    [("character", CHAR_A1, CHAR_A1), ("user", None, USER_A), ("session", SESSION_A1, SESSION_A1)],
+)
+def test_another_users_row_at_the_same_scope_keeps_its_sort_key__S016_001_DoD6(
+    engine: Engine,
+    generator: SnowflakeGenerator,
+    scope: str,
+    scope_id: int | None,
+    stored_scope_id: int,
+) -> None:
+    _insert_memo(
+        engine, memo_id=91_100, user_id=USER_B, scope=scope, scope_id=stored_scope_id, sort_key=-40
+    )
+    older = _create(engine, generator, USER_A, scope, scope_id)
+    newer = _create(engine, generator, USER_A, scope, scope_id)
+
+    result = _reorder(engine, USER_A, scope, scope_id, [older.id, newer.id])
+
+    assert _ids(result) == [older.id, newer.id]
+    stored_foreign = _stored(engine, 91_100)
+    assert stored_foreign is not None
+    assert stored_foreign["sort_key"] == -40
+    assert stored_foreign["user_id"] == USER_B
+
+
+# --- DoD-7: a refused reorder leaves no transaction open ---------------------------------
+
+
+@pytest.mark.parametrize("case", MISMATCH_CASES)
+def test_a_mismatch_refusal_leaves_no_transaction_open__S016_001_DoD7(
+    engine: Engine, generator: SnowflakeGenerator, case: str
+) -> None:
+    world = _seed_mismatch_world(engine, generator)
+    memo_ids = _mismatched_ids(case, world)
+
+    with engine.connect() as connection:
+        with pytest.raises(MemoOrderMismatchError):
+            reorder_memos(connection, USER_A, "session", SESSION_A1, memo_ids)
+        _begin_and_roll_back(connection)
+
+
+@pytest.mark.parametrize(("scope", "scope_id", "error"), REFUSED_TARGETS)
+def test_a_target_refusal_leaves_no_transaction_open__S016_001_DoD7(
+    engine: Engine, scope: str, scope_id: int, error: type[Exception]
+) -> None:
+    foreign_notes = _seed_foreign_notes_at_b_targets(engine)
+    memo_ids = [foreign_notes[scope_id]] if scope_id in foreign_notes else []
+
+    with engine.connect() as connection:
+        with pytest.raises(error):
+            reorder_memos(connection, USER_A, scope, scope_id, memo_ids)  # type: ignore[arg-type]
+        _begin_and_roll_back(connection)
+
+
+# --- DoD-14: the service module still imports no fastapi and no other service ------------
+
+
+def test_the_service_module_still_has_no_fastapi_and_no_service_import__S016_001_DoD14() -> None:
+    tree = ast.parse(inspect.getsource(memos_module))
+
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level > 0:
+                offenders.append(f"relative import, level {node.level}")
+            elif module == "fastapi" or module.startswith("fastapi."):
+                offenders.append(f"from {module} import ...")
+            elif module == _FORBIDDEN_IMPORT_ROOT or module.startswith(_FORBIDDEN_IMPORT_ROOT + "."):
+                offenders.append(f"from {module} import ...")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "fastapi" or alias.name.startswith("fastapi."):
+                    offenders.append(f"import {alias.name}")
+                if alias.name == _FORBIDDEN_IMPORT_ROOT or alias.name.startswith(
+                    _FORBIDDEN_IMPORT_ROOT + "."
+                ):
+                    offenders.append(f"import {alias.name}")
+
+    assert offenders == []

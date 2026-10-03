@@ -53,7 +53,7 @@ export function App(props: AppProps): React.JSX.Element {
     >
       <Routes>
         <Route path="/" element={null} />
-        <Route path="/sessions/:id" element={<SessionRoute characters={characters} />} />
+        <Route path="/sessions/:id" element={<SessionRoute characters={characters} storage={storage} />} />
         <Route
           path="/characters/new"
           element={

@@ -63,3 +63,52 @@
     z-index: 100;
   }
 }
+
+/* The session screen's root (016): the wall's positioning context. One column
+ * while the wall floats; fills the centre column's height and clips, so a
+ * closed wall slid off to the right adds no scrollbar. */
+.app-session {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Pinned: the wall becomes a real second column. */
+.app-session.wall-pinned {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* The stream column scrolls on its own. */
+.app-stream {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Floating: anchored to the stream's right edge, slid out until opened. */
+.app-wall {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 84vw);
+  overflow: auto;
+  transform: translateX(100%);
+  transition: transform 150ms ease;
+  z-index: 10;
+}
+
+.app-wall.wall-open {
+  transform: translateX(0);
+}
+
+/* Pinned: an in-flow 320px column; the switch does not animate. */
+.app-session.wall-pinned .app-wall {
+  position: relative;
+  width: 320px;
+  transform: none;
+  transition: none;
+}

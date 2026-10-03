@@ -88,7 +88,17 @@
 // own exact paths, so no count changes. `/characters/new` mounts no section, so its stub — which
 // rejects every other URL — is unchanged; session routes are 015 step 008's. One clause is added
 // at the bottom ("— DoD-4" there is 015 step 009's); no other assertion changes.
-import { act, render, screen, within } from "@testing-library/react";
+//
+// Amended by feature 016, step 006 (DoD-9, DoD-11, DoD-12): the session screen's ready render is
+// now the note wall's layout, and 015's "Notes" region sits inside the complementary "Note wall",
+// which is closed (aria-hidden) unless the layout record pins it. `renderApp` takes an optional
+// `storage` (default `null`, as before) and passes it to `App`. The 015 step 008 clause at
+// `/sessions/1` is amended to find the region inside the wall with `{ hidden: true }` (its title
+// now ends with 016 006's "— DoD-11"). A block at the bottom adds DoD-9: with a stored
+// `wallPinned: true`, no wall and no "Open notes" at `/`, `/characters/<id>`, `/settings` and
+// `/search`, and a pinned wall inside the main region at `/sessions/1` with the shell's `.app`
+// grid still holding exactly the nav and the main. No other assertion changes.
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -96,6 +106,7 @@ import type { ChangeEvent } from "react";
 import { App } from "../../src/app/App";
 import type { Character } from "../../src/app/charactersApi";
 import type { Session } from "../../src/app/sessionsApi";
+import type { LayoutStorage } from "../../src/app/workspaceLayout";
 import { AppProviders } from "../../src/shared/AppProviders";
 import type { CurrentUser } from "../../src/shared/currentUser";
 
@@ -218,6 +229,14 @@ const SESSION_MEMO_CHAIN_PATTERN = /^\/api\/sessions\/([^/]+)\/memo-chain$/;
 const NOTES_REGION_NAME = "Notes";
 const COMPOSER_NAME = "Composer";
 
+// ------------------------------------------- 016 step 006: the note wall
+const WALL_NAME = "Note wall";
+const OPEN_NOTES_NAME = "Open notes";
+const UNPIN_NOTES_NAME = "Unpin notes";
+const LAYOUT_KEY = "rphelper.workspace-layout";
+const PINNED_CLASS = "wall-pinned";
+const SESSION_ROOT_CLASS = "app-session";
+
 // ------------------------------------------- 015 step 009: the character page's Notes listing
 /** One pathname shared by every memo request; listings differ only in the query string. */
 const MEMOS_PATH = "/api/memos";
@@ -280,11 +299,11 @@ function LocationProbe() {
   return <output data-testid="probe-location">{location.pathname}</output>;
 }
 
-function renderApp(initialPath: string) {
+function renderApp(initialPath: string, storage: LayoutStorage | null = null) {
   return render(
     <AppProviders>
       <MemoryRouter initialEntries={[initialPath]}>
-        <App user={USER} storage={null} />
+        <App user={USER} storage={storage} />
         <LocationProbe />
       </MemoryRouter>
     </AppProviders>,
@@ -988,14 +1007,26 @@ describe("013 step 007 — /sessions/1 renders the session screen with its strea
 // The section's own behaviour is MemoChainSection.test.tsx's; this clause is the route-level
 // proof that it sits in the main region at `/sessions/1`. "— DoD-7" is 015 step 008's.
 describe("015 step 008 — /sessions/1 renders the Notes section in the main region", () => {
-  it("at /sessions/1 the main region holds the Notes region after the session header, from one memo-chain read — DoD-7", async () => {
+  it("(015 008 DoD-7, amended) at /sessions/1 the main region holds the Note wall holding the Notes region after the session header, from one memo-chain read — DoD-11", async () => {
     const { calls } = stubWorkspace([CHAR_A], [SESSION_ONE]);
     renderApp(SESSION_ONE_ROUTE);
     await flush();
 
     const main = within(mainElement());
-    const notes = await main.findByRole("region", { name: NOTES_REGION_NAME });
-    expect(within(notes).getByRole("heading", { name: NOTES_REGION_NAME })).toBeInTheDocument();
+    // The closed wall carries aria-hidden="true", for which the installed dom-accessibility-api
+    // computes an empty name — so find it unnamed and check its aria-label.
+    const wall = await waitFor(() => {
+      const walls = main
+        .queryAllByRole("complementary", { hidden: true })
+        .filter((el) => el.getAttribute("aria-label") === WALL_NAME);
+      expect(walls).toHaveLength(1);
+      return walls[0];
+    });
+    expect(wall.getAttribute("aria-label")).toBe(WALL_NAME);
+    const notes = within(wall).getByRole("region", { name: NOTES_REGION_NAME, hidden: true });
+    expect(
+      within(notes).getByRole("heading", { name: NOTES_REGION_NAME, hidden: true }),
+    ).toBeInTheDocument();
     const header = main.getByRole("heading", { name: START_LABEL_HEADING });
     expect(header.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(
@@ -1024,5 +1055,65 @@ describe("015 step 009 — /characters/<id> renders the Notes section after the 
     const listings = calls.filter((call) => call.method === "GET" && call.path === MEMOS_PATH);
     expect(listings).toHaveLength(1);
     expect(listings[0].search).toBe(characterNotesSearch(ID_A));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 016, step 006 — the wall exists only on the ready session screen (US-095.AC-1,
+// US-094.AC-2, D1). `App` is given an in-memory layout storage holding `wallPinned: true`.
+// "— DoD-9" here is 016 step 006's.
+type GetItem = (key: string) => string | null;
+type SetItem = (key: string, value: string) => void;
+
+/** A file-local in-memory `LayoutStorage` seeded with a pinned wall (the nav expanded). */
+function pinnedStorage(): LayoutStorage {
+  const entries = new Map<string, string>([
+    [LAYOUT_KEY, JSON.stringify({ navCollapsed: false, wallPinned: true })],
+  ]);
+  const getItem = vi.fn<GetItem>((key) => entries.get(key) ?? null);
+  const setItem = vi.fn<SetItem>((key, value) => {
+    entries.set(key, value);
+  });
+  return { getItem, setItem };
+}
+
+const NO_SESSION_ROUTES = ["/", `/characters/${ID_A}`, "/settings", "/search"];
+
+describe("016 step 006 — a stored pin shows the wall only on a session (US-095.AC-1, D1)", () => {
+  it.each(NO_SESSION_ROUTES)(
+    "with a stored wallPinned: true, %s has no Note wall (not even hidden) and no Open notes — DoD-9",
+    async (path) => {
+      stubWorkspace([CHAR_A], [SESSION_ONE]);
+      renderApp(path, pinnedStorage());
+      await flush();
+
+      expect(navElement()).toBeInTheDocument();
+      expect(screen.queryAllByRole("complementary", { hidden: true })).toHaveLength(0);
+      expect(document.querySelector(`[aria-label="${WALL_NAME}"]`)).toBeNull();
+      expect(screen.queryByRole("button", { name: OPEN_NOTES_NAME, hidden: true })).toBeNull();
+    },
+  );
+
+  it("with a stored wallPinned: true, /sessions/1 shows the wall as a pinned column inside the main region, and the .app grid still has exactly the nav and the main — DoD-9", async () => {
+    stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp(SESSION_ONE_ROUTE, pinnedStorage());
+    await flush();
+
+    const wall = await within(mainElement()).findByRole("complementary", { name: WALL_NAME });
+    expect(mainElement().contains(wall)).toBe(true);
+    expect(within(wall).getByRole("button", { name: UNPIN_NOTES_NAME })).toBeInTheDocument();
+    expect(within(wall).getByRole("region", { name: NOTES_REGION_NAME })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: OPEN_NOTES_NAME, hidden: true })).toBeNull();
+    const sessionRoot = wall.closest(`.${SESSION_ROOT_CLASS}`);
+    expect(sessionRoot).not.toBeNull();
+    expect(sessionRoot?.classList.contains(PINNED_CLASS)).toBe(true);
+
+    const grid = navElement().parentElement;
+    expect(grid).not.toBeNull();
+    expect(grid?.classList.contains("app")).toBe(true);
+    const children = Array.from(grid?.children ?? []);
+    expect(children).toHaveLength(2);
+    expect(children[0]).toBe(navElement());
+    expect(children[1]).toBe(mainElement());
   });
 });

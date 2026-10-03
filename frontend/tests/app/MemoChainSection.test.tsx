@@ -16,6 +16,13 @@
 // - A Mantine `Loader`: `.mantine-Loader-root`. A notification: `.mantine-Notification-root`.
 // - `fetch` is stubbed per test; requests are recorded by exact method + pathname + query
 //   string with the parsed JSON body.
+//
+// Feature 016, step 004 amendments (DoD-7..DoD-9): every group is now reorderable inside the
+// section's one DndContext, so each saved note's listitem is focusable and named
+// "Note <n> of <total>" for its own group (016 context.md strings table). A just-created note is
+// found FIRST in its group (016 D5). Keyboard activation is Space keydown on the focused card;
+// dnd-kit's announcement live region (role "status") is read afterwards. Pointer and arrow-key
+// movement are never exercised (jsdom zero-size rects, 016 D8).
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ChangeEvent } from "react";
@@ -407,7 +414,7 @@ describe("creating a note in each group (US-049..US-053, D5)", () => {
   ];
 
   it.each(CASES)(
-    "%s: New note, typing and blurring POSTs that level's scope and scope id; the note appears in that group only, with no chain or listing request after — DoD-5",
+    "%s: New note, typing and blurring POSTs that level's scope and scope id; the note appears first in that group only, with no chain or listing request after (015 008 DoD-5, amended by 016 D5) — DoD-7",
     async (title, scope, scopeId, before) => {
       const { calls } = await readyFour();
       const user = newUser();
@@ -420,7 +427,7 @@ describe("creating a note in each group (US-049..US-053, D5)", () => {
       await waitFor(() => {
         expect(groupItems(title)).toHaveLength(before + 1);
       });
-      const fresh = within(groupItems(title)[before]).getByRole("textbox", { name: NOTE_LABEL });
+      const fresh = within(groupItems(title)[0]).getByRole("textbox", { name: NOTE_LABEL });
       fireEvent.change(fresh, { target: { value: text } });
       fireEvent.blur(fresh);
 
@@ -437,10 +444,10 @@ describe("creating a note in each group (US-049..US-053, D5)", () => {
 
       // After the 201 the saved note is in this group (a saved note carries its flag controls).
       await waitFor(() => {
-        expect(within(groupItems(title)[before]).queryByRole("button", { name: "Disable note" })).not.toBeNull();
+        expect(within(groupItems(title)[0]).queryByRole("button", { name: "Disable note" })).not.toBeNull();
       });
       await settle();
-      expect(groupBodies(title)[before]).toBe(text);
+      expect(groupBodies(title)[0]).toBe(text);
       expect(groupItems(title)).toHaveLength(before + 1);
       for (const [each, count] of counts) {
         if (each === title) continue;
@@ -535,4 +542,111 @@ describe("loading and failure (no notification)", () => {
     expect(groupBodies(SESSION_NOTES)).toEqual(SESSION_BODIES);
     expect(document.querySelector(NOTIFICATION)).toBeNull();
   });
+});
+
+// ===========================================================================
+// Feature 016, step 004 — the chain's drag context (D8; R2).
+
+/** Every memo id string in a chain, in level order. */
+function memoIds(levels: MemoChainLevel[]): string[] {
+  return levels.flatMap((each) => each.memos.map((row) => row.id));
+}
+
+/** Each saved note's listitem in the group is focusable and named Note 1..n of n, in order. */
+function expectReorderableGroup(title: string, count: number): void {
+  const items = groupItems(title);
+  expect(items).toHaveLength(count);
+  items.forEach((item, index) => {
+    expect(item.tabIndex).toBe(0);
+    expect(item).toHaveAccessibleName(`Note ${index + 1} of ${count}`);
+  });
+}
+
+function pressSpace(target: HTMLElement): void {
+  fireEvent.keyDown(target, { code: "Space", key: " " });
+}
+
+/** dnd-kit's announcement live region(s): role "status" elements in the document. */
+function liveRegionText(): string {
+  return screen
+    .queryAllByRole("status", { hidden: true })
+    .map((element) => element.textContent ?? "")
+    .join(" ")
+    .trim();
+}
+
+describe("the chain's drag context — four levels (016 004)", () => {
+  it("every saved note's listitem in all four groups is focusable and named Note <n> of <total> for its own group — DoD-7", async () => {
+    await readyFour();
+
+    expectReorderableGroup(YOUR_NOTES, USER_LEVEL.memos.length);
+    expectReorderableGroup(CHARACTER_NOTES, CHARACTER_LEVEL.memos.length);
+    expectReorderableGroup(SETUP_NOTES, SETUP_LEVEL.memos.length);
+    expectReorderableGroup(SESSION_NOTES, SESSION_LEVEL.memos.length);
+  });
+
+  it("the Notes region, the group names and their order still hold with reorderable groups — DoD-7", async () => {
+    await readyFour();
+
+    expect(within(notesRegion()).getByRole("heading", { name: NOTES })).toBeInTheDocument();
+    expect(groupTitles()).toEqual([YOUR_NOTES, CHARACTER_NOTES, SETUP_NOTES, SESSION_NOTES]);
+    expect(groupBodies(YOUR_NOTES)).toEqual(USER_BODIES);
+    expect(groupBodies(CHARACTER_NOTES)).toEqual(CHARACTER_BODIES);
+    expect(groupBodies(SETUP_NOTES)).toEqual(SETUP_BODIES);
+    expect(groupBodies(SESSION_NOTES)).toEqual(SESSION_BODIES);
+  });
+
+  it("the position names count per group: Your notes' second note is Note 2 of 2, the Setup note is Note 1 of 1 — DoD-7", async () => {
+    await readyFour();
+
+    expect(within(group(YOUR_NOTES)).getByRole("listitem", { name: "Note 2 of 2" })).toBe(groupItems(YOUR_NOTES)[1]);
+    expect(within(group(SETUP_NOTES)).getByRole("listitem", { name: "Note 1 of 1" })).toBe(groupItems(SETUP_NOTES)[0]);
+    expect(within(group(CHARACTER_NOTES)).queryByRole("listitem", { name: "Note 1 of 2" })).toBeNull();
+  });
+});
+
+describe("the chain's drag context — three levels, no setup (US-057.AC-1, R2)", () => {
+  it("renders exactly three reorderable groups and no Setup notes — DoD-8", async () => {
+    serveChain(THREE_LEVELS);
+    renderSection();
+    await waitFor(() => {
+      expect(within(notesRegion()).queryByRole("region", { name: SESSION_NOTES })).not.toBeNull();
+    });
+
+    expect(groupTitles()).toEqual([YOUR_NOTES, CHARACTER_NOTES, SESSION_NOTES]);
+    expect(screen.queryByRole("region", { name: SETUP_NOTES })).toBeNull();
+    expect(screen.queryByText(SETUP_NOTES)).toBeNull();
+    expectReorderableGroup(YOUR_NOTES, USER_LEVEL.memos.length);
+    expectReorderableGroup(CHARACTER_NOTES, CHARACTER_LEVEL.memos.length);
+    expectReorderableGroup(SESSION_NOTES, SESSION_LEVEL.memos.length);
+  });
+});
+
+describe("the chain's announcements (US-102 keyboard path; D8)", () => {
+  type AnnounceCase = [title: string, index: number];
+
+  const ANNOUNCE_CASES: AnnounceCase[] = [
+    [SESSION_NOTES, 1],
+    [YOUR_NOTES, 0],
+  ];
+
+  it.each(ANNOUNCE_CASES)(
+    "Space on the focused saved note %s #%i fills dnd-kit's live region with a message that holds no memo id — DoD-9",
+    async (title, index) => {
+      await readyFour();
+      const card = groupItems(title)[index];
+
+      card.focus();
+      expect(document.activeElement).toBe(card);
+      pressSpace(card);
+
+      await waitFor(() => {
+        expect(liveRegionText()).not.toBe("");
+      });
+      const message = liveRegionText();
+      for (const id of memoIds(FOUR_LEVELS)) {
+        expect(message).not.toContain(id);
+      }
+    },
+  );
 });

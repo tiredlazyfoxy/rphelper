@@ -7,7 +7,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 
 import type { Memo, MemoPatch, MemoScope } from "./memosApi";
-import { createMemo, deleteMemo, fetchMemos, updateMemo } from "./memosApi";
+import { createMemo, deleteMemo, fetchMemos, reorderMemos, updateMemo } from "./memosApi";
 
 /** Explicit load status: gates the loading and failure renders, not "notes are empty". */
 export type MemoLevelStatus = "idle" | "loading" | "ready" | "failed";
@@ -37,6 +37,10 @@ export class MemoLevelState {
   failures: Record<string, string> = {};
   /** Per-note "a flag write is in flight" marks, by memo id (absent = none). */
   flagWritesInFlight: Record<string, true> = {};
+  /** True while a reorder of this level awaits its response (016 D7). */
+  reorderInFlight: boolean = false;
+  /** The level's reorder failure text, or null (016 D7; level-wide, not per note). */
+  reorderFailureText: string | null = null;
 
   constructor(scope: MemoScope, scopeId: string | null) {
     this.scope = scope;
@@ -222,7 +226,8 @@ export function setNewNoteText(state: MemoLevelState, text: string): void {
 
 /**
  * Effect, on focus loss: no new note or saving → nothing; blank → dropped, no request;
- * otherwise POSTs a create for the level and appends the returned row. Never rejects.
+ * otherwise POSTs a create for the level and prepends the returned row (016 D5). Never
+ * rejects.
  */
 export async function saveNewNote(state: MemoLevelState): Promise<void> {
   const current = state.newNote;
@@ -252,7 +257,7 @@ export async function saveNewNote(state: MemoLevelState): Promise<void> {
   }
   runInAction(() => {
     const typed = state.newNote?.text ?? snapshot;
-    state.memos = [...state.memos, row];
+    state.memos = [row, ...state.memos];
     state.newNote = null;
     if (typed !== snapshot && typed !== row.body) {
       state.editorTexts = { ...state.editorTexts, [row.id]: typed };
@@ -323,6 +328,119 @@ export function applyMemoRow(state: MemoLevelState, memo: Memo): void {
     const next = state.memos.slice();
     next[index] = memo;
     state.memos = next;
+  });
+}
+
+/** Pure: true while a reorder of the level awaits its response (016 D7). */
+export function isReorderInFlight(state: MemoLevelState): boolean {
+  return state.reorderInFlight;
+}
+
+/** Pure: the level's reorder failure text, or null (016 D7). */
+export function reorderFailure(state: MemoLevelState): string | null {
+  return state.reorderFailureText;
+}
+
+const REORDER_FAILED = "Could not reorder the notes.";
+
+/** True when the two id lists hold the same ids in the same order. */
+function sameOrder(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+/**
+ * Pure: the held rows in the given id order. Ids given but not held are ignored; held ids
+ * not given keep their relative order at the front.
+ */
+function orderRows(rows: readonly Memo[], ids: readonly string[]): Memo[] {
+  const byId = new Map(rows.map((row) => [row.id, row] as const));
+  const given = new Set(ids);
+  const front = rows.filter((row) => !given.has(row.id));
+  const ordered: Memo[] = [];
+  const placed = new Set<string>();
+  for (const id of ids) {
+    const row = byId.get(id);
+    if (row !== undefined && !placed.has(id)) {
+      ordered.push(row);
+      placed.add(id);
+    }
+  }
+  return [...front, ...ordered];
+}
+
+/**
+ * Pure: the success merge. The returned order, each returned row taken only when its
+ * `updated_at` is not older than the held row's; returned ids not held dropped; held ids
+ * absent from the response first, in their current relative order.
+ */
+function mergeReturnedRows(held: readonly Memo[], returned: readonly Memo[]): Memo[] {
+  const heldById = new Map(held.map((row) => [row.id, row] as const));
+  const returnedIds = new Set(returned.map((row) => row.id));
+  const front = held.filter((row) => !returnedIds.has(row.id));
+  const merged: Memo[] = [];
+  const placed = new Set<string>();
+  for (const row of returned) {
+    const current = heldById.get(row.id);
+    if (current === undefined || placed.has(row.id)) {
+      continue;
+    }
+    merged.push(row.updated_at < current.updated_at ? current : row);
+    placed.add(row.id);
+  }
+  return [...front, ...merged];
+}
+
+/**
+ * Pure: the revert. The current rows sorted by each id's index in the remembered order;
+ * ids not remembered first, in their current relative order.
+ */
+function revertRows(rows: readonly Memo[], remembered: readonly string[]): Memo[] {
+  const index = new Map(remembered.map((id, position) => [id, position] as const));
+  const front = rows.filter((row) => !index.has(row.id));
+  const known = rows
+    .filter((row) => index.has(row.id))
+    .sort((a, b) => (index.get(a.id) ?? 0) - (index.get(b.id) ?? 0));
+  return [...front, ...known];
+}
+
+/**
+ * Effect (016 D7): optimistically rewrites `memos` into the given saved-note id order,
+ * sends the whole level's order, merges the returned rows on success or reverts to the
+ * pre-drop relative order with "Could not reorder the notes." on failure. Does nothing
+ * while a reorder is in flight or when the order is unchanged. Passes no signal; never
+ * rejects.
+ */
+export async function reorderMemoLevel(state: MemoLevelState, memoIds: string[]): Promise<void> {
+  if (state.reorderInFlight) {
+    return;
+  }
+  const remembered = state.memos.map((memo) => memo.id);
+  if (sameOrder(remembered, memoIds)) {
+    return;
+  }
+  const scope = state.scope;
+  const scopeId = state.scopeId;
+  const sentIds = memoIds.slice();
+  runInAction(() => {
+    state.memos = orderRows(state.memos, sentIds);
+    state.reorderInFlight = true;
+    state.reorderFailureText = null;
+  });
+
+  let returned: Memo[];
+  try {
+    returned = await reorderMemos(scope, scopeId, sentIds);
+  } catch {
+    runInAction(() => {
+      state.memos = revertRows(state.memos, remembered);
+      state.reorderFailureText = REORDER_FAILED;
+      state.reorderInFlight = false;
+    });
+    return;
+  }
+  runInAction(() => {
+    state.memos = mergeReturnedRows(state.memos, returned);
+    state.reorderInFlight = false;
   });
 }
 
