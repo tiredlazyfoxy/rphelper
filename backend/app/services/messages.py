@@ -7,7 +7,9 @@ Feature `012`, step `002`. Plain arguments in, frozen `StreamMessage` values out
 inserts). Reads go only through the schema layer's selectables (`settled_entries`,
 `current_zone`, `message_states` — D1, D7); every write bumps the session (D3); nothing here
 ever names `related_to` in an insert or update, nor touches the settle columns of an existing
-row (D16). There is no delete, no discard and no settle-state operation in this module.
+row (D16). Feature `014` step `001` widens the edit to settled rows of any kind (text only;
+a buried row stays refused). There is no delete, no discard and no settle-state operation in
+this module.
 """
 
 from collections.abc import Iterator
@@ -128,7 +130,12 @@ def file_partner_entry(
 
 
 def edit_message_text(connection: Connection, user_id: int, message_id: int, text: str) -> StreamMessage:
-    """Replace a current-zone message's text, bump its session, return the stored row."""
+    """Replace a zone or settled message's text verbatim, bump its session, return the stored row.
+
+    A buried row (`related_to` set) is refused with `MessageNotEditableError`; `kind`,
+    `settled_at` and `related_to` are never written (014 D1). The row is read back through
+    `settled_entries` when settled, `current_zone` otherwise.
+    """
     with connection.begin():
         state_columns = message_states.selected_columns
         state = connection.execute(
@@ -136,7 +143,7 @@ def edit_message_text(connection: Connection, user_id: int, message_id: int, tex
         ).first()
         if state is None:
             raise MessageNotFoundError()
-        if state.related_to is not None or state.settled_at is not None:
+        if state.related_to is not None:
             raise MessageNotEditableError()
         now = _now_text()
         connection.execute(
@@ -145,10 +152,9 @@ def edit_message_text(connection: Connection, user_id: int, message_id: int, tex
             .values(text=text, updated_at=now)
         )
         _bump_session(connection, user_id, state.session_id, now)
-        zone_columns = current_zone.selected_columns
-        row = connection.execute(
-            current_zone.where(zone_columns.id == message_id, zone_columns.user_id == user_id)
-        ).one()
+        selectable = settled_entries if state.settled_at is not None else current_zone
+        columns = selectable.selected_columns
+        row = connection.execute(selectable.where(columns.id == message_id, columns.user_id == user_id)).one()
         message = _to_message(row)
     return message
 

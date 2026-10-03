@@ -62,6 +62,32 @@
 // tree's `/api/sessions` listing and the archive/restore action paths it already served. The
 // DoD-15 clause above therefore also sees the started session's screen load; it asserts the
 // location and the tree, which are untouched by that.
+//
+// Amended by feature 013, step 007 (DoD-9): the session screen's ready render mounts the stream,
+// which reads `GET /api/sessions/<id>/entries` and `/zone`. `stubWorkspace` gained one branch
+// answering both by exact pathname (empty lists for a held session, 404 `session_not_found`
+// otherwise), so the `/sessions/1` clause, the tree-click clause and the DoD-15 started-session
+// clause all see a loaded stream. "No entries yet." is now the empty record's line, so the two
+// 011 step 009 clauses find it rather than get it. One clause is added at the bottom; no other
+// route clause changes.
+//
+// Amended by feature 015, step 008 (DoD-10): the session screen's ready render also mounts the
+// "Notes" section, which reads `GET /api/sessions/<id>/memo-chain`. `stubWorkspace` gained one
+// branch answering that exact pathname (`{ "levels": [] }` for a held session, 404
+// `session_not_found` otherwise), so the `/sessions/1` clause, the tree-click clause, the 013
+// clause and the DoD-15 started-session clause all see a loaded section. One clause is added at
+// the bottom ("— DoD-7" there is 015 step 008's); no other assertion changes.
+//
+// Amended by feature 015, step 009 (DoD-7): the character screen's ready render also mounts the
+// character-level "Notes" section after the "Sessions" region, which reads
+// `GET /api/memos?scope=character&scope_id=<id>`. Both character-screen stubs answer it with
+// `{ "memos": [] }`, matched on the exact pathname **and** query string (the pathname
+// `/api/memos` alone is shared with the POST and with other levels' listings): the
+// `/characters/1` clause's own stub, and `stubWorkspace` (for a character it holds; 404
+// `character_not_found` otherwise). `listRequests` and `sessionsListRequests` stay keyed on their
+// own exact paths, so no count changes. `/characters/new` mounts no section, so its stub — which
+// rejects every other URL — is unchanged; session routes are 015 step 008's. One clause is added
+// at the bottom ("— DoD-4" there is 015 step 009's); no other assertion changes.
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -181,6 +207,28 @@ const SESSION_ACTION_PATTERN = /^\/api\/sessions\/([^/]+)\/(archive|restore)$/;
 // ------------------------------------------- 011 step 009: the session screen's own read
 /** One session by id — the session screen's single source (011 D17), archived or not. */
 const SESSION_ITEM_PATTERN = /^\/api\/sessions\/([^/]+)$/;
+
+// ------------------------------------------- 013 step 007: the session stream's two reads
+/** `GET /api/sessions/<id>/entries` and `GET /api/sessions/<id>/zone`, anchored both ends. */
+const SESSION_STREAM_PATTERN = /^\/api\/sessions\/([^/]+)\/(entries|zone)$/;
+
+// ------------------------------------------- 015 step 008: the session's Notes section read
+/** `GET /api/sessions/<id>/memo-chain`, anchored both ends. */
+const SESSION_MEMO_CHAIN_PATTERN = /^\/api\/sessions\/([^/]+)\/memo-chain$/;
+const NOTES_REGION_NAME = "Notes";
+const COMPOSER_NAME = "Composer";
+
+// ------------------------------------------- 015 step 009: the character page's Notes listing
+/** One pathname shared by every memo request; listings differ only in the query string. */
+const MEMOS_PATH = "/api/memos";
+/** `?scope=character&scope_id=<id>`, anchored both ends; the id is captured. */
+const CHARACTER_NOTES_SEARCH_PATTERN = /^\?scope=character&scope_id=([^&]+)$/;
+const EMPTY_NOTES = { memos: [] };
+
+function characterNotesSearch(characterId: string): string {
+  return `?scope=character&scope_id=${characterId}`;
+}
+const RULER_NAME = "Current zone";
 
 const SESSION_NOT_FOUND_TEXT = "Session not found";
 const NO_ENTRIES_TEXT = "No entries yet.";
@@ -337,6 +385,15 @@ function stubWorkspace(rows: Character[], sessions: Session[] = []) {
       return jsonResponse({ sessions: sessionOrder.filter((row) => row.archived_at === null) }, 200);
     }
 
+    // 015 step 009: the character screen's Notes section lists that character's notes. Matched
+    // on the exact pathname and query string; answered empty for a held character, the
+    // backend's own 404 code otherwise.
+    if (url.pathname === MEMOS_PATH && method === "GET") {
+      const notesFor = CHARACTER_NOTES_SEARCH_PATTERN.exec(url.search);
+      if (notesFor !== null && store.has(notesFor[1])) return jsonResponse(EMPTY_NOTES, 200);
+      return notFoundResponse();
+    }
+
     // 011 step 008: the character screen's Sessions section lists, starts, archives and
     // restores. All four are matched on the exact pathname, beside the tree's own listing.
     const characterSessions = CHARACTER_SESSIONS_PATTERN.exec(url.pathname);
@@ -377,6 +434,28 @@ function stubWorkspace(rows: Character[], sessions: Session[] = []) {
         return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
       }
       return jsonResponse(row, 200);
+    }
+
+    // 013 step 007: the session screen's ready render mounts the stream, which reads that
+    // session's entries and zone. Matched on the exact pathname; answered empty for a held
+    // session, the backend's own 404 code otherwise.
+    const sessionStream = SESSION_STREAM_PATTERN.exec(url.pathname);
+    if (sessionStream !== null && method === "GET") {
+      if (!sessionOrder.some((candidate) => candidate.id === sessionStream[1])) {
+        return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
+      }
+      return jsonResponse(sessionStream[2] === "entries" ? { entries: [] } : { messages: [] }, 200);
+    }
+
+    // 015 step 008: the session screen's ready render mounts the Notes section, which reads that
+    // session's memo chain. Matched on the exact pathname; answered with no levels for a held
+    // session, the backend's own 404 code otherwise.
+    const sessionChain = SESSION_MEMO_CHAIN_PATTERN.exec(url.pathname);
+    if (sessionChain !== null && method === "GET") {
+      if (!sessionOrder.some((candidate) => candidate.id === sessionChain[1])) {
+        return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
+      }
+      return jsonResponse({ levels: [] }, 200);
     }
 
     const sessionAction = SESSION_ACTION_PATTERN.exec(url.pathname);
@@ -571,6 +650,11 @@ describe("the character routes render the character screen in the same shell (00
   it("renders the requested character in the main region at /characters/1 — DoD-13", async () => {
     stubFetch((input) => {
       const path = requestPath(input);
+      // 015 step 009: the ready screen mounts the Notes section, which lists the character's
+      // notes — matched on the exact pathname and query string.
+      if (path === MEMOS_PATH && requestUrl(input).search === characterNotesSearch(CHARACTER.id)) {
+        return Promise.resolve(jsonResponse(EMPTY_NOTES, 200));
+      }
       if (path === CHARACTER_PATH) return Promise.resolve(jsonResponse(CHARACTER, 200));
       // 009 step 008: the shell's tree lists the characters on every route.
       if (path === COLLECTION_PATH) {
@@ -834,7 +918,7 @@ describe("the session route renders the session screen in the same shell (D17, U
       `/characters/${ID_A}`,
     );
     expect(main.getByRole("heading", { name: START_LABEL_HEADING })).toBeInTheDocument();
-    expect(main.getByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(await main.findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
     expect(main.queryByText(SESSION_NOT_FOUND_TEXT)).toBeNull();
     expect(main.queryByText(NOT_FOUND_TEXT)).toBeNull();
     expect(sessionItemRequests(calls, SESSION_ONE_ID)).toHaveLength(1);
@@ -855,10 +939,90 @@ describe("the session route renders the session screen in the same shell (D17, U
     expect(currentPath()).toBe(`/sessions/${SESSION_A_ID}`);
     expect(sessionItemRequests(calls, SESSION_A_ID)).toHaveLength(1);
     const main = within(mainElement());
-    expect(main.getByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(await main.findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
     expect(main.getByRole("link", { name: CHAR_A.name })).toHaveAttribute(
       "href",
       `/characters/${ID_A}`,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 013, step 007 — the session screen now carries its stream (013 D13). `stubWorkspace`
+// answers `GET /api/sessions/<id>/entries` and `/zone` by exact pathname (empty for a held
+// session), so the two 011 step 009 clauses above keep their assertions; this clause is the
+// route-level proof that the stream sits in the main region. "— DoD-9" is 013 step 007's.
+describe("013 step 007 — /sessions/1 renders the session screen with its stream", () => {
+  it("at /sessions/1 the main region holds the header and the stream, from the session, entries and zone reads — DoD-9", async () => {
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp(SESSION_ONE_ROUTE);
+    await flush();
+
+    expect(navElement()).toBeInTheDocument();
+    const main = within(mainElement());
+    expect(main.getByRole("link", { name: CHAR_A.name })).toHaveAttribute(
+      "href",
+      `/characters/${ID_A}`,
+    );
+    expect(main.getByRole("heading", { name: START_LABEL_HEADING })).toBeInTheDocument();
+    expect(await main.findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(main.getByRole("separator", { name: RULER_NAME })).toBeInTheDocument();
+    expect(main.getByRole("textbox", { name: COMPOSER_NAME })).toBeInTheDocument();
+    expect(main.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(main.getByRole("button", { name: "Settle" })).toBeInTheDocument();
+    expect(main.queryByText(SESSION_NOT_FOUND_TEXT)).toBeNull();
+    expect(main.queryByText(NOT_FOUND_TEXT)).toBeNull();
+
+    expect(sessionItemRequests(calls, SESSION_ONE_ID)).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.method === "GET" && call.path === `/api/sessions/${SESSION_ONE_ID}/entries`),
+    ).toHaveLength(1);
+    expect(
+      calls.filter((call) => call.method === "GET" && call.path === `/api/sessions/${SESSION_ONE_ID}/zone`),
+    ).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 015, step 008 — the session screen's ready render carries the "Notes" section (D1).
+// The section's own behaviour is MemoChainSection.test.tsx's; this clause is the route-level
+// proof that it sits in the main region at `/sessions/1`. "— DoD-7" is 015 step 008's.
+describe("015 step 008 — /sessions/1 renders the Notes section in the main region", () => {
+  it("at /sessions/1 the main region holds the Notes region after the session header, from one memo-chain read — DoD-7", async () => {
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp(SESSION_ONE_ROUTE);
+    await flush();
+
+    const main = within(mainElement());
+    const notes = await main.findByRole("region", { name: NOTES_REGION_NAME });
+    expect(within(notes).getByRole("heading", { name: NOTES_REGION_NAME })).toBeInTheDocument();
+    const header = main.getByRole("heading", { name: START_LABEL_HEADING });
+    expect(header.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(
+      calls.filter(
+        (call) => call.method === "GET" && call.path === `/api/sessions/${SESSION_ONE_ID}/memo-chain`,
+      ),
+    ).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 015, step 009 — the character screen's ready render carries the character-level
+// "Notes" section after the "Sessions" region (D1). The section's own behaviour is
+// CharacterNotesSection.test.tsx's and its place on the screen CharacterScreen.test.tsx's; this
+// clause is the route-level proof inside the shell. "— DoD-4" is 015 step 009's.
+describe("015 step 009 — /characters/<id> renders the Notes section after the Sessions region", () => {
+  it("the main region holds the Notes region after the Sessions region, from one character notes listing — DoD-4", async () => {
+    const { calls } = stubWorkspace([CHAR_A]);
+    renderApp(`/characters/${ID_A}`);
+    await flush();
+
+    const main = within(mainElement());
+    const notes = await main.findByRole("region", { name: NOTES_REGION_NAME });
+    expect(within(notes).getByRole("heading", { name: NOTES_REGION_NAME })).toBeInTheDocument();
+    expect(sessionsRegion().compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    const listings = calls.filter((call) => call.method === "GET" && call.path === MEMOS_PATH);
+    expect(listings).toHaveLength(1);
+    expect(listings[0].search).toBe(characterNotesSearch(ID_A));
   });
 });

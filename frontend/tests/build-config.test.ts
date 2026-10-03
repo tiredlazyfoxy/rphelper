@@ -287,12 +287,14 @@ describe("package.json — excluded dependencies", () => {
     // `@mantine/tiptap`, `@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`,
     // `@tiptap/extension-link` and `tiptap-markdown`, which are now sanctioned runtime
     // dependencies. Everything else this clause forbade stays forbidden.
+    // Rescoped again by feature 013 step 004 (context.md D5): `react-markdown` renders
+    // message bodies and is a sanctioned runtime dependency; its presence is asserted in
+    // tests/app/MessageBody.test.tsx (013 step 004 DoD-1).
     const forbidden = names.filter(
       (n) =>
         n === "@mantine/form" ||
         n === "eslint" ||
         n.startsWith("eslint-") ||
-        n === "react-markdown" ||
         n.startsWith("@dnd-kit/"),
     );
     expect(forbidden).toEqual([]);

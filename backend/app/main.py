@@ -38,7 +38,10 @@ The factory's order is therefore fixed:
    `app.include_router(stream_router)` (feature `012`), no prefix, full paths
    `/api/sessions/{session_id}/entries|zone|zone/messages|settle|reopen` and
    `/api/messages/{message_id}`, registered **after** the sessions router so 011's routes
-   keep matching first.
+   keep matching first. Last of everything comes `app.include_router(memos_router)`
+   (feature `015`), no prefix, full paths `/api/memos`, `/api/memos/{memo_id}` and
+   `/api/sessions/{session_id}/memo-chain`, registered **after** the stream router so
+   every earlier router's routes keep matching first.
 
 **The lifespan runs no DDL.** No table creation, no upgrade, no schema check, and no
 create-if-missing convenience. Remediation is admin-triggered and belongs to feature
@@ -71,6 +74,7 @@ from app.routers.auth import router as auth_router
 from app.routers.bootstrap import router as bootstrap_router
 from app.routers.characters import router as characters_router
 from app.routers.health import router as health_router
+from app.routers.memos import router as memos_router
 from app.routers.sessions import router as sessions_router
 from app.routers.setups import router as setups_router
 from app.routers.stream import router as stream_router
@@ -98,9 +102,10 @@ def create_app() -> FastAPI:
     `app.include_router(auth_router)`, `app.include_router(admin_users_router)`,
     `app.include_router(admin_llm_router)`, `app.include_router(admin_db_router)`,
     `app.include_router(characters_router)`, `app.include_router(setups_router)`,
-    `app.include_router(sessions_router)` and `app.include_router(stream_router)` — the
-    setups router immediately after the characters router, the sessions router
-    immediately after setups, and the stream router last, immediately after sessions.
+    `app.include_router(sessions_router)`, `app.include_router(stream_router)` and
+    `app.include_router(memos_router)` — the setups router immediately after the
+    characters router, the sessions router immediately after setups, the stream router
+    immediately after sessions, and the memos router last, immediately after stream.
 
     Constructed with `FastAPI(lifespan=lifespan)`.
 
@@ -126,6 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(setups_router)
     app.include_router(sessions_router)
     app.include_router(stream_router)
+    app.include_router(memos_router)
     return app
 
 

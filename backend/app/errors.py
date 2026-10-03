@@ -430,6 +430,23 @@ class MessageNotFoundError(DomainError):
         super().__init__(message, detail)
 
 
+class MemoNotFoundError(DomainError):
+    """An id-addressed memo operation names no memo the caller owns.
+
+    Raised by `app.services.memos` (feature `015`, `context.md` D12) for both "no such id" and
+    "another user's id" — indistinguishable on the wire (R5). `detail` carries nothing.
+    """
+
+    code = "memo_not_found"
+    http_status = 404
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments; an explicit message still wins.
+        if message is None:
+            message = "That memo does not exist."
+        super().__init__(message, detail)
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later

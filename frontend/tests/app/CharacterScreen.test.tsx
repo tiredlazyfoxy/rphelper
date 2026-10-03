@@ -57,13 +57,31 @@
 //   counting the Sessions section's request as the Setups section's;
 // - no other 009 or 010 assertion changed. 011 step 008's own DoD-12..DoD-14 are the three
 //   blocks at the bottom of this file.
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+//
+// Amended by feature 015, step 009 (DoD-7): existing mode's "ready" render now carries the
+// character-level "Notes" section (015 D1) after the "Sessions" region, which loads
+// `GET /api/memos?scope=character&scope_id=<id>` on mount. Consequences, all mechanical:
+// - `sectionListing` also answers that listing with `{ "memos": [] }`, matched on the exact
+//   pathname **and** query string (the pathname `/api/memos` alone is shared with the POST and
+//   with other levels' listings); the two hand-written stubs of 010 DoD-12 and 011 DoD-14 gain
+//   the same branch. An empty listing renders no note, so no "Note" textbox and no note-side
+//   button but "New note" exists, and every 009, 010 and 011 query keeps its meaning;
+// - the `MarkdownEditor` stub now takes its textarea id from React's `useId` (step 007's stub),
+//   because several editors labelled "Note" can be on screen at once and a label-derived id
+//   would collide; every query here goes through the label, so nothing else changes;
+// - 011 DoD-12's document order still holds (Notes comes after Sessions); 010 DoD-12's and 011
+//   DoD-14's request counts are keyed on their own exact paths, so the notes listing is not
+//   counted. New mode and the loading / not-found / failed states mount no Notes section, so
+//   their stubs and their "no request at all" clauses are untouched. No assertion was dropped.
+//   015 step 009's own DoD-4..DoD-6 are the three blocks at the bottom of this file.
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChangeEvent } from "react";
 import { CharacterRoute, CharacterScreen } from "../../src/app/CharacterScreen";
 import type { Character } from "../../src/app/charactersApi";
+import type { Memo } from "../../src/app/memosApi";
 import type { Session } from "../../src/app/sessionsApi";
 import type { Setup } from "../../src/app/setupsApi";
 import { CharactersState } from "../../src/app/charactersState";
@@ -72,7 +90,8 @@ import { documentNavigation } from "../../src/shared/api";
 import { AppProviders } from "../../src/shared/AppProviders";
 
 vi.mock("../../src/shared/MarkdownEditor", async () => {
-  const { createElement } = await import("react");
+  // 015 step 009: the id comes from `useId`, so several "Note" editors never share one.
+  const { createElement, useId } = await import("react");
   type StubProps = {
     label: string;
     value: string;
@@ -81,7 +100,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
   };
   return {
     MarkdownEditor: (props: StubProps) => {
-      const id = `markdown-editor-${props.label.toLowerCase().replace(/\s+/g, "-")}`;
+      const id = `markdown-editor-${useId()}`;
       return createElement(
         "div",
         null,
@@ -213,16 +232,36 @@ const EMPTY_SETUPS = { setups: [] };
 /** 011 step 008: the Sessions section's own listing, answered empty everywhere. */
 const EMPTY_SESSIONS = { sessions: [] };
 
+/** 015 step 009: the Notes section's listing — one pathname shared by every memo request. */
+const MEMOS_PATH = "/api/memos";
+
+/** 015 step 009: the exact query of one character's notes listing (memos wire contract). */
+function notesSearch(characterId: string): string {
+  return `?scope=character&scope_id=${characterId}`;
+}
+
+/** 015 step 009: true for exactly `GET /api/memos?scope=character&scope_id=<id>`. */
+function isNotesListing(request: Seen, characterId: string): boolean {
+  return (
+    request.method === "GET" && request.path === MEMOS_PATH && request.search === notesSearch(characterId)
+  );
+}
+
+/** 015 step 009: the Notes section's own listing, answered empty everywhere but its own blocks. */
+const EMPTY_NOTES = { memos: [] };
+
 /**
  * 010 / 011: the two sections a loaded character's screen mounts ask for three listings under
  * that character — 010's setups, 011's sessions, and 011's own second request for the same
- * setups (the Select's choices). Answers all of them empty, any number of times, routed by the
- * exact path; returns null when the request is not one of them.
+ * setups (the Select's choices). 015 step 009 adds a fourth: the Notes section's listing, matched
+ * on the exact path **and** query. Answers all of them empty, any number of times; returns null
+ * when the request is not one of them.
  */
 function sectionListing(request: Seen, characterId: string): Response | null {
   if (request.method !== "GET") return null;
   if (request.path === setupsPath(characterId)) return jsonResponse(EMPTY_SETUPS, 200);
   if (request.path === sessionsPath(characterId)) return jsonResponse(EMPTY_SESSIONS, 200);
+  if (isNotesListing(request, characterId)) return jsonResponse(EMPTY_NOTES, 200);
   return null;
 }
 
@@ -947,6 +986,10 @@ describe("moving between characters builds a fresh Setups section (010 D11)", ()
       if (request.method === "GET" && request.path === sessionsPath(ID_B)) {
         return jsonResponse(EMPTY_SESSIONS, 200);
       }
+      // 015 step 009: the Notes section lists each character's notes, answered empty.
+      if (isNotesListing(request, ID_A) || isNotesListing(request, ID_B)) {
+        return jsonResponse(EMPTY_NOTES, 200);
+      }
       return notFoundResponse();
     });
     renderScreen(`/characters/${ID_A}`);
@@ -1114,6 +1157,10 @@ describe("moving between characters builds a fresh Sessions section (011 D15)", 
       ) {
         return jsonResponse(EMPTY_SETUPS, 200);
       }
+      // 015 step 009: the Notes section lists each character's notes, answered empty.
+      if (isNotesListing(request, ID_A) || isNotesListing(request, ID_B)) {
+        return jsonResponse(EMPTY_NOTES, 200);
+      }
       return notFoundResponse();
     });
     renderScreen(`/characters/${ID_A}`);
@@ -1133,5 +1180,196 @@ describe("moving between characters builds a fresh Sessions section (011 D15)", 
     expect(listings[0].search).toBe("");
     expect(sessionHrefs()).toEqual([`/sessions/${SESSION_OF_B.id}`]);
     expect(sessionsSwitch()).not.toBeChecked();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 015, step 009 — the character-level "Notes" region's place on this screen (015
+// DoD-4..DoD-6). Expected behaviour comes from 015's step file, 009.context.md and context.md:
+// D1 (existing mode and "ready" only, after the "Sessions" region, keyed by the character id;
+// its heading at the same order as the page's "Setups" and "Sessions" headings), D5 (a new
+// note POSTs on blur), D8 (an archived character is a valid target) and the memos wire
+// contract. The section's own behaviour is CharacterNotesSection.test.tsx's.
+const NOTES_REGION = "Notes";
+const NOTE_LABEL = "Note";
+const NEW_NOTE_NAME = "New note";
+const NO_NOTES_TEXT = "No notes yet.";
+
+const NOTE_STAMP = "2026-10-02T09:26:53.000000+00:00";
+
+/** A character-level wire Memo with all nine keys. */
+function characterNote(id: string, characterId: string, body: string, sortKey = 0): Memo {
+  return {
+    id,
+    scope: "character",
+    scope_id: characterId,
+    body,
+    is_enabled: true,
+    is_forced: false,
+    sort_key: sortKey,
+    created_at: NOTE_STAMP,
+    updated_at: NOTE_STAMP,
+  };
+}
+
+const NOTE_OF_A_1 = characterNote("7250000000000000201", ID_A, "Aria hums when she lies.");
+const NOTE_OF_A_2 = characterNote("7250000000000000202", ID_A, "Aria never says goodbye.", 1);
+const NOTE_OF_B = characterNote("7250000000000000203", ID_B, "Corvin keeps a ledger of debts.");
+
+/** Every memo request of any kind — the pathname `/api/memos` is shared by all of them. */
+function memoRequests(calls: Seen[]): Seen[] {
+  return calls.filter((call) => call.path === MEMOS_PATH || call.path.startsWith(`${MEMOS_PATH}/`));
+}
+
+function notesRegion(): HTMLElement {
+  return screen.getByRole("region", { name: NOTES_REGION });
+}
+
+function queryNotesRegion(): HTMLElement | null {
+  return screen.queryByRole("region", { name: NOTES_REGION });
+}
+
+/** Each note's text in the Notes region, in document order (each note's "Note" editor value). */
+function noteBodies(): string[] {
+  return within(notesRegion())
+    .queryAllByRole("textbox", { name: NOTE_LABEL })
+    .map((box) => (box as HTMLTextAreaElement).value);
+}
+
+function headingLevel(element: HTMLElement): number {
+  const aria = element.getAttribute("aria-level");
+  if (aria !== null) return Number(aria);
+  const match = /^H([1-6])$/.exec(element.tagName);
+  if (match === null) throw new Error(`not a heading element: ${element.tagName}`);
+  return Number(match[1]);
+}
+
+describe("015 step 009 — the Notes region's place on the character screen (D1)", () => {
+  it("once loaded, the Notes region is present with its heading and follows the Sessions region in document order — DoD-4", async () => {
+    const { calls } = await renderLoaded(CHAR_A);
+
+    const notes = await screen.findByRole("region", { name: NOTES_REGION });
+    const notesHeading = within(notes).getByRole("heading", { name: NOTES_REGION });
+    expect(notesHeading).toBeInTheDocument();
+    expect(within(mainRegion()).getByRole("region", { name: NOTES_REGION })).toBe(notes);
+    expect(precedes(sessionsRegion(), notes)).toBe(true);
+    expect(precedes(setupsRegion(), notes)).toBe(true);
+    // The same heading order as the page's "Setups" and "Sessions" headings.
+    const sessionsHeading = within(sessionsRegion()).getByRole("heading", { name: SESSIONS_REGION });
+    expect(headingLevel(notesHeading)).toBe(headingLevel(sessionsHeading));
+
+    const reads = memoRequests(calls);
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({ method: "GET", path: MEMOS_PATH, search: notesSearch(ID_A) });
+  });
+
+  it("new mode at /characters/new renders no Notes region and makes no /api/memos request — DoD-4", async () => {
+    const { calls } = stubBackend(() => notFoundResponse());
+    renderScreen(NEW_PATH);
+    await flush();
+
+    expect(queryNotesRegion()).toBeNull();
+    expect(memoRequests(calls)).toEqual([]);
+  });
+
+  it("the Character not found state renders no Notes region and makes no /api/memos request — DoD-4", async () => {
+    const { calls } = stubBackend(() => notFoundResponse());
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(NOT_FOUND_TEXT)).toBeInTheDocument();
+    expect(queryNotesRegion()).toBeNull();
+    expect(memoRequests(calls)).toEqual([]);
+  });
+
+  it("the Could not load the character state renders no Notes region and makes no /api/memos request — DoD-4", async () => {
+    const { calls } = stubBackend(() => serverError());
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(LOAD_FAILED_TEXT)).toBeInTheDocument();
+    expect(queryNotesRegion()).toBeNull();
+    expect(memoRequests(calls)).toEqual([]);
+  });
+});
+
+describe("015 step 009 — an archived character still carries the Notes region (D8)", () => {
+  it("renders the region and a new note there POSTs with that character's id — DoD-5", async () => {
+    const typed = "Voice: dry";
+    const { calls } = stubBackend((request) => {
+      if (request.method === "GET" && request.path === itemPath(ID_A)) {
+        return jsonResponse(ARCHIVED_A, 200);
+      }
+      if (request.method === "POST" && request.path === MEMOS_PATH && request.search === "") {
+        return jsonResponse(characterNote("9007199254740999", ID_A, typed), 201);
+      }
+      const listing = sectionListing(request, ID_A);
+      if (listing !== null) return listing;
+      return notFoundResponse();
+    });
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(notesRegion()).queryByText(NO_NOTES_TEXT)).not.toBeNull();
+    });
+
+    await newUser().click(within(notesRegion()).getByRole("button", { name: NEW_NOTE_NAME }));
+    await waitFor(() => {
+      expect(within(notesRegion()).queryAllByRole("textbox", { name: NOTE_LABEL })).toHaveLength(1);
+    });
+    const editor = within(notesRegion()).getByRole("textbox", { name: NOTE_LABEL });
+    fireEvent.change(editor, { target: { value: typed } });
+    fireEvent.blur(editor);
+
+    await waitFor(() => {
+      expect(matching(calls, "POST", MEMOS_PATH)).toHaveLength(1);
+    });
+    const posts = matching(calls, "POST", MEMOS_PATH);
+    expect(posts[0].search).toBe("");
+    expect(posts[0].body).toEqual({ scope: "character", scope_id: ID_A, body: typed });
+  });
+});
+
+describe("015 step 009 — moving between characters builds a fresh Notes region (D1)", () => {
+  it("navigating from a to b requests b's notes listing and shows b's notes, with none of a's — DoD-6", async () => {
+    const user = newUser();
+    const { calls } = stubBackend((request) => {
+      if (request.method === "GET" && request.path === itemPath(ID_A)) {
+        return jsonResponse(CHAR_A, 200);
+      }
+      if (request.method === "GET" && request.path === itemPath(ID_B)) {
+        return jsonResponse(CHAR_B, 200);
+      }
+      if (isNotesListing(request, ID_A)) {
+        return jsonResponse({ memos: [NOTE_OF_A_1, NOTE_OF_A_2] }, 200);
+      }
+      if (isNotesListing(request, ID_B)) {
+        return jsonResponse({ memos: [NOTE_OF_B] }, 200);
+      }
+      const listing = sectionListing(request, ID_A) ?? sectionListing(request, ID_B);
+      if (listing !== null) return listing;
+      return notFoundResponse();
+    });
+    renderScreen(`/characters/${ID_A}`);
+    await flush();
+    await waitFor(() => {
+      expect(noteBodies()).toEqual([NOTE_OF_A_1.body, NOTE_OF_A_2.body]);
+    });
+
+    await user.click(screen.getByRole("button", { name: PROBE_NAVIGATE }));
+    await flush();
+
+    expect(locationPath()).toBe(`/characters/${ID_B}`);
+    await waitFor(() => {
+      expect(noteBodies()).toEqual([NOTE_OF_B.body]);
+    });
+    const bReads = calls.filter((call) => isNotesListing(call, ID_B));
+    expect(bReads).toHaveLength(1);
+    expect(within(notesRegion()).queryByDisplayValue(NOTE_OF_A_1.body)).toBeNull();
+    expect(within(notesRegion()).queryByDisplayValue(NOTE_OF_A_2.body)).toBeNull();
+    expect(screen.queryByDisplayValue(NOTE_OF_A_1.body)).toBeNull();
+    expect(screen.queryByDisplayValue(NOTE_OF_A_2.body)).toBeNull();
   });
 });

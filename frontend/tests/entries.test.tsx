@@ -25,6 +25,12 @@
 // `APP_PATHS` block). The stub answers that one path by exact pathname — with the backend's own
 // 404 envelope, because both clauses assert the shell and the nav, never the centre's content.
 // No assertion about any entry's outcome changes, and no clause is dropped.
+//
+// Feature 013, step 007 DoD-10 widens the `app` entry's stub only, once more: the session
+// screen's ready render mounts the stream, which reads `/api/sessions/abc123/entries` and
+// `/api/sessions/abc123/zone`. The stub answers both exact paths with the backend's own 404
+// envelope (the session here is not found, so the stream never mounts — the answers only keep
+// the stub total). No assertion about any entry's outcome changes, and no clause is dropped.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { act, screen, within } from "@testing-library/react";
@@ -45,6 +51,8 @@ const SHELL_NAV_NAME = "Workspace navigation";
 /** 011 step 009 (DoD-12): the deep session path this file mounts the `app` entry at. */
 const DEEP_SESSION_ROUTE = "/sessions/abc123";
 const DEEP_SESSION_ITEM_PATH = "/api/sessions/abc123";
+/** 013 step 007 (DoD-10): the stream's two reads for that session. */
+const DEEP_SESSION_STREAM_PATHS = ["/api/sessions/abc123/entries", "/api/sessions/abc123/zone"];
 
 const FRONTEND_ROOT = path.resolve(__dirname, "..");
 const SRC_ROOT = path.join(FRONTEND_ROOT, "src");
@@ -149,7 +157,9 @@ function stubAppIdentity(answer: () => Response): void {
       // that one session. Matched on the exact pathname and answered with the backend's own 404
       // envelope — the clauses here assert the shell, not the screen — so every other request is
       // still a test failure and no assertion about the entry's outcome changes.
-      if (pathname === DEEP_SESSION_ITEM_PATH) {
+      // Feature 013, step 007 (DoD-10), stubs only: the stream under that session's ready
+      // render reads its entries and zone. Exact pathnames, the same 404 envelope.
+      if (pathname === DEEP_SESSION_ITEM_PATH || DEEP_SESSION_STREAM_PATHS.includes(pathname)) {
         return Promise.resolve(
           jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404),
         );
@@ -504,5 +514,21 @@ describe("the app entry gates on GET /api/me", () => {
     expect(shellNavIn(mountElement())).not.toBeNull();
     expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
     expect(appEntryRequests).toContain(DEEP_SESSION_ITEM_PATH);
+  });
+
+  // Feature 013, step 007 — DoD-10 (stub widening only). The deep session path's outcome is the
+  // shell in #root, exactly as before, and the app entry's own stub (the global `fetch` installed
+  // by this clause's `mountEntry`) answers the session's `/entries` and `/zone` GETs by exact
+  // path — any status, never the rejecting fallback. The probe goes to that stub directly, so it
+  // does not depend on which requests other clauses' leftover timers happen to make.
+  it("the app entry still boots at the deep session path with the stream's reads answered — DoD-10", async () => {
+    await mountEntry("app", DEEP_SESSION_ROUTE, signedIn);
+
+    expect(shellNavIn(mountElement())).not.toBeNull();
+    expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
+    for (const streamPath of DEEP_SESSION_STREAM_PATHS) {
+      const answered = await fetch(streamPath, { method: "GET" });
+      expect(answered).toBeInstanceOf(Response);
+    }
   });
 });

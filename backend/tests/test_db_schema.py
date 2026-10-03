@@ -625,7 +625,7 @@ NEW_006_TABLES = {"llm_servers", "models"}
 # "the registry, minus what pre-dated it, minus what later features added". A feature
 # that adds a table appends it here and gives its own delta a `LATER_THAN_<n>_TABLES`
 # set of its own, so the shape stays the same for 010 and beyond.
-LATER_THAN_006_TABLES = {"characters", "setups", "sessions", "messages"}  # 009/001, 010/001, 011/001, 012/001
+LATER_THAN_006_TABLES = {"characters", "setups", "sessions", "messages", "memos"}  # 009/001 .. 012/001, 015/001
 
 # context.md D1: the "active" switch admin-surfaces.md describes is deliberately dropped.
 FORBIDDEN_SERVER_FLAG_COLUMNS = ("active", "is_active", "enabled")
@@ -1061,7 +1061,7 @@ NEW_009_TABLES = {"characters"}
 # DoD-1/DoD-11's shared shape: features after 009 append their tables here (010/001 DoD-8
 # added "setups"; 011/001 DoD-9 added "sessions"; 012/001 DoD-1 added "messages"), so this
 # delta keeps meaning "009 added exactly `characters`".
-LATER_THAN_009_TABLES: set[str] = {"setups", "sessions", "messages"}
+LATER_THAN_009_TABLES: set[str] = {"setups", "sessions", "messages", "memos"}
 
 CHARACTERS_COLUMNS = {"id", "user_id", "name", "sheet", "archived_at", "created_at", "updated_at"}
 
@@ -1196,7 +1196,7 @@ NEW_010_TABLES = {"setups"}
 # this delta keeps meaning "010 added exactly `setups`" once a later feature declares one.
 # 011/001 DoD-9 appended "sessions" — the first entry this set ever needed; 012/001 DoD-1
 # appended "messages".
-LATER_THAN_010_TABLES: set[str] = {"sessions", "messages"}
+LATER_THAN_010_TABLES: set[str] = {"sessions", "messages", "memos"}
 
 SETUPS_COLUMNS = {
     "id",
@@ -1415,7 +1415,7 @@ NEW_011_TABLES = {"sessions"}
 # 011/001 DoD-1, in 009/001 DoD-11's shape: features after 011 append their tables here, so
 # this delta keeps meaning "011 added exactly `sessions`" once a later feature declares one.
 # 012/001 DoD-1 appended "messages" — the first entry this set ever needed.
-LATER_THAN_011_TABLES: set[str] = {"messages"}
+LATER_THAN_011_TABLES: set[str] = {"messages", "memos"}
 
 SESSIONS_COLUMNS = {
     "id",
@@ -1695,7 +1695,7 @@ PRE_012_TABLES = PRE_011_TABLES | NEW_011_TABLES
 NEW_012_TABLES = {"messages"}
 # 012/001 DoD-1, in 009/001 DoD-11's shape: features after 012 append their tables here, so
 # this delta keeps meaning "012 added exactly `messages`" once a later feature declares one.
-LATER_THAN_012_TABLES: set[str] = set()
+LATER_THAN_012_TABLES: set[str] = {"memos"}  # 015/001
 
 MESSAGES_COLUMNS = {
     "id",
@@ -2114,3 +2114,307 @@ def test_create_all_creates_no_sql_view__S012_001_DoD6(db_engine: Engine) -> Non
         names = {row[0] for row in connection.execute(text("SELECT name FROM sqlite_master")).all()}
         for name in SELECTABLE_NAMES:
             assert name not in names
+
+
+# ======================================================================================
+# Feature 015, step 001 (`001.table-errors-models.md`) — the `memos` table. Expected values
+# come from that step's DoD-1..5 and DoD-11 and feature 015's context.md D10 (ten columns,
+# `user_id` the only FK, `scope_id` polymorphic with no FK, a CHECK over the four scopes,
+# boolean defaults enabled / not forced, one composite non-unique index, no `ON DELETE`)
+# and D4 (no unique constraint on the sort key). Tests are suffixed `__S015_001_DoD<n>`.
+# DoD-6 (the CHECK's values equal the models' scope literal) lives in
+# `tests/test_memos_models.py`, next to the literal.
+# ======================================================================================
+
+# The registry as it stood before this step (003/001 + 005/001, 004/001, 006/001, 009/001,
+# 010/001, 011/001, 012/001).
+PRE_015_TABLES = PRE_012_TABLES | NEW_012_TABLES
+NEW_015_TABLES = {"memos"}
+# 015/001 DoD-1, in 009/001 DoD-11's shape: features after 015 append their tables here, so
+# this delta keeps meaning "015 added exactly `memos`" once a later feature declares one.
+LATER_THAN_015_TABLES: set[str] = set()
+
+MEMOS_COLUMNS = {
+    "id",
+    "user_id",
+    "scope",
+    "scope_id",
+    "body",
+    "is_enabled",
+    "is_forced",
+    "sort_key",
+    "created_at",
+    "updated_at",
+}
+
+# 015/001 DoD-2 — R6 / D10: one body, no title or name; no archive; no state or status.
+FORBIDDEN_MEMOS_COLUMNS = ("title", "name", "archived_at", "state", "status")
+
+MEMO_SCOPES = ("user", "character", "setup", "session")
+
+RAW_MEMOS_MINIMAL_INSERT = text(
+    "INSERT INTO memos (id, user_id, scope, scope_id, body, sort_key, created_at, updated_at) "
+    "VALUES (:id, :user_id, :scope, :scope_id, :body, :sort_key, :created_at, :updated_at)"
+)
+
+
+def _memos() -> Table:
+    return schema.metadata.tables["memos"]
+
+
+def _raw_memo(**overrides: Any) -> dict[str, Any]:
+    """A user-level note of owner 1 (`scope_id` = the owner), first in its level."""
+    row: dict[str, Any] = {
+        "id": 500,
+        "user_id": 1,
+        "scope": "user",
+        "scope_id": 1,
+        "body": "# Standing note\n",
+        "sort_key": 0,
+        "created_at": TIMESTAMP,
+        "updated_at": TIMESTAMP,
+    }
+    row.update(overrides)
+    return row
+
+
+def _seeded_memos_connection(db_engine: Engine) -> Connection:
+    """A connection on a fresh file: whole registry created by `create_all`, foreign keys
+    **on**, one owner (`id=1`) committed."""
+    with db_engine.connect() as setup:
+        schema.metadata.create_all(setup)
+        setup.commit()
+
+    connection = db_engine.connect()
+    connection.exec_driver_sql("PRAGMA foreign_keys = ON")
+    assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+    connection.execute(RAW_INSERT, _raw_row(id=1, username="owner"))
+    connection.commit()
+    return connection
+
+
+def _memo_ids(connection: Connection) -> set[int]:
+    return {row[0] for row in connection.execute(text("SELECT id FROM memos")).all()}
+
+
+# --- 015/001 DoD-1: the registry gains `memos` and nothing else ------------------------
+
+
+def test_registry_gains_exactly_the_memos_table__S015_001_DoD1() -> None:
+    """015/001 DoD-1 — `memos` is registered, and it is the only table 015 declares."""
+    assert "memos" in schema.metadata.tables
+    assert isinstance(_memos(), Table)
+    assert _memos().name == "memos"
+    assert set(schema.metadata.tables) - PRE_015_TABLES - LATER_THAN_015_TABLES == NEW_015_TABLES
+
+
+def test_registry_still_carries_every_pre_015_table__S015_001_DoD1() -> None:
+    """015/001 DoD-1 — 015 only adds: every table declared before it is still registered."""
+    assert PRE_015_TABLES <= set(schema.metadata.tables)
+    assert "memos" not in PRE_015_TABLES
+
+
+def test_the_015_delta_survives_a_table_a_later_feature_declares__S015_001_DoD1() -> None:
+    """015/001 DoD-1 — the delta is later-table-proof: a future table named in the
+    later-features set leaves it meaning "015 added exactly `memos`"."""
+    future_table = "a_table_a_later_feature_declares"
+    future_registry = set(schema.metadata.tables) | {future_table}
+    future_later = LATER_THAN_015_TABLES | {future_table}
+
+    assert future_registry - PRE_015_TABLES - future_later == NEW_015_TABLES
+
+
+def test_create_all_on_a_fresh_file_creates_memos__S015_001_DoD1(db_engine: Engine) -> None:
+    """015/001 DoD-1 — `create_all` against a fresh file creates `memos`, and the created set
+    obeys the same delta."""
+    with db_engine.connect() as connection:
+        schema.metadata.create_all(connection)
+        connection.commit()
+        created = _created_table_names(connection)
+    assert "memos" in created
+    assert created - PRE_015_TABLES - LATER_THAN_015_TABLES == NEW_015_TABLES
+
+
+# --- 015/001 DoD-11: every earlier delta still holds with `memos` registered --------------
+
+
+def test_the_006_delta_still_holds_with_memos_registered__S015_001_DoD11() -> None:
+    """015/001 DoD-11 — 006's delta still means "006 added exactly `llm_servers` and `models`"."""
+    assert PRE_006_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_006_TABLES - LATER_THAN_006_TABLES == NEW_006_TABLES
+
+
+def test_the_009_delta_still_holds_with_memos_registered__S015_001_DoD11() -> None:
+    """015/001 DoD-11 — 009's delta still means "009 added exactly `characters`"."""
+    assert PRE_009_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_009_TABLES - LATER_THAN_009_TABLES == NEW_009_TABLES
+
+
+def test_the_010_delta_still_holds_with_memos_registered__S015_001_DoD11() -> None:
+    """015/001 DoD-11 — 010's delta still means "010 added exactly `setups`"."""
+    assert PRE_010_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_010_TABLES - LATER_THAN_010_TABLES == NEW_010_TABLES
+
+
+def test_the_011_delta_still_holds_with_memos_registered__S015_001_DoD11() -> None:
+    """015/001 DoD-11 — 011's delta still means "011 added exactly `sessions`"."""
+    assert PRE_011_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_011_TABLES - LATER_THAN_011_TABLES == NEW_011_TABLES
+
+
+def test_the_012_delta_still_holds_with_memos_registered__S015_001_DoD11() -> None:
+    """015/001 DoD-11 — 012's delta still means "012 added exactly `messages`"."""
+    assert PRE_012_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_012_TABLES - LATER_THAN_012_TABLES == NEW_012_TABLES
+
+
+def test_every_earlier_later_features_set_now_names_memos__S015_001_DoD11() -> None:
+    """015/001 DoD-11 — the later-table-proof shape is kept by *adding* `memos` to each
+    earlier delta's later-features set rather than by rewriting its assertion."""
+    assert "memos" in LATER_THAN_006_TABLES
+    assert "memos" in LATER_THAN_009_TABLES
+    assert "memos" in LATER_THAN_010_TABLES
+    assert "memos" in LATER_THAN_011_TABLES
+    assert "memos" in LATER_THAN_012_TABLES
+    assert "memos" not in PRE_015_TABLES
+
+
+# --- 015/001 DoD-2: exactly ten columns, the primary key, all NOT NULL ---------------------
+
+
+def test_memos_has_exactly_the_ten_declared_columns__S015_001_DoD2() -> None:
+    """015/001 DoD-2 — exactly id, user_id, scope, scope_id, body, is_enabled, is_forced,
+    sort_key, created_at, updated_at."""
+    names = [column.name for column in _memos().columns]
+    assert len(names) == len(set(names))
+    assert set(names) == MEMOS_COLUMNS
+
+
+def test_memos_id_is_the_primary_key__S015_001_DoD2() -> None:
+    """015/001 DoD-2 — `id` alone is the primary key."""
+    assert [column.name for column in _memos().primary_key.columns] == ["id"]
+    assert _memos().c.id.primary_key is True
+
+
+@pytest.mark.parametrize("column", sorted(MEMOS_COLUMNS))
+def test_every_memos_column_is_not_nullable__S015_001_DoD2(column: str) -> None:
+    """015/001 DoD-2 — every column is NOT NULL."""
+    assert _memos().c[column].nullable is False
+
+
+@pytest.mark.parametrize("column", FORBIDDEN_MEMOS_COLUMNS)
+def test_memos_declares_no_title_name_archive_state_or_status_column__S015_001_DoD2(column: str) -> None:
+    """015/001 DoD-2 — US-119.AC-1 / R6: no `title`, `name`, `archived_at`, `state` or
+    `status` column."""
+    assert column not in _memos().c
+
+
+# --- 015/001 DoD-3: one bare FK, none on scope_id, one composite non-unique index ----------
+
+
+def test_memos_user_id_declares_a_foreign_key_to_users_id__S015_001_DoD3() -> None:
+    """015/001 DoD-3 — `user_id` carries a declared foreign key targeting `users.id`."""
+    targets = {fk.target_fullname for fk in _memos().c.user_id.foreign_keys}
+    assert targets == {"users.id"}
+
+
+def test_memos_scope_id_declares_no_foreign_key__S015_001_DoD3() -> None:
+    """015/001 DoD-3 — the polymorphic `scope_id` has no foreign key."""
+    assert not _memos().c.scope_id.foreign_keys
+
+
+def test_memos_declares_exactly_the_one_foreign_key__S015_001_DoD3() -> None:
+    """015/001 DoD-3 — the table's only foreign key is `user_id` → `users.id`."""
+    pairs = {(fk.parent.name, fk.target_fullname) for fk in _memos().foreign_keys}
+    assert pairs == {("user_id", "users.id")}
+
+
+def test_memos_foreign_keys_declare_no_on_delete_action__S015_001_DoD3() -> None:
+    """015/001 DoD-3 — no foreign key declares an `ON DELETE` action."""
+    assert _memos().foreign_keys
+    for fk in _memos().foreign_keys:
+        assert fk.ondelete is None, f"{fk.parent.name} declares ON DELETE {fk.ondelete}"
+
+
+def test_memos_declares_exactly_one_non_unique_index_over_the_level_and_sort_key__S015_001_DoD3() -> None:
+    """015/001 DoD-3 — exactly one index, non-unique, over `user_id`, `scope`, `scope_id`,
+    `sort_key` in that order."""
+    assert len(_memos().indexes) == 1
+    index = next(iter(_memos().indexes))
+    assert [column.name for column in index.columns] == ["user_id", "scope", "scope_id", "sort_key"]
+    assert not index.unique
+
+
+# --- 015/001 DoD-4: the flag defaults hold in a real database ------------------------------
+
+
+def test_a_row_inserted_without_flags_reads_back_enabled_and_not_forced__S015_001_DoD4(
+    db_engine: Engine,
+) -> None:
+    """015/001 DoD-4 — US-053.AC-1: a row inserted with only id, user_id, scope, scope_id,
+    body, sort_key and the two timestamps reads back with `is_enabled` true and `is_forced`
+    false."""
+    with _seeded_memos_connection(db_engine) as connection:
+        connection.execute(RAW_MEMOS_MINIMAL_INSERT, _raw_memo(id=500))
+        connection.commit()
+
+        memos = _memos()
+        row = connection.execute(
+            memos.select().with_only_columns(memos.c.is_enabled, memos.c.is_forced).where(memos.c.id == 500)
+        ).one()
+        assert row.is_enabled is True
+        assert row.is_forced is False
+
+        raw = connection.execute(text("SELECT is_enabled, is_forced FROM memos WHERE id = 500")).one()
+        assert bool(raw[0]) is True
+        assert bool(raw[1]) is False
+
+
+# --- 015/001 DoD-5: the scope CHECK, the FK and no uniqueness in a real database ----------
+
+
+def test_memos_refuses_an_unknown_scope__S015_001_DoD5(db_engine: Engine) -> None:
+    """015/001 DoD-5 — a row with `scope` 'world' fails to insert."""
+    with _seeded_memos_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(RAW_MEMOS_MINIMAL_INSERT, _raw_memo(id=501, scope="world", scope_id=77))
+
+
+@pytest.mark.parametrize("scope", MEMO_SCOPES)
+def test_memos_accepts_each_of_the_four_scopes__S015_001_DoD5(db_engine: Engine, scope: str) -> None:
+    """015/001 DoD-5 — each of `user`, `character`, `setup`, `session` inserts."""
+    with _seeded_memos_connection(db_engine) as connection:
+        connection.execute(RAW_MEMOS_MINIMAL_INSERT, _raw_memo(id=502, scope=scope, scope_id=77))
+        connection.commit()
+        assert _memo_ids(connection) == {502}
+        stored = connection.execute(text("SELECT scope FROM memos WHERE id = 502")).scalar_one()
+        assert stored == scope
+
+
+def test_memos_accepts_a_scope_id_that_names_no_row__S015_001_DoD5(db_engine: Engine) -> None:
+    """015/001 DoD-5 — with foreign keys on, `scope_id` is not FK-enforced (D10: polymorphic)."""
+    with _seeded_memos_connection(db_engine) as connection:
+        connection.execute(RAW_MEMOS_MINIMAL_INSERT, _raw_memo(id=503, scope="character", scope_id=999_999))
+        connection.commit()
+        assert _memo_ids(connection) == {503}
+
+
+def test_memos_refuses_a_row_whose_user_id_names_no_user__S015_001_DoD5(db_engine: Engine) -> None:
+    """015/001 DoD-5 — with foreign keys on, the `users` FK is enforced."""
+    with _seeded_memos_connection(db_engine) as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(RAW_MEMOS_MINIMAL_INSERT, _raw_memo(id=504, user_id=999_999, scope_id=999_999))
+
+
+def test_memos_accepts_two_rows_at_the_same_level_and_sort_key__S015_001_DoD5(db_engine: Engine) -> None:
+    """015/001 DoD-5 — D4: two rows with the same `user_id`, `scope`, `scope_id` and
+    `sort_key` both insert (no uniqueness)."""
+    with _seeded_memos_connection(db_engine) as connection:
+        connection.execute(
+            RAW_MEMOS_MINIMAL_INSERT, _raw_memo(id=505, scope="session", scope_id=30, sort_key=3, body="a")
+        )
+        connection.execute(
+            RAW_MEMOS_MINIMAL_INSERT, _raw_memo(id=506, scope="session", scope_id=30, sort_key=3, body="b")
+        )
+        connection.commit()
+        assert _memo_ids(connection) == {505, 506}

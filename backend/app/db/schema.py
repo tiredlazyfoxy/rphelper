@@ -38,6 +38,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     select,
+    true,
 )
 
 from app.roles import Role
@@ -322,6 +323,59 @@ messages = Table(
     CheckConstraint("related_to IS NULL OR settled_at IS NULL", name="ck_messages_buried_or_settled"),
     Index("ix_messages_session_id_settled_at", "session_id", "settled_at"),
     Index("ix_messages_related_to", "related_to"),
+)
+
+
+#: The roleplayer's notes (`data-model.md` § `memos`; feature `015`, D10). Exactly ten
+#: columns. Deliberately absent: `title`, `name`, `archived_at` and any `state` / `status`
+#: column — `data-model.md` forbids each, and a note is removed by a hard delete (D2), never
+#: archived. `user_id` is the direct owner column every read scopes by; its foreign key is bare,
+#: with **no `ON DELETE`** — nothing deletes a user. `scope` + `scope_id` is the polymorphic
+#: level pair: `scope_id` is the caller, a character, a setup or a session id depending on
+#: `scope`, so it carries **no foreign key** (the referential-integrity trade `data-model.md`
+#: records). `scope` is a non-native enum with its CHECK created (the `users.role` form, D10):
+#: the four values are R2's chain itself, and a row with any other scope would be a note no
+#: chain query ever finds — the constraint makes it unwritable. The same four strings are the
+#: scope literal in `models/memos.py` (`db/` never imports `models/`); a test pins the
+#: equality. `sort_key` has no default and **no unique constraint**: the service allocates it
+#: inside the create transaction (D4). `is_enabled` defaults true and `is_forced` false, each
+#: with a matching server default. One **non-unique composite** index on
+#: `(user_id, scope, scope_id, sort_key)`: the level list filters the first three and orders by
+#: the fourth, each chain OR-term shares the three-column prefix, and the `MAX(sort_key)`
+#: allocation is an index seek. Timestamps are the fixed-width UTC text form.
+memos = Table(
+    "memos",
+    metadata,
+    Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=False),
+    Column(
+        "user_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("users.id"),
+        nullable=False,
+    ),
+    Column(
+        "scope",
+        Enum(
+            "user",
+            "character",
+            "setup",
+            "session",
+            name="memos_scope",
+            native_enum=False,
+            create_constraint=True,
+            validate_strings=True,
+            length=16,
+        ),
+        nullable=False,
+    ),
+    Column("scope_id", BigInteger().with_variant(Integer(), "sqlite"), nullable=False),
+    Column("body", Text, nullable=False),
+    Column("is_enabled", Boolean, nullable=False, default=True, server_default=true()),
+    Column("is_forced", Boolean, nullable=False, default=False, server_default=false()),
+    Column("sort_key", Integer, nullable=False),
+    Column("created_at", Text, nullable=False),
+    Column("updated_at", Text, nullable=False),
+    Index("ix_memos_user_id_scope_scope_id_sort_key", "user_id", "scope", "scope_id", "sort_key"),
 )
 
 

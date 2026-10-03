@@ -10,6 +10,11 @@ status codes; step 001's ``messages`` Table for the one raw insert DoD-5 needs).
 
 Covers step 004 DoD-1 .. DoD-20. DoD-21 is ``[manual/live]`` and carries no test.
 
+Amended by feature 014, step 001 (``docs/plans/014.entry-editing-and-copy-out/
+001.settled-edit-backend.md``, D1 / D2): ``PATCH /api/messages/{id}`` now edits a settled
+entry of any kind; only a buried message stays 409 ``message_not_editable``. 012 DoD-13's
+settled-refusal cases are rewritten as successes; the 014 cases carry ``__S014_001_DoD<n>``.
+
 The application is always the real factory's (``create_app()``), pinned to the per-test
 database through ``dependency_overrides[get_settings]``. Each signed-in caller gets its own
 ``TestClient`` carrying exactly one session cookie. Characters come from 009's
@@ -874,43 +879,63 @@ def test_patch_on_a_zone_message_answers_the_edited_message__S012_004_DoD13(
     assert zone[0]["text"] == "Edited ((keep))"
 
 
-def test_patch_on_a_filed_partner_block_answers_message_not_editable__S012_004_DoD13(
+def test_patch_on_a_filed_partner_block_answers_the_edited_entry__S012_004_DoD13__S014_001_DoD10(
     application: FastAPI, db_settings: Settings
 ) -> None:
-    """DoD-13 — D2: a settled partner entry is not editable (until 014); its text is unchanged."""
+    """DoD-13 (amended by 014 001 DoD-10) — 014 D1: a filed partner block is editable; 200 with
+    kind `partner`, the new text and the same `settled_at`; entries show it (US-109.AC-1)."""
     client = _player_a(application, db_settings)
     session = _new_session(client)
     filed = _file_partner(client, session["id"], "Partner block.")
 
     response = client.patch(_message_path(filed["id"]), json={"text": "Changed."})
 
-    _assert_envelope(response, 409, MESSAGE_NOT_EDITABLE)
+    assert response.status_code == 200, response.text
+    edited = response.json()
+    _assert_message_shape(edited)
+    assert edited["id"] == filed["id"]
+    assert edited["kind"] == "partner"
+    assert edited["text"] == "Changed."
+    assert edited["settled_at"] == filed["settled_at"]
     entries = _entries(client, session["id"])
     assert _ids(entries) == [filed["id"]]
-    assert entries[0]["text"] == "Partner block."
+    assert entries[0]["text"] == "Changed."
+    assert entries[0]["kind"] == "partner"
 
 
-def test_patch_on_a_settled_turn_answers_message_not_editable__S012_004_DoD13(
+def test_patch_on_a_settled_decision_keeps_the_kind__S012_004_DoD13__S014_001_DoD10(
     application: FastAPI, db_settings: Settings
 ) -> None:
-    """DoD-13 — D2: a settled turn is not editable (until 014); its text is unchanged."""
+    """DoD-13 (amended by 014 001 DoD-10) — a settled decision (`((skip ahead))`, settled)
+    edited to `Skip to morning.` answers 200 with kind `decision` (US-110.AC-1, R12)."""
     client = _player_a(application, db_settings)
     session = _new_session(client)
-    message = _append(client, session["id"], "A settled turn.")
-    _settle(client, session["id"])
-    entries_before = _entries(client, session["id"])
+    _append(client, session["id"], "((skip ahead))")
+    settled = _settle(client, session["id"])
+    assert settled["kind"] == "decision"
+    decision_id = settled["entry_id"]
+    (before,) = _entries(client, session["id"])
 
-    response = client.patch(_message_path(message["id"]), json={"text": "Changed."})
+    response = client.patch(_message_path(decision_id), json={"text": "Skip to morning."})
 
-    _assert_envelope(response, 409, MESSAGE_NOT_EDITABLE)
-    assert _entries(client, session["id"]) == entries_before
-    assert entries_before[0]["text"] == "A settled turn."
+    assert response.status_code == 200, response.text
+    edited = response.json()
+    _assert_message_shape(edited)
+    assert edited["id"] == decision_id
+    assert edited["kind"] == "decision"
+    assert edited["text"] == "Skip to morning."
+    assert edited["settled_at"] == before["settled_at"]
+    entries = _entries(client, session["id"])
+    assert _ids(entries) == [decision_id]
+    assert entries[0]["kind"] == "decision"
+    assert entries[0]["text"] == "Skip to morning."
 
 
-def test_patch_on_a_buried_message_answers_message_not_editable__S012_004_DoD13(
+def test_patch_on_a_buried_message_answers_message_not_editable__S012_004_DoD13__S014_001_DoD10(
     application: FastAPI, db_settings: Settings
 ) -> None:
-    """DoD-13 — US-116.AC-1, D2: a buried message → 409; re-opening shows its text unchanged."""
+    """DoD-13 (kept by 014 001 DoD-10) — US-116.AC-1: a buried message → 409; re-opening shows
+    its text unchanged."""
     client = _player_a(application, db_settings)
     session = _new_session(client)
     buried = _append(client, session["id"], "Buried line.")
@@ -1305,3 +1330,170 @@ def test_011_routes_still_answer_with_this_router_registered__S012_004_DoD20(
     assert client.get(_session_path(sid)).status_code == 200
     assert client.post(f"{SESSIONS_PATH}/{sid}/archive").status_code == 200
     assert client.post(f"{SESSIONS_PATH}/{sid}/restore").status_code == 200
+
+
+# =====================================================================================
+# Feature 014, step 001 — PATCH on settled entries (D1, D2)
+#
+# Expected values come from ``docs/plans/014.entry-editing-and-copy-out/
+# 001.settled-edit-backend.md`` (DoD-9 .. DoD-12) and ``001.context.md``. The route and
+# its wire shapes are 012's, unchanged.
+# =====================================================================================
+
+
+def _settled_turn_between_partners(client: TestClient) -> tuple[str, dict[str, Any]]:
+    """A session whose entries are [partner, settled turn, partner] and whose zone holds a draft.
+
+    Returns the session id and the settled turn as read from ``GET …/entries``.
+    """
+    session = _new_session(client)
+    sid = session["id"]
+    _file_partner(client, sid, "Opening block.")
+    turn = _append(client, sid, "A turn with a typpo.")
+    settled = _settle(client, sid)
+    assert settled["entry_id"] == turn["id"]
+    assert settled["kind"] == "turn"
+    _file_partner(client, sid, "Closing block.")
+    _append(client, sid, "A draft in the zone.")
+    entries = _entries(client, sid)
+    assert len(entries) == 3
+    assert entries[1]["id"] == turn["id"]
+    return sid, entries[1]
+
+
+# --- 014 DoD-9: a settled turn is edited in place -----------------------------------
+
+
+def test_patch_on_a_settled_turn_answers_200_with_the_edited_entry__S014_001_DoD9(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """014 DoD-9 — US-110.AC-1, US-032.AC-1: 200, the exact text, kind `turn`, the same
+    `settled_at` as read from `GET …/entries`."""
+    client = _player_a(application, db_settings)
+    sid, turn = _settled_turn_between_partners(client)
+
+    response = client.patch(_message_path(turn["id"]), json={"text": "Edited turn."})
+
+    assert response.status_code == 200, response.text
+    edited = response.json()
+    _assert_message_shape(edited)
+    assert edited["id"] == turn["id"]
+    assert edited["session_id"] == sid
+    assert edited["text"] == "Edited turn."
+    assert edited["kind"] == "turn"
+    assert edited["settled_at"] == turn["settled_at"]
+    assert edited["created_at"] == turn["created_at"]
+
+
+def test_a_settled_edit_keeps_the_entry_position_and_leaves_the_zone__S014_001_DoD9(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """014 DoD-9 — `GET …/entries` shows the new text at the same position (neighbours
+    unchanged); `GET …/zone` is unchanged."""
+    client = _player_a(application, db_settings)
+    sid, turn = _settled_turn_between_partners(client)
+    entries_before = _entries(client, sid)
+    zone_before = _zone(client, sid)
+
+    response = client.patch(_message_path(turn["id"]), json={"text": "Edited turn."})
+    assert response.status_code == 200, response.text
+
+    entries = _entries(client, sid)
+    assert _ids(entries) == _ids(entries_before)
+    assert entries[1]["text"] == "Edited turn."
+    assert entries[1]["kind"] == "turn"
+    assert entries[1]["settled_at"] == turn["settled_at"]
+    assert entries[0] == entries_before[0]
+    assert entries[2] == entries_before[2]
+    assert _zone(client, sid) == zone_before
+
+
+# --- 014 DoD-11: text validation on a settled entry ---------------------------------
+
+
+@pytest.mark.parametrize("text", ["", "   ", _MISSING], ids=["empty", "whitespace", "missing"])
+def test_patch_on_a_settled_entry_refuses_blank_text__S014_001_DoD11(
+    application: FastAPI, db_settings: Settings, text: Any
+) -> None:
+    """014 DoD-11 — 012 D9: blank or missing text → 422; the entry is unchanged."""
+    client = _player_a(application, db_settings)
+    sid, turn = _settled_turn_between_partners(client)
+    entries_before = _entries(client, sid)
+
+    response = client.patch(_message_path(turn["id"]), json=_text_body(text))
+
+    assert response.status_code == 422, response.text
+    assert _entries(client, sid) == entries_before
+
+
+def test_patch_on_a_settled_entry_accepts_a_500000_character_text__S014_001_DoD11(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """014 DoD-11 — R10: no application layer refuses an enormous settled edit (200)."""
+    client = _player_a(application, db_settings)
+    _, turn = _settled_turn_between_partners(client)
+    enormous = "c" * 500_000
+
+    response = client.patch(_message_path(turn["id"]), json={"text": enormous})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["text"] == enormous
+
+
+# --- 014 DoD-12: last use, refusals and owner scope ---------------------------------
+
+
+def test_a_settled_patch_keeps_last_use_moving_forward__S014_001_DoD12(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """014 DoD-12 — D2: after a settled PATCH, `last_used_at` is not earlier than before."""
+    client = _player_a(application, db_settings)
+    sid, turn = _settled_turn_between_partners(client)
+    before = _read_session(client, sid)["last_used_at"]
+    _pause()
+
+    response = client.patch(_message_path(turn["id"]), json={"text": "Edited turn."})
+    assert response.status_code == 200, response.text
+
+    after = _read_session(client, sid)["last_used_at"]
+    assert TIMESTAMP_PATTERN.match(after) is not None
+    assert after >= before
+
+
+def test_a_refused_buried_patch_leaves_last_use_unchanged__S014_001_DoD12(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """014 DoD-12 — a refused (buried) PATCH writes nothing, the bump included."""
+    client = _player_a(application, db_settings)
+    session = _new_session(client)
+    sid = session["id"]
+    buried = _append(client, sid, "Buried line.")
+    _append(client, sid, "Head line.")
+    settled = _settle(client, sid)
+    assert settled["buried_ids"] == [buried["id"]]
+    before = _read_session(client, sid)["last_used_at"]
+    _pause()
+
+    response = client.patch(_message_path(buried["id"]), json={"text": "Changed."})
+
+    _assert_envelope(response, 409, MESSAGE_NOT_EDITABLE)
+    assert _read_session(client, sid)["last_used_at"] == before
+
+
+def test_another_users_settled_entry_answers_404_message_not_found__S014_001_DoD12(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """014 DoD-12 — R5: as B, PATCH on A's settled entry → 404 `message_not_found`, the same
+    body as for nobody's id; A's entries are unchanged."""
+    owner = _player_a(application, db_settings)
+    sid, turn = _settled_turn_between_partners(owner)
+    entries_before = _entries(owner, sid)
+    intruder = _player_b(application, db_settings)
+
+    foreign = intruder.patch(_message_path(turn["id"]), json={"text": "Hijacked."})
+    unknown = intruder.patch(_message_path(UNKNOWN_MESSAGE_ID), json={"text": "Hijacked."})
+
+    body = _assert_envelope(foreign, 404, MESSAGE_NOT_FOUND)
+    assert unknown.status_code == 404, unknown.text
+    assert body == unknown.json()
+    assert _entries(owner, sid) == entries_before

@@ -1,6 +1,7 @@
 // The centre column of `/sessions/:id` (feature 011, step 009, D17): the session's own
-// screen, which in 011 is a header plus the line "No entries yet." — entries, the ruler, the
-// composer and the zone are 012 / 013's, and the wall is 015 / 016's. The screen holds no
+// screen — a header plus the session stream (013 step 007: the settled record, the ruler,
+// the kind switch, the zone and the composer, in `SessionStream`, which owns and loads its
+// own state); the wall is 015 / 016's. The screen holds no
 // business logic of its own: it creates one `SessionScreenState` (this step) with `useState`
 // and calls that module's one effect. `CharacterScreen.tsx` (009 step 007) is the template.
 //
@@ -11,9 +12,9 @@
 // text is the neutral "Character" and no second request is made for a name (D17).
 //
 // Deliberately absent, per D5 / D17 / D18: any Archive, Restore or "Actions for …" control
-// (archiving a session lives on the character screen only), any textbox, any stream, ruler,
-// composer, zone or wall, and any notification API import — the failure branch renders its
-// one fixed sentence inline with a Retry, and the ready centre holds no button at all.
+// (archiving a session lives on the character screen only), the wall, and any notification
+// API import — the failure branch renders its one fixed sentence inline with a Retry. The
+// header itself holds no button; every control in the ready centre is the stream's.
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
@@ -35,6 +36,8 @@ import type { CharactersState } from "./charactersState";
 import { isSessionArchived } from "./sessionsApi";
 import { formatSessionStart } from "./sessionLabel";
 import { SessionScreenState, loadSessionScreen } from "./sessionScreenState";
+import { SessionStream } from "./SessionStream";
+import { MemoChainSection } from "./MemoChainSection";
 
 /** The link text when the workspace list does not hold this session's character (D17). */
 const UNKNOWN_CHARACTER = "Character";
@@ -52,7 +55,7 @@ export type SessionScreenProps = {
 
 /**
  * The session's own screen: the header (character link, start-time heading, setup label and
- * the "Archived" badge) plus "No entries yet.", with the loading, not-found and failed
+ * the "Archived" badge) plus the session stream, with the loading, not-found and failed
  * branches. Keyed by the session id by `SessionRoute`, so each session gets fresh state.
  */
 export const SessionScreen = observer(function SessionScreen(
@@ -149,8 +152,11 @@ export const SessionScreen = observer(function SessionScreen(
             )}
           </Group>
         </Stack>
-        {/* 012 / 013 replace this line with the entry stream, the ruler and the zone. */}
-        <Text c="dimmed">No entries yet.</Text>
+        {/* 013 D13: the stream (record, ruler, kind switch, zone, composer) — for archived
+            sessions too (R6). "No entries yet." is now the record's empty line. */}
+        <SessionStream sessionId={props.sessionId} />
+        {/* 015 D1: the chain's Notes section, after the stream (016 moves it to the wall). */}
+        <MemoChainSection sessionId={props.sessionId} />
       </Stack>
     </Container>
   );

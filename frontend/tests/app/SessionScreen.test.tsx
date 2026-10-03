@@ -24,19 +24,75 @@
 // - Stubs and request counters key on the **exact** pathname (context.md "Stubs routed by
 //   exact path"): `/api/sessions/<id>`, `/api/characters` and `/api/characters/<id>` share
 //   prefixes.
-import { act, render, screen, within } from "@testing-library/react";
+//
+// Amended by feature 013, step 007 (DoD-6..DoD-8): the ready render now mounts the session's
+// stream (013 D13) in place of 011's "No entries yet." line, which is now the empty record's
+// line and appears only **after** the stream loads (find, not get). Every case that reaches the
+// ready render stubs `GET /api/sessions/<id>/entries` → `{ "entries": [] }` and
+// `GET /api/sessions/<id>/zone` → `{ "messages": [] }` by exact path (`serveSessions` and
+// `streamAnswer`). 011 DoD-10 ("no textbox and no button") is **replaced** by 013 DoD-6 (the
+// composer, Send and Settle are expected; Archive / Restore / "Actions for …" stay absent).
+// 011 DoD-5's request count now allows exactly the two stream GETs besides the session's own.
+// 011 DoD-4's "nothing else in the header" check is scoped to the header block (the ancestor of
+// the start-time heading that does not contain the stream), since the stream's own texts now
+// share the main region. 011 DoD-6 and DoD-9 keep their assertions with widened stubs. The 013
+// clauses are in the block at the bottom, under a describe naming 013 step 007, so their
+// "— DoD-N" tags are 013 step 007's.
+//
+// Amended by feature 015, step 008 (DoD-10): the ready render now also mounts the session's
+// "Notes" section, which reads `GET /api/sessions/<id>/memo-chain` on mount. `streamAnswer`
+// answers that exact path too (`{ "levels": [] }` unless a test supplies a chain), so every
+// ready-state case keeps its meaning; 011 DoD-5's exact request list gains that one GET. 011
+// DoD-10's "no textbox and no button" clause no longer exists (013 step 007 replaced it with the
+// Archive / Restore / "Actions for …" absence checks, which no Notes control is named like), so
+// there is nothing left to scope. `Seen` now records the parsed JSON body (for 015's PATCH
+// clause), and `src/shared/MarkdownEditor` is replaced by step 007's labelled-`<textarea>` stub
+// (id from React's `useId`) so the notes' editors can be typed into. No other assertion changes.
+// The 015 clauses are in the last block, under a describe naming 015 step 008, so their
+// "— DoD-N" tags are 015 step 008's.
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
+import type { ChangeEvent } from "react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionRoute, SessionScreen } from "../../src/app/SessionScreen";
 import type { Character } from "../../src/app/charactersApi";
 import { CharactersState } from "../../src/app/charactersState";
+import type { Memo, MemoChainLevel, MemoScope } from "../../src/app/memosApi";
 import type { Session } from "../../src/app/sessionsApi";
+import type { Message, MessageKind } from "../../src/app/streamApi";
 import { AppProviders } from "../../src/shared/AppProviders";
 
+// 015 step 008: the notes' editors, as step 007's MemoLevelGroup.test.tsx stubs them.
+vi.mock("../../src/shared/MarkdownEditor", async () => {
+  const { createElement, useId } = await import("react");
+  type StubProps = {
+    label: string;
+    value: string;
+    onChange: (markdown: string) => void;
+    readOnly?: boolean;
+  };
+  return {
+    MarkdownEditor: (props: StubProps) => {
+      const id = `markdown-editor-${useId()}`;
+      return createElement(
+        "div",
+        null,
+        createElement("label", { htmlFor: id }, props.label),
+        createElement("textarea", {
+          id,
+          value: props.value,
+          readOnly: props.readOnly ?? false,
+          onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
+        }),
+      );
+    },
+  };
+});
+
 type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-type Seen = { method: string; path: string; search: string };
+type Seen = { method: string; path: string; search: string; body: unknown };
 type User = ReturnType<typeof userEvent.setup>;
 
 // ---------------------------------------------------------------- the spec's names
@@ -176,6 +232,13 @@ function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
   return (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
 }
 
+/** 015 step 008: the parsed JSON body of a request, undefined when it has none. */
+function parseBody(init?: RequestInit): unknown {
+  const raw = init?.body;
+  if (raw === undefined || raw === null) return undefined;
+  return JSON.parse(String(raw)) as unknown;
+}
+
 /** A URL-routed in-memory backend; every request is recorded in order. */
 function stubBackend(handler: (request: Seen) => Response | Promise<Response>) {
   const calls: Seen[] = [];
@@ -185,6 +248,7 @@ function stubBackend(handler: (request: Seen) => Response | Promise<Response>) {
       method: requestMethod(input, init),
       path: url.pathname,
       search: url.search,
+      body: parseBody(init),
     };
     calls.push(request);
     return handler(request);
@@ -193,15 +257,73 @@ function stubBackend(handler: (request: Seen) => Response | Promise<Response>) {
   return { mock, calls };
 }
 
-/** Answers a GET of each given session by exact path, and 404s everything else. */
-function serveSessions(...rows: Session[]) {
+/** 013 step 007: the stream's two reads, by exact path. */
+function entriesPath(sessionId: string): string {
+  return `/api/sessions/${sessionId}/entries`;
+}
+
+function zonePath(sessionId: string): string {
+  return `/api/sessions/${sessionId}/zone`;
+}
+
+/** 015 step 008: the Notes section's one read, by exact path. */
+function memoChainPath(sessionId: string): string {
+  return `/api/sessions/${sessionId}/memo-chain`;
+}
+
+/**
+ * 013 step 007: answers a GET of `<id>/entries` or `<id>/zone` for any of the given session
+ * ids (entries from `entriesBy`, else empty; the zone always empty), or undefined.
+ * 015 step 008: also a GET of `<id>/memo-chain` (levels from `chainsBy`, else none).
+ */
+function streamAnswer(
+  request: Seen,
+  sessionIds: string[],
+  entriesBy: Record<string, Message[]> = {},
+  chainsBy: Record<string, MemoChainLevel[]> = {},
+): Response | undefined {
+  if (request.method !== "GET") return undefined;
+  for (const id of sessionIds) {
+    if (request.path === entriesPath(id)) return jsonResponse({ entries: entriesBy[id] ?? [] }, 200);
+    if (request.path === zonePath(id)) return jsonResponse({ messages: [] }, 200);
+    if (request.path === memoChainPath(id)) return jsonResponse({ levels: chainsBy[id] ?? [] }, 200);
+  }
+  return undefined;
+}
+
+/**
+ * Answers a GET of each given session by exact path, and (013 step 007) its stream's entries
+ * and zone, and 404s everything else.
+ */
+function serveSessionsWith(entriesBy: Record<string, Message[]>, ...rows: Session[]) {
+  const ids = rows.map((row) => row.id);
   return stubBackend((request) => {
     if (request.method === "GET") {
       const row = rows.find((candidate) => request.path === sessionPath(candidate.id));
       if (row !== undefined) return jsonResponse(row, 200);
     }
-    return notFoundResponse();
+    return streamAnswer(request, ids, entriesBy) ?? notFoundResponse();
   });
+}
+
+function serveSessions(...rows: Session[]) {
+  return serveSessionsWith({}, ...rows);
+}
+
+const ENTRY_STAMP = "2026-05-10T09:30:00.000000+00:00";
+
+/** A settled entry with all eight keys. */
+function settledEntry(sessionId: string, id: string, kind: MessageKind, text: string): Message {
+  return {
+    id,
+    session_id: sessionId,
+    role: "user",
+    kind,
+    text,
+    settled_at: ENTRY_STAMP,
+    created_at: ENTRY_STAMP,
+    updated_at: ENTRY_STAMP,
+  };
 }
 
 function deferred<T>() {
@@ -312,11 +434,41 @@ function sessionRequests(calls: Seen[], sessionId: string): Seen[] {
   return calls.filter((call) => call.method === "GET" && call.path === sessionPath(sessionId));
 }
 
+function getRequests(calls: Seen[], path: string): Seen[] {
+  return calls.filter((call) => call.method === "GET" && call.path === path);
+}
+
+/** 013 step 007: the stream's composer, which only a ready stream renders. */
+function mainComposer(): HTMLElement {
+  return within(mainRegion()).getByRole("textbox", { name: "Composer" });
+}
+
+/**
+ * 013 step 007: the header block — the outermost ancestor of the start-time heading that does
+ * not also contain the stream (its composer). 011's header stays outside the stream (007
+ * Interface intent), so this is the header and nothing of the stream.
+ */
+function headerBlock(): HTMLElement {
+  const stream = mainComposer();
+  let block: HTMLElement = within(mainRegion()).getByRole("heading", { name: START_LABEL_HEADING });
+  while (block.parentElement !== null && !block.parentElement.contains(stream)) {
+    block = block.parentElement;
+  }
+  return block;
+}
+
 // ---------------------------------------------------------------------------
 describe("the screen while its session is loading (D17)", () => {
   it("shows a loader while the GET is pending, then the session — DoD-2", async () => {
     const gate = deferred<Response>();
-    stubBackend(() => gate.promise);
+    // 013 step 007: only the session's own GET is gated; the stream's two reads answer empty.
+    stubBackend(
+      (request) =>
+        streamAnswer(request, [SESSION_A_ID]) ??
+        (request.method === "GET" && request.path === sessionPath(SESSION_A_ID)
+          ? gate.promise
+          : notFoundResponse()),
+    );
     renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
 
     expect(loaders().length).toBeGreaterThan(0);
@@ -324,8 +476,8 @@ describe("the screen while its session is loading (D17)", () => {
     gate.resolve(jsonResponse(SESSION_A, 200));
     await flush();
 
+    expect(await within(mainRegion()).findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
     expect(loaders()).toEqual([]);
-    expect(within(mainRegion()).getByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
   });
 });
 
@@ -341,7 +493,7 @@ describe("the ready header names the character, the start time and the empty run
     expect(
       within(mainRegion()).getByRole("heading", { name: START_LABEL_HEADING }),
     ).toBeInTheDocument();
-    expect(within(mainRegion()).getByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(await within(mainRegion()).findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
     expect(sessionRequests(calls, SESSION_A_ID)).toHaveLength(1);
   });
 
@@ -358,19 +510,17 @@ describe("the ready header names the character, the start time and the empty run
     renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
     await flush();
 
+    expect(await within(mainRegion()).findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
     expect(within(mainRegion()).queryByText(SETUP_NAME)).toBeNull();
+    expect(mainText()).toContain(NO_ENTRIES_TEXT);
 
-    // The header's three pieces and nothing else: the character's name, a start-time label of
-    // the fixed shape, and the empty-run line. Whatever is left over is the setup's place.
-    const text = mainText();
+    // The header's pieces and nothing else: the character's name and a start-time label of the
+    // fixed shape. Whatever is left over is the setup's place. (013 step 007: scoped to the
+    // header block, because the stream's own texts now share the main region.)
+    const text = (headerBlock().textContent ?? "").trim();
     expect(text).toContain(CHAR_A.name);
     expect(text).toMatch(START_LABEL_ANYWHERE);
-    expect(text).toContain(NO_ENTRIES_TEXT);
-    const residue = text
-      .replace(CHAR_A.name, "")
-      .replace(START_LABEL_ANYWHERE, "")
-      .replace(NO_ENTRIES_TEXT, "")
-      .trim();
+    const residue = text.replace(CHAR_A.name, "").replace(START_LABEL_ANYWHERE, "").trim();
     expect(residue).toBe("");
   });
 
@@ -384,6 +534,16 @@ describe("the ready header names the character, the start time and the empty run
     expect(queryMainLink(CHAR_A.name)).toBeNull();
     expect(calls.filter((call) => call.path.startsWith(CHARACTERS_PATH))).toEqual([]);
     expect(sessionRequests(calls, SESSION_A_ID)).toHaveLength(1);
+    // 013 step 007: exactly the stream's two GETs besides the session's own.
+    // 015 step 008: and the Notes section's one memo-chain GET.
+    expect(calls.map((call) => `${call.method} ${call.path}`).sort()).toEqual(
+      [
+        `GET ${sessionPath(SESSION_A_ID)}`,
+        `GET ${entriesPath(SESSION_A_ID)}`,
+        `GET ${zonePath(SESSION_A_ID)}`,
+        `GET ${memoChainPath(SESSION_A_ID)}`,
+      ].sort(),
+    );
   });
 });
 
@@ -395,7 +555,7 @@ describe("an archived session opened by URL (D5, R6)", () => {
     await flush();
 
     expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
-    expect(within(mainRegion()).getByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(await within(mainRegion()).findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
     // Document-wide, because a Mantine menu would render into a portal outside `<main>`.
     expect(screen.queryByRole("button", { name: ARCHIVE_NAME })).toBeNull();
     expect(screen.queryByRole("button", { name: RESTORE_NAME })).toBeNull();
@@ -457,7 +617,8 @@ describe("a failed load offers one retry (D18)", () => {
         }
         return jsonResponse(SESSION_A, 200);
       }
-      return notFoundResponse();
+      // 013 step 007: the ready render's stream reads answer empty.
+      return streamAnswer(request, [SESSION_A_ID]) ?? notFoundResponse();
     });
     renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
     await flush();
@@ -468,7 +629,7 @@ describe("a failed load offers one retry (D18)", () => {
 
     expect(sessionRequests(calls, SESSION_A_ID)).toHaveLength(2);
     expect(mainLink(CHAR_A.name)).toHaveAttribute("href", characterHref(CHAR_A_ID));
-    expect(within(mainRegion()).getByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(await within(mainRegion()).findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
     expect(within(mainRegion()).queryByText(LOAD_FAILED_TEXT)).toBeNull();
   });
 });
@@ -499,15 +660,349 @@ describe("moving in-entry from one session to another", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("nothing of 012 or 013 is on this screen yet (D17)", () => {
-  it("the ready main region holds no textbox and no button — DoD-10", async () => {
-    serveSessions(SESSION_A);
+// Feature 013, step 007 — the stream on the session screen. 011 DoD-10 ("no textbox and no
+// button") is replaced by DoD-6 below; every "— DoD-N" in this block is 013 step 007's.
+describe("013 step 007 — the session screen mounts the stream (US-125.AC-1, R6, D13)", () => {
+  it("ready with empty entries and zone: the header, No entries yet., the Composer, Send and Settle, and no archive control — DoD-6", async () => {
+    const { calls } = serveSessions(SESSION_A);
     renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
     await flush();
 
-    expect(within(mainRegion()).getByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
-    expect(within(mainRegion()).queryAllByRole("textbox")).toEqual([]);
-    expect(within(mainRegion()).queryAllByRole("button")).toEqual([]);
+    const main = within(mainRegion());
+    expect(mainLink(CHAR_A.name)).toHaveAttribute("href", characterHref(CHAR_A_ID));
+    expect(main.getByRole("heading", { name: START_LABEL_HEADING })).toBeInTheDocument();
+    expect(await main.findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(mainComposer()).toBeInTheDocument();
+    expect(main.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(main.getByRole("button", { name: "Settle" })).toBeInTheDocument();
+    expect(getRequests(calls, entriesPath(SESSION_A_ID))).toHaveLength(1);
+    expect(getRequests(calls, zonePath(SESSION_A_ID))).toHaveLength(1);
+
+    // Document-wide, because a Mantine menu would render into a portal outside `<main>`.
+    expect(screen.queryByRole("button", { name: ARCHIVE_NAME })).toBeNull();
+    expect(screen.queryByRole("button", { name: RESTORE_NAME })).toBeNull();
+    expect(screen.queryByRole("button", { name: ROW_ACTIONS_NAME })).toBeNull();
     expect(notificationsShown()).toEqual([]);
+  });
+
+  it("an archived session shows the Archived badge and a working stream whose composer enables Send and Settle — DoD-7", async () => {
+    const user = newUser();
+    serveSessions(ARCHIVED_SESSION);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    const main = within(mainRegion());
+    expect(main.getByText(ARCHIVED_BADGE)).toBeInTheDocument();
+    expect(await main.findByText(NO_ENTRIES_TEXT)).toBeInTheDocument();
+    expect(main.getByRole("separator", { name: "Current zone" })).toBeInTheDocument();
+
+    const composer = mainComposer();
+    expect(composer).toBeEnabled();
+    await user.type(composer, "Still writing here.");
+
+    expect(composer).toHaveValue("Still writing here.");
+    expect(main.getByRole("button", { name: "Send" })).toBeEnabled();
+    expect(main.getByRole("button", { name: "Settle" })).toBeEnabled();
+  });
+
+  it("navigating in-entry from a to b requests b's session, entries and zone and shows only b's record — DoD-8", async () => {
+    const user = newUser();
+    const A_TEXT = "A's partner waits at the well.";
+    const B_TEXT = "B's duelist sheathes his blade.";
+    const { calls } = serveSessionsWith(
+      {
+        [SESSION_A_ID]: [settledEntry(SESSION_A_ID, "7250000000000000501", "partner", A_TEXT)],
+        [SESSION_B_ID]: [settledEntry(SESSION_B_ID, "7250000000000000502", "turn", B_TEXT)],
+      },
+      SESSION_A,
+      SESSION_B,
+    );
+    renderRoute(
+      sessionRoutePath(SESSION_A_ID),
+      workspaceWith(CHAR_A, CHAR_B),
+      sessionRoutePath(SESSION_B_ID),
+    );
+    await flush();
+    expect(await within(mainRegion()).findByText(A_TEXT)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^probe navigate$/i }));
+    await flush();
+
+    expect(screen.getByTestId("location").textContent).toBe(sessionRoutePath(SESSION_B_ID));
+    expect(sessionRequests(calls, SESSION_B_ID)).toHaveLength(1);
+    expect(getRequests(calls, entriesPath(SESSION_B_ID)).length).toBeGreaterThanOrEqual(1);
+    expect(getRequests(calls, zonePath(SESSION_B_ID)).length).toBeGreaterThanOrEqual(1);
+
+    expect(await within(mainRegion()).findByText(B_TEXT)).toBeInTheDocument();
+    const records = within(mainRegion()).getAllByRole("list", { name: "Settled record" });
+    expect(records).toHaveLength(1);
+    expect(records[0].textContent).toContain(B_TEXT);
+    expect(records[0].textContent).not.toContain(A_TEXT);
+    expect(within(mainRegion()).queryByText(A_TEXT)).toBeNull();
+    expect(within(mainRegion()).getAllByRole("separator", { name: "Current zone" })).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 015, step 008 — the session's "Notes" section on the screen (D1, D5, D16). Every
+// "— DoD-N" in this block is 015 step 008's. Notes are read through their "Note" editors (the
+// MarkdownEditor stub's textareas); requests are matched by exact method + pathname.
+const NOTES_REGION = "Notes";
+const NOTE_LABEL = "Note";
+const MEMO_STAMP = "2026-10-02T09:26:53.000000+00:00";
+
+function memoRow(id: string, scope: MemoScope, scopeId: string | null, body: string): Memo {
+  return {
+    id,
+    scope,
+    scope_id: scopeId,
+    body,
+    is_enabled: true,
+    is_forced: false,
+    sort_key: 0,
+    created_at: MEMO_STAMP,
+    updated_at: MEMO_STAMP,
+  };
+}
+
+function memoPath(memoId: string): string {
+  return `/api/memos/${memoId}`;
+}
+
+const A_CHAR_NOTE_ID = "7250000000000000301";
+const A_SESSION_NOTE_ID = "7250000000000000302";
+const B_CHAR_NOTE_ID = "7250000000000000311";
+const B_SESSION_NOTE_ID = "7250000000000000312";
+
+const A_CHAR_NOTE = "Aria never finishes a sentence.";
+const A_SESSION_NOTE = "The well is dry tonight.";
+const B_CHAR_NOTE = "Bo counts his scars aloud.";
+const B_SESSION_NOTE = "The duel is at dawn.";
+
+/** A's chain: user, character, setup (A has one), session. */
+const CHAIN_A: MemoChainLevel[] = [
+  { scope: "user", scope_id: null, memos: [] },
+  { scope: "character", scope_id: CHAR_A_ID, memos: [memoRow(A_CHAR_NOTE_ID, "character", CHAR_A_ID, A_CHAR_NOTE)] },
+  { scope: "setup", scope_id: SETUP_ID, memos: [] },
+  {
+    scope: "session",
+    scope_id: SESSION_A_ID,
+    memos: [memoRow(A_SESSION_NOTE_ID, "session", SESSION_A_ID, A_SESSION_NOTE)],
+  },
+];
+
+/** B's chain, with B's own notes. */
+const CHAIN_B: MemoChainLevel[] = [
+  { scope: "user", scope_id: null, memos: [] },
+  { scope: "character", scope_id: CHAR_B_ID, memos: [memoRow(B_CHAR_NOTE_ID, "character", CHAR_B_ID, B_CHAR_NOTE)] },
+  { scope: "setup", scope_id: SETUP_ID, memos: [] },
+  {
+    scope: "session",
+    scope_id: SESSION_B_ID,
+    memos: [memoRow(B_SESSION_NOTE_ID, "session", SESSION_B_ID, B_SESSION_NOTE)],
+  },
+];
+
+/**
+ * The given sessions, their streams and their chains by exact path, plus a PATCH of any held
+ * note answered with the merged row and a later updated_at. Everything else 404s.
+ */
+function serveSessionsWithChains(chainsBy: Record<string, MemoChainLevel[]>, ...rows: Session[]) {
+  const ids = rows.map((row) => row.id);
+  const notes = new Map<string, Memo>();
+  for (const levels of Object.values(chainsBy)) {
+    for (const level of levels) for (const note of level.memos) notes.set(note.id, note);
+  }
+  return stubBackend((request) => {
+    if (request.method === "GET") {
+      const row = rows.find((candidate) => request.path === sessionPath(candidate.id));
+      if (row !== undefined) return jsonResponse(row, 200);
+    }
+    if (request.method === "PATCH") {
+      const note = [...notes.values()].find((candidate) => request.path === memoPath(candidate.id));
+      if (note !== undefined) {
+        const next: Memo = {
+          ...note,
+          ...(request.body as Partial<Memo>),
+          updated_at: "2026-10-02T09:45:00.000000+00:00",
+        };
+        notes.set(next.id, next);
+        return jsonResponse(next, 200);
+      }
+    }
+    return streamAnswer(request, ids, {}, chainsBy) ?? notFoundResponse();
+  });
+}
+
+function notesRegion(): HTMLElement {
+  return within(mainRegion()).getByRole("region", { name: NOTES_REGION });
+}
+
+function queryNotesRegion(): HTMLElement | null {
+  return screen.queryByRole("region", { name: NOTES_REGION });
+}
+
+function noteBodies(): string[] {
+  return within(notesRegion())
+    .queryAllByRole("textbox", { name: NOTE_LABEL })
+    .map((box) => (box as HTMLTextAreaElement).value);
+}
+
+function isAfter(earlier: Node, later: Node): boolean {
+  return (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+describe("015 step 008 — the session screen mounts the Notes section (D1, D16)", () => {
+  it("ready: the main region holds the Notes region after the session header and the stream, from one memo-chain read — DoD-7", async () => {
+    const { calls } = serveSessionsWithChains({ [SESSION_A_ID]: CHAIN_A }, SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    const notes = await within(mainRegion()).findByRole("region", { name: NOTES_REGION });
+    expect(within(notes).getByRole("heading", { name: NOTES_REGION })).toBeInTheDocument();
+
+    const header = within(mainRegion()).getByRole("heading", { name: START_LABEL_HEADING });
+    expect(header.contains(notes)).toBe(false);
+    expect(isAfter(header, notes)).toBe(true);
+    expect(headerBlock().contains(notes)).toBe(false);
+    expect(isAfter(mainLink(CHAR_A.name), notes)).toBe(true);
+    // After the screen's existing ready content: the stream (its composer) precedes the section.
+    expect(isAfter(mainComposer(), notes)).toBe(true);
+
+    expect(getRequests(calls, memoChainPath(SESSION_A_ID))).toHaveLength(1);
+    await waitFor(() => {
+      expect(noteBodies()).toEqual([A_CHAR_NOTE, A_SESSION_NOTE]);
+    });
+  });
+
+  it("while the session is loading there is no Notes region and no memo-chain request — DoD-7", async () => {
+    const gate = deferred<Response>();
+    const { calls } = stubBackend(
+      (request) =>
+        streamAnswer(request, [SESSION_A_ID]) ??
+        (request.method === "GET" && request.path === sessionPath(SESSION_A_ID)
+          ? gate.promise
+          : notFoundResponse()),
+    );
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    expect(loaders().length).toBeGreaterThan(0);
+    expect(queryNotesRegion()).toBeNull();
+    expect(getRequests(calls, memoChainPath(SESSION_A_ID))).toEqual([]);
+
+    gate.resolve(jsonResponse(SESSION_A, 200));
+    await flush();
+    expect(await within(mainRegion()).findByRole("region", { name: NOTES_REGION })).toBeInTheDocument();
+  });
+
+  it("Session not found renders no Notes region and makes no memo-chain request — DoD-7", async () => {
+    const { calls } = stubBackend(() => notFoundResponse());
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    expect(within(mainRegion()).getByText(NOT_FOUND_TEXT)).toBeInTheDocument();
+    expect(queryNotesRegion()).toBeNull();
+    expect(getRequests(calls, memoChainPath(SESSION_A_ID))).toEqual([]);
+  });
+
+  type FailureCase = [label: string, answer: () => Response];
+
+  const LOAD_FAILURES: FailureCase[] = [
+    ["a 500 envelope", serverError],
+    [
+      "a transport failure",
+      () => {
+        throw new TypeError("Failed to fetch");
+      },
+    ],
+  ];
+
+  it.each(LOAD_FAILURES)(
+    "%s: Could not load the session renders no Notes region and makes no memo-chain request — DoD-7",
+    async (_label, answer) => {
+      const { calls } = stubBackend(() => answer());
+      renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+      await flush();
+
+      expect(within(mainRegion()).getByText(LOAD_FAILED_TEXT)).toBeInTheDocument();
+      expect(queryNotesRegion()).toBeNull();
+      expect(getRequests(calls, memoChainPath(SESSION_A_ID))).toEqual([]);
+    },
+  );
+
+  it("navigating in-entry from a to b requests b's memo chain and shows b's notes with none of a's — DoD-8", async () => {
+    const user = newUser();
+    const { calls } = serveSessionsWithChains(
+      { [SESSION_A_ID]: CHAIN_A, [SESSION_B_ID]: CHAIN_B },
+      SESSION_A,
+      SESSION_B,
+    );
+    renderRoute(
+      sessionRoutePath(SESSION_A_ID),
+      workspaceWith(CHAR_A, CHAR_B),
+      sessionRoutePath(SESSION_B_ID),
+    );
+    await flush();
+    await waitFor(() => {
+      expect(noteBodies()).toEqual([A_CHAR_NOTE, A_SESSION_NOTE]);
+    });
+    expect(getRequests(calls, memoChainPath(SESSION_B_ID))).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: /^probe navigate$/i }));
+    await flush();
+
+    expect(screen.getByTestId("location").textContent).toBe(sessionRoutePath(SESSION_B_ID));
+    expect(getRequests(calls, memoChainPath(SESSION_B_ID))).toHaveLength(1);
+    await waitFor(() => {
+      expect(noteBodies()).toEqual([B_CHAR_NOTE, B_SESSION_NOTE]);
+    });
+    expect(within(mainRegion()).getAllByRole("region", { name: NOTES_REGION })).toHaveLength(1);
+    const shown = noteBodies();
+    expect(shown).not.toContain(A_CHAR_NOTE);
+    expect(shown).not.toContain(A_SESSION_NOTE);
+  });
+
+  it("typing into a note on a without blurring, then navigating to b, PATCHes that note's new body — DoD-9", async () => {
+    const user = newUser();
+    const { calls } = serveSessionsWithChains(
+      { [SESSION_A_ID]: CHAIN_A, [SESSION_B_ID]: CHAIN_B },
+      SESSION_A,
+      SESSION_B,
+    );
+    renderRoute(
+      sessionRoutePath(SESSION_A_ID),
+      workspaceWith(CHAR_A, CHAR_B),
+      sessionRoutePath(SESSION_B_ID),
+    );
+    await flush();
+    await waitFor(() => {
+      expect(noteBodies()).toEqual([A_CHAR_NOTE, A_SESSION_NOTE]);
+    });
+    const typed = "The well is full again by morning.";
+
+    const sessionNoteBox = within(notesRegion())
+      .getAllByRole("textbox", { name: NOTE_LABEL })
+      .find((box) => (box as HTMLTextAreaElement).value === A_SESSION_NOTE);
+    if (sessionNoteBox === undefined) throw new Error("a's session note editor is missing");
+    fireEvent.change(sessionNoteBox, { target: { value: typed } });
+    await flush();
+    expect(calls.filter((call) => call.method === "PATCH")).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: /^probe navigate$/i }));
+    await flush();
+
+    expect(screen.getByTestId("location").textContent).toBe(sessionRoutePath(SESSION_B_ID));
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === "PATCH").length).toBeGreaterThanOrEqual(1);
+    });
+    const patches = calls.filter((call) => call.method === "PATCH");
+    expect(patches).toContainEqual({
+      method: "PATCH",
+      path: memoPath(A_SESSION_NOTE_ID),
+      search: "",
+      body: { body: typed },
+    });
+    expect(patches.every((call) => call.path === memoPath(A_SESSION_NOTE_ID))).toBe(true);
   });
 });

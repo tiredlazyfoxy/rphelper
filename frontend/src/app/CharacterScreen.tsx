@@ -38,6 +38,7 @@ import {
 } from "./characterScreenState";
 import { SetupsSection } from "./SetupsSection";
 import { SessionsSection } from "./SessionsSection";
+import { CharacterNotesSection } from "./CharacterNotesSection";
 import type { SessionsState } from "./sessionsState";
 
 /** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
@@ -272,6 +273,11 @@ export const CharacterScreen = observer(function CharacterScreen(
             characterId={state.characterId}
             sessions={sessions}
           />
+        )}
+        {/* 015 D1 / step 009: the character-level "Notes" section, after Sessions and only
+            here. Keyed by the character id so a different character builds fresh state. */}
+        {state.characterId !== null && (
+          <CharacterNotesSection key={state.characterId} characterId={state.characterId} />
         )}
       </Stack>
     </Container>

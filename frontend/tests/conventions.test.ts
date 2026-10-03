@@ -127,10 +127,13 @@ describe("one notification call site", () => {
     return false;
   }
 
-  it("Mantine's notification API is imported by shared/notifyFailure.ts alone — DoD-12", () => {
+  // Amended by feature 014, step 003 (D4): the allowed set is exactly the two sanctioned
+  // outlets; any third importer fails. Keeps 002/006's DoD-12 suffix and adds 014/003's DoD-5.
+  it("Mantine's notification API is imported by exactly shared/notifyFailure.ts and shared/notifyWarning.ts — DoD-12, DoD-5", () => {
     const importers = codeFiles()
       .filter((file) => importsNotificationApi(readFileSync(file, "utf8")))
-      .map(relative);
-    expect(importers).toEqual(["src/shared/notifyFailure.ts"]);
+      .map(relative)
+      .sort();
+    expect(importers).toEqual(["src/shared/notifyFailure.ts", "src/shared/notifyWarning.ts"]);
   });
 });

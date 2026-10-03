@@ -216,8 +216,11 @@ describe("the single call site for Mantine's notification API", () => {
     expect(sourceFiles(SRC_ROOT)).toContain(EXEMPT);
   });
 
-  it("no file under frontend/src but shared/notifyFailure.ts calls Mantine's notification API — DoD-15", () => {
-    const files = sourceFiles(SRC_ROOT).filter((file) => file !== EXEMPT);
+  // Amended by feature 014, step 003 (D4): the allowed set is exactly the two sanctioned
+  // outlets; any third caller fails. Keeps 002/005's DoD-15 suffix and adds 014/003's DoD-5.
+  it("no file under frontend/src but shared/notifyFailure.ts and shared/notifyWarning.ts calls Mantine's notification API — DoD-15, DoD-5", () => {
+    const allowed = new Set([EXEMPT, path.join(SRC_ROOT, "shared", "notifyWarning.ts")]);
+    const files = sourceFiles(SRC_ROOT).filter((file) => !allowed.has(file));
     expect(files.length).toBeGreaterThan(0);
     const offenders: string[] = [];
     for (const file of files) {
