@@ -26,6 +26,7 @@ deliberately out-of-creation-order rows, which are raw inserts.
 import ast
 import inspect
 import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -41,13 +42,16 @@ from app.errors import (
 from app.ids import SnowflakeGenerator
 from app.roles import Role
 from app.services import sessions as sessions_module
+from app.services.messages import StreamMessage
 from app.services.sessions import (
     RpSession,
+    StartedSession,
     archive_session,
     get_session,
     list_character_sessions,
     list_sessions,
     restore_session,
+    start_seeded_session,
     start_session,
 )
 
@@ -952,7 +956,7 @@ def test_the_service_module_has_no_delete_path_and_no_fastapi_import__S011_002_D
     assert _FASTAPI_IMPORT.search(source) is None
 
 
-def test_the_service_module_imports_no_other_service__S011_002_DoD16__S017_002_DoD11() -> None:
+def test_the_service_module_imports_no_other_service__S011_002_DoD16__S017_002_DoD11__S018_002_DoD10() -> None:
     """DoD-16 — D11: the parent and setup checks are this module's own scoped selects, so
     nothing is imported from any `app.services.` module (nor relatively from the package).
 
@@ -960,16 +964,22 @@ def test_the_service_module_imports_no_other_service__S011_002_DoD16__S017_002_D
     `from app.services.llm_registry import ...` naming only the transaction-neutral reads,
     `ModelRefLevel`, `EnabledChatModel` and the `UNSET` / `Unset` sentinel. Any other
     `app.services.*` import, any other name from `llm_registry`, a star import, or a
-    module-level import of `llm_registry` (which would expose every name) still fails."""
-    allowed_module = "app.services.llm_registry"
-    allowed_names = {
-        "list_enabled_chat_models",
-        "first_enabled_chat_model",
-        "validate_chat_model",
-        "ModelRefLevel",
-        "EnabledChatModel",
-        "UNSET",
-        "Unset",
+    module-level import of `llm_registry` (which would expose every name) still fails.
+
+    Amended by 018 step 002 DoD-10 (018 D3): a second exception is
+    `from app.services.messages import ...` naming only the transaction-neutral zone insert
+    helper `insert_zone_message` and the message value type `StreamMessage`."""
+    allowed_names_by_module = {
+        "app.services.llm_registry": {
+            "list_enabled_chat_models",
+            "first_enabled_chat_model",
+            "validate_chat_model",
+            "ModelRefLevel",
+            "EnabledChatModel",
+            "UNSET",
+            "Unset",
+        },
+        "app.services.messages": {"insert_zone_message", "StreamMessage"},
     }
     tree = ast.parse(inspect.getsource(sessions_module))
 
@@ -978,9 +988,9 @@ def test_the_service_module_imports_no_other_service__S011_002_DoD16__S017_002_D
         if isinstance(node, ast.ImportFrom):
             if node.level > 0:
                 offenders.append(f"relative import, level {node.level}")
-            elif node.module == allowed_module:
+            elif node.module in allowed_names_by_module:
                 for alias in node.names:
-                    if alias.name not in allowed_names:
+                    if alias.name not in allowed_names_by_module[node.module]:
                         offenders.append(f"from {node.module} import {alias.name}")
             elif node.module is not None and (
                 node.module == _FORBIDDEN_IMPORT_ROOT
@@ -1002,3 +1012,341 @@ def test_the_service_module_never_mentions_a_model_reference__S011_002_DoD16() -
     source = inspect.getsource(sessions_module)
 
     assert "model_ref" not in source
+
+
+# =========================================================================================
+# Feature 018, step 002 — create a session and seed its zone in one transaction.
+#
+# Expected values come from `docs/plans/018.character-page/002.create-and-seed-route.md`
+# (Interface intent, DoD-1..5 and DoD-10), `002.context.md` ("Id-minting order": session id
+# first, message id second) and the feature `context.md` (D3 — one transaction, one insert,
+# `last_used_at` stays the creation instant; the Wire contract's current-zone row; R2, R4,
+# R5, R6, R11). Binding: `## Skeleton` -> Step 002 — `StartedSession(session, opening_message)`
+# and `start_seeded_session(connection, generator, user_id, character_id, opening_text,
+# setup_id=None) -> StartedSession`. Test names end `__S018_002_DoD<n>`.
+# =========================================================================================
+
+OPENING_TEXT = "Hello there"
+
+#: Registry rows for DoD-4 (017 "Registry fixtures"): the server ids and `models.id` order
+#: disagree, so the first enabled model (D7 order: `llm_servers.id`, then `models.id`) is
+#: SERVER_LOW's, not the model with the smaller `models.id`.
+SERVER_LOW = 5_100
+SERVER_HIGH = 5_200
+MODEL_ON_HIGH = 61_001
+MODEL_ON_HIGH_NAME = "alpha-chat"
+MODEL_ON_LOW = 62_001
+MODEL_ON_LOW_NAME = "beta-chat"
+
+
+class _SecondIdFails(Exception):
+    """Raised by `_FailOnSecondIdGenerator` on its second `next_id()` (DoD-3)."""
+
+
+class _FailOnSecondIdGenerator:
+    """Answers one known id first (the session's), then fails (the message's)."""
+
+    def __init__(self, first: int) -> None:
+        self.first = first
+        self.calls = 0
+
+    def next_id(self) -> int:
+        self.calls += 1
+        if self.calls == 1:
+            return self.first
+        raise _SecondIdFails("the message id cannot be minted")
+
+
+def _seed(
+    engine: Engine,
+    generator: Any,
+    user_id: int,
+    character_id: int,
+    opening_text: str,
+    setup_id: int | None = None,
+) -> StartedSession:
+    with engine.connect() as connection:
+        return start_seeded_session(
+            connection, generator, user_id, character_id, opening_text, setup_id
+        )
+
+
+def _count_messages(engine: Engine) -> int:
+    """Rows in the `messages` table, counted directly."""
+    with engine.connect() as connection:
+        return int(connection.execute(select(func.count()).select_from(schema.messages)).scalar_one())
+
+
+def _all_message_rows(engine: Engine) -> list[dict[str, Any]]:
+    with engine.connect() as connection:
+        rows = connection.execute(select(schema.messages).order_by(schema.messages.c.id)).all()
+    return [dict(row._mapping) for row in rows]
+
+
+def _session_ids(engine: Engine) -> set[int]:
+    with engine.connect() as connection:
+        return {int(value) for value in connection.execute(select(schema.sessions.c.id)).scalars()}
+
+
+def _stored_session_row(engine: Engine, session_id: int) -> dict[str, Any]:
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(schema.sessions).where(schema.sessions.c.id == session_id)
+        ).one()
+    return dict(row._mapping)
+
+
+def _captured_model(engine: Engine, session_id: int) -> tuple[Any, Any]:
+    row = _stored_session_row(engine, session_id)
+    return (row["model_server_id"], row["model_name"])
+
+
+def _insert_llm_server(engine: Engine, *, server_id: int, name: str) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            schema.metadata.tables["llm_servers"]
+            .insert()
+            .values(
+                id=server_id,
+                name=name,
+                kind="llamaswap",
+                base_url=f"http://llm-{server_id}.test:8080",
+                api_key_ref=None,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+
+
+def _insert_llm_model(engine: Engine, *, model_id: int, server_id: int, name: str) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            schema.metadata.tables["models"]
+            .insert()
+            .values(
+                id=model_id,
+                server_id=server_id,
+                model_name=name,
+                is_enabled=True,
+                is_embedding_designated=False,
+                embedding_dim=None,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+
+
+def _seed_two_enabled_models(engine: Engine) -> None:
+    _insert_llm_server(engine, server_id=SERVER_LOW, name="server low")
+    _insert_llm_server(engine, server_id=SERVER_HIGH, name="server high")
+    _insert_llm_model(engine, model_id=MODEL_ON_HIGH, server_id=SERVER_HIGH, name=MODEL_ON_HIGH_NAME)
+    _insert_llm_model(engine, model_id=MODEL_ON_LOW, server_id=SERVER_LOW, name=MODEL_ON_LOW_NAME)
+
+
+def _configure_character_model(engine: Engine, character_id: int, server_id: int, name: str) -> None:
+    """A raw update of the character's model pair (017's write route is not under test)."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.characters.update()
+            .where(schema.characters.c.id == character_id)
+            .values(model_server_id=server_id, model_name=name)
+        )
+
+
+# --- DoD-1: one session, one current-zone opening message --------------------------------
+
+
+def test_create_and_seed_returns_the_session_and_its_opening_message__S018_002_DoD1(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-1 — US-117.AC-1/AC-2, R2, R11: no setup; the opening message is a current-zone
+    user row of the new session, text verbatim."""
+    started = _seed(engine, generator, USER_A, CHAR_A1, OPENING_TEXT)
+
+    assert isinstance(started, StartedSession)
+    assert isinstance(started.session, RpSession)
+    assert started.session.character_id == CHAR_A1
+    assert started.session.setup_id is None
+    message = started.opening_message
+    assert isinstance(message, StreamMessage)
+    assert message.session_id == started.session.id
+    assert message.role == "user"
+    assert message.kind is None
+    assert message.settled_at is None
+    assert message.text == OPENING_TEXT
+
+
+def test_create_and_seed_stores_exactly_one_session_and_one_message__S018_002_DoD1(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-1 — reading the database afterwards finds exactly one new session and exactly one
+    message, for that session (a zone row: no kind, no settled_at)."""
+    sessions_before = _session_ids(engine)
+    assert _count_messages(engine) == 0
+
+    started = _seed(engine, generator, USER_A, CHAR_A1, OPENING_TEXT)
+
+    assert _session_ids(engine) - sessions_before == {started.session.id}
+    assert len(_session_ids(engine)) == len(sessions_before) + 1
+    rows = _all_message_rows(engine)
+    assert len(rows) == 1
+    (stored,) = rows
+    assert stored["session_id"] == started.session.id
+    assert started.opening_message is not None
+    assert stored["id"] == started.opening_message.id
+    assert stored["user_id"] == USER_A
+    assert stored["role"] == "user"
+    assert stored["kind"] is None
+    assert stored["settled_at"] is None
+    assert stored["text"] == OPENING_TEXT
+
+
+# --- DoD-2: one instant ------------------------------------------------------------------
+
+
+def test_the_opening_message_and_the_session_share_one_instant__S018_002_DoD2(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-2 — D3, 011 D3: the message's `created_at` is the session's `created_at`, and the
+    session's `last_used_at`, `created_at` and `updated_at` are all equal (no second bump)."""
+    started = _seed(engine, generator, USER_A, CHAR_A1, OPENING_TEXT)
+
+    session = started.session
+    assert started.opening_message is not None
+    assert started.opening_message.created_at == session.created_at
+    assert session.last_used_at == session.created_at == session.updated_at
+
+
+def test_the_stored_session_row_keeps_the_creation_instant__S018_002_DoD2(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-2 — read back from the row: `last_used_at`, `created_at` and `updated_at` all equal
+    the opening message's `created_at` (the session is not bumped a second time)."""
+    started = _seed(engine, generator, USER_A, CHAR_A1, OPENING_TEXT)
+
+    row = _stored_session_row(engine, started.session.id)
+    (message_row,) = _all_message_rows(engine)
+    assert row["last_used_at"] == row["created_at"] == row["updated_at"]
+    assert message_row["created_at"] == row["created_at"]
+
+
+# --- DoD-3: atomicity --------------------------------------------------------------------
+
+
+def test_a_failed_message_insert_rolls_the_session_back__S018_002_DoD3(
+    engine: Engine,
+) -> None:
+    """DoD-3 — US-117.AC-1, D3: the generator fails on its second id (the message's, after
+    the session insert ran inside the transaction); the operation raises and the database
+    holds no new session row and no message row."""
+    sessions_before = _session_ids(engine)
+    messages_before = _count_messages(engine)
+    failing = _FailOnSecondIdGenerator(first=88_001)
+
+    with pytest.raises(_SecondIdFails):
+        _seed(engine, failing, USER_A, CHAR_A1, OPENING_TEXT)
+
+    assert failing.calls == 2
+    assert _session_ids(engine) == sessions_before
+    assert 88_001 not in _session_ids(engine)
+    assert _count_messages(engine) == messages_before
+
+
+# --- DoD-4: the model capture is start_session's ----------------------------------------
+
+
+def test_create_and_seed_captures_the_first_enabled_model_like_start__S018_002_DoD4(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-4 — R4, US-106.AC-1, 017 D1: a character without a model captures the first
+    enabled model (D7 order), exactly as `start_session` does under the same registry."""
+    _seed_two_enabled_models(engine)
+
+    seeded = _seed(engine, generator, USER_A, CHAR_A1, OPENING_TEXT)
+    plain = _start(engine, generator, USER_A, CHAR_A1)
+
+    assert _captured_model(engine, seeded.session.id) == (SERVER_LOW, MODEL_ON_LOW_NAME)
+    assert _captured_model(engine, seeded.session.id) == _captured_model(engine, plain.id)
+
+
+def test_create_and_seed_captures_the_characters_configured_model_like_start__S018_002_DoD4(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-4 — US-139.AC-2, 017 D1: a character with a configured model captures that pair
+    (not the first enabled), exactly as `start_session` does."""
+    _seed_two_enabled_models(engine)
+    _configure_character_model(engine, CHAR_A2, SERVER_HIGH, MODEL_ON_HIGH_NAME)
+
+    seeded = _seed(engine, generator, USER_A, CHAR_A2, OPENING_TEXT)
+    plain = _start(engine, generator, USER_A, CHAR_A2)
+
+    assert _captured_model(engine, seeded.session.id) == (SERVER_HIGH, MODEL_ON_HIGH_NAME)
+    assert _captured_model(engine, seeded.session.id) == _captured_model(engine, plain.id)
+
+
+# --- DoD-5: owner scope; archive is not a lock -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "character_id",
+    [CHAR_B1, UNKNOWN_CHARACTER_ID],
+    ids=["another-users-character", "nobodys-character"],
+)
+def test_create_and_seed_on_a_parent_not_the_callers_is_refused__S018_002_DoD5(
+    engine: Engine, generator: SnowflakeGenerator, character_id: int
+) -> None:
+    """DoD-5 — R5, 011 D2: `CharacterNotFoundError`, and neither a session nor a message is
+    inserted."""
+    sessions_before = _session_ids(engine)
+    messages_before = _count_messages(engine)
+
+    with pytest.raises(CharacterNotFoundError):
+        _seed(engine, generator, USER_A, character_id, OPENING_TEXT)
+
+    assert _session_ids(engine) == sessions_before
+    assert _count_messages(engine) == messages_before
+
+
+def test_create_and_seed_on_the_callers_archived_character_succeeds__S018_002_DoD5(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-5 — R6, 011 D2: archive is not a lock; the session and its opening message are
+    created under the archived character."""
+    started = _seed(engine, generator, USER_A, CHAR_A_ARCHIVED, OPENING_TEXT)
+
+    assert started.session.character_id == CHAR_A_ARCHIVED
+    assert started.opening_message is not None
+    assert started.opening_message.session_id == started.session.id
+    assert started.opening_message.text == OPENING_TEXT
+    assert _ids(_list_character(engine, USER_A, CHAR_A_ARCHIVED)) == [started.session.id]
+    assert _count_messages(engine) == 1
+
+
+# --- DoD-10: the narrow import exception, read from disk ---------------------------------
+
+
+def test_the_service_imports_only_the_zone_helper_and_message_type_and_no_fastapi__S018_002_DoD10() -> None:
+    """DoD-10 — D3: from `app.services.messages` exactly the zone insert helper and the
+    message value type are imported (no module-level import of it), and no `fastapi`."""
+    source = Path(str(sessions_module.__file__)).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    names_from_messages: set[str] = set()
+    module_imports_of_messages: list[str] = []
+    fastapi_imports: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            if node.module == "app.services.messages":
+                names_from_messages.update(alias.name for alias in node.names)
+            if node.module == "fastapi" or node.module.startswith("fastapi."):
+                fastapi_imports.append(node.module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "app.services.messages":
+                    module_imports_of_messages.append(alias.name)
+                if alias.name == "fastapi" or alias.name.startswith("fastapi."):
+                    fastapi_imports.append(alias.name)
+
+    assert names_from_messages == {"insert_zone_message", "StreamMessage"}
+    assert module_imports_of_messages == []
+    assert fastapi_imports == []

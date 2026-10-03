@@ -31,7 +31,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, func, select
 
 from app.config import Settings, get_settings
 from app.db import schema
@@ -73,6 +73,13 @@ SESSION_KEYS = {
     "created_at",
     "updated_at",
 }
+
+#: 018 D3 / Wire contract: the start route answers ``StartedSession`` — the eight session
+#: keys plus ``opening_message``. Every other session route keeps exactly ``SESSION_KEYS``.
+STARTED_SESSION_KEYS = SESSION_KEYS | {"opening_message"}
+
+#: 012's eight-key ``Message`` wire shape, cited by 018's Wire contract.
+MESSAGE_KEYS = {"id", "session_id", "role", "kind", "text", "settled_at", "created_at", "updated_at"}
 
 NOT_AUTHENTICATED = "not_authenticated"
 CHARACTER_NOT_FOUND = "character_not_found"
@@ -277,12 +284,24 @@ def _start_request(client: TestClient, character_id: Any, body: Any = _OMITTED) 
     return client.post(path, json=body)
 
 
-def _start(client: TestClient, character_id: Any, body: Any = _OMITTED) -> dict[str, Any]:
+def _start_started(client: TestClient, character_id: Any, body: Any = _OMITTED) -> dict[str, Any]:
+    """The start route's whole 201 answer: a ``StartedSession`` (018 D3)."""
     response = _start_request(client, character_id, body)
     assert response.status_code == 201, response.text
     created = response.json()
     assert isinstance(created, dict)
+    assert set(created) == STARTED_SESSION_KEYS
     return created
+
+
+def _start(client: TestClient, character_id: Any, body: Any = _OMITTED) -> dict[str, Any]:
+    """Start a session and return its eight ``Session`` keys.
+
+    Amended by 018 step 002 DoD-8: the start answer carries the eight session keys plus
+    ``opening_message`` (checked exactly here); the session part is what 011's callers compare
+    against the eight-key reads, listings, archive and restore answers."""
+    started = _start_started(client, character_id, body)
+    return {key: started[key] for key in SESSION_KEYS}
 
 
 def _sessions_of(response: httpx.Response) -> list[dict[str, Any]]:
@@ -346,6 +365,14 @@ def _assert_wire_shape(session: dict[str, Any]) -> None:
     assert TIMESTAMP_PATTERN.match(session["updated_at"]) is not None
 
 
+def _assert_started_wire_shape(started: dict[str, Any]) -> None:
+    """The start route's answer (018 step 002 DoD-8 amends 011's exact-keys check for this
+    route only): exactly the eight session keys plus ``opening_message``, the session part
+    being 011's ``Session`` wire object."""
+    assert set(started) == STARTED_SESSION_KEYS
+    _assert_wire_shape({key: started[key] for key in SESSION_KEYS})
+
+
 def _foreign_collection_request(client: TestClient, method: str, character_id: Any) -> httpx.Response:
     if method == "GET":
         return client.get(_character_sessions_path(character_id))
@@ -387,10 +414,12 @@ def test_every_route_answers_401_without_a_session__S011_003_DoD1(
 # --- DoD-2: start with no setup, then read and list -----------------------------------
 
 
-def test_starting_with_an_empty_body_answers_201_with_no_setup__S011_003_DoD2(
+def test_starting_with_an_empty_body_answers_201_with_no_setup__S011_003_DoD2__S018_002_DoD8(
     application: FastAPI, db_settings: Settings
 ) -> None:
-    """DoD-2 — US-026.AC-1, US-024.AC-1, R2: 201, ids as decimal strings, no setup, last use == creation."""
+    """DoD-2 — US-026.AC-1, US-024.AC-1, R2: 201, ids as decimal strings, no setup, last use == creation.
+
+    Amended by 018 step 002 DoD-8: the answer's exact keys are the eight plus `opening_message`."""
     client = _player_a(application, db_settings)
     character = _character(client, "Aria")
 
@@ -398,7 +427,7 @@ def test_starting_with_an_empty_body_answers_201_with_no_setup__S011_003_DoD2(
 
     assert response.status_code == 201, response.text
     created = response.json()
-    _assert_wire_shape(created)
+    _assert_started_wire_shape(created)
     assert created["character_id"] == character["id"]
     assert created["setup_id"] is None
     assert created["setup_name"] is None
@@ -420,10 +449,12 @@ def test_a_started_session_reads_by_id_and_appears_in_both_listings__S011_003_Do
 
 
 @pytest.mark.parametrize("body", [_OMITTED, {}, {"setup_id": None}], ids=["no-body", "empty-object", "explicit-null"])
-def test_all_three_no_setup_request_shapes_answer_201__S011_003_DoD2(
+def test_all_three_no_setup_request_shapes_answer_201__S011_003_DoD2__S018_002_DoD8(
     application: FastAPI, db_settings: Settings, body: Any
 ) -> None:
-    """DoD-2 — D2, US-024.AC-3, R2: no body, `{}` and `{"setup_id": null}` all start a session with none."""
+    """DoD-2 — D2, US-024.AC-3, R2: no body, `{}` and `{"setup_id": null}` all start a session with none.
+
+    Amended by 018 step 002 DoD-8: the answer's exact keys are the eight plus `opening_message`."""
     client = _player_a(application, db_settings)
     character = _character(client, "Aria")
 
@@ -431,7 +462,7 @@ def test_all_three_no_setup_request_shapes_answer_201__S011_003_DoD2(
 
     assert response.status_code == 201, response.text
     created = response.json()
-    _assert_wire_shape(created)
+    _assert_started_wire_shape(created)
     assert created["setup_id"] is None
     assert created["setup_name"] is None
     assert created["character_id"] == character["id"]
@@ -441,10 +472,12 @@ def test_all_three_no_setup_request_shapes_answer_201__S011_003_DoD2(
 # --- DoD-3: start with a setup, and one setup backing two sessions --------------------
 
 
-def test_starting_with_a_setup_answers_its_id_and_name__S011_003_DoD3(
+def test_starting_with_a_setup_answers_its_id_and_name__S011_003_DoD3__S018_002_DoD8(
     application: FastAPI, db_settings: Settings
 ) -> None:
-    """DoD-3 — US-025.AC-1, D10: the chosen setup comes back as `setup_id` plus its current name."""
+    """DoD-3 — US-025.AC-1, D10: the chosen setup comes back as `setup_id` plus its current name.
+
+    Amended by 018 step 002 DoD-8: the answer's exact keys are the eight plus `opening_message`."""
     client = _player_a(application, db_settings)
     character = _character(client, "Aria")
     setup = _create_setup(client, character["id"], "Tavern", "# Night")
@@ -453,7 +486,7 @@ def test_starting_with_a_setup_answers_its_id_and_name__S011_003_DoD3(
 
     assert response.status_code == 201, response.text
     created = response.json()
-    _assert_wire_shape(created)
+    _assert_started_wire_shape(created)
     assert created["setup_id"] == setup["id"]
     assert created["setup_name"] == setup["name"]
 
@@ -928,3 +961,226 @@ def test_009_and_010_routes_still_answer_with_this_router_registered__S011_003_D
     assert client.get(_character_path(character["id"])).status_code == 200
     assert client.get(_character_setups_path(character["id"])).status_code == 200
     assert client.post(_character_action_path(character["id"], "archive")).status_code == 200
+
+
+# =====================================================================================
+# Feature 018, step 002 — the start route creates and seeds in one request.
+#
+# Expected values come from `docs/plans/018.character-page/002.create-and-seed-route.md`
+# (DoD-6 .. DoD-9) and the feature `context.md`'s Wire contract (201 `StartedSession`: the
+# eight session keys plus `opening_message`, 012's eight-key `Message` or null; a present
+# `opening_message` must be non-blank, else 422 and nothing is created; 011's failures
+# unchanged; "a refusal creates nothing"). The zone and entries are read back through 012's
+# `GET /api/sessions/{id}/zone` and `/entries`. Test names end `__S018_002_DoD<n>`.
+# =====================================================================================
+
+OPENING_TEXT = "Hello there"
+
+
+def _zone_path(session_id: Any) -> str:
+    return f"{SESSIONS_PATH}/{session_id}/zone"
+
+
+def _entries_path(session_id: Any) -> str:
+    return f"{SESSIONS_PATH}/{session_id}/entries"
+
+
+def _zone(client: TestClient, session_id: Any) -> Any:
+    response = client.get(_zone_path(session_id))
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _entries(client: TestClient, session_id: Any) -> Any:
+    response = client.get(_entries_path(session_id))
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _count_rows(engine: Engine, table: Any) -> int:
+    with engine.connect() as connection:
+        return int(connection.execute(select(func.count()).select_from(table)).scalar_one())
+
+
+def _assert_message_wire_shape(message: Any) -> None:
+    """012's `Message`: exactly eight keys, ids as decimal strings."""
+    assert isinstance(message, dict)
+    assert set(message) == MESSAGE_KEYS
+    assert isinstance(message["id"], str)
+    assert message["id"].isdigit()
+    assert isinstance(message["session_id"], str)
+    assert message["session_id"].isdigit()
+
+
+# --- DoD-6: the opening message arrives as a current-zone row --------------------------
+
+
+def test_starting_with_an_opening_message_answers_the_started_session__S018_002_DoD6(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-6 — US-117.AC-1/AC-2, R11: 201, the eight session keys plus `opening_message`, a
+    current-zone user message of the new session with the text verbatim."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+
+    response = _start_request(client, character["id"], {"opening_message": OPENING_TEXT})
+
+    assert response.status_code == 201, response.text
+    started = response.json()
+    _assert_started_wire_shape(started)
+    assert started["character_id"] == character["id"]
+    message = started["opening_message"]
+    _assert_message_wire_shape(message)
+    assert message["session_id"] == started["id"]
+    assert message["role"] == "user"
+    assert message["kind"] is None
+    assert message["settled_at"] is None
+    assert message["text"] == OPENING_TEXT
+
+
+def test_the_opening_message_is_the_zone_and_the_entries_stay_empty__S018_002_DoD6(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-6 — US-117.AC-2, R11: `GET …/zone` lists exactly that message; `GET …/entries` is
+    empty (nothing settled is created)."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    started = _start_started(client, character["id"], {"opening_message": OPENING_TEXT})
+
+    assert _zone(client, started["id"]) == {"messages": [started["opening_message"]]}
+    assert _entries(client, started["id"]) == {"entries": []}
+
+
+# --- DoD-7: a blank opening message, and a foreign character ----------------------------
+
+
+@pytest.mark.parametrize("blank", ["   ", ""], ids=["whitespace-only", "empty"])
+def test_a_blank_opening_message_answers_422_and_creates_nothing__S018_002_DoD7(
+    application: FastAPI, db_settings: Settings, engine: Engine, blank: str
+) -> None:
+    """DoD-7 — Wire contract: a present `opening_message` must be non-blank; 422, and the
+    character's session listing is unchanged (no session row, no message row)."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    _start(client, character["id"], {})
+    before = _character_sessions(client, character["id"], include_archived=True)
+    messages_before = _count_rows(engine, schema.messages)
+
+    response = _start_request(client, character["id"], {"opening_message": blank})
+
+    assert response.status_code == 422, response.text
+    assert _character_sessions(client, character["id"], include_archived=True) == before
+    assert _count_rows(engine, schema.messages) == messages_before
+
+
+def test_another_users_character_answers_404_with_an_opening_message__S018_002_DoD7(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-7 — R5: player B posting a valid `opening_message` to A's character answers 404
+    `character_not_found`, and A's session listing is unchanged (nothing created)."""
+    owner = _player_a(application, db_settings)
+    character = _character(owner, "Aria")
+    _start(owner, character["id"], {})
+    before = _character_sessions(owner, character["id"], include_archived=True)
+    sessions_before = _count_rows(engine, schema.sessions)
+    messages_before = _count_rows(engine, schema.messages)
+    intruder = _player_b(application, db_settings)
+
+    response = _start_request(intruder, character["id"], {"opening_message": OPENING_TEXT})
+
+    _assert_envelope(response, 404, CHARACTER_NOT_FOUND)
+    assert _character_sessions(owner, character["id"], include_archived=True) == before
+    assert _count_rows(engine, schema.sessions) == sessions_before
+    assert _count_rows(engine, schema.messages) == messages_before
+
+
+# --- DoD-8: no opening message is 011's start, answering `opening_message: null` --------
+
+
+@pytest.mark.parametrize("body", [_OMITTED, {}], ids=["no-body", "empty-object"])
+def test_a_start_without_an_opening_message_answers_null_and_an_empty_zone__S018_002_DoD8(
+    application: FastAPI, db_settings: Settings, body: Any
+) -> None:
+    """DoD-8 — 011 D2, 018 D3: the session is created as 011 built it (no setup, last use ==
+    creation), the answer's `opening_message` is null, and the new zone is empty."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+
+    response = _start_request(client, character["id"], body)
+
+    assert response.status_code == 201, response.text
+    started = response.json()
+    _assert_started_wire_shape(started)
+    assert started["opening_message"] is None
+    assert started["character_id"] == character["id"]
+    assert started["setup_id"] is None
+    assert started["setup_name"] is None
+    assert started["last_used_at"] == started["created_at"]
+    assert _zone(client, started["id"]) == {"messages": []}
+    assert started["id"] in _ids(_character_sessions(client, character["id"]))
+
+
+def test_a_start_with_a_working_setup_and_no_opening_message_answers_null__S018_002_DoD8(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-8 — 011 D2: `{"setup_id": <A's working setup>}` starts with that setup, answers
+    `opening_message: null`, and the new zone is empty."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    setup = _create_setup(client, character["id"], "Tavern", "# Night")
+
+    response = _start_request(client, character["id"], {"setup_id": setup["id"]})
+
+    assert response.status_code == 201, response.text
+    started = response.json()
+    _assert_started_wire_shape(started)
+    assert started["opening_message"] is None
+    assert started["setup_id"] == setup["id"]
+    assert started["setup_name"] == setup["name"]
+    assert _zone(client, started["id"]) == {"messages": []}
+
+
+def test_every_other_session_route_still_answers_exactly_eight_keys__S018_002_DoD8(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-8 — the amendment is for the start route only: read, both listings, archive and
+    restore keep exactly the eight `Session` keys, even for a session started with an
+    opening message."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    started = _start_started(client, character["id"], {"opening_message": OPENING_TEXT})
+    session_id = started["id"]
+
+    assert set(_read_session(client, session_id)) == SESSION_KEYS
+    for row in _all_sessions(client) + _character_sessions(client, character["id"]):
+        assert set(row) == SESSION_KEYS
+    archived = _archive_session(client, session_id)
+    assert archived.status_code == 200, archived.text
+    assert set(archived.json()) == SESSION_KEYS
+    restored = _restore_session(client, session_id)
+    assert restored.status_code == 200, restored.text
+    assert set(restored.json()) == SESSION_KEYS
+
+
+# --- DoD-9: an archived setup refuses, and the refusal creates nothing ------------------
+
+
+def test_an_archived_setup_with_an_opening_message_answers_409_and_creates_nothing__S018_002_DoD9(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-9 — 011 D12: `{"setup_id": <A's archived setup>, "opening_message": "Hi"}` answers
+    409 `setup_archived`; no session and no message is created."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    setup = _create_setup(client, character["id"], "Tavern", "# Night")
+    _archive_setup(client, setup["id"])
+    before = _character_sessions(client, character["id"], include_archived=True)
+    sessions_before = _count_rows(engine, schema.sessions)
+    messages_before = _count_rows(engine, schema.messages)
+
+    response = _start_request(client, character["id"], {"setup_id": setup["id"], "opening_message": "Hi"})
+
+    _assert_envelope(response, 409, SETUP_ARCHIVED)
+    assert _character_sessions(client, character["id"], include_archived=True) == before
+    assert _count_rows(engine, schema.sessions) == sessions_before
+    assert _count_rows(engine, schema.messages) == messages_before

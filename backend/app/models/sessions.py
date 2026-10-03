@@ -40,6 +40,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 from app.models.ids import SnowflakeOut
+from app.models.stream import MessageResponse, NonBlankText
 
 
 def _parse_optional_snowflake(value: Any) -> int | None:
@@ -73,6 +74,15 @@ class SessionResponse(BaseModel):
     updated_at: str
 
 
+class StartedSessionResponse(SessionResponse):
+    """The start-session answer: `SessionResponse`'s eight keys plus `opening_message` (018 D3).
+
+    `opening_message` is the seeded zone message, or `None` exactly when none was sent.
+    """
+
+    opening_message: MessageResponse | None
+
+
 class SessionListResponse(BaseModel):
     """The caller's sessions, under the single `sessions` field, in the order the service gave."""
 
@@ -85,3 +95,4 @@ class StartSessionRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     setup_id: OptionalSnowflakeIn = None
+    opening_message: NonBlankText | None = None

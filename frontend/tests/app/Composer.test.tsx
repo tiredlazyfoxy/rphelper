@@ -768,3 +768,46 @@ describe("017 step 011 — Composer's sendBlockedReason gate (US-107.AC-1, US-10
     expect(posts(log)[0]?.body).toBe('{"kind":"partner","text":"Pasted"}');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Feature 018, step 003 — the stream composer rebuilt on ComposerCore (D4). Every 013 / 017
+// assertion above is unchanged and is DoD-5's main evidence; the cases below add the slot
+// placement the step's Interface intent states (preview under the text area; Settle, then
+// Discard, beside Send). Every "— DoD-N" here is 018 step 003's.
+function precedes(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+describe("018 step 003 — Composer rebuilt on the core keeps its public behaviour (D4)", () => {
+  it('with a blank draft and an empty zone: textbox "Composer", then "Send", then "Settle", then "Discard empty zone" — DoD-5', () => {
+    stubFetch(() => undefined);
+    renderComposer(seeded());
+
+    const textbox = composer();
+    const send = sendButton();
+    const settle = settleButton();
+    const discard = screen.getByRole("button", { name: DISCARD_NAME });
+
+    expect(precedes(textbox, send)).toBe(true);
+    expect(precedes(send, settle)).toBe(true);
+    expect(precedes(settle, discard)).toBe(true);
+  });
+
+  it('with draft "She walks." on my turn, the preview line sits after the text area and before "Send" — DoD-5', () => {
+    stubFetch(() => undefined);
+    renderComposer(seeded({ draft: "She walks." }));
+
+    const preview = screen.getByText(PREVIEW_TURN);
+    expect(precedes(composer(), preview)).toBe(true);
+    expect(precedes(preview, sendButton())).toBe(true);
+    expect(precedes(sendButton(), settleButton())).toBe(true);
+  });
+
+  it("the composer itself renders no kind switch (the switch stays a sibling) — DoD-5", () => {
+    stubFetch(() => undefined);
+    renderComposer(seeded());
+
+    expect(screen.queryByRole("radio", { name: "My turn" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Partner" })).toBeNull();
+  });
+});

@@ -1288,3 +1288,201 @@ describe("with reorderable: the reorder failure and the state's order (016 003)"
     expect(noteBox(within(region()).getByRole("listitem", { name: "Note 3 of 3" })).value).toBe(BODY_A);
   });
 });
+
+// ===========================================================================
+// Feature 018, step 005 — the opt-in grid layout (DoD-2, DoD-3).
+// Expected behaviour comes from 018's step file 005.notes-grid.md (Interface intent for
+// MemoLevelGroup: grid renders the SAME list and listitems — new note first, identical card
+// content, flags, reach line and failures — and the reorderable cards behave identically) and
+// 018 context.md D8. Every test above renders without a layout prop and is the "no layout
+// prop" half of DoD-2; none of them is edited. Geometry is [manual/live] (jsdom does not lay
+// out), so nothing here asserts columns or styles.
+// ===========================================================================
+function renderGrid(state: MemoLevelState, options: { layout?: "list" | "grid" } = {}) {
+  const onRetry = vi.fn<() => void>();
+  const result = render(
+    <AppProviders>
+      <MemoLevelGroup
+        state={state}
+        title={TITLE}
+        headingOrder={3}
+        onRetry={onRetry}
+        layout={options.layout ?? "grid"}
+      />
+    </AppProviders>,
+  );
+  return { ...result, onRetry };
+}
+
+/** A grid, reorderable group inside a DndContext with only a KeyboardSensor and an onDragStart spy. */
+function renderSortableGrid(state: MemoLevelState) {
+  const onDragStart = vi.fn<(event: DragStartEvent) => void>();
+  const onRetry = vi.fn<() => void>();
+  const result = render(
+    <AppProviders>
+      <KeyboardDnd onDragStart={onDragStart}>
+        <MemoLevelGroup state={state} title={TITLE} headingOrder={3} onRetry={onRetry} layout="grid" reorderable />
+      </KeyboardDnd>
+    </AppProviders>,
+  );
+  return { ...result, onDragStart, onRetry };
+}
+
+function twoSavedNotes(): Memo[] {
+  return [
+    memo(MEMO_A, { body: BODY_A, is_enabled: true, is_forced: false, sort_key: 0 }),
+    memo(MEMO_B, { body: BODY_B, is_enabled: true, is_forced: true, sort_key: 1 }),
+  ];
+}
+
+describe("layout grid: the same list and cards (018 005, D8)", () => {
+  it("a ready level with two saved notes renders the region named by its title, its heading, one list and exactly two listitems in state order — DoD-2", () => {
+    stubBackend(() => notFoundResponse());
+    renderGrid(readyLevel(...twoSavedNotes()));
+
+    const group = region();
+    expect(within(group).getByRole("heading", { name: TITLE, level: 3 })).toBeInTheDocument();
+    expect(within(group).getAllByRole("list")).toHaveLength(1);
+    const listed = within(group).getAllByRole("listitem");
+    expect(listed).toHaveLength(2);
+    expect(noteBox(listed[0]).value).toBe(BODY_A);
+    expect(noteBox(listed[1]).value).toBe(BODY_B);
+  });
+
+  it("each grid listitem holds exactly one Note textbox, its flag buttons and its reach line, as in the list — DoD-2", () => {
+    stubBackend(() => notFoundResponse());
+    renderGrid(readyLevel(...twoSavedNotes()));
+
+    for (const item of items()) {
+      const boxes = within(item).getAllByRole("textbox");
+      expect(boxes).toHaveLength(1);
+      expect(boxes[0]).toBe(within(item).getByRole("textbox", { name: NOTE_LABEL }));
+    }
+    expect(button(itemAt(0), DISABLE_NOTE)).toBeInTheDocument();
+    expect(button(itemAt(0), FORCE_NOTE)).toBeInTheDocument();
+    expect(within(itemAt(0)).getByText(SEARCHABLE_LINE)).toBeInTheDocument();
+    expect(button(itemAt(1), DISABLE_NOTE)).toBeInTheDocument();
+    expect(button(itemAt(1), STOP_FORCING_NOTE)).toBeInTheDocument();
+    expect(within(itemAt(1)).getByText(FORCED_LINE)).toBeInTheDocument();
+  });
+
+  it("New note in grid adds a FIRST listitem with one empty Note textbox, no flags and no reach line; the saved notes follow in order — DoD-2", async () => {
+    const { calls } = serveNotes(twoSavedNotes());
+    renderGrid(readyLevel(...twoSavedNotes()));
+
+    await newUser().click(newNoteButton());
+    await waitFor(() => {
+      expect(items()).toHaveLength(3);
+    });
+
+    const fresh = itemAt(0);
+    expect(within(fresh).getAllByRole("textbox")).toHaveLength(1);
+    expect(noteBox(fresh).value).toBe("");
+    for (const label of FLAG_LABELS) {
+      expect(hasButton(fresh, label)).toBe(false);
+    }
+    for (const line of REACH_LINES) {
+      expect(within(fresh).queryByText(line)).toBeNull();
+    }
+    expect(noteBox(itemAt(1)).value).toBe(BODY_A);
+    expect(noteBox(itemAt(2)).value).toBe(BODY_B);
+    expect(within(region()).getAllByRole("list")).toHaveLength(1);
+    await settle();
+    expect(calls).toEqual([]);
+  });
+
+  it("a failed body save in grid shows Could not save the note. inside that listitem and keeps the typed text — DoD-2", async () => {
+    serveNotes(twoSavedNotes(), { patch: true });
+    renderGrid(readyLevel(...twoSavedNotes()));
+    const typed = "A grid rewrite that will not land.";
+
+    fireEvent.change(noteBox(itemAt(1)), { target: { value: typed } });
+    fireEvent.blur(noteBox(itemAt(1)));
+
+    await waitFor(() => {
+      expect(within(itemAt(1)).queryByText(SAVE_FAILURE)).not.toBeNull();
+    });
+    expect(noteBox(itemAt(1)).value).toBe(typed);
+    expect(within(itemAt(0)).queryByText(SAVE_FAILURE)).toBeNull();
+    expect(document.querySelector(NOTIFICATION)).toBeNull();
+  });
+
+  it("grid without reorderable and with no DndContext ancestor carries no sortable marks — DoD-2", () => {
+    stubBackend(() => notFoundResponse());
+    renderGrid(readyLevel(...threeNotes()));
+
+    expect(textsInOrder()).toEqual([BODY_A, BODY_B, BODY_C]);
+    for (const item of items()) {
+      expect(item).not.toHaveAttribute("tabindex");
+      expect(item).not.toHaveAttribute("aria-roledescription");
+    }
+    expect(within(region()).queryAllByRole("listitem", { name: POSITION_NAME })).toEqual([]);
+  });
+
+  it("layout list, given explicitly, renders the same region, one list and the saved notes in state order with no sortable marks — DoD-2", () => {
+    stubBackend(() => notFoundResponse());
+    renderGrid(readyLevel(...twoSavedNotes()), { layout: "list" });
+
+    const group = region();
+    expect(within(group).getAllByRole("list")).toHaveLength(1);
+    expect(textsInOrder()).toEqual([BODY_A, BODY_B]);
+    for (const item of items()) {
+      expect(item).not.toHaveAttribute("tabindex");
+    }
+  });
+});
+
+describe("layout grid with reorderable: the sortable cards behave identically (018 005, US-102)", () => {
+  it("each saved note's listitem is focusable with tabIndex 0 and named Note 1 of 3 .. Note 3 of 3 in state order — DoD-3", () => {
+    stubBackend(() => notFoundResponse());
+    renderSortableGrid(readyLevel(...threeNotes()));
+
+    const listed = items();
+    expect(listed).toHaveLength(3);
+    const expected: Array<[string, string]> = [
+      ["Note 1 of 3", BODY_A],
+      ["Note 2 of 3", BODY_B],
+      ["Note 3 of 3", BODY_C],
+    ];
+    expected.forEach(([name, body], index) => {
+      const item = listed[index];
+      expect(item).toHaveAccessibleName(name);
+      expect(within(region()).getByRole("listitem", { name })).toBe(item);
+      expect(item.tabIndex).toBe(0);
+      expect(noteBox(item).value).toBe(body);
+    });
+  });
+
+  it("Space with the target being a card's Note textbox does not start a drag; Space on the focused card starts one with that note's id — DoD-3", async () => {
+    stubBackend(() => notFoundResponse());
+    const { onDragStart } = renderSortableGrid(readyLevel(...threeNotes()));
+    const card = itemAt(2);
+
+    pressSpace(noteBox(card));
+    await settle();
+    expect(onDragStart).not.toHaveBeenCalled();
+
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    pressSpace(card);
+
+    await waitFor(() => {
+      expect(onDragStart).toHaveBeenCalledTimes(1);
+    });
+    expect(startedIds(onDragStart)).toEqual([MEMO_C]);
+  });
+
+  it("Space on the focused first card starts a drag with the first note's id — DoD-3", async () => {
+    stubBackend(() => notFoundResponse());
+    const { onDragStart } = renderSortableGrid(readyLevel(...threeNotes()));
+    const card = itemAt(0);
+
+    card.focus();
+    pressSpace(card);
+
+    await waitFor(() => {
+      expect(onDragStart).toHaveBeenCalledTimes(1);
+    });
+    expect(startedIds(onDragStart)).toEqual([MEMO_A]);
+  });
+});

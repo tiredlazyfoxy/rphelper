@@ -28,8 +28,11 @@ body parameter is annotated `StartSessionRequest | None` with the default `None`
 at all, `{}` and `{"setup_id": null}` all reach the handler and all mean "no setup" (R2 — no
 default, no sentinel); `{"setup_id": "abc"}` is refused by the model's validator as a 422
 before the handler runs. Because the parameter carries a default it is declared **last**,
-after the dependencies, the same way `include_archived` is on the two list routes. `018`
-later adds an optional opening-message field to this same model and route.
+after the dependencies, the same way `include_archived` is on the two list routes. Since
+`018` (D3) the body may also carry an optional `opening_message`: when present the route
+calls `start_seeded_session`, which creates the session and seeds that text into its zone in
+one transaction; either way the route answers `StartedSessionResponse` — the eight session
+keys plus `opening_message`, `null` when none was sent.
 
 **No `PATCH` and no `DELETE` handler exists here** (`context.md` R6, D9). Nothing in this
 router edits a session and nothing deletes one; Starlette answers 405 for either method on
@@ -48,6 +51,7 @@ Timestamps are the stored fixed-width UTC text in both the service's `RpSession`
 re-formats a timestamp, and `user_id` never reaches the wire (R5).
 """
 
+from dataclasses import asdict
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -60,8 +64,10 @@ from app.models.ids import SnowflakeIn
 from app.models.sessions import (
     SessionListResponse,
     SessionResponse,
+    StartedSessionResponse,
     StartSessionRequest,
 )
+from app.models.stream import MessageResponse
 from app.routers.bootstrap import get_id_generator
 from app.services.sessions import (
     RpSession,
@@ -70,6 +76,7 @@ from app.services.sessions import (
     list_character_sessions,
     list_sessions,
     restore_session,
+    start_seeded_session,
     start_session,
 )
 
@@ -128,8 +135,11 @@ def start_own_session(
     connection: Annotated[Connection, Depends(get_connection)],
     generator: Annotated[SnowflakeGenerator, Depends(get_id_generator)],
     body: StartSessionRequest | None = None,
-) -> SessionResponse:
-    """Start one session under the caller's character via `start_session(...)`; answers 201.
+) -> StartedSessionResponse:
+    """Start one session under the caller's character; answers 201 with `StartedSessionResponse`.
+
+    With an `opening_message` it calls `start_seeded_session(...)` (018 D3); otherwise
+    `start_session(...)`, answering `opening_message: null`.
 
     A `None` body (no body at all) and a body whose `setup_id` is absent or `null` are the
     same request: `setup_id` `None`, a session with no setup. An archived character of the
@@ -140,8 +150,17 @@ def start_own_session(
     # three are therefore the same call: `setup_id` `None`, a session with no setup — no
     # default and no sentinel is substituted here or anywhere below (R2, D2).
     setup_id = None if body is None else body.setup_id
+    if body is not None and body.opening_message is not None:
+        # 018 D3: session and opening zone message in the service's one transaction.
+        started = start_seeded_session(
+            connection, generator, current_user.id, character_id, body.opening_message, setup_id
+        )
+        return StartedSessionResponse(
+            **asdict(started.session),
+            opening_message=MessageResponse.model_validate(started.opening_message, from_attributes=True),
+        )
     session = start_session(connection, generator, current_user.id, character_id, setup_id)
-    return _to_response(session)
+    return StartedSessionResponse(**asdict(session), opening_message=None)
 
 
 @router.get("/api/sessions/{session_id}", status_code=200)

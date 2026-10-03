@@ -63,31 +63,47 @@ def append_message(
     """Insert one roleplayer zone message and bump the session."""
     with connection.begin():
         _require_session(connection, user_id, session_id)
-        new_id = generator.next_id()
         now = _now_text()
-        connection.execute(
-            messages.insert().values(
-                id=new_id,
-                user_id=user_id,
-                session_id=session_id,
-                role="user",
-                text=text,
-                created_at=now,
-                updated_at=now,
-            )
-        )
+        message = insert_zone_message(connection, generator, user_id, session_id, text, now)
         _bump_session(connection, user_id, session_id, now)
-        message = StreamMessage(
+    return message
+
+
+def insert_zone_message(
+    connection: Connection,
+    generator: SnowflakeGenerator,
+    user_id: int,
+    session_id: int,
+    text: str,
+    now: str,
+) -> StreamMessage:
+    """Insert one current-zone user row stamped `now` — transaction-neutral (018 D3).
+
+    Opens no transaction, checks nothing about the session and does not bump it: the caller
+    owns all three.
+    """
+    new_id = generator.next_id()
+    connection.execute(
+        messages.insert().values(
             id=new_id,
+            user_id=user_id,
             session_id=session_id,
             role="user",
-            kind=None,
             text=text,
-            settled_at=None,
             created_at=now,
             updated_at=now,
         )
-    return message
+    )
+    return StreamMessage(
+        id=new_id,
+        session_id=session_id,
+        role="user",
+        kind=None,
+        text=text,
+        settled_at=None,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 def file_partner_entry(

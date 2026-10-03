@@ -213,6 +213,30 @@ describe("Composer paste warning — partner (D5, US-035.AC-1, US-035.AC-2)", ()
 
     expect(notifyWarningSpy).not.toHaveBeenCalled();
   });
+
+  // Feature 018, step 003 (D4): the warning now lives in ComposerCore and runs before the
+  // stream composer's partner hook. Behaviour is unchanged: warning first, filing after.
+  it("018 step 003 — on partner, the warning fires before the partner filing request — DoD-5", async () => {
+    const log = happyBackend();
+    const requestsSeenAtWarning: number[] = [];
+    notifyWarningSpy.mockImplementationOnce(() => {
+      requestsSeenAtWarning.push(log.length);
+    });
+    const state = seeded("partner");
+    renderComposer(state);
+    expect(effectiveKind(state)).toBe("partner");
+
+    const notPrevented = paste(OVER_THRESHOLD);
+    await waitFor(() => {
+      expect(posts(log)).toHaveLength(1);
+    });
+    await flush();
+
+    expect(notPrevented).toBe(false);
+    expect(requestsSeenAtWarning).toEqual([0]);
+    expectPartnerFiling(log, OVER_THRESHOLD);
+    expect(notifyWarningSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Composer paste warning — my turn (D5, US-035.AC-1, US-035.AC-2)", () => {

@@ -15,11 +15,13 @@ raises `SetupNotFoundError`, and one of the caller's that is archived raises
 `services/auth.py` owns `OpenedSession`, `open_session`, `resolve_session` and friends, and
 nothing in this module shadows them (D11).
 
-The six operations below are the whole surface. Nothing here ever removes a row (R6), nothing
+The seven operations below are the whole surface. Nothing here ever removes a row (R6), nothing
 here writes a row in any table but `sessions` (R2 — no setup is ever created, and there is no
-sentinel "no setup" row), and there is no "touch" operation: `last_used_at` is stamped once at
-creation and bumped only by the content writes `012` brings (D3), so a read — `get_session`
-included — never writes.
+sentinel "no setup" row) except the one opening zone message `start_seeded_session` inserts
+through `services/messages.py`'s transaction-neutral `insert_zone_message` (018 D3 — that helper
+and `StreamMessage` are the only names imported from that module), and there is no "touch" operation:
+`last_used_at` is stamped once at creation and bumped only by the content writes `012` brings (D3), so a read
+— `get_session` included — never writes.
 
 Creation captures the session's model in its one transaction, after the character and setup
 checks (`017` D1): the character's own configured pair, taken as-is and never checked against
@@ -53,6 +55,7 @@ from app.db.schema import characters, sessions, setups
 from app.errors import CharacterNotFoundError, SessionNotFoundError, SetupArchivedError, SetupNotFoundError
 from app.ids import SnowflakeGenerator
 from app.services.llm_registry import first_enabled_chat_model
+from app.services.messages import StreamMessage, insert_zone_message
 
 
 @dataclass(frozen=True)
@@ -97,54 +100,102 @@ def start_session(
     returned value carries `setup_name` from the setup the check already read, or `None`. Any
     refusal inserts nothing.
     """
-    # D12's order, all inside the one write transaction, so any refusal inserts nothing: the
-    # parent character first, then the setup's existence under that same parent, then its
-    # archive state.
     with connection.begin():
-        character_model = _require_parent_character(connection, user_id, character_id)
-        setup_name: str | None = None
-        if setup_id is not None:
-            setup_name = _require_choosable_setup(connection, user_id, character_id, setup_id)
-        # 017 D1, after every check so a refusal costs no registry read: the character's own
-        # pair as-is (never validated, R4); else the first enabled model (D7); else NULL.
-        model_server_id: int | None = None
-        model_name: str | None = None
-        if character_model is not None:
-            model_server_id, model_name = character_model
-        else:
-            first_enabled = first_enabled_chat_model(connection)
-            if first_enabled is not None:
-                model_server_id = first_enabled.server.id
-                model_name = first_enabled.model_name
-        new_id = generator.next_id()
-        now = _now_text()
-        connection.execute(
-            sessions.insert().values(
-                id=new_id,
-                user_id=user_id,
-                character_id=character_id,
-                setup_id=setup_id,
-                model_server_id=model_server_id,
-                model_name=model_name,
-                last_used_at=now,
-                archived_at=None,
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        # One instant for all three stamps (D3), and `setup_name` is the name the setup check
-        # just read — so the created value needs no second read.
-        session = RpSession(
+        session = _insert_session(connection, generator, user_id, character_id, setup_id)
+    return session
+
+
+@dataclass(frozen=True)
+class StartedSession:
+    """A just-created session and the opening message seeded into its zone, or `None` (018 D3)."""
+
+    session: RpSession
+    opening_message: StreamMessage | None
+
+
+def start_seeded_session(
+    connection: Connection,
+    generator: SnowflakeGenerator,
+    user_id: int,
+    character_id: int,
+    opening_text: str,
+    setup_id: int | None = None,
+) -> StartedSession:
+    """Create a session exactly as `start_session` does and seed its zone in the same transaction.
+
+    One `with connection.begin():` — the parent check, the optional setup check, the session id,
+    `now`, 017's model capture and the session insert (shared with `start_session`), then
+    `insert_zone_message` with the new session id and the **same** `now` (018 D3). No `(( ))`
+    parsing, no settle, no model call, no second bump. Any failure inserts nothing.
+    """
+    # The session id is minted before the message id, both inside the one transaction, so a
+    # failure of the message insert rolls the session insert back with it.
+    with connection.begin():
+        session = _insert_session(connection, generator, user_id, character_id, setup_id)
+        # The session's own creation instant is the message's: creation and the first content
+        # write are one instant, so `last_used_at` needs no second bump (018 D3, 011 D3).
+        message = insert_zone_message(connection, generator, user_id, session.id, opening_text, session.created_at)
+    return StartedSession(session=session, opening_message=message)
+
+
+def _insert_session(
+    connection: Connection,
+    generator: SnowflakeGenerator,
+    user_id: int,
+    character_id: int,
+    setup_id: int | None,
+) -> RpSession:
+    """The shared create body: checks, 017's model capture, id, `now`, insert — inside the caller's transaction.
+
+    Opens no transaction itself; `start_session` and `start_seeded_session` each wrap it in
+    their own `with connection.begin():`.
+    """
+    # D12's order, all inside the caller's one write transaction, so any refusal inserts
+    # nothing: the parent character first, then the setup's existence under that same parent,
+    # then its archive state.
+    character_model = _require_parent_character(connection, user_id, character_id)
+    setup_name: str | None = None
+    if setup_id is not None:
+        setup_name = _require_choosable_setup(connection, user_id, character_id, setup_id)
+    # 017 D1, after every check so a refusal costs no registry read: the character's own
+    # pair as-is (never validated, R4); else the first enabled model (D7); else NULL.
+    model_server_id: int | None = None
+    model_name: str | None = None
+    if character_model is not None:
+        model_server_id, model_name = character_model
+    else:
+        first_enabled = first_enabled_chat_model(connection)
+        if first_enabled is not None:
+            model_server_id = first_enabled.server.id
+            model_name = first_enabled.model_name
+    new_id = generator.next_id()
+    now = _now_text()
+    connection.execute(
+        sessions.insert().values(
             id=new_id,
+            user_id=user_id,
             character_id=character_id,
             setup_id=setup_id,
-            setup_name=setup_name,
-            archived_at=None,
+            model_server_id=model_server_id,
+            model_name=model_name,
             last_used_at=now,
+            archived_at=None,
             created_at=now,
             updated_at=now,
         )
-    return session
+    )
+    # One instant for all three stamps (D3), and `setup_name` is the name the setup check
+    # just read — so the created value needs no second read.
+    return RpSession(
+        id=new_id,
+        character_id=character_id,
+        setup_id=setup_id,
+        setup_name=setup_name,
+        archived_at=None,
+        last_used_at=now,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 def list_sessions(connection: Connection, user_id: int, include_archived: bool = False) -> list[RpSession]:

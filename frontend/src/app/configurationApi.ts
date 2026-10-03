@@ -1,7 +1,7 @@
 // The configuration wire surface (feature 017, step 006): the enabled-model list, the
 // user's own settings and a session's resolved configuration, as the server sends them, and
-// one call per route over the shared client. The character configuration routes get no
-// call here until 018 (D20).
+// one call per route over the shared client. Feature 018 (step 006) adds the character's
+// own configuration: one fetch and one update call, and nothing else character-addressed.
 // Ids are decimal strings and are never parsed, coerced or compared numerically.
 // Failures are the shared client's `ApiError`s, rethrown unchanged; an abort is rethrown as
 // the abort.
@@ -69,6 +69,30 @@ export type SessionConfigurationPatch = {
   preferred_language?: string | null;
 };
 
+/**
+ * A character's own configuration (018 D9): each key is the character's own value, or null
+ * for "not set". Flat — not the session's `Setting<T>` shape. No language key.
+ */
+export type CharacterConfiguration = {
+  model: ModelRef | null;
+  system_prompt: string | null;
+  tool_memo_search: boolean | null;
+  tool_session_search: boolean | null;
+  tool_web_search: boolean | null;
+};
+
+/**
+ * The character configuration update body: exactly the supplied keys are sent; null clears
+ * a key back to "not set" (`model: null` included, 017 D10). It admits no language key.
+ */
+export type CharacterConfigurationPatch = {
+  model?: ModelRef | null;
+  system_prompt?: string | null;
+  tool_memo_search?: boolean | null;
+  tool_session_search?: boolean | null;
+  tool_web_search?: boolean | null;
+};
+
 /** The model listing route's body: `{ models: [...] }`. */
 type EnabledModelListResponse = {
   models: EnabledModel[];
@@ -80,6 +104,11 @@ const USER_SETTINGS_PATH = "/api/me/settings";
 /** `/api/sessions/<sessionId>/configuration`; the id is only ever escaped, never parsed. */
 function sessionConfigurationPath(sessionId: string): string {
   return `/api/sessions/${encodeURIComponent(sessionId)}/configuration`;
+}
+
+/** `/api/characters/<characterId>/configuration`; the id is only ever escaped, never parsed. */
+function characterConfigurationPath(characterId: string): string {
+  return `/api/characters/${encodeURIComponent(characterId)}/configuration`;
 }
 
 /** `GET /api/models` — resolves to the payload's `models` array, in server order. */
@@ -119,4 +148,24 @@ export async function updateSessionConfiguration(
   signal?: AbortSignal,
 ): Promise<SessionConfiguration> {
   return apiPatch<SessionConfiguration>(sessionConfigurationPath(sessionId), patch, signal);
+}
+
+/** `GET /api/characters/<characterId>/configuration` — resolves to the configuration. */
+export async function fetchCharacterConfiguration(
+  characterId: string,
+  signal?: AbortSignal,
+): Promise<CharacterConfiguration> {
+  return apiGet<CharacterConfiguration>(characterConfigurationPath(characterId), signal);
+}
+
+/**
+ * `PATCH /api/characters/<characterId>/configuration` — sends exactly the keys present,
+ * resolves to the configuration.
+ */
+export async function updateCharacterConfiguration(
+  characterId: string,
+  patch: CharacterConfigurationPatch,
+  signal?: AbortSignal,
+): Promise<CharacterConfiguration> {
+  return apiPatch<CharacterConfiguration>(characterConfigurationPath(characterId), patch, signal);
 }

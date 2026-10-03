@@ -560,17 +560,20 @@ def test_get_me_still_answers_exactly_id_username_role__S017_005_DoD2(
 # --- DoD-3: end to end, default capture and inheritance -------------------------------
 
 
-def test_a_new_session_captures_the_first_enabled_model_and_inherits_defaults__S017_005_DoD3(
+def test_a_new_session_captures_the_first_enabled_model_and_inherits_defaults__S017_005_DoD3__S018_002_DoD8(
     application: FastAPI, db_settings: Settings, engine: Engine
 ) -> None:
-    """DoD-3 — US-106.AC-1, US-108.AC-1/AC-2, D1, D5: first enabled in D7 order, tools default on, no prompt."""
+    """DoD-3 — US-106.AC-1, US-108.AC-1/AC-2, D1, D5: first enabled in D7 order, tools default on, no prompt.
+
+    Amended by 018 step 002 DoD-8 (018 D3): the start route now answers `StartedSession`, the
+    eight session keys plus `opening_message` (null here: none was sent)."""
     _seed_registry(engine, low_second_enabled=False)  # two enabled: LOW_FIRST, HIGH_FIRST
     client = _player_a(application, db_settings)
     character = _character(client, "Aria")
 
     session = _start(client, character["id"])
 
-    assert set(session) == SESSION_KEYS
+    assert set(session) == SESSION_KEYS | {"opening_message"}
     configuration = _session_configuration(client, session["id"])
     assert configuration["model"] == _ref(SERVER_LOW, MODEL_LOW_FIRST_NAME)
     _assert_default_tools(configuration)

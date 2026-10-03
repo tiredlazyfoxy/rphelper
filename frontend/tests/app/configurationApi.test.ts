@@ -5,16 +5,25 @@
 // detail), D18 (a patch carries exactly the keys it holds), D20 (no character call) and the
 // "Ids are strings" constraint. Requests are matched by exact pathname, query and method.
 // Every id used here is beyond Number.MAX_SAFE_INTEGER, so a numeric coercion would change it.
+//
+// Feature 018, step 006 adds the two character-configuration calls (DoD-1, DoD-2) and
+// replaces 017's "no character-configuration call (D20)" guard with DoD-3: exactly the two
+// character calls, and a patch type with no language key. Expected values come from 018's
+// step file, 006.context.md ("017's character routes, as declared") and context.md D9.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isApiError } from "../../src/shared/apiError";
 import * as configurationApi from "../../src/app/configurationApi";
 import {
+  type CharacterConfiguration,
+  type CharacterConfigurationPatch,
   type EnabledModel,
+  fetchCharacterConfiguration,
   fetchEnabledModels,
   fetchSessionConfiguration,
   fetchUserSettings,
   type SessionConfiguration,
   type Setting,
+  updateCharacterConfiguration,
   updateSessionConfiguration,
   updateUserSettings,
   type UserSettings,
@@ -414,15 +423,183 @@ describe("failures and aborts", () => {
   });
 });
 
+// ===========================================================================
+// Feature 018, step 006 — the character-configuration calls.
+// ===========================================================================
+
+const CHARACTER_ID = "7250000000000000001";
+const OTHER_CHARACTER_ID = "7250000000000000009";
+const CHARACTER_CONFIG_PATH = `/api/characters/${CHARACTER_ID}/configuration`;
+
+/** A wire CharacterConfiguration with all five keys (flat: each value or null). */
+function characterConfiguration(overrides: Partial<CharacterConfiguration> = {}): CharacterConfiguration {
+  return {
+    model: { server_id: SERVER_A, model_name: "llama-3" },
+    system_prompt: "Stay in character.",
+    tool_memo_search: null,
+    tool_session_search: false,
+    tool_web_search: true,
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
-describe("no character-configuration call (D20)", () => {
-  it("exports no character-configuration call — DoD-6", () => {
-    const exported = Object.keys(configurationApi);
-    expect(exported.filter((name) => /character/i.test(name))).toEqual([]);
+describe("018 step 006 — fetchCharacterConfiguration", () => {
+  it("requests exactly GET /api/characters/7250000000000000001/configuration — DoD-1", async () => {
+    const mock = serve(characterConfiguration());
+    await fetchCharacterConfiguration("7250000000000000001");
+    expect(seen(mock)).toEqual([
+      { method: "GET", path: "/api/characters/7250000000000000001/configuration", search: "" },
+    ]);
+    expect(rawBody(mock)).toBeUndefined();
   });
 
-  it("no exported function requests a /api/characters path — DoD-6", async () => {
-    // Every runtime export is one of the five calls; none reaches the character routes.
+  it("resolves to the served five-key object unchanged, ids still strings — DoD-1", async () => {
+    const served = characterConfiguration();
+    serve(served);
+    const got = await fetchCharacterConfiguration(CHARACTER_ID);
+    expect(got).toStrictEqual(served);
+    expect(Object.keys(got).sort()).toEqual([
+      "model",
+      "system_prompt",
+      "tool_memo_search",
+      "tool_session_search",
+      "tool_web_search",
+    ]);
+    expect(got.model?.server_id).toBe("7250000000000000301");
+    expect(typeof got.model?.server_id).toBe("string");
+  });
+
+  it("resolves an all-null configuration as all null — DoD-1", async () => {
+    const served: CharacterConfiguration = {
+      model: null,
+      system_prompt: null,
+      tool_memo_search: null,
+      tool_session_search: null,
+      tool_web_search: null,
+    };
+    serve(served);
+    await expect(fetchCharacterConfiguration(CHARACTER_ID)).resolves.toStrictEqual(served);
+  });
+
+  it("addresses the character id verbatim — DoD-1", async () => {
+    const mock = serve(characterConfiguration());
+    await fetchCharacterConfiguration(OTHER_CHARACTER_ID);
+    expect(seen(mock)).toEqual([
+      { method: "GET", path: `/api/characters/${OTHER_CHARACTER_ID}/configuration`, search: "" },
+    ]);
+  });
+
+  it("a 404 character_not_found envelope rejects with that ApiError unchanged — DoD-1", async () => {
+    serve({ error: { code: "character_not_found", message: "No such character.", detail: {} } }, 404);
+    const error = await rejection(() => fetchCharacterConfiguration(CHARACTER_ID));
+    expect(isApiError(error)).toBe(true);
+    expect(isApiError(error) ? error.code : null).toBe("character_not_found");
+    expect(isApiError(error) ? error.status : null).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("018 step 006 — updateCharacterConfiguration", () => {
+  it("a model patch PATCHes /api/characters/<id>/configuration with exactly that one key — DoD-2", async () => {
+    const served = characterConfiguration({
+      model: { server_id: "7250000000000000301", model_name: "llama-3" },
+    });
+    const mock = serve(served);
+    await expect(
+      updateCharacterConfiguration(CHARACTER_ID, {
+        model: { server_id: "7250000000000000301", model_name: "llama-3" },
+      }),
+    ).resolves.toStrictEqual(served);
+    expect(seen(mock)).toEqual([{ method: "PATCH", path: CHARACTER_CONFIG_PATH, search: "" }]);
+    expect(sentBody(mock)).toStrictEqual({
+      model: { server_id: "7250000000000000301", model_name: "llama-3" },
+    });
+    expect(bodyKeys(mock)).toEqual(["model"]);
+    expect(typeof (sentBody(mock) as { model: { server_id: unknown } }).model.server_id).toBe("string");
+  });
+
+  it('{ model: null } sends exactly {"model":null} — DoD-2', async () => {
+    const served = characterConfiguration({ model: null });
+    const mock = serve(served);
+    await expect(updateCharacterConfiguration(CHARACTER_ID, { model: null })).resolves.toStrictEqual(served);
+    expect(seen(mock)).toEqual([{ method: "PATCH", path: CHARACTER_CONFIG_PATH, search: "" }]);
+    expect(sentBody(mock)).toStrictEqual({ model: null });
+    expect(rawBody(mock)).toBe('{"model":null}');
+  });
+
+  it('{ tool_web_search: false } sends exactly {"tool_web_search":false} — DoD-2', async () => {
+    const served = characterConfiguration({ tool_web_search: false });
+    const mock = serve(served);
+    await expect(
+      updateCharacterConfiguration(CHARACTER_ID, { tool_web_search: false }),
+    ).resolves.toStrictEqual(served);
+    expect(seen(mock)).toEqual([{ method: "PATCH", path: CHARACTER_CONFIG_PATH, search: "" }]);
+    expect(sentBody(mock)).toStrictEqual({ tool_web_search: false });
+    expect(bodyKeys(mock)).toEqual(["tool_web_search"]);
+    expect(rawBody(mock)).toBe('{"tool_web_search":false}');
+  });
+
+  it("addresses the character id verbatim — DoD-2", async () => {
+    const mock = serve(characterConfiguration());
+    await updateCharacterConfiguration(OTHER_CHARACTER_ID, { system_prompt: null });
+    expect(seen(mock)).toEqual([
+      { method: "PATCH", path: `/api/characters/${OTHER_CHARACTER_ID}/configuration`, search: "" },
+    ]);
+    expect(sentBody(mock)).toStrictEqual({ system_prompt: null });
+  });
+
+  it("a 409 model_not_enabled envelope rejects with an ApiError carrying that code — DoD-2", async () => {
+    serve(
+      {
+        error: {
+          code: "model_not_enabled",
+          message: "That model is not enabled.",
+          detail: { server_id: SERVER_B, model_name: "qwen-2", level: "character" },
+        },
+      },
+      409,
+    );
+    const error = await rejection(() =>
+      updateCharacterConfiguration(CHARACTER_ID, { model: { server_id: SERVER_B, model_name: "qwen-2" } }),
+    );
+    expect(isApiError(error)).toBe(true);
+    if (!isApiError(error)) return;
+    expect(error.code).toBe("model_not_enabled");
+    expect(error.status).toBe(409);
+    expect((error.detail as Record<string, unknown>).level).toBe("character");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 017 006 DoD-6 ("no character-configuration call", D20), amended by 018 006 DoD-3:
+// the module now exports exactly the two character calls and no other character call.
+describe("character-configuration calls: exactly two (017 006 DoD-6, amended by 018 006)", () => {
+  it("017 DoD-6 amended: the only character-named exports are the fetch and update calls — DoD-3", () => {
+    const exported = Object.keys(configurationApi);
+    expect(exported.filter((name) => /character/i.test(name)).sort()).toEqual([
+      "fetchCharacterConfiguration",
+      "updateCharacterConfiguration",
+    ]);
+  });
+
+  it("017 DoD-6 amended: the runtime functions are the five calls plus the two character calls — DoD-3", () => {
+    const functions = Object.entries(configurationApi)
+      .filter(([, value]) => typeof value === "function")
+      .map(([name]) => name)
+      .sort();
+    expect(functions).toEqual([
+      "fetchCharacterConfiguration",
+      "fetchEnabledModels",
+      "fetchSessionConfiguration",
+      "fetchUserSettings",
+      "updateCharacterConfiguration",
+      "updateSessionConfiguration",
+      "updateUserSettings",
+    ]);
+  });
+
+  it("017 DoD-6 amended: none of the five other calls requests a /api/characters path — DoD-3", async () => {
     const mock = stubFetch(() => Promise.resolve(jsonResponse(sessionConfiguration(), 200)));
     await fetchEnabledModels().catch(() => undefined);
     await fetchUserSettings().catch(() => undefined);
@@ -430,16 +607,50 @@ describe("no character-configuration call (D20)", () => {
     await fetchSessionConfiguration(SESSION_ID).catch(() => undefined);
     await updateSessionConfiguration(SESSION_ID, { tool_memo_search: true }).catch(() => undefined);
     expect(seen(mock).filter((call) => call.path.startsWith("/api/characters"))).toEqual([]);
-    const functions = Object.entries(configurationApi)
-      .filter(([, value]) => typeof value === "function")
-      .map(([name]) => name)
-      .sort();
-    expect(functions).toEqual([
-      "fetchEnabledModels",
-      "fetchSessionConfiguration",
-      "fetchUserSettings",
-      "updateSessionConfiguration",
-      "updateUserSettings",
+  });
+
+  it("the two character calls reach only /api/characters/<id>/configuration — DoD-3", async () => {
+    const mock = stubFetch(() => Promise.resolve(jsonResponse(characterConfiguration(), 200)));
+    await fetchCharacterConfiguration(CHARACTER_ID);
+    await updateCharacterConfiguration(CHARACTER_ID, { tool_memo_search: true });
+    expect(seen(mock)).toEqual([
+      { method: "GET", path: CHARACTER_CONFIG_PATH, search: "" },
+      { method: "PATCH", path: CHARACTER_CONFIG_PATH, search: "" },
     ]);
+  });
+
+  it("CharacterConfigurationPatch admits no rp_language / preferred_language key (type-level, npm run typecheck) — DoD-3", () => {
+    // Exact key set of the patch type: the five configuration keys and nothing else.
+    type PatchKeys = keyof CharacterConfigurationPatch;
+    type Expected = "model" | "system_prompt" | "tool_memo_search" | "tool_session_search" | "tool_web_search";
+    type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+    const exactKeys: Same<PatchKeys, Expected> = true;
+    const noRpLanguage: "rp_language" extends PatchKeys ? "has" : "absent" = "absent";
+    const noPreferredLanguage: "preferred_language" extends PatchKeys ? "has" : "absent" = "absent";
+
+    // An object literal carrying a language key is an excess-property error.
+    // @ts-expect-error — the character patch has no rp_language key (US-061.AC-3)
+    const withRp: CharacterConfigurationPatch = { rp_language: "Japanese" };
+    // @ts-expect-error — the character patch has no preferred_language key (US-061.AC-3)
+    const withPreferred: CharacterConfigurationPatch = { preferred_language: "English" };
+
+    // Each of the five keys is admitted alone, with a value or null.
+    const admitted: CharacterConfigurationPatch[] = [
+      {},
+      { model: null },
+      { model: { server_id: SERVER_A, model_name: "llama-3" } },
+      { system_prompt: null },
+      { system_prompt: "Be terse." },
+      { tool_memo_search: null },
+      { tool_session_search: true },
+      { tool_web_search: false },
+    ];
+
+    expect(exactKeys).toBe(true);
+    expect(noRpLanguage).toBe("absent");
+    expect(noPreferredLanguage).toBe("absent");
+    expect(withRp).toBeDefined();
+    expect(withPreferred).toBeDefined();
+    expect(admitted).toHaveLength(8);
   });
 });

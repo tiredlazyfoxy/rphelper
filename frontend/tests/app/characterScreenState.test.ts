@@ -9,23 +9,31 @@
 //   - loadCharacter writes the row and the draft, maps 404 character_not_found to
 //     "not-found" and every other failure to "failed", writes nothing once aborted and
 //     never rejects;
-//   - the four submits clear the error first, apply the server's returned row to the
+//   - the submits clear the error first, apply the server's returned row to the
 //     workspace characters state, are never optimistic, and on failure set one fixed
 //     sentence per action without rejecting.
+//
+// Feature 018, step 008 — the draft page and blur-save (DoD-1..DoD-11). Expected values
+// come from 008.draft-page-state.md (Interface intent, DoD), 008.context.md and the
+// feature context.md's D6, D7 and UI strings table. 009's canSubmit / submitSave are out
+// of the contract (D6, D7): their tests are replaced by the "018 step 008" describes
+// below, and the tests that mixed them in are amended (titles end "— DoD-11").
 import { isComputedProp, isObservableProp, runInAction, toJS } from "mobx";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Character } from "../../src/app/charactersApi";
 import { CharactersState } from "../../src/app/charactersState";
 import {
   CharacterScreenState,
-  canSubmit,
+  commitName,
+  commitPersona,
+  flushCharacterEdits,
   isDirty,
+  isDraft,
   isNewCharacter,
   loadCharacter,
   submitArchive,
   submitCreate,
   submitRestore,
-  submitSave,
 } from "../../src/app/characterScreenState";
 
 type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -35,6 +43,8 @@ const CREATE_ERROR = "Could not create the character.";
 const SAVE_ERROR = "Could not save the character.";
 const ARCHIVE_ERROR = "Could not archive the character.";
 const RESTORE_ERROR = "Could not restore the character.";
+/** 018's name-field sentence (context.md UI strings). */
+const NAME_ERROR = "A character needs a name.";
 
 // ---------------------------------------------------------------- fixtures
 // Ids are decimal strings past Number.MAX_SAFE_INTEGER (context.md "Ids are strings").
@@ -53,14 +63,6 @@ const LOADED: Character = {
   archived_at: null,
   created_at: "2026-03-14T09:26:53.000000+00:00",
   updated_at: "2026-03-14T09:26:53.000000+00:00",
-};
-
-/** What the server answers a PATCH of a typed, untrimmed name with: the stored value. */
-const SAVED: Character = {
-  ...LOADED,
-  name: "Bo",
-  sheet: "# Bo\n\nShorter now.",
-  updated_at: "2026-03-20T18:04:11.000000+00:00",
 };
 
 const ARCHIVED: Character = {
@@ -244,7 +246,7 @@ const FAILURES: FailureCase[] = [
 ];
 
 // ---------------------------------------------------------------------------
-describe("the new-mode state and canSubmit", () => {
+describe("the new-mode state", () => {
   it("a state constructed with null is in new mode, ready, with no character and an empty draft — DoD-1", () => {
     const state = new CharacterScreenState(null);
     expect(isNewCharacter(state)).toBe(true);
@@ -273,23 +275,7 @@ describe("the new-mode state and canSubmit", () => {
     });
   });
 
-  it("canSubmit is false on an empty draft name — DoD-1", () => {
-    expect(canSubmit(new CharacterScreenState(null))).toBe(false);
-  });
-
-  it.each(["   ", "\t", "\n  \n"])(
-    "canSubmit is false on a whitespace-only draft name, case %# — DoD-1",
-    (name) => {
-      expect(canSubmit(newScreen(name, "# Anything"))).toBe(false);
-    },
-  );
-
-  it("canSubmit is true once the name has a non-space character — DoD-1", () => {
-    expect(canSubmit(newScreen("Aria Vance", ""))).toBe(true);
-    expect(canSubmit(newScreen("  Aria  ", ""))).toBe(true);
-  });
-
-  it("the class carries no method and no computed getter — DoD-1", () => {
+  it("the class carries no method and no computed getter (009 DoD-1, field list widened by 018 008) — DoD-11", () => {
     expect(Object.getOwnPropertyNames(CharacterScreenState.prototype)).toEqual(["constructor"]);
     const state = new CharacterScreenState(null);
     const observed = Object.getOwnPropertyNames(state).filter((name) =>
@@ -300,6 +286,9 @@ describe("the new-mode state and canSubmit", () => {
       "characterId",
       "error",
       "name",
+      "nameError",
+      "nameSaving",
+      "personaSaving",
       "sheet",
       "status",
       "submitStatus",
@@ -311,20 +300,25 @@ describe("the new-mode state and canSubmit", () => {
     }
   });
 
-  it("the derivations and the effects are free functions, not members — DoD-1", () => {
+  it("the derivations and the effects are free functions, not members (009 DoD-1, re-listed by 018 008) — DoD-11", () => {
     for (const fn of [
       isNewCharacter,
       isDirty,
-      canSubmit,
+      isDraft,
       loadCharacter,
       submitCreate,
-      submitSave,
+      commitName,
+      commitPersona,
+      flushCharacterEdits,
       submitArchive,
       submitRestore,
     ]) {
       expect(typeof fn).toBe("function");
     }
-    expect(Object.getOwnPropertyNames(CharacterScreenState.prototype)).not.toContain("submitSave");
+    const members = Object.getOwnPropertyNames(CharacterScreenState.prototype);
+    for (const name of ["commitName", "commitPersona", "flushCharacterEdits", "isDraft"]) {
+      expect(members).not.toContain(name);
+    }
   });
 });
 
@@ -497,7 +491,7 @@ describe("loadCharacter", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("isDirty and canSubmit around a loaded character", () => {
+describe("isDirty around a loaded character", () => {
   async function loadedViaServer(): Promise<CharacterScreenState> {
     stubBackend(() => jsonResponse(LOADED, 200));
     const state = new CharacterScreenState(ID);
@@ -505,129 +499,25 @@ describe("isDirty and canSubmit around a loaded character", () => {
     return state;
   }
 
-  it("right after a successful load neither isDirty nor canSubmit holds — DoD-5", async () => {
+  it("right after a successful load isDirty does not hold (009 DoD-5, canSubmit dropped) — DoD-11", async () => {
     const state = await loadedViaServer();
     expect(isDirty(state)).toBe(false);
-    expect(canSubmit(state)).toBe(false);
   });
 
-  it("changing the draft name makes both true — DoD-5", async () => {
+  it("changing the draft name makes isDirty true (009 DoD-5, canSubmit dropped) — DoD-11", async () => {
     const state = await loadedViaServer();
     runInAction(() => {
       state.name = "Aria Vancet";
     });
     expect(isDirty(state)).toBe(true);
-    expect(canSubmit(state)).toBe(true);
   });
 
-  it("changing the draft sheet makes both true — DoD-5", async () => {
+  it("changing the draft sheet makes isDirty true (009 DoD-5, canSubmit dropped) — DoD-11", async () => {
     const state = await loadedViaServer();
     runInAction(() => {
       state.sheet = `${LOADED.sheet}\n\nAnd a second paragraph.`;
     });
     expect(isDirty(state)).toBe(true);
-    expect(canSubmit(state)).toBe(true);
-  });
-
-  it("a whitespace-only draft name makes canSubmit false — DoD-5", async () => {
-    const state = await loadedViaServer();
-    runInAction(() => {
-      state.name = "   ";
-    });
-    expect(canSubmit(state)).toBe(false);
-  });
-
-  it("canSubmit is false while a submit is in flight — DoD-5", async () => {
-    const state = await loadedViaServer();
-    runInAction(() => {
-      state.name = "Aria Vancet";
-      state.submitStatus = "submitting";
-    });
-    expect(canSubmit(state)).toBe(false);
-    runInAction(() => {
-      state.submitStatus = "idle";
-    });
-    expect(canSubmit(state)).toBe(true);
-  });
-
-  it("a new-mode draft with a name cannot be submitted while a submit is in flight — DoD-5", () => {
-    const state = newScreen("Aria Vance", "# Aria");
-    runInAction(() => {
-      state.submitStatus = "submitting";
-    });
-    expect(canSubmit(state)).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("submitSave", () => {
-  it("patches both fields, is never optimistic, and adopts the server's row — DoD-6", async () => {
-    const pending = deferred<Response>();
-    const { calls } = stubBackend(() => pending.promise);
-    const state = loadedScreen(LOADED);
-    const characters = workspaceWith([LOADED, OTHER]);
-    runInAction(() => {
-      state.name = "  Bo  ";
-      state.sheet = "# Bo\n\nShorter now.";
-    });
-
-    const running = submitSave(state, characters);
-    await flush();
-
-    // The request: both fields, the name exactly as typed (006.context.md).
-    expect(calls).toHaveLength(1);
-    expect(calls[0].method).toBe("PATCH");
-    expect(calls[0].path).toBe(ITEM_PATH);
-    expect(calls[0].body).toEqual({ name: "  Bo  ", sheet: "# Bo\n\nShorter now." });
-    expect(Object.keys(calls[0].body as Record<string, unknown>).sort()).toEqual(["name", "sheet"]);
-
-    // Never optimistic: before the response, the loaded value still stands.
-    expect(toJS(state.character)).toEqual(LOADED);
-    expect(rows(characters).find((row) => row.id === ID)).toEqual(LOADED);
-
-    pending.resolve(jsonResponse(SAVED, 200));
-    await expect(running).resolves.toBeUndefined();
-
-    // After it: the server's row, in `character` and in the draft.
-    expect(toJS(state.character)).toEqual(SAVED);
-    expect(state.name).toBe("Bo");
-    expect(state.sheet).toBe(SAVED.sheet);
-    expect(isDirty(state)).toBe(false);
-    expect(rows(characters).find((row) => row.id === ID)).toEqual(SAVED);
-    expect(state.error).toBeNull();
-  });
-
-  it.each(FAILURES)(
-    "a failed save (%s) keeps the edited draft and the loaded character — DoD-7",
-    async (_label, answer) => {
-      stubBackend(() => answer());
-      const state = loadedScreen(LOADED);
-      const characters = workspaceWith([LOADED]);
-      runInAction(() => {
-        state.name = "Bo the Unsaved";
-        state.sheet = "# Bo\n\nUnsaved body.";
-      });
-      await expect(submitSave(state, characters)).resolves.toBeUndefined();
-      expect(state.error).toBe(SAVE_ERROR);
-      expect(state.name).toBe("Bo the Unsaved");
-      expect(state.sheet).toBe("# Bo\n\nUnsaved body.");
-      expect(toJS(state.character)).toEqual(LOADED);
-      expect(rows(characters)).toEqual([LOADED]);
-    },
-  );
-
-  it("a transport failure on save behaves the same way — DoD-7", async () => {
-    stubBackend(() => {
-      throw new TypeError("Failed to fetch");
-    });
-    const state = loadedScreen(LOADED);
-    runInAction(() => {
-      state.name = "Bo the Unsaved";
-    });
-    await expect(submitSave(state, workspaceWith([LOADED]))).resolves.toBeUndefined();
-    expect(state.error).toBe(SAVE_ERROR);
-    expect(state.name).toBe("Bo the Unsaved");
-    expect(toJS(state.character)).toEqual(LOADED);
   });
 });
 
@@ -718,34 +608,6 @@ describe("submitArchive and submitRestore", () => {
 
 // ---------------------------------------------------------------------------
 describe("a submit after a failure", () => {
-  it("submitSave clears the previous error before its own request — DoD-11", async () => {
-    const pending = deferred<Response>();
-    let attempt = 0;
-    const { calls } = stubBackend(() => {
-      attempt += 1;
-      return attempt === 1 ? serverError() : pending.promise;
-    });
-    const state = loadedScreen(LOADED);
-    const characters = workspaceWith([LOADED]);
-    runInAction(() => {
-      state.name = "  Bo  ";
-      state.sheet = "# Bo\n\nShorter now.";
-    });
-
-    await submitSave(state, characters);
-    expect(state.error).toBe(SAVE_ERROR);
-
-    const running = submitSave(state, characters);
-    await flush();
-    // The second request is already out, and the stale error is already gone.
-    expect(calls).toHaveLength(2);
-    expect(state.error).toBeNull();
-
-    pending.resolve(jsonResponse(SAVED, 200));
-    await expect(running).resolves.toBeUndefined();
-    expect(state.error).toBeNull();
-  });
-
   it("submitCreate clears the previous error before its own request — DoD-11", async () => {
     const pending = deferred<Response>();
     let attempt = 0;
@@ -771,7 +633,7 @@ describe("a submit after a failure", () => {
     expect(onCreated).toHaveBeenCalledTimes(1);
   });
 
-  it("an archive after a save failure clears the save sentence before its request — DoD-11", async () => {
+  it("an archive after a save failure clears the save sentence before its request (009 DoD-11, the save is now the name commit) — DoD-11", async () => {
     const pending = deferred<Response>();
     let attempt = 0;
     const { calls } = stubBackend(() => {
@@ -784,7 +646,7 @@ describe("a submit after a failure", () => {
       state.name = "Bo the Unsaved";
     });
 
-    await submitSave(state, characters);
+    await commitName(state, characters);
     expect(state.error).toBe(SAVE_ERROR);
 
     const running = submitArchive(state, characters);
@@ -796,5 +658,629 @@ describe("a submit after a failure", () => {
     pending.resolve(jsonResponse(ARCHIVED, 200));
     await expect(running).resolves.toBeUndefined();
     expect(state.error).toBeNull();
+  });
+});
+
+// ===========================================================================
+// Feature 018, step 008 — the draft page and blur-save.
+// ===========================================================================
+
+// ---------------------------------------------------------------- 018 fixtures
+// Timestamps are fixed-width text; "not older" is their order (008.context.md).
+const T_LOADED = "2026-05-01T10:00:00.000000+00:00";
+const T_RENAMED = "2026-05-01T10:05:00.000000+00:00";
+const T_PERSONA = "2026-05-01T10:06:00.000000+00:00";
+const T_ARCHIVED = "2026-05-01T10:07:00.000000+00:00";
+const T_LATER = "2026-05-01T10:08:00.000000+00:00";
+
+/** The loaded character "Aria" of DoD-5..DoD-10. */
+const ARIA: Character = {
+  id: ID,
+  name: "Aria",
+  sheet: "# Aria",
+  archived_at: null,
+  created_at: T_LOADED,
+  updated_at: T_LOADED,
+};
+
+const ARIA_RENAMED: Character = { ...ARIA, name: "Aria Vale", updated_at: T_RENAMED };
+
+const NEW_SHEET = "# Aria\n\nA cartographer of drowned cities.";
+const ARIA_PERSONA: Character = { ...ARIA, sheet: NEW_SHEET, updated_at: T_PERSONA };
+
+const ARIA_ARCHIVED: Character = { ...ARIA, archived_at: T_ARCHIVED, updated_at: T_ARCHIVED };
+
+/** What the create of the draft "Aria" / "# Aria" answers. */
+const ARIA_CREATED: Character = {
+  id: NEW_ID,
+  name: "Aria",
+  sheet: "# Aria",
+  archived_at: null,
+  created_at: T_LOADED,
+  updated_at: T_LOADED,
+};
+
+function isPatch(request: Seen): boolean {
+  return request.method === "PATCH" && request.path === ITEM_PATH;
+}
+
+function isCreate(request: Seen): boolean {
+  return request.method === "POST" && request.path === COLLECTION_PATH && request.search === "";
+}
+
+function patchBody(request: Seen): Record<string, unknown> {
+  return request.body as Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+describe("018 step 008 — the draft and submitCreate's guard", () => {
+  it("a state constructed with null is a draft, ready, with no character — DoD-1", () => {
+    const state = new CharacterScreenState(null);
+    expect(isDraft(state)).toBe(true);
+    expect(state.status).toBe("ready");
+    expect(state.character).toBeNull();
+    expect(state.nameError).toBeNull();
+    expect(state.nameSaving).toBe(false);
+    expect(state.personaSaving).toBe(false);
+  });
+
+  it("a state constructed with an id is not a draft — DoD-1", () => {
+    expect(isDraft(new CharacterScreenState(ID))).toBe(false);
+  });
+
+  it.each(["", "   ", "\t", "\n  \n"])(
+    "submitCreate with a blank name (case %#) sends no request and does not call onCreated — DoD-1",
+    async (name) => {
+      const { calls } = stubBackend(() => jsonResponse(ARIA_CREATED, 201));
+      const state = newScreen(name, "");
+      const onCreated = vi.fn<(characterId: string) => void>();
+      await expect(submitCreate(state, workspaceWith([]), onCreated)).resolves.toBeUndefined();
+      await flush();
+      expect(calls).toHaveLength(0);
+      expect(onCreated).not.toHaveBeenCalled();
+      expect(isDraft(state)).toBe(true);
+    },
+  );
+
+  it("submitCreate with a persona typed and the name blank still sends nothing — DoD-1", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_CREATED, 201));
+    const state = newScreen("   ", "# Aria\n\nA persona with no name yet.");
+    const characters = workspaceWith([OTHER]);
+    const onCreated = vi.fn<(characterId: string) => void>();
+    await submitCreate(state, characters, onCreated);
+    await flush();
+    expect(calls).toHaveLength(0);
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(isDraft(state)).toBe(true);
+    expect(rows(characters)).toEqual([OTHER]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("018 step 008 — creating the character from the draft", () => {
+  it("posts exactly the draft's name and sheet to /api/characters — DoD-2", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_CREATED, 201));
+    await submitCreate(newScreen("Aria", "# Aria"), workspaceWith([]), () => {});
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("POST");
+    expect(calls[0].path).toBe(COLLECTION_PATH);
+    expect(calls[0].body).toEqual({ name: "Aria", sheet: "# Aria" });
+  });
+
+  it("on the 201 calls onCreated once with the id string, lists the row, and ends the draft — DoD-2", async () => {
+    stubBackend(() => jsonResponse(ARIA_CREATED, 201));
+    const state = newScreen("Aria", "# Aria");
+    const characters = workspaceWith([OTHER]);
+    const onCreated = vi.fn<(characterId: string) => void>();
+
+    await expect(submitCreate(state, characters, onCreated)).resolves.toBeUndefined();
+
+    expect(onCreated).toHaveBeenCalledTimes(1);
+    expect(onCreated).toHaveBeenCalledWith(NEW_ID);
+    expect(typeof onCreated.mock.calls[0][0]).toBe("string");
+    expect(rows(characters).find((row) => row.id === NEW_ID)).toEqual(ARIA_CREATED);
+    expect(isDraft(state)).toBe(false);
+    expect(toJS(state.character)).toEqual(ARIA_CREATED);
+    expect(state.name).toBe("Aria");
+    expect(state.sheet).toBe("# Aria");
+    expect(state.submitStatus).toBe("idle");
+  });
+
+  it("a second submitCreate while the first is pending sends no second request — DoD-3", async () => {
+    const pending = deferred<Response>();
+    const { calls } = stubBackend(() => pending.promise);
+    const state = newScreen("Aria", "# Aria");
+    const characters = workspaceWith([]);
+    const onCreated = vi.fn<(characterId: string) => void>();
+
+    const first = submitCreate(state, characters, onCreated);
+    await flush();
+    const second = submitCreate(state, characters, onCreated);
+    await flush();
+    expect(calls).toHaveLength(1);
+
+    pending.resolve(jsonResponse(ARIA_CREATED, 201));
+    await expect(first).resolves.toBeUndefined();
+    await expect(second).resolves.toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(onCreated).toHaveBeenCalledTimes(1);
+  });
+
+  it("a submitCreate after a successful create sends nothing — DoD-3", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_CREATED, 201));
+    const state = newScreen("Aria", "# Aria");
+    const characters = workspaceWith([]);
+    const onCreated = vi.fn<(characterId: string) => void>();
+
+    await submitCreate(state, characters, onCreated);
+    expect(calls).toHaveLength(1);
+
+    await submitCreate(state, characters, onCreated);
+    runInAction(() => {
+      state.name = "Aria Again";
+    });
+    await submitCreate(state, characters, onCreated);
+    await flush();
+
+    expect(calls).toHaveLength(1);
+    expect(onCreated).toHaveBeenCalledTimes(1);
+    expect(ids(characters)).toEqual([NEW_ID]);
+  });
+
+  it.each(FAILURES)(
+    "a failed create (%s) keeps the draft, calls nothing and leaves the workspace alone — DoD-4",
+    async (_label, answer) => {
+      stubBackend(() => answer());
+      const state = newScreen("Aria", "# Aria");
+      const characters = workspaceWith([OTHER]);
+      const onCreated = vi.fn<(characterId: string) => void>();
+
+      await expect(submitCreate(state, characters, onCreated)).resolves.toBeUndefined();
+
+      expect(state.error).toBe(CREATE_ERROR);
+      expect(state.name).toBe("Aria");
+      expect(state.sheet).toBe("# Aria");
+      expect(isDraft(state)).toBe(true);
+      expect(state.character).toBeNull();
+      expect(onCreated).not.toHaveBeenCalled();
+      expect(rows(characters)).toEqual([OTHER]);
+      expect(state.submitStatus).toBe("idle");
+    },
+  );
+
+  it("a transport failure on create behaves the same way — DoD-4", async () => {
+    stubBackend(() => {
+      throw new TypeError("Failed to fetch");
+    });
+    const state = newScreen("Aria", "# Aria");
+    const characters = workspaceWith([OTHER]);
+    const onCreated = vi.fn<(characterId: string) => void>();
+
+    await expect(submitCreate(state, characters, onCreated)).resolves.toBeUndefined();
+
+    expect(state.error).toBe(CREATE_ERROR);
+    expect(state.name).toBe("Aria");
+    expect(state.sheet).toBe("# Aria");
+    expect(isDraft(state)).toBe(true);
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(rows(characters)).toEqual([OTHER]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("018 step 008 — the name commit", () => {
+  it("an unchanged name sends nothing — DoD-5", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_RENAMED, 200));
+    const state = loadedScreen(ARIA);
+    await expect(commitName(state, workspaceWith([ARIA]))).resolves.toBeUndefined();
+    await flush();
+    expect(calls).toHaveLength(0);
+    expect(toJS(state.character)).toEqual(ARIA);
+  });
+
+  it("a changed name PATCHes exactly {name}, then character and the workspace hold the served row — DoD-5", async () => {
+    const pending = deferred<Response>();
+    const { calls } = stubBackend(() => pending.promise);
+    const state = loadedScreen(ARIA);
+    const characters = workspaceWith([ARIA, OTHER]);
+    runInAction(() => {
+      state.name = "Aria Vale";
+    });
+
+    const running = commitName(state, characters);
+    await flush();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("PATCH");
+    expect(calls[0].path).toBe(ITEM_PATH);
+    expect(calls[0].body).toEqual({ name: "Aria Vale" });
+    // Never optimistic: the held row stands until the answer.
+    expect(toJS(state.character)).toEqual(ARIA);
+
+    pending.resolve(jsonResponse(ARIA_RENAMED, 200));
+    await expect(running).resolves.toBeUndefined();
+
+    expect(toJS(state.character)).toEqual(ARIA_RENAMED);
+    expect(rows(characters).find((row) => row.id === ID)).toEqual(ARIA_RENAMED);
+    expect(state.name).toBe("Aria Vale");
+  });
+
+  it("a name sent with spaces adopts the server's trimmed name, and a later commit sends nothing — DoD-5", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_RENAMED, 200));
+    const state = loadedScreen(ARIA);
+    const characters = workspaceWith([ARIA]);
+    runInAction(() => {
+      state.name = "  Aria Vale ";
+    });
+
+    await commitName(state, characters);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toEqual({ name: "  Aria Vale " });
+    expect(state.name).toBe("Aria Vale");
+
+    await commitName(state, characters);
+    await flush();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a blank name sends nothing, sets the name error and keeps the typed text — DoD-5", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_RENAMED, 200));
+    const state = loadedScreen(ARIA);
+    const characters = workspaceWith([ARIA]);
+    runInAction(() => {
+      state.name = "   ";
+    });
+
+    await expect(commitName(state, characters)).resolves.toBeUndefined();
+    await flush();
+
+    expect(calls).toHaveLength(0);
+    expect(state.nameError).toBe(NAME_ERROR);
+    expect(state.name).toBe("   ");
+    expect(state.character?.name).toBe("Aria");
+    expect(rows(characters)).toEqual([ARIA]);
+  });
+
+  it("a later commit with a non-blank changed name clears the name error and saves — DoD-5", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_RENAMED, 200));
+    const state = loadedScreen(ARIA);
+    const characters = workspaceWith([ARIA]);
+    runInAction(() => {
+      state.name = "   ";
+    });
+    await commitName(state, characters);
+    expect(state.nameError).toBe(NAME_ERROR);
+
+    runInAction(() => {
+      state.name = "Aria Vale";
+    });
+    await commitName(state, characters);
+
+    expect(state.nameError).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toEqual({ name: "Aria Vale" });
+  });
+
+  it("a later commit with the unchanged non-blank name clears the name error and sends nothing — DoD-5", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_RENAMED, 200));
+    const state = loadedScreen(ARIA);
+    const characters = workspaceWith([ARIA]);
+    runInAction(() => {
+      state.name = "";
+    });
+    await commitName(state, characters);
+    expect(state.nameError).toBe(NAME_ERROR);
+
+    runInAction(() => {
+      state.name = "Aria";
+    });
+    await commitName(state, characters);
+    await flush();
+
+    expect(state.nameError).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("018 step 008 — the persona commit", () => {
+  it("an unchanged sheet sends nothing — DoD-6", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_PERSONA, 200));
+    const state = loadedScreen(ARIA);
+    await expect(commitPersona(state, workspaceWith([ARIA]))).resolves.toBeUndefined();
+    await flush();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("a changed sheet PATCHes exactly {sheet} and leaves an unsaved name edit untouched — DoD-6", async () => {
+    const { calls } = stubBackend(() => jsonResponse(ARIA_PERSONA, 200));
+    const state = loadedScreen(ARIA);
+    const characters = workspaceWith([ARIA, OTHER]);
+    runInAction(() => {
+      state.name = "Aria the Unsaved";
+      state.sheet = NEW_SHEET;
+    });
+
+    await expect(commitPersona(state, characters)).resolves.toBeUndefined();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].method).toBe("PATCH");
+    expect(calls[0].path).toBe(ITEM_PATH);
+    expect(calls[0].body).toEqual({ sheet: NEW_SHEET });
+    expect(state.name).toBe("Aria the Unsaved");
+    expect(state.sheet).toBe(NEW_SHEET);
+    expect(toJS(state.character)).toEqual(ARIA_PERSONA);
+    expect(rows(characters).find((row) => row.id === ID)).toEqual(ARIA_PERSONA);
+  });
+
+  it("text typed during a pending persona save survives the answer and stays dirty — DoD-7", async () => {
+    const pending = deferred<Response>();
+    const { calls } = stubBackend(() => pending.promise);
+    const state = loadedScreen(ARIA);
+    const characters = workspaceWith([ARIA]);
+    runInAction(() => {
+      state.sheet = NEW_SHEET;
+    });
+
+    const running = commitPersona(state, characters);
+    await flush();
+    expect(calls).toHaveLength(1);
+    expect(state.personaSaving).toBe(true);
+
+    const newer = `${NEW_SHEET}\n\nAnd a line typed while saving.`;
+    runInAction(() => {
+      state.sheet = newer;
+    });
+
+    pending.resolve(jsonResponse(ARIA_PERSONA, 200));
+    await expect(running).resolves.toBeUndefined();
+
+    expect(state.sheet).toBe(newer);
+    expect(isDirty(state)).toBe(true);
+    expect(state.personaSaving).toBe(false);
+  });
+
+  it("a second persona commit during the pending save sends nothing — DoD-7", async () => {
+    const pending = deferred<Response>();
+    const { calls } = stubBackend(() => pending.promise);
+    const state = loadedScreen(ARIA);
+    const characters = workspaceWith([ARIA]);
+    runInAction(() => {
+      state.sheet = NEW_SHEET;
+    });
+
+    const first = commitPersona(state, characters);
+    await flush();
+    runInAction(() => {
+      state.sheet = `${NEW_SHEET}\n\nMore.`;
+    });
+    const second = commitPersona(state, characters);
+    await flush();
+    expect(calls).toHaveLength(1);
+
+    pending.resolve(jsonResponse(ARIA_PERSONA, 200));
+    await expect(first).resolves.toBeUndefined();
+    await expect(second).resolves.toBeUndefined();
+    expect(calls).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("018 step 008 — an answer older than the held character", () => {
+  it("a persona answer older than an archive answered first does not replace character — DoD-8", async () => {
+    const patch = deferred<Response>();
+    stubBackend((request) => {
+      if (isPatch(request)) return patch.promise;
+      if (request.method === "POST" && request.path === ARCHIVE_PATH) {
+        return jsonResponse(ARIA_ARCHIVED, 200);
+      }
+      return serverError();
+    });
+    const state = loadedScreen(ARIA);
+    const characters = workspaceWith([ARIA], true);
+    runInAction(() => {
+      state.sheet = NEW_SHEET;
+    });
+
+    const saving = commitPersona(state, characters);
+    await flush();
+    await submitArchive(state, characters);
+    expect(toJS(state.character)).toEqual(ARIA_ARCHIVED);
+
+    // ARIA_PERSONA's updated_at (10:06) is older than the archive's (10:07).
+    patch.resolve(jsonResponse(ARIA_PERSONA, 200));
+    await expect(saving).resolves.toBeUndefined();
+
+    expect(toJS(state.character)).toEqual(ARIA_ARCHIVED);
+  });
+
+  it("a name answer older than the held character does not replace it — DoD-8", async () => {
+    stubBackend(() => jsonResponse(ARIA_RENAMED, 200));
+    const held: Character = { ...ARIA, updated_at: T_LATER };
+    const state = loadedScreen(held);
+    runInAction(() => {
+      state.name = "Aria Vale";
+    });
+
+    await commitName(state, workspaceWith([held]));
+
+    expect(toJS(state.character)).toEqual(held);
+  });
+
+  it("a newer answer does replace character — DoD-8", async () => {
+    const newer: Character = { ...ARIA_ARCHIVED, sheet: NEW_SHEET, updated_at: T_LATER };
+    stubBackend(() => jsonResponse(newer, 200));
+    const state = loadedScreen(ARIA_ARCHIVED);
+    runInAction(() => {
+      state.sheet = NEW_SHEET;
+    });
+
+    await commitPersona(state, workspaceWith([ARIA_ARCHIVED], true));
+
+    expect(toJS(state.character)).toEqual(newer);
+  });
+
+  it("an answer with the same updated_at is not older and replaces character — DoD-8", async () => {
+    const same: Character = { ...ARIA, name: "Aria Vale" };
+    stubBackend(() => jsonResponse(same, 200));
+    const state = loadedScreen(ARIA);
+    runInAction(() => {
+      state.name = "Aria Vale";
+    });
+
+    await commitName(state, workspaceWith([ARIA]));
+
+    expect(toJS(state.character)).toEqual(same);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("018 step 008 — a failed save", () => {
+  it.each(FAILURES)(
+    "a failed name save (%s) sets the save sentence, keeps the typed name and the character — DoD-9",
+    async (_label, answer) => {
+      stubBackend(() => answer());
+      const state = loadedScreen(ARIA);
+      const characters = workspaceWith([ARIA]);
+      runInAction(() => {
+        state.name = "Aria Vale";
+      });
+
+      await expect(commitName(state, characters)).resolves.toBeUndefined();
+
+      expect(state.error).toBe(SAVE_ERROR);
+      expect(state.name).toBe("Aria Vale");
+      expect(toJS(state.character)).toEqual(ARIA);
+      expect(rows(characters)).toEqual([ARIA]);
+    },
+  );
+
+  it.each(FAILURES)(
+    "a failed persona save (%s) sets the save sentence, keeps the typed sheet and the character — DoD-9",
+    async (_label, answer) => {
+      stubBackend(() => answer());
+      const state = loadedScreen(ARIA);
+      const characters = workspaceWith([ARIA]);
+      runInAction(() => {
+        state.sheet = NEW_SHEET;
+      });
+
+      await expect(commitPersona(state, characters)).resolves.toBeUndefined();
+
+      expect(state.error).toBe(SAVE_ERROR);
+      expect(state.sheet).toBe(NEW_SHEET);
+      expect(toJS(state.character)).toEqual(ARIA);
+      expect(rows(characters)).toEqual([ARIA]);
+    },
+  );
+
+  it("a transport failure on either save behaves the same way — DoD-9", async () => {
+    stubBackend(() => {
+      throw new TypeError("Failed to fetch");
+    });
+
+    const naming = loadedScreen(ARIA);
+    runInAction(() => {
+      naming.name = "Aria Vale";
+    });
+    await expect(commitName(naming, workspaceWith([ARIA]))).resolves.toBeUndefined();
+    expect(naming.error).toBe(SAVE_ERROR);
+    expect(naming.name).toBe("Aria Vale");
+    expect(toJS(naming.character)).toEqual(ARIA);
+
+    const writing = loadedScreen(ARIA);
+    runInAction(() => {
+      writing.sheet = NEW_SHEET;
+    });
+    await expect(commitPersona(writing, workspaceWith([ARIA]))).resolves.toBeUndefined();
+    expect(writing.error).toBe(SAVE_ERROR);
+    expect(writing.sheet).toBe(NEW_SHEET);
+    expect(toJS(writing.character)).toEqual(ARIA);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("018 step 008 — the flush", () => {
+  /** Answers a name PATCH and a sheet PATCH each with its own row; a create with ARIA_CREATED. */
+  function flushBackend() {
+    return stubBackend((request) => {
+      if (isPatch(request)) {
+        const body = patchBody(request);
+        if ("name" in body) return jsonResponse(ARIA_RENAMED, 200);
+        if ("sheet" in body) return jsonResponse(ARIA_PERSONA, 200);
+      }
+      if (isCreate(request)) return jsonResponse(ARIA_CREATED, 201);
+      return serverError();
+    });
+  }
+
+  it("on a loaded character with a changed name and sheet sends one name PATCH and one sheet PATCH — DoD-10", async () => {
+    const { calls } = flushBackend();
+    const state = loadedScreen(ARIA);
+    runInAction(() => {
+      state.name = "Aria Vale";
+      state.sheet = NEW_SHEET;
+    });
+
+    await expect(flushCharacterEdits(state, workspaceWith([ARIA]))).resolves.toBeUndefined();
+    await flush();
+
+    expect(calls).toHaveLength(2);
+    expect(calls.every(isPatch)).toBe(true);
+    const bodies = calls.map((call) => call.body);
+    expect(bodies).toEqual(
+      expect.arrayContaining([{ name: "Aria Vale" }, { sheet: NEW_SHEET }]),
+    );
+  });
+
+  it("on a draft with name Aria posts the create once — DoD-10", async () => {
+    const { calls } = flushBackend();
+    const state = newScreen("Aria", "# Aria");
+    const characters = workspaceWith([]);
+
+    await expect(flushCharacterEdits(state, characters)).resolves.toBeUndefined();
+    await flush();
+
+    expect(calls).toHaveLength(1);
+    expect(isCreate(calls[0])).toBe(true);
+    expect(calls[0].body).toEqual({ name: "Aria", sheet: "# Aria" });
+    expect(rows(characters).find((row) => row.id === NEW_ID)).toEqual(ARIA_CREATED);
+  });
+
+  it("on a loaded character with nothing changed sends nothing — DoD-10", async () => {
+    const { calls } = flushBackend();
+    await expect(
+      flushCharacterEdits(loadedScreen(ARIA), workspaceWith([ARIA])),
+    ).resolves.toBeUndefined();
+    await flush();
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    ["an empty draft", "", ""],
+    ["a draft with only a persona", "   ", "# A persona with no name"],
+  ])("on %s sends nothing — DoD-10", async (_label, name, sheet) => {
+    const { calls } = flushBackend();
+    await expect(
+      flushCharacterEdits(newScreen(name, sheet), workspaceWith([])),
+    ).resolves.toBeUndefined();
+    await flush();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("on a loaded character with a blank name and a changed sheet sends only the sheet PATCH — DoD-10", async () => {
+    const { calls } = flushBackend();
+    const state = loadedScreen(ARIA);
+    runInAction(() => {
+      state.name = "  ";
+      state.sheet = NEW_SHEET;
+    });
+
+    await flushCharacterEdits(state, workspaceWith([ARIA]));
+    await flush();
+
+    expect(calls).toHaveLength(1);
+    expect(isPatch(calls[0])).toBe(true);
+    expect(calls[0].body).toEqual({ sheet: NEW_SHEET });
   });
 });

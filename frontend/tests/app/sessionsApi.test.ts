@@ -18,8 +18,11 @@ import {
   isSessionArchived,
   restoreSession,
   type Session,
+  type StartedSession,
   startSession,
+  startSessionWithMessage,
 } from "../../src/app/sessionsApi";
+import type { Message } from "../../src/app/streamApi";
 
 type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -332,6 +335,139 @@ describe("failures are the shared client's ApiErrors, rethrown unchanged", () =>
       expect(isApiError(error) ? error.code : null).toBe("character_not_found");
       vi.unstubAllGlobals();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 018, step 004 — the start-with-message call and startSession's eight keys
+// (DoD-1, DoD-2). Expected values: the step's Interface intent and DoD plus 018 context.md's
+// Wire contract (StartedSession = the eight Session keys + opening_message, Message | null)
+// and D5 (startSession resolves to exactly the eight Session keys).
+
+const SESSION_KEYS = [
+  "archived_at",
+  "character_id",
+  "created_at",
+  "id",
+  "last_used_at",
+  "setup_id",
+  "setup_name",
+  "updated_at",
+];
+
+const S018_SESSION_ID = "7270000000000000101";
+const S018_MESSAGE_ID = "7280000000000000101";
+const S018_STAMP = "2026-10-03T09:26:53.000000+00:00";
+
+/** The served session's eight keys (no setup: the page composer sends none, D1). */
+const S018_SESSION: Session = {
+  id: S018_SESSION_ID,
+  character_id: CHARACTER_ID,
+  setup_id: null,
+  setup_name: null,
+  archived_at: null,
+  last_used_at: S018_STAMP,
+  created_at: S018_STAMP,
+  updated_at: S018_STAMP,
+};
+
+/** The opening message: a current-zone user row (kind and settled_at null), all eight keys. */
+function openingMessage(text: string): Message {
+  return {
+    id: S018_MESSAGE_ID,
+    session_id: S018_SESSION_ID,
+    role: "user",
+    kind: null,
+    text,
+    settled_at: null,
+    created_at: S018_STAMP,
+    updated_at: S018_STAMP,
+  };
+}
+
+/** A served StartedSession with all nine keys. */
+function startedSession(opening: Message | null): StartedSession {
+  return { ...S018_SESSION, opening_message: opening };
+}
+
+describe("startSessionWithMessage (018 step 004)", () => {
+  it("sends exactly one POST /api/characters/<id>/sessions whose parsed body is exactly { opening_message: <text verbatim> } — DoD-1", async () => {
+    const mock = serve(startedSession(openingMessage("  Hello\n")), 201);
+
+    await startSessionWithMessage(CHARACTER_ID, "  Hello\n");
+
+    expect(seen(mock)).toEqual([
+      { method: "POST", path: "/api/characters/7250000000000000001/sessions", search: "" },
+    ]);
+    expect(sentBody(mock)).toEqual({ opening_message: "  Hello\n" });
+    expect(bodyKeys(mock)).toEqual(["opening_message"]);
+    expect(bodyKeys(mock)).not.toContain("setup_id");
+  });
+
+  it("resolves to the served nine-key StartedSession unchanged, ids the identical strings — DoD-1", async () => {
+    const served = startedSession(openingMessage("  Hello\n"));
+    serve(served, 201);
+
+    const result = await startSessionWithMessage(CHARACTER_ID, "  Hello\n");
+
+    expect(result).toEqual(served);
+    expect(Object.keys(result).sort()).toEqual([...SESSION_KEYS, "opening_message"].sort());
+    expect(result.id).toBe(S018_SESSION_ID);
+    expect(typeof result.id).toBe("string");
+    expect(result.character_id).toBe(CHARACTER_ID);
+    expect(typeof result.character_id).toBe("string");
+    expect(result.opening_message?.id).toBe(S018_MESSAGE_ID);
+    expect(typeof result.opening_message?.id).toBe("string");
+    expect(result.opening_message?.session_id).toBe(S018_SESSION_ID);
+    expect(result.opening_message?.text).toBe("  Hello\n");
+  });
+
+  it("a 404 character_not_found envelope rejects with an ApiError carrying that code — DoD-1", async () => {
+    serve(envelope("character_not_found", "That character does not exist."), 404);
+
+    const error = await rejection(() => startSessionWithMessage(CHARACTER_ID, "  Hello\n"));
+
+    expect(isApiError(error)).toBe(true);
+    expect(isApiError(error) ? error.code : null).toBe("character_not_found");
+    expect(isApiError(error) ? error.status : null).toBe(404);
+  });
+});
+
+describe("startSession resolves to exactly the eight Session keys (018 step 004, D5)", () => {
+  it("against a served nine-key StartedSession with opening_message null it resolves to exactly the eight Session keys — DoD-2", async () => {
+    serve(startedSession(null), 201);
+
+    const result = await startSession(CHARACTER_ID, null);
+
+    expect(Object.keys(result).sort()).toEqual(SESSION_KEYS);
+    expect(result).not.toHaveProperty("opening_message");
+    expect(result).toEqual(S018_SESSION);
+  });
+
+  it("its request is unchanged from 011: one POST with the body exactly { setup_id: null } — DoD-2", async () => {
+    const mock = serve(startedSession(null), 201);
+
+    await startSession(CHARACTER_ID, null);
+
+    expect(seen(mock)).toEqual([{ method: "POST", path: CHARACTER_SESSIONS_PATH, search: "" }]);
+    expect(sentBody(mock)).toEqual({ setup_id: null });
+    expect(bodyKeys(mock)).toEqual(["setup_id"]);
+  });
+
+  it("with a chosen setup, the nine-key answer still resolves to exactly the eight keys and the body stays { setup_id } — DoD-2", async () => {
+    const served: StartedSession = {
+      ...S018_SESSION,
+      setup_id: SETUP_ID,
+      setup_name: "The Gilded Tavern",
+      opening_message: null,
+    };
+    const mock = serve(served, 201);
+
+    const result = await startSession(CHARACTER_ID, SETUP_ID);
+
+    expect(Object.keys(result).sort()).toEqual(SESSION_KEYS);
+    expect(result).toEqual({ ...S018_SESSION, setup_id: SETUP_ID, setup_name: "The Gilded Tavern" });
+    expect(sentBody(mock)).toEqual({ setup_id: SETUP_ID });
   });
 });
 

@@ -14,7 +14,12 @@ import { Box, Button, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import type { TitleOrder } from "@mantine/core";
 import { IconCircleCheck, IconCircleOff, IconPin, IconPlus } from "@tabler/icons-react";
 import { observer } from "mobx-react-lite";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  SortableContext,
+  rectSortingStrategy,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
 import { IconButton } from "../shared/IconButton";
@@ -51,6 +56,18 @@ const LIST_STYLE: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "var(--mantine-spacing-sm)",
+};
+
+/**
+ * The same bare list as a responsive multi-column grid (018 D8): as many columns of at
+ * least the card minimum as fit, inline style only (no stylesheet, no new selector).
+ */
+const GRID_STYLE: React.CSSProperties = {
+  listStyle: "none",
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(18rem, 1fr))",
+  gap: "var(--mantine-spacing-sm)",
+  alignItems: "start",
 };
 
 /**
@@ -211,12 +228,21 @@ export type MemoLevelGroupProps = {
    * runs and no `DndContext` is needed.
    */
   reorderable?: boolean;
+  /**
+   * How the list lays out its listitems (018 D8). "list" (the default) is the wall's
+   * stacked list; "grid" is the same list and listitems as a responsive multi-column grid,
+   * with the rect sorting strategy when `reorderable`.
+   */
+  layout?: MemoLevelLayout;
 };
+
+/** `MemoLevelGroup`'s list layout: the stacked list (default) or a multi-column grid. */
+export type MemoLevelLayout = "list" | "grid";
 
 export const MemoLevelGroup = observer(function MemoLevelGroup(
   props: MemoLevelGroupProps,
 ): React.JSX.Element {
-  const { state, title, headingOrder, onRetry, reorderable = false } = props;
+  const { state, title, headingOrder, onRetry, reorderable = false, layout = "list" } = props;
   const headingId = useId();
 
   // D5: leaving keeps the edit. Flushes the state captured at mount, once, on unmount.
@@ -241,7 +267,7 @@ export const MemoLevelGroup = observer(function MemoLevelGroup(
     return (
       <SortableContext
         items={state.memos.map((memo) => memo.id)}
-        strategy={verticalListSortingStrategy}
+        strategy={layout === "grid" ? rectSortingStrategy : verticalListSortingStrategy}
       >
         {state.memos.map((memo, index) => (
           <SortableNoteCard
@@ -318,7 +344,7 @@ export const MemoLevelGroup = observer(function MemoLevelGroup(
             No notes yet.
           </Text>
         ) : (
-          <Box component="ul" m={0} p={0} style={LIST_STYLE}>
+          <Box component="ul" m={0} p={0} style={layout === "grid" ? GRID_STYLE : LIST_STYLE}>
             {renderNewNote()}
             {renderSavedNotes()}
           </Box>

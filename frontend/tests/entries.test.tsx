@@ -45,6 +45,15 @@
 // the backend's own 404 envelope (the session here is not found, so the bar never mounts — the
 // answers only keep the stub total). One clause is added at the bottom; no assertion about any
 // entry's outcome changes, and no clause is dropped.
+//
+// Feature 018, step 009 DoD-11 widens the `app` entry's stub only, once more: the character
+// page's ready body now mounts the "Configuration" block, which reads
+// `GET /api/characters/<id>/configuration` and `GET /api/models`. `/api/models` is already
+// answered by exact path (017 step 011); the stub now also answers the deep character path's
+// configuration read, `/api/characters/abc123/configuration`, by exact path with the backend's
+// own 404 envelope (no `APP_PATHS` entry mounts a character page, so the answers only keep the
+// stub total). One clause is added at the bottom; no assertion about any entry's outcome
+// changes, and no clause is dropped.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { act, screen, within } from "@testing-library/react";
@@ -69,6 +78,8 @@ const DEEP_SESSION_ITEM_PATH = "/api/sessions/abc123";
 const DEEP_SESSION_STREAM_PATHS = ["/api/sessions/abc123/entries", "/api/sessions/abc123/zone"];
 /** 017 step 011 (DoD-11): the session header bar's two reads for that session. */
 const DEEP_SESSION_CONFIG_PATHS = ["/api/sessions/abc123/configuration", "/api/models"];
+/** 018 step 009 (DoD-11): the character page's configuration block's two reads. */
+const DEEP_CHARACTER_CONFIG_PATHS = ["/api/characters/abc123/configuration", "/api/models"];
 /** 017 step 007 (DoD-8): the settings screen's two reads at `/settings`. */
 const SETTINGS_ROUTE = "/settings";
 const USER_SETTINGS_PATH = "/api/me/settings";
@@ -177,6 +188,14 @@ function stubAppIdentity(answer: () => Response): void {
       }
       if (pathname === "/api/characters") {
         return Promise.resolve(jsonResponse({ characters: [] }, 200));
+      }
+      // Feature 018, step 009 (DoD-11), stubs only: a character page's configuration block reads
+      // that character's configuration (and `/api/models`, answered below as before). Exact
+      // pathname, the backend's own 404 envelope for the unknown character.
+      if (pathname === DEEP_CHARACTER_CONFIG_PATHS[0]) {
+        return Promise.resolve(
+          jsonResponse({ error: { code: "character_not_found", message: "", detail: {} } }, 404),
+        );
       }
       // Feature 011, step 006 (DoD-12), stubs only: that same tree now also issues
       // `GET /api/sessions`. Matched on the exact pathname; every other request is still a
@@ -593,6 +612,20 @@ describe("the app entry gates on GET /api/me", () => {
     expect(shellNavIn(mountElement())).not.toBeNull();
     expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
     for (const configPath of DEEP_SESSION_CONFIG_PATHS) {
+      const answered = await fetch(configPath, { method: "GET" });
+      expect(answered).toBeInstanceOf(Response);
+    }
+  });
+
+  // Feature 018, step 009 — DoD-11 (stub widening only). The entry's outcome is the shell in
+  // #root, exactly as before, and the app entry's own stub answers the character page's
+  // configuration and models GETs by exact path — any status, never the rejecting fallback.
+  it("(018 step 009) the app entry still boots with the character page's configuration and models reads answered — DoD-11", async () => {
+    await mountEntry("app", HOME_PATH.app, signedIn);
+
+    expect(shellNavIn(mountElement())).not.toBeNull();
+    expect(within(mountElement()).getByRole("button", { name: "User menu" })).toBeInTheDocument();
+    for (const configPath of DEEP_CHARACTER_CONFIG_PATHS) {
       const answered = await fetch(configPath, { method: "GET" });
       expect(answered).toBeInstanceOf(Response);
     }

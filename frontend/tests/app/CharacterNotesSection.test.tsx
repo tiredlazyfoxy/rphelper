@@ -390,3 +390,120 @@ describe("a failed load (no notification)", () => {
     expect(document.querySelector(NOTIFICATION)).toBeNull();
   });
 });
+
+// ===========================================================================
+// Feature 018, step 005 — the notes as a reorderable grid in the section's own drag context
+// (DoD-5, DoD-6). Expected behaviour comes from 018's step file 005.notes-grid.md (Interface
+// intent for CharacterNotesSection: grid + reorderable inside its own DndContext with the
+// shared sensors and the builder's announcements for one group "Notes") and 018 context.md D8,
+// which carries 016 D8 (cards named "Note <n> of <total>", announcements by position and group,
+// never by id). Every 015 009 assertion above is kept unedited and is DoD-6's main half; the
+// archived-character and character-to-character cases of 015 009 live in
+// CharacterScreen.test.tsx (outside this step's Test files) and are not edited here.
+// Keyboard activation is Space keydown on the focused card; dnd-kit's announcement live
+// region (role "status") is read afterwards. Movement is never exercised (jsdom rects).
+// ===========================================================================
+function pressSpace(target: HTMLElement): void {
+  fireEvent.keyDown(target, { code: "Space", key: " " });
+}
+
+/** dnd-kit's announcement live region(s): role "status" elements in the document. */
+function liveRegionText(): string {
+  return screen
+    .queryAllByRole("status", { hidden: true })
+    .map((element) => element.textContent ?? "")
+    .join(" ")
+    .trim();
+}
+
+const PAYLOAD_IDS = PAYLOAD.map((row) => row.id);
+
+describe("the character's notes as a reorderable grid (US-096.AC-1, US-102, D8)", () => {
+  it("three served notes render in the Notes region as three listitems named Note 1 of 3, Note 2 of 3, Note 3 of 3 in served order, each focusable — DoD-5", async () => {
+    serveNotes(PAYLOAD);
+    renderSection();
+    await waitFor(() => {
+      expect(bodies()).toHaveLength(PAYLOAD.length);
+    });
+
+    const listed = items();
+    expect(listed).toHaveLength(3);
+    const expected: Array<[string, string]> = [
+      ["Note 1 of 3", BODY_1],
+      ["Note 2 of 3", BODY_2],
+      ["Note 3 of 3", BODY_3],
+    ];
+    expected.forEach(([name, body], index) => {
+      const item = listed[index];
+      expect(item).toHaveAccessibleName(name);
+      expect(within(notesRegion()).getByRole("listitem", { name })).toBe(item);
+      expect(item.tabIndex).toBe(0);
+      expect(within(item).getByRole("textbox", { name: NOTE_LABEL })).toHaveValue(body);
+    });
+  });
+
+  it("focusing the first note and pressing Space fills the live region with a non-empty announcement holding no memo id — DoD-5", async () => {
+    serveNotes(PAYLOAD);
+    renderSection();
+    await waitFor(() => {
+      expect(bodies()).toHaveLength(PAYLOAD.length);
+    });
+    const card = items()[0];
+
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    pressSpace(card);
+
+    await waitFor(() => {
+      expect(liveRegionText()).not.toBe("");
+    });
+    const message = liveRegionText();
+    for (const id of [...PAYLOAD_IDS, CHARACTER_ID]) {
+      expect(message).not.toContain(id);
+    }
+    // The builder is fed the one group "Notes": the note is named by position and that title.
+    expect(message).toMatch(/\b1\b/);
+    expect(message).toContain(NOTES);
+  });
+});
+
+describe("015 009's behaviour kept in the grid (US-050.AC-1, D8)", () => {
+  const OTHER_ID = "9007199254740995";
+  const OTHER_SEARCH = `?scope=character&scope_id=${OTHER_ID}`;
+  const OTHER_BODY = "Brann keeps a ledger of debts.";
+
+  it("re-keyed for another character, the section requests that character's listing exactly and lists only its notes — DoD-6", async () => {
+    const { calls } = stubBackend((request) => {
+      if (isListing(request)) return jsonResponse({ memos: PAYLOAD }, 200);
+      if (request.method === "GET" && request.path === MEMOS_PATH && request.search === OTHER_SEARCH) {
+        return jsonResponse(
+          { memos: [memo("7250000000000000209", OTHER_BODY, { scope_id: OTHER_ID })] },
+          200,
+        );
+      }
+      return notFoundResponse();
+    });
+    const { rerender } = render(
+      <AppProviders>
+        <CharacterNotesSection key={CHARACTER_ID} characterId={CHARACTER_ID} />
+      </AppProviders>,
+    );
+    await waitFor(() => {
+      expect(bodies()).toEqual([BODY_1, BODY_2, BODY_3]);
+    });
+
+    rerender(
+      <AppProviders>
+        <CharacterNotesSection key={OTHER_ID} characterId={OTHER_ID} />
+      </AppProviders>,
+    );
+
+    await waitFor(() => {
+      expect(bodies()).toEqual([OTHER_BODY]);
+    });
+    await settle();
+    expect(items()).toHaveLength(1);
+    expect(items()[0]).toHaveAccessibleName("Note 1 of 1");
+    expect(listings(calls).map((call) => call.search)).toEqual([LISTING_SEARCH, OTHER_SEARCH]);
+  });
+});

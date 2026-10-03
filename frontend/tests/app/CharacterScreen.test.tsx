@@ -74,6 +74,24 @@
 //   counted. New mode and the loading / not-found / failed states mount no Notes section, so
 //   their stubs and their "no request at all" clauses are untouched. No assertion was dropped.
 //   015 step 009's own DoD-4..DoD-6 are the three blocks at the bottom of this file.
+//
+// Amended by feature 018, step 009 (DoD-1..DoD-11): `/characters/new` is the draft page (018 D6:
+// "Draft" badge, marker line, Name and Persona only, the create fires when Name loses focus
+// holding non-blank text, replace navigation), and `/characters/:id` saves name and persona on
+// focus loss with no Save (018 D7). The ready body runs Notes → Setups → Configuration →
+// Sessions → Start a session (018 D10). Consequences:
+// - `sectionListing` also answers `GET /api/characters/<id>/configuration` (five keys, all null)
+//   and `GET /api/models` (`{ "models": [] }`) by exact path and empty query, and the two
+//   hand-written stubs of 010 DoD-12 and 011 DoD-14 gain the same branch (018 DoD-11);
+//   `serveCharacters` answers a PATCH of a held row with that row and the patch applied, because
+//   any edit now saves when its field loses focus;
+// - replaced (018 DoD-1..DoD-6): 009 DoD-1/DoD-2 (Create disabled / enabled), 009 DoD-3 ×2 and
+//   DoD-4 (Create click → Name blur), 009 DoD-5's "Save is disabled" line, 009 DoD-6 (Save
+//   PATCHes both fields — removed, superseded by 018 DoD-5), 009 DoD-8's "Save is enabled" line,
+//   009 DoD-11 (Save click → focus loss), and 015 DoD-4's "Notes follows Sessions" (now Notes
+//   precedes Setups). Each amended title ends with the 018 "— DoD-N" that amends it;
+// - every other 009 / 010 / 011 / 015 assertion is unchanged. 018 step 009's own clauses are the
+//   blocks at the bottom of this file.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -81,6 +99,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChangeEvent } from "react";
 import { CharacterRoute, CharacterScreen } from "../../src/app/CharacterScreen";
 import type { Character } from "../../src/app/charactersApi";
+import type { CharacterConfiguration } from "../../src/app/configurationApi";
 import type { Memo } from "../../src/app/memosApi";
 import type { Session } from "../../src/app/sessionsApi";
 import type { Setup } from "../../src/app/setupsApi";
@@ -195,13 +214,7 @@ const CREATED: Character = {
   updated_at: "2026-04-10T12:00:00.000000+00:00",
 };
 
-/** What the server answers the PATCH with — a trimmed name the screen must re-render from. */
-const SAVED_A: Character = {
-  ...CHAR_A,
-  name: "Bo",
-  sheet: "Shorter now.",
-  updated_at: "2026-03-20T18:04:11.000000+00:00",
-};
+// 018 step 009: `SAVED_A` (009 DoD-6's PATCH answer) went with that removed clause.
 
 const EDITED_NAME = "Bo";
 const EDITED_SHEET = "Shorter now.";
@@ -250,6 +263,37 @@ function isNotesListing(request: Seen, characterId: string): boolean {
 /** 015 step 009: the Notes section's own listing, answered empty everywhere but its own blocks. */
 const EMPTY_NOTES = { memos: [] };
 
+/** 018 step 009: the configuration block's own read, under the character. */
+function configurationPath(characterId: string): string {
+  return `${itemPath(characterId)}/configuration`;
+}
+
+/** 018 step 009: the enabled-models read the configuration block makes. */
+const MODELS_PATH = "/api/models";
+
+/** 018 step 009: a character configuration with all five keys, nothing set. */
+const UNSET_CONFIGURATION: CharacterConfiguration = {
+  model: null,
+  system_prompt: null,
+  tool_memo_search: null,
+  tool_session_search: null,
+  tool_web_search: null,
+};
+
+/**
+ * 018 step 009 (DoD-11): answers exactly `GET /api/characters/<id>/configuration` (nothing set)
+ * and `GET /api/models` (none enabled), both with an empty query; null otherwise.
+ */
+function configurationListing(request: Seen, characterId: string): Response | null {
+  if (request.method !== "GET" || request.search !== "") return null;
+  if (request.path === configurationPath(characterId)) return jsonResponse(UNSET_CONFIGURATION, 200);
+  if (request.path === MODELS_PATH) return jsonResponse({ models: [] }, 200);
+  return null;
+}
+
+/** 018 step 009: the `updated_at` a PATCH answer carries — later than every fixture's. */
+const PATCHED_STAMP = "2026-09-30T12:00:00.000000+00:00";
+
 /**
  * 010 / 011: the two sections a loaded character's screen mounts ask for three listings under
  * that character — 010's setups, 011's sessions, and 011's own second request for the same
@@ -259,6 +303,9 @@ const EMPTY_NOTES = { memos: [] };
  */
 function sectionListing(request: Seen, characterId: string): Response | null {
   if (request.method !== "GET") return null;
+  // 018 step 009 (DoD-11): the configuration block's two reads.
+  const configuration = configurationListing(request, characterId);
+  if (configuration !== null) return configuration;
   if (request.path === setupsPath(characterId)) return jsonResponse(EMPTY_SETUPS, 200);
   if (request.path === sessionsPath(characterId)) return jsonResponse(EMPTY_SESSIONS, 200);
   if (isNotesListing(request, characterId)) return jsonResponse(EMPTY_NOTES, 200);
@@ -330,6 +377,15 @@ function serveCharacters(...rows: Character[]) {
       for (const candidate of rows) {
         const listing = sectionListing(request, candidate.id);
         if (listing !== null) return listing;
+      }
+    }
+    // 018 step 009: an edit now saves when its field loses focus (D7), so a PATCH of a held row
+    // answers that row with the patch applied.
+    if (request.method === "PATCH") {
+      const row = rows.find((candidate) => request.path === itemPath(candidate.id));
+      if (row !== undefined) {
+        const patch = (request.body ?? {}) as Partial<Character>;
+        return jsonResponse({ ...row, ...patch, updated_at: PATCHED_STAMP }, 200);
       }
     }
     return notFoundResponse();
@@ -521,34 +577,34 @@ async function typeInto(user: User, element: HTMLElement, text: string): Promise
 
 // ---------------------------------------------------------------------------
 describe("new mode at /characters/new (D1)", () => {
-  it("shows the New character form with a disabled Create and nothing of the existing screen — DoD-1", () => {
+  it("(009 DoD-1, amended) shows the New character form with no Create and nothing of the existing screen — DoD-1", () => {
     stubBackend(() => notFoundResponse());
     renderScreen(NEW_PATH);
 
     expect(heading(NEW_HEADING)).toBeInTheDocument();
     expect(nameInput()).toBeInTheDocument();
     expect(personaInput()).toBeInTheDocument();
-    expect(button(CREATE_NAME)).toBeDisabled();
+    expect(queryButton(CREATE_NAME)).toBeNull();
     expect(queryButton(ARCHIVE_NAME)).toBeNull();
     expect(queryHeading(SESSIONS_HEADING)).toBeNull();
   });
 
-  it("typing a name enables Create and sends no request — DoD-2", async () => {
+  it("(009 DoD-2, amended) typing a name without leaving the field sends no request — DoD-2", async () => {
     const user = newUser();
     const { mock, calls } = stubBackend(() => notFoundResponse());
     renderScreen(NEW_PATH);
 
     await user.type(nameInput(), TYPED_NAME);
 
-    expect(button(CREATE_NAME)).toBeEnabled();
+    expect(queryButton(CREATE_NAME)).toBeNull();
     expect(calls).toEqual([]);
     expect(mock).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-describe("Create posts once and hands the route over to the new id (D1, US-020.AC-1)", () => {
-  it("POSTs /api/characters once and moves the router to the returned id with no document navigation — DoD-3", async () => {
+describe("Name losing focus posts once and hands the route over to the new id (018 D6, US-020.AC-1)", () => {
+  it("(009 DoD-3, amended) blurring Name POSTs /api/characters once with the persona and moves the router to the returned id with no document navigation — DoD-3", async () => {
     const user = newUser();
     const assign = vi.spyOn(documentNavigation, "assign").mockImplementation(() => {});
     const { calls } = stubBackend((request) => {
@@ -565,19 +621,21 @@ describe("Create posts once and hands the route over to the new id (D1, US-020.A
     });
     renderScreen(NEW_PATH);
 
-    await user.type(nameInput(), TYPED_NAME);
+    // The persona first: in a draft its focus loss does nothing, and it rides along with the
+    // create that Name's focus loss fires (018 D6).
     await user.type(personaInput(), TYPED_SHEET);
-    await user.click(button(CREATE_NAME));
+    await user.type(nameInput(), TYPED_NAME);
+    await user.tab();
     await flush();
 
     const posts = matching(calls, "POST", COLLECTION_PATH);
     expect(posts).toHaveLength(1);
-    expect(posts[0].body).toMatchObject({ name: TYPED_NAME, sheet: TYPED_SHEET });
+    expect(posts[0].body).toEqual({ name: TYPED_NAME, sheet: TYPED_SHEET });
     expect(locationPath()).toBe(`/characters/${CREATED_ID}`);
     expect(assign).not.toHaveBeenCalled();
   });
 
-  it("navigates with replace, so going back does not return to the empty form — DoD-3", async () => {
+  it("(009 DoD-3, amended) navigates with replace, so going back does not return to the empty form — DoD-3", async () => {
     const user = newUser();
     stubBackend((request) => {
       if (request.method === "POST" && request.path === COLLECTION_PATH) {
@@ -594,7 +652,7 @@ describe("Create posts once and hands the route over to the new id (D1, US-020.A
     renderScreen(NEW_PATH);
 
     await user.type(nameInput(), TYPED_NAME);
-    await user.click(button(CREATE_NAME));
+    await user.tab();
     await flush();
     expect(locationPath()).toBe(`/characters/${CREATED_ID}`);
 
@@ -604,13 +662,13 @@ describe("Create posts once and hands the route over to the new id (D1, US-020.A
     expect(locationPath()).toBe(`/characters/${CREATED_ID}`);
   });
 
-  it("a failed Create reports inline, stays on the form and keeps the typed name — DoD-4", async () => {
+  it("(009 DoD-4, amended) a failed create on Name's focus loss reports inline, stays on the form and keeps the typed name — DoD-4", async () => {
     const user = newUser();
     stubBackend(() => serverError());
     renderScreen(NEW_PATH);
 
     await user.type(nameInput(), TYPED_NAME);
-    await user.click(button(CREATE_NAME));
+    await user.tab();
     await flush();
 
     expect(within(mainRegion()).getByText(CREATE_FAILED_TEXT)).toBeInTheDocument();
@@ -622,7 +680,7 @@ describe("Create posts once and hands the route over to the new id (D1, US-020.A
 
 // ---------------------------------------------------------------------------
 describe("existing mode at /characters/:id", () => {
-  it("shows a loader while the GET is pending, then the character — DoD-5", async () => {
+  it("(009 DoD-5, amended: no Save) shows a loader while the GET is pending, then the character — DoD-5", async () => {
     const gate = deferred<Response>();
     stubBackend((request) => {
       if (request.method === "GET" && request.path === itemPath(ID_A)) {
@@ -648,42 +706,16 @@ describe("existing mode at /characters/:id", () => {
     expect(heading(CHAR_A.name)).toBeInTheDocument();
     expect(nameInput()).toHaveValue(CHAR_A.name);
     expect(personaInput()).toHaveValue(CHAR_A.sheet);
-    expect(button(SAVE_NAME)).toBeDisabled();
+    // 018 step 009 (D7): Save is gone; name and persona save on focus loss.
+    expect(queryButton(SAVE_NAME)).toBeNull();
     expect(button(ARCHIVE_NAME)).toBeInTheDocument();
     expect(within(mainRegion()).queryByText(ARCHIVED_BADGE)).toBeNull();
     expect(heading(SESSIONS_HEADING)).toBeInTheDocument();
   });
 
-  it("editing enables Save, which PATCHes name and sheet and re-renders from the response — DoD-6", async () => {
-    const user = newUser();
-    const { calls } = stubBackend((request) => {
-      if (request.method === "GET" && request.path === itemPath(ID_A)) {
-        return jsonResponse(CHAR_A, 200);
-      }
-      if (request.method === "PATCH" && request.path === itemPath(ID_A)) {
-        return jsonResponse(SAVED_A, 200);
-      }
-      // 010 step 006 / 011 step 008: the ready screen mounts both sections.
-      const listing = sectionListing(request, ID_A);
-      if (listing !== null) return listing;
-      return notFoundResponse();
-    });
-    renderScreen(`/characters/${ID_A}`);
-    await flush();
-
-    await typeInto(user, nameInput(), EDITED_NAME);
-    await typeInto(user, personaInput(), EDITED_SHEET);
-    expect(button(SAVE_NAME)).toBeEnabled();
-
-    await user.click(button(SAVE_NAME));
-    await flush();
-
-    const patches = matching(calls, "PATCH", itemPath(ID_A));
-    expect(patches).toHaveLength(1);
-    expect(patches[0].body).toMatchObject({ name: EDITED_NAME, sheet: EDITED_SHEET });
-    expect(heading(SAVED_A.name)).toBeInTheDocument();
-    expect(button(SAVE_NAME)).toBeDisabled();
-  });
+  // 009 DoD-6 ("editing enables Save, which PATCHes name and sheet and re-renders from the
+  // response") was removed by 018 step 009: Save is gone (018 D7), and the per-field saves on
+  // focus loss are 018 DoD-5's clauses at the bottom of this file.
 
   it("Archive and Restore round-trip through their own routes — DoD-7", async () => {
     const user = newUser();
@@ -721,7 +753,7 @@ describe("existing mode at /characters/:id", () => {
     expect(button(ARCHIVE_NAME)).toBeInTheDocument();
   });
 
-  it("an already-archived character opens badged, offers Restore and stays editable — DoD-8", async () => {
+  it("(009 DoD-8, amended: no Save) an already-archived character opens badged, offers Restore and stays editable — DoD-5", async () => {
     const user = newUser();
     await renderLoaded(ARCHIVED_A);
 
@@ -737,7 +769,8 @@ describe("existing mode at /characters/:id", () => {
 
     expect(nameInput()).toHaveValue(EDITED_NAME);
     expect(personaInput()).toHaveValue(EDITED_SHEET);
-    expect(button(SAVE_NAME)).toBeEnabled();
+    // 018 step 009 (D7): there is no Save to enable.
+    expect(queryButton(SAVE_NAME)).toBeNull();
   });
 
   it("a 404 character_not_found renders Character not found in main, with no Retry and no notification — DoD-9", async () => {
@@ -800,7 +833,7 @@ describe("existing mode at /characters/:id", () => {
     expect(within(mainRegion()).queryByText(LOAD_FAILED_TEXT)).toBeNull();
   });
 
-  it("a failed Save reports inline and keeps the edited values in the fields — DoD-11", async () => {
+  it("(009 DoD-11, amended: focus loss instead of Save) a failed save reports inline and keeps the edited values in the fields — DoD-5", async () => {
     const user = newUser();
     stubBackend((request) => {
       if (request.method === "GET" && request.path === itemPath(ID_A)) {
@@ -816,9 +849,10 @@ describe("existing mode at /characters/:id", () => {
     renderScreen(`/characters/${ID_A}`);
     await flush();
 
+    // 018 step 009 (D7): each field saves when it loses focus.
     await typeInto(user, nameInput(), EDITED_NAME);
     await typeInto(user, personaInput(), EDITED_SHEET);
-    await user.click(button(SAVE_NAME));
+    await user.tab();
     await flush();
 
     expect(within(mainRegion()).getByText(SAVE_FAILED_TEXT)).toBeInTheDocument();
@@ -979,6 +1013,9 @@ describe("moving between characters builds a fresh Setups section (010 D11)", ()
       if (request.method === "GET" && request.path === setupsPath(ID_B)) {
         return jsonResponse({ setups: [SETUP_OF_B] }, 200);
       }
+      // 018 step 009 (DoD-11): the configuration block's two reads, by exact path.
+      const configuration = configurationListing(request, ID_A) ?? configurationListing(request, ID_B);
+      if (configuration !== null) return configuration;
       // 011 step 008: the Sessions section lists each character's sessions, answered empty.
       if (request.method === "GET" && request.path === sessionsPath(ID_A)) {
         return jsonResponse(EMPTY_SESSIONS, 200);
@@ -1151,6 +1188,9 @@ describe("moving between characters builds a fresh Sessions section (011 D15)", 
       if (request.method === "GET" && request.path === sessionsPath(ID_B)) {
         return jsonResponse({ sessions: [SESSION_OF_B] }, 200);
       }
+      // 018 step 009 (DoD-11): the configuration block's two reads, by exact path.
+      const configuration = configurationListing(request, ID_A) ?? configurationListing(request, ID_B);
+      if (configuration !== null) return configuration;
       if (
         request.method === "GET" &&
         (request.path === setupsPath(ID_A) || request.path === setupsPath(ID_B))
@@ -1245,15 +1285,16 @@ function headingLevel(element: HTMLElement): number {
 }
 
 describe("015 step 009 — the Notes region's place on the character screen (D1)", () => {
-  it("once loaded, the Notes region is present with its heading and follows the Sessions region in document order — DoD-4", async () => {
+  it("(015 009 DoD-4, amended: Notes now precedes Setups and Sessions) once loaded, the Notes region is present with its heading, ahead of the Setups and Sessions regions — DoD-6", async () => {
     const { calls } = await renderLoaded(CHAR_A);
 
     const notes = await screen.findByRole("region", { name: NOTES_REGION });
     const notesHeading = within(notes).getByRole("heading", { name: NOTES_REGION });
     expect(notesHeading).toBeInTheDocument();
     expect(within(mainRegion()).getByRole("region", { name: NOTES_REGION })).toBe(notes);
-    expect(precedes(sessionsRegion(), notes)).toBe(true);
-    expect(precedes(setupsRegion(), notes)).toBe(true);
+    // 018 D10 amends "Notes follows Sessions": the grid now sits ahead of both sections.
+    expect(precedes(notes, setupsRegion())).toBe(true);
+    expect(precedes(notes, sessionsRegion())).toBe(true);
     // The same heading order as the page's "Setups" and "Sessions" headings.
     const sessionsHeading = within(sessionsRegion()).getByRole("heading", { name: SESSIONS_REGION });
     expect(headingLevel(notesHeading)).toBe(headingLevel(sessionsHeading));
@@ -1371,5 +1412,326 @@ describe("015 step 009 — moving between characters builds a fresh Notes region
     expect(within(notesRegion()).queryByDisplayValue(NOTE_OF_A_2.body)).toBeNull();
     expect(screen.queryByDisplayValue(NOTE_OF_A_1.body)).toBeNull();
     expect(screen.queryByDisplayValue(NOTE_OF_A_2.body)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 018, step 009 — the character page, assembled (018 DoD-1, DoD-2, DoD-4..DoD-7,
+// DoD-9..DoD-11; DoD-3 and DoD-8 are App.test.tsx's, DoD-12 is [manual/live]). Expected values
+// come from 018's step file, 009.context.md and context.md: D6 (the draft page), D7 (save on
+// focus loss, flush on leaving), D10 (body order, no wall) and the UI strings table.
+const DRAFT_BADGE = "Draft";
+const DRAFT_LINE = "Nothing is saved until you enter a name.";
+const NAME_REQUIRED_TEXT = "A character needs a name.";
+const SEND_NAME = /^send$/i;
+const CONFIGURATION_REGION = "Configuration";
+const START_REGION = "Start a session";
+const COMPOSER_LABEL = "Composer";
+const MODEL_UNSET_LINE = "Not set: new sessions take the first enabled model.";
+const WALL_LABEL = "Note wall";
+const OPEN_NOTES_NAME = "Open notes";
+const YOUR_NOTES = "Your notes";
+const SESSION_NOTES = "Session notes";
+
+/** The five body regions, in the order 018 D10 requires. */
+const BODY_REGIONS = [NOTES_REGION, "Setups", CONFIGURATION_REGION, "Sessions", START_REGION];
+
+const ID_C = "7250000000000000021";
+const C_STAMP = "2026-07-01T09:00:00.000000+00:00";
+
+const CHAR_C: Character = {
+  id: ID_C,
+  name: "Aria",
+  sheet: "# Aria",
+  archived_at: null,
+  created_at: C_STAMP,
+  updated_at: C_STAMP,
+};
+
+const ARCHIVED_C: Character = {
+  ...CHAR_C,
+  archived_at: "2026-07-02T09:00:00.000000+00:00",
+  updated_at: "2026-07-02T09:00:00.000000+00:00",
+};
+
+/** What the create answers in the draft-page clauses: the typed name and persona, a new id. */
+const CREATED_ARIA: Character = {
+  id: CREATED_ID,
+  name: "Aria",
+  sheet: "# Aria",
+  archived_at: null,
+  created_at: C_STAMP,
+  updated_at: C_STAMP,
+};
+
+const NOTE_OF_C_1 = characterNote("7250000000000000211", ID_C, "Aria keeps her promises late.", 0);
+const NOTE_OF_C_2 = characterNote("7250000000000000212", ID_C, "Aria fears deep water.", 1);
+
+/**
+ * 018 step 009: GET and PATCH of each held row (a PATCH answers the row with the patch applied
+ * and a later `updated_at`), every section listing of each, the given notes for each, and an
+ * optional create answer for `POST /api/characters`. Everything else is a 404.
+ */
+function serveRows(
+  rows: Character[],
+  options: { notes?: Memo[]; onCreate?: () => Response | Promise<Response> } = {},
+) {
+  return stubBackend((request) => {
+    if (request.method === "POST" && request.path === COLLECTION_PATH && options.onCreate) {
+      return options.onCreate();
+    }
+    for (const row of rows) {
+      if (request.path === itemPath(row.id) && request.search === "") {
+        if (request.method === "GET") return jsonResponse(row, 200);
+        if (request.method === "PATCH") {
+          const patch = (request.body ?? {}) as Partial<Character>;
+          return jsonResponse({ ...row, ...patch, updated_at: PATCHED_STAMP }, 200);
+        }
+      }
+      if (options.notes !== undefined && isNotesListing(request, row.id)) {
+        return jsonResponse({ memos: options.notes.filter((note) => note.scope_id === row.id) }, 200);
+      }
+      const listing = sectionListing(request, row.id);
+      if (listing !== null) return listing;
+    }
+    return notFoundResponse();
+  });
+}
+
+function region(name: string): HTMLElement {
+  return within(mainRegion()).getByRole("region", { name });
+}
+
+function queryRegionAnywhere(name: string): HTMLElement | null {
+  return screen.queryByRole("region", { name, hidden: true });
+}
+
+describe("018 step 009 — the draft page at /characters/new (D6)", () => {
+  it("shows New character, the Draft badge, the marker line, Name and Persona, and no Create / Save / Archive / Send, no section and no request — DoD-1", async () => {
+    const { calls } = stubBackend(() => notFoundResponse());
+    renderScreen(NEW_PATH);
+    await flush();
+
+    const main = within(mainRegion());
+    expect(heading(NEW_HEADING)).toBeInTheDocument();
+    expect(main.getByText(DRAFT_BADGE)).toBeInTheDocument();
+    expect(main.getByText(DRAFT_LINE)).toBeInTheDocument();
+    expect(nameInput()).toBeInTheDocument();
+    expect(personaInput()).toBeInTheDocument();
+
+    for (const name of [CREATE_NAME, SAVE_NAME, ARCHIVE_NAME, SEND_NAME]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    for (const name of BODY_REGIONS) {
+      expect(queryRegionAnywhere(name)).toBeNull();
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("blurring an empty Name, typing a persona and blurring it, then unmounting with only the persona typed sends nothing — DoD-2", async () => {
+    const user = newUser();
+    const { calls } = stubBackend(() => notFoundResponse());
+    const { view } = renderScreen(NEW_PATH);
+
+    await user.click(nameInput());
+    await user.tab();
+    await flush();
+    expect(calls).toEqual([]);
+
+    await user.type(personaInput(), TYPED_SHEET);
+    await user.tab();
+    await flush();
+    expect(calls).toEqual([]);
+    expect(personaInput()).toHaveValue(TYPED_SHEET);
+
+    view.unmount();
+    await flush();
+    expect(calls).toEqual([]);
+  });
+
+  it("while the create is pending Name and Persona are read-only and blurring Name again sends no second POST — DoD-4", async () => {
+    const user = newUser();
+    const gate = deferred<Response>();
+    const { calls } = serveRows([CREATED_ARIA], { onCreate: () => gate.promise });
+    renderScreen(NEW_PATH);
+
+    await user.type(personaInput(), "# Aria");
+    await user.type(nameInput(), "Aria");
+    await user.tab();
+    await flush();
+
+    expect(matching(calls, "POST", COLLECTION_PATH)).toHaveLength(1);
+    expect(nameInput()).toHaveAttribute("readonly");
+    expect(personaInput()).toHaveAttribute("readonly");
+
+    fireEvent.focus(nameInput());
+    fireEvent.blur(nameInput());
+    await flush();
+    expect(matching(calls, "POST", COLLECTION_PATH)).toHaveLength(1);
+
+    gate.resolve(jsonResponse(CREATED_ARIA, 201));
+    await flush();
+    expect(matching(calls, "POST", COLLECTION_PATH)).toHaveLength(1);
+  });
+
+  it("a failed create shows Could not create the character., keeps Aria and the persona, stays at /characters/new and still shows Draft — DoD-4", async () => {
+    const user = newUser();
+    const { calls } = serveRows([], { onCreate: () => serverError() });
+    renderScreen(NEW_PATH);
+
+    await user.type(personaInput(), "# Aria");
+    await user.type(nameInput(), "Aria");
+    await user.tab();
+    await flush();
+
+    expect(matching(calls, "POST", COLLECTION_PATH)).toHaveLength(1);
+    expect(within(mainRegion()).getByText(CREATE_FAILED_TEXT)).toBeInTheDocument();
+    expect(nameInput()).toHaveValue("Aria");
+    expect(personaInput()).toHaveValue("# Aria");
+    expect(locationPath()).toBe(NEW_PATH);
+    expect(within(mainRegion()).getByText(DRAFT_BADGE)).toBeInTheDocument();
+  });
+});
+
+describe("018 step 009 — name and persona save on focus loss at /characters/<id> (D7)", () => {
+  it("there is no Save button, and changing Name to Aria Vale and blurring sends exactly PATCH {name} and the heading reads Aria Vale — DoD-5", async () => {
+    const user = newUser();
+    const { calls } = serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    expect(heading(CHAR_C.name)).toBeInTheDocument();
+    expect(queryButton(SAVE_NAME)).toBeNull();
+
+    await typeInto(user, nameInput(), "Aria Vale");
+    await user.tab();
+    await flush();
+
+    const patches = matching(calls, "PATCH", itemPath(ID_C));
+    expect(patches.map((call) => call.body)).toEqual([{ name: "Aria Vale" }]);
+    expect(heading("Aria Vale")).toBeInTheDocument();
+  });
+
+  it("clearing Name and blurring sends nothing, shows A character needs a name. on the Name field and keeps the saved name as the heading — DoD-5", async () => {
+    const user = newUser();
+    const { calls } = serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    await user.clear(nameInput());
+    await user.tab();
+    await flush();
+
+    expect(matching(calls, "PATCH", itemPath(ID_C))).toEqual([]);
+    expect(nameInput()).toHaveAccessibleDescription(/A character needs a name\./);
+    expect(within(mainRegion()).getByText(NAME_REQUIRED_TEXT)).toBeInTheDocument();
+    expect(nameInput()).toHaveValue("");
+    expect(heading(CHAR_C.name)).toBeInTheDocument();
+  });
+
+  it("changing the persona and blurring its editor sends exactly PATCH {sheet} — DoD-5", async () => {
+    const user = newUser();
+    const changed = "A duelist with a borrowed name.";
+    const { calls } = serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    await typeInto(user, personaInput(), changed);
+    await user.tab();
+    await flush();
+
+    const patches = matching(calls, "PATCH", itemPath(ID_C));
+    expect(patches.map((call) => call.body)).toEqual([{ sheet: changed }]);
+  });
+
+  it("leaving by an in-entry navigation after changing the persona without blurring sends exactly one PATCH {sheet} — DoD-9", async () => {
+    const changed = "Changed and never blurred.";
+    const { calls } = serveRows([CHAR_C, CHAR_B]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    // A change event alone: focus never enters the editor, so it never leaves it either.
+    fireEvent.change(personaInput(), { target: { value: changed } });
+    expect(matching(calls, "PATCH", itemPath(ID_C))).toEqual([]);
+
+    // A click event alone moves no focus; the navigation unmounts the screen.
+    fireEvent.click(screen.getByRole("button", { name: PROBE_NAVIGATE }));
+    await flush();
+
+    expect(locationPath()).toBe(`/characters/${ID_B}`);
+    const patches = matching(calls, "PATCH", itemPath(ID_C));
+    expect(patches.map((call) => call.body)).toEqual([{ sheet: changed }]);
+  });
+});
+
+describe("018 step 009 — the body's order, the notes grid and no wall (D10)", () => {
+  it("once loaded the regions run Notes, Setups, Configuration, Sessions, Start a session, and the notes are focusable cards named Note <n> of <total> — DoD-6", async () => {
+    serveRows([CHAR_C], { notes: [NOTE_OF_C_1, NOTE_OF_C_2] });
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    const notes = await within(mainRegion()).findByRole("region", { name: NOTES_REGION });
+    await waitFor(() => {
+      expect(within(notes).getByRole("listitem", { name: "Note 2 of 2" })).toBeInTheDocument();
+    });
+
+    const ordered = BODY_REGIONS.map((name) => region(name));
+    for (let index = 0; index + 1 < ordered.length; index += 1) {
+      expect(precedes(ordered[index], ordered[index + 1])).toBe(true);
+    }
+
+    const first = within(notes).getByRole("listitem", { name: "Note 1 of 2" });
+    const second = within(notes).getByRole("listitem", { name: "Note 2 of 2" });
+    expect(first.tabIndex).toBe(0);
+    expect(second.tabIndex).toBe(0);
+    expect(precedes(first, second)).toBe(true);
+  });
+
+  it("the page renders no Note wall, no Open notes, no Your notes / Session notes group and makes no /memo-chain request — DoD-7", async () => {
+    const { calls } = serveRows([CHAR_C], { notes: [NOTE_OF_C_1] });
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+    await within(mainRegion()).findByRole("region", { name: NOTES_REGION });
+
+    expect(
+      screen
+        .queryAllByRole("complementary", { hidden: true })
+        .filter((element) => element.getAttribute("aria-label") === WALL_LABEL),
+    ).toEqual([]);
+    expect(document.querySelector(`[aria-label="${WALL_LABEL}"]`)).toBeNull();
+    expect(screen.queryByRole("button", { name: OPEN_NOTES_NAME, hidden: true })).toBeNull();
+    for (const name of [YOUR_NOTES, SESSION_NOTES]) {
+      expect(queryRegionAnywhere(name)).toBeNull();
+      expect(screen.queryByRole("heading", { name, hidden: true })).toBeNull();
+    }
+    expect(calls.filter((call) => call.path.endsWith("/memo-chain"))).toEqual([]);
+  });
+
+  it("an archived character still renders every section, the configuration block and the composer included, with Restore in place of Archive — DoD-10", async () => {
+    serveRows([ARCHIVED_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
+    expect(button(RESTORE_NAME)).toBeInTheDocument();
+    expect(queryButton(ARCHIVE_NAME)).toBeNull();
+
+    for (const name of BODY_REGIONS) {
+      expect(region(name)).toBeInTheDocument();
+    }
+    expect(await within(region(CONFIGURATION_REGION)).findByText(MODEL_UNSET_LINE)).toBeInTheDocument();
+    expect(within(region(START_REGION)).getByRole("textbox", { name: COMPOSER_LABEL })).toBeInTheDocument();
+    expect(within(region(START_REGION)).getByRole("button", { name: SEND_NAME })).toBeInTheDocument();
+  });
+
+  it("the ready page's configuration and models reads are answered by exact path, so the block loads with no failure — DoD-11", async () => {
+    const { calls } = serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    expect(await within(region(CONFIGURATION_REGION)).findByText(MODEL_UNSET_LINE)).toBeInTheDocument();
+    expect(within(mainRegion()).queryByText("Could not load the configuration")).toBeNull();
+    expect(matching(calls, "GET", configurationPath(ID_C))).toHaveLength(1);
+    expect(matching(calls, "GET", MODELS_PATH)).toHaveLength(1);
   });
 });

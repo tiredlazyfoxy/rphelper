@@ -1,8 +1,9 @@
-// The centre column of the two character routes (009 step 007): `/characters/new` (new
-// mode) and `/characters/:id` (existing mode). The screen holds no business logic of its
-// own — it creates one `CharacterScreenState` (006) with `useState`, renders its fields,
-// and calls 006's free functions. The workspace `CharactersState` (004, D11) is created
-// once in `App` and passed down so a create/save/archive/restore applies to the tree.
+// The centre column of the two character routes (009 step 007, rebuilt by 018 step 009):
+// `/characters/new` (the draft page, 018 D6) and `/characters/:id` (the character page,
+// 018 D7 / D10). The screen holds no business logic of its own — it creates one
+// `CharacterScreenState` (009 006, 018 008) with `useState`, renders its fields, and calls
+// its free functions. The workspace `CharactersState` (004, D11) is created once in `App`
+// and passed down so a create/save/archive/restore applies to the tree.
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
@@ -11,6 +12,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Badge,
+  Box,
   Button,
   Center,
   Container,
@@ -21,24 +23,27 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { IconArchive, IconArchiveOff, IconDeviceFloppy, IconPlus } from "@tabler/icons-react";
+import { IconArchive, IconArchiveOff } from "@tabler/icons-react";
 
 import { MarkdownEditor } from "../shared/MarkdownEditor";
 import { isArchived } from "./charactersApi";
 import type { CharactersState } from "./charactersState";
 import {
   CharacterScreenState,
-  canSubmit,
+  commitName,
+  commitPersona,
+  flushCharacterEdits,
   isNewCharacter,
   loadCharacter,
   submitArchive,
   submitCreate,
   submitRestore,
-  submitSave,
 } from "./characterScreenState";
 import { SetupsSection } from "./SetupsSection";
 import { SessionsSection } from "./SessionsSection";
 import { CharacterNotesSection } from "./CharacterNotesSection";
+import { CharacterConfigSection } from "./CharacterConfigSection";
+import { CharacterComposer } from "./CharacterComposer";
 import type { SessionsState } from "./sessionsState";
 
 /** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
@@ -52,18 +57,19 @@ export type CharacterScreenProps = {
   characterId: string | null;
   /**
    * The one workspace sessions state `App` creates (011 D15), handed to the Sessions
-   * section so starting or archiving a session updates the tree with no refetch. Required
-   * in both modes even though new mode renders no section: one prop, no optional branch.
+   * section and the page composer so starting a session updates the tree with no
+   * refetch. Required in both modes even though the draft renders no section.
    */
   sessions: SessionsState;
 };
 
 /**
- * The character screen. New mode renders "New character" with Name, Persona and Create;
- * existing mode loads on mount and renders loading / not-found / failed / ready, where
- * ready carries the saved name heading, the Archived badge, Name, Persona, Save,
- * Archive-or-Restore, 010's "Setups" section and 011's "Sessions" section. Failures render
- * inline (D12).
+ * The character screen. New mode is the draft page: "New character", a "Draft" badge,
+ * the marker line, Name and Persona, creating on the first committed non-blank name
+ * (018 D6). Existing mode loads on mount and renders loading / not-found / failed / ready,
+ * where ready carries the header, Name and Persona (saved on focus loss, 018 D7),
+ * Archive-or-Restore, then Notes → Setups → Configuration → Sessions → the page composer
+ * (018 D10). Pending edits are flushed on unmount. Failures render inline (D12).
  */
 export const CharacterScreen = observer(function CharacterScreen(
   props: CharacterScreenProps,
@@ -74,9 +80,10 @@ export const CharacterScreen = observer(function CharacterScreen(
   const [state] = useState(() => new CharacterScreenState(characterId));
   const navigate = useNavigate();
   const controllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(false);
 
   // Existing mode loads on mount; the controller aborts on unmount so a late response
-  // writes nothing. New mode makes no request until Create (D1).
+  // writes nothing. New mode makes no request on mount (018 D6).
   useEffect(() => {
     if (isNewCharacter(state)) {
       return;
@@ -92,6 +99,17 @@ export const CharacterScreen = observer(function CharacterScreen(
     };
   }, [state]);
 
+  // 018 D7 / R10: leaving the page saves pending edits — blur is unreliable when an
+  // element leaves the DOM (015 D5). After a create the state is no longer a draft, so the
+  // flush on the replace navigation's unmount sends nothing.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      void flushCharacterEdits(state, characters);
+    };
+  }, [state, characters]);
+
   const character = state.character;
   const archived = character !== null && isArchived(character);
   const submitting = state.submitStatus === "submitting";
@@ -100,18 +118,13 @@ export const CharacterScreen = observer(function CharacterScreen(
     void loadCharacter(state, controllerRef.current?.signal);
   };
 
-  // D1: `replace`, so Back does not return to an empty form whose Create would duplicate.
-  // The id is the server's string, used exactly as received.
+  // D1 / 018 D6: `replace`, so Back does not return to the draft page. The id is the
+  // server's string, used exactly as received; skipped once the screen has unmounted.
   const onCreated = (createdId: string): void => {
+    if (!mountedRef.current) {
+      return;
+    }
     void navigate(`/characters/${createdId}`, { replace: true });
-  };
-
-  const onCreate = (): void => {
-    void submitCreate(state, characters, onCreated);
-  };
-
-  const onSave = (): void => {
-    void submitSave(state, characters);
   };
 
   const onArchive = (): void => {
@@ -130,49 +143,48 @@ export const CharacterScreen = observer(function CharacterScreen(
     return <Alert color="red">{state.error}</Alert>;
   };
 
-  /** The two draft fields, identical in both modes. The writes are MobX actions. */
-  const renderFields = (): React.JSX.Element => (
-    <>
-      <TextInput
-        label="Name"
-        value={state.name}
-        onChange={(event) => {
-          const value = event.currentTarget.value;
-          runInAction(() => {
-            state.name = value;
-          });
-        }}
-      />
-      <MarkdownEditor
-        label="Persona"
-        value={state.sheet}
-        onChange={(markdown) => {
-          runInAction(() => {
-            state.sheet = markdown;
-          });
-        }}
-        readOnly={submitting}
-      />
-    </>
-  );
+  const onNameChange = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    const value = event.currentTarget.value;
+    runInAction(() => {
+      state.name = value;
+    });
+  };
+
+  const onSheetChange = (markdown: string): void => {
+    runInAction(() => {
+      state.sheet = markdown;
+    });
+  };
 
   if (isNewCharacter(state)) {
+    // The draft page (018 D6): nothing else renders — every section needs an id. The
+    // persona rides along with the create; its own focus loss saves nothing here.
     return (
       <Container size="md" py="md">
         <Stack gap="md">
-          <Title order={2}>New character</Title>
-          {renderError()}
-          {renderFields()}
-          <Group>
-            {/* `canSubmit` is already false while a submit is in flight. */}
-            <Button
-              leftSection={<IconPlus size={ICON_SIZE} stroke={ICON_STROKE} />}
-              disabled={!canSubmit(state)}
-              onClick={onCreate}
-            >
-              Create
-            </Button>
+          <Group gap="sm">
+            <Title order={2}>New character</Title>
+            <Badge color="blue" variant="light">
+              Draft
+            </Badge>
           </Group>
+          <Text c="dimmed">Nothing is saved until you enter a name.</Text>
+          {renderError()}
+          <TextInput
+            label="Name"
+            value={state.name}
+            onChange={onNameChange}
+            onBlur={() => {
+              void submitCreate(state, characters, onCreated);
+            }}
+            readOnly={submitting}
+          />
+          <MarkdownEditor
+            label="Persona"
+            value={state.sheet}
+            onChange={onSheetChange}
+            readOnly={submitting}
+          />
         </Stack>
       </Container>
     );
@@ -208,6 +220,21 @@ export const CharacterScreen = observer(function CharacterScreen(
     );
   }
 
+  // Existing mode returned above when the id was null; the test is only strictness.
+  const id = state.characterId;
+
+  /**
+   * The persona editor exposes no blur hook: the wrapper's focus-leave commits only when
+   * focus moves outside it, not into the editor's own toolbar (015 `007`).
+   */
+  const onPersonaBlur = (event: React.FocusEvent<HTMLDivElement>): void => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) {
+      return;
+    }
+    void commitPersona(state, characters);
+  };
+
   return (
     <Container size="md" py="md">
       <Stack gap="md">
@@ -221,15 +248,24 @@ export const CharacterScreen = observer(function CharacterScreen(
           )}
         </Group>
         {renderError()}
-        {renderFields()}
+        <TextInput
+          label="Name"
+          value={state.name}
+          onChange={onNameChange}
+          onBlur={() => {
+            void commitName(state, characters);
+          }}
+          error={state.nameError}
+        />
+        <Box onBlur={onPersonaBlur}>
+          <MarkdownEditor
+            label="Persona"
+            value={state.sheet}
+            onChange={onSheetChange}
+            readOnly={submitting}
+          />
+        </Box>
         <Group>
-          <Button
-            leftSection={<IconDeviceFloppy size={ICON_SIZE} stroke={ICON_STROKE} />}
-            disabled={!canSubmit(state)}
-            onClick={onSave}
-          >
-            Save
-          </Button>
           {/* D4: no confirm — archiving destroys nothing. */}
           {archived ? (
             <Button
@@ -251,34 +287,15 @@ export const CharacterScreen = observer(function CharacterScreen(
             </Button>
           )}
         </Group>
-        {/* 010 D1: the interim "Setups" section, between the persona/actions block and
-            the Sessions heading, and only here — new mode, loading, not-found and failed
-            render none. Keyed by the character id (010 D11) so a different character
-            builds fresh section state even if this screen is ever rendered unkeyed. The
-            id is the route's string, used verbatim; the null test is only strictness
-            (existing mode returned above when it was null). */}
-        {state.characterId !== null && (
-          <SetupsSection key={state.characterId} characterId={state.characterId} />
-        )}
-        {/* 011 D1 / step 008: the real Sessions section, in the place 009's heading-only
-            one held — after 010's Setups section and only here, so new mode, loading,
-            not-found and failed render none. Its own "Sessions" heading (same
-            `Title order={3}` level) takes the old heading's place, so 010's "Setups
-            precedes the Sessions heading" stays true. Keyed by the character id (D15) so a
-            different character builds fresh section state; the id is the route's string,
-            used verbatim, and the null test is only strictness. */}
-        {state.characterId !== null && (
-          <SessionsSection
-            key={state.characterId}
-            characterId={state.characterId}
-            sessions={sessions}
-          />
-        )}
-        {/* 015 D1 / step 009: the character-level "Notes" section, after Sessions and only
-            here. Keyed by the character id so a different character builds fresh state. */}
-        {state.characterId !== null && (
-          <CharacterNotesSection key={state.characterId} characterId={state.characterId} />
-        )}
+        {/* 018 D10: the body order — Notes (the page's grid) → Setups → Configuration →
+            Sessions → the page composer last. Each section is keyed by the character id
+            so a different character builds fresh section state; the id is the route's
+            string, used verbatim. */}
+        {id !== null && <CharacterNotesSection key={id} characterId={id} />}
+        {id !== null && <SetupsSection key={id} characterId={id} />}
+        {id !== null && <CharacterConfigSection key={id} characterId={id} headingOrder={3} />}
+        {id !== null && <SessionsSection key={id} characterId={id} sessions={sessions} />}
+        {id !== null && <CharacterComposer key={id} characterId={id} sessions={sessions} />}
       </Stack>
     </Container>
   );

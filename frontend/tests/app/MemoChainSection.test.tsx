@@ -650,3 +650,48 @@ describe("the chain's announcements (US-102 keyboard path; D8)", () => {
     },
   );
 });
+
+// ===========================================================================
+// Feature 018, step 005 — MemoChainSection now takes its sensors and announcements from
+// app/memoDnd.ts (D8 — refactor, no behaviour change). Every assertion above, including 016
+// 004 DoD-9, is kept unedited and is DoD-4's main half. The case below pins what the shared
+// builder promises when fed the chain's groups: a note named by its position in its group and
+// that group's title (018 005 Interface intent; 016 D8).
+describe("the chain's announcements come from the shared builder (018 005)", () => {
+  it("Space on the focused second Session note fills the live region with its position 2 and the title Session notes, and no memo id — DoD-4", async () => {
+    await readyFour();
+    const card = groupItems(SESSION_NOTES)[1];
+
+    card.focus();
+    expect(document.activeElement).toBe(card);
+    pressSpace(card);
+
+    await waitFor(() => {
+      expect(liveRegionText()).not.toBe("");
+    });
+    const message = liveRegionText();
+    expect(message).toMatch(/\b2\b/);
+    expect(message).toContain(SESSION_NOTES);
+    for (const id of memoIds(FOUR_LEVELS)) {
+      expect(message).not.toContain(id);
+    }
+  });
+
+  it("Space on the focused Character note names Character notes in the live region, and no memo id — DoD-4", async () => {
+    await readyFour();
+    const card = groupItems(CHARACTER_NOTES)[0];
+
+    card.focus();
+    pressSpace(card);
+
+    await waitFor(() => {
+      expect(liveRegionText()).not.toBe("");
+    });
+    const message = liveRegionText();
+    expect(message).toMatch(/\b1\b/);
+    expect(message).toContain(CHARACTER_NOTES);
+    for (const id of memoIds(FOUR_LEVELS)) {
+      expect(message).not.toContain(id);
+    }
+  });
+});

@@ -6,6 +6,7 @@
 // Ids are decimal strings and are never parsed, coerced or compared numerically.
 // Failures are the shared client's `ApiError`s, rethrown unchanged.
 import { apiGet, apiPost } from "../shared/api";
+import type { Message } from "./streamApi";
 
 /** One session, exactly as the sessions routes send it. No renaming layer. */
 export type Session = {
@@ -17,6 +18,14 @@ export type Session = {
   last_used_at: string;
   created_at: string;
   updated_at: string;
+};
+
+/**
+ * The start route's body (018 D5): the eight `Session` keys plus the seeded opening message,
+ * or null when no opening text was sent.
+ */
+export type StartedSession = Session & {
+  opening_message: Message | null;
 };
 
 /** Either listing route's body: `{ sessions: [...] }`. */
@@ -85,14 +94,51 @@ export async function fetchSession(sessionId: string, signal?: AbortSignal): Pro
 /**
  * `POST /api/characters/<characterId>/sessions` with the JSON body `{ setup_id: <id or null> }`
  * — always sent, so the request states "no setup" rather than implying it. Resolves to the
- * created session.
+ * created session's eight `Session` keys only: the route's `opening_message: null` never
+ * reaches a store (018 D5).
  */
 export async function startSession(
   characterId: string,
   setupId: string | null,
   signal?: AbortSignal,
 ): Promise<Session> {
-  return apiPost<Session>(characterSessionsPath(characterId), { setup_id: setupId }, signal);
+  const started = await apiPost<StartedSession>(
+    characterSessionsPath(characterId),
+    { setup_id: setupId },
+    signal,
+  );
+  return toSession(started);
+}
+
+/** The eight `Session` keys of a started session, named explicitly; drops `opening_message`. */
+function toSession(started: Session): Session {
+  return {
+    id: started.id,
+    character_id: started.character_id,
+    setup_id: started.setup_id,
+    setup_name: started.setup_name,
+    archived_at: started.archived_at,
+    last_used_at: started.last_used_at,
+    created_at: started.created_at,
+    updated_at: started.updated_at,
+  };
+}
+
+/**
+ * `POST /api/characters/<characterId>/sessions` with the JSON body exactly
+ * `{ opening_message: <text verbatim> }` (018 D5): create-and-seed. Resolves to the served
+ * `StartedSession` unchanged.
+ */
+export async function startSessionWithMessage(
+  characterId: string,
+  openingText: string,
+  signal?: AbortSignal,
+): Promise<StartedSession> {
+  return apiPost<StartedSession>(
+    characterSessionsPath(characterId),
+    { opening_message: openingText },
+    signal,
+  );
 }
 
 /** `POST /api/sessions/<sessionId>/archive` — resolves to the session. */

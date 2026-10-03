@@ -117,9 +117,29 @@
 // session; 404 `session_not_found` otherwise), so the `/sessions/1` clauses, the tree-click clause
 // and the DoD-15 started-session clause all see a loaded bar. One clause is added at the bottom
 // ("— DoD-11" there is 017 step 011's); no other assertion changes.
+//
+// Amended by feature 018, step 009 (DoD-1, DoD-3, DoD-5, DoD-6, DoD-11): `/characters/new` is the
+// draft page (018 D6) with no Create, and `/characters/<id>` saves on focus loss with no Save
+// (018 D7); its ready body also mounts the "Configuration" block (`GET
+// /api/characters/<id>/configuration` + `GET /api/models`) and the page composer "Start a
+// session", and runs Notes → Setups → Configuration → Sessions → Start a session (018 D10).
+// Consequences:
+// - `stubWorkspace` answers the character configuration GET by exact pathname (all five keys
+//   null for a held character, 404 `character_not_found` otherwise; `/api/models` was already
+//   answered), and its `POST /api/characters/<id>/sessions` answers the started-session wire
+//   shape: the eight session keys plus `opening_message` (null, or the eight-key opening
+//   message when one was sent). The `/characters/1` clause's own stub answers both reads too;
+//   `/characters/new`'s stub (which rejects every other URL) is unchanged — the draft page
+//   makes no request;
+// - replaced: 009 step 007 DoD-13's "Create button at /characters/new" (→ the Draft badge and no
+//   Create, 018 DoD-1), 009 step 008 DoD-8's Create click (→ Name losing focus, 018 DoD-3), 009
+//   step 008 DoD-10's Save click (→ Name losing focus, 018 DoD-5), and 015 step 009 DoD-4's
+//   "Notes after Sessions" (→ the 018 D10 order, 018 DoD-6). Each amended title ends with the
+//   018 "— DoD-N" that amends it. No other assertion changes. 018 step 009's own clauses
+//   (DoD-3, DoD-5, DoD-7, DoD-8) are the block at the bottom of this file.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChangeEvent } from "react";
 import { App } from "../../src/app/App";
@@ -305,6 +325,20 @@ const USABLE_CONFIGURATION = {
   rp_language: EMPTY_TEXT_SETTING,
   preferred_language: EMPTY_TEXT_SETTING,
 };
+
+// ------------------------------------------- 018 step 009: the character page's configuration read
+/** `GET /api/characters/<id>/configuration`, anchored both ends. */
+const CHARACTER_CONFIGURATION_PATTERN = /^\/api\/characters\/([^/]+)\/configuration$/;
+/** A character configuration with all five keys, nothing set. */
+const UNSET_CHARACTER_CONFIGURATION = {
+  model: null,
+  system_prompt: null,
+  tool_memo_search: null,
+  tool_session_search: null,
+  tool_web_search: null,
+};
+/** The opening message id the started-session answer carries when one was sent. */
+const OPENING_MESSAGE_ID = "9007199254740997";
 
 const SESSION_NOT_FOUND_TEXT = "Session not found";
 const NO_ENTRIES_TEXT = "No entries yet.";
@@ -495,7 +529,7 @@ function stubWorkspace(rows: Character[], sessions: Session[] = []) {
         return jsonResponse({ sessions: listed }, 200);
       }
       if (method === "POST") {
-        const sent = (body ?? {}) as { setup_id?: string | null };
+        const sent = (body ?? {}) as { setup_id?: string | null; opening_message?: string | null };
         const started: Session = {
           id: STARTED_SESSION_ID,
           character_id: characterId,
@@ -507,8 +541,32 @@ function stubWorkspace(rows: Character[], sessions: Session[] = []) {
           updated_at: STARTED_STAMP,
         };
         sessionOrder.unshift(started);
-        return jsonResponse(started, 201);
+        // 018 step 009: the route answers the started session — the eight session keys plus
+        // `opening_message`, null exactly when none was sent (018 context.md "Wire contract").
+        const opening =
+          typeof sent.opening_message === "string"
+            ? {
+                id: OPENING_MESSAGE_ID,
+                session_id: STARTED_SESSION_ID,
+                role: "user",
+                kind: null,
+                text: sent.opening_message,
+                settled_at: null,
+                created_at: STARTED_STAMP,
+                updated_at: STARTED_STAMP,
+              }
+            : null;
+        return jsonResponse({ ...started, opening_message: opening }, 201);
       }
+    }
+
+    // 018 step 009: the character page's "Configuration" block reads the character's own
+    // configuration. Matched on the exact pathname; nothing set for a held character, the
+    // backend's own 404 code otherwise. (`GET /api/models` is answered below, as before.)
+    const characterConfiguration = CHARACTER_CONFIGURATION_PATTERN.exec(url.pathname);
+    if (characterConfiguration !== null && method === "GET") {
+      if (!store.has(characterConfiguration[1])) return notFoundResponse();
+      return jsonResponse(UNSET_CHARACTER_CONFIGURATION, 200);
     }
 
     // 011 step 009: the session screen reads its one session by id, archived or not (D17).
@@ -692,6 +750,11 @@ function screenNameField(): HTMLElement {
   return within(mainElement()).getByRole("textbox", { name: NAME_LABEL });
 }
 
+/** 018 step 009: the screen's Persona editor (the stubbed labelled textarea). */
+function screenPersonaField(): HTMLElement {
+  return within(mainElement()).getByRole("textbox", { name: /^persona$/i });
+}
+
 // ---------------------------------------------------------------------------
 // 009 step 008: every route mounts the tree, so each clause below stubs the listing.
 describe("every declared route is the same shell around an empty centre (D5)", () => {
@@ -730,7 +793,7 @@ describe("an undeclared path is a 404 inside the same shell (D5)", () => {
 // Feature 009, step 007 — the two character routes now render the character screen.
 describe("the character routes render the character screen in the same shell (009 D1, D11)", () => {
   // 009 step 008: the tree's listing is the only request new mode makes.
-  it("renders the New character screen in the main region at /characters/new — DoD-13", async () => {
+  it("(009 007 DoD-13, amended: the draft page, no Create) renders the New character screen in the main region at /characters/new — DoD-1", async () => {
     stubFetch((input) => {
       const path = requestPath(input);
       if (path === COLLECTION_PATH) return Promise.resolve(jsonResponse({ characters: [] }, 200));
@@ -746,7 +809,10 @@ describe("the character routes render the character screen in the same shell (00
     expect(main.getByRole("heading", { name: /^new character$/i })).toBeInTheDocument();
     expect(main.getByRole("textbox", { name: /^name$/i })).toBeInTheDocument();
     expect(main.getByRole("textbox", { name: /^persona$/i })).toBeInTheDocument();
-    expect(main.getByRole("button", { name: /^create$/i })).toBeInTheDocument();
+    // 018 step 009 (D6): the draft marker replaces the Create button.
+    expect(main.getByText("Draft")).toBeInTheDocument();
+    expect(main.getByText("Nothing is saved until you enter a name.")).toBeInTheDocument();
+    expect(main.queryByRole("button", { name: /^create$/i })).toBeNull();
   });
 
   it("renders the requested character in the main region at /characters/1 — DoD-13", async () => {
@@ -771,6 +837,14 @@ describe("the character routes render the character screen in the same shell (00
       if (path === characterSessionsPath(CHARACTER.id)) {
         return Promise.resolve(jsonResponse(EMPTY_SESSIONS, 200));
       }
+      // 018 step 009 (DoD-11): the ready screen mounts the Configuration block, which reads the
+      // character's configuration and the enabled models — both by exact pathname.
+      if (path === `${CHARACTER_PATH}/configuration`) {
+        return Promise.resolve(jsonResponse(UNSET_CHARACTER_CONFIGURATION, 200));
+      }
+      if (path === MODELS_PATH) {
+        return Promise.resolve(jsonResponse({ models: ENABLED_MODELS }, 200));
+      }
       // 011 step 006: the shell's tree loads the workspace sessions on every route.
       if (path === SESSIONS_PATH) {
         return Promise.resolve(jsonResponse(EMPTY_SESSIONS, 200));
@@ -794,7 +868,7 @@ describe("the character routes render the character screen in the same shell (00
 // Feature 009, step 008 — the screen and the tree share the one workspace state (D11), so a
 // create, an archive/restore or a save shows in the tree with no second listing request.
 describe("creating a character shows it in the tree without refetching the list (US-020.AC-2, D11)", () => {
-  it("lands on the created id and marks that row current, with no list request after the create — DoD-8", async () => {
+  it("(009 008 DoD-8, amended: Name losing focus creates) lands on the created id and marks that row current, with no list request after the create — DoD-3", async () => {
     const user = newUser();
     const { calls } = stubWorkspace([]);
     renderApp(NEW_CHARACTER_ROUTE);
@@ -802,7 +876,8 @@ describe("creating a character shows it in the tree without refetching the list 
     expect(listRequests(calls)).toHaveLength(1);
 
     await user.type(screenNameField(), TYPED_NAME);
-    await user.click(screenControl(CREATE_NAME));
+    // 018 step 009 (D6): no Create button; the create fires when Name loses focus.
+    await user.tab();
     await flush();
 
     expect(currentPath()).toBe(`/characters/${CREATED_ID}`);
@@ -847,7 +922,7 @@ describe("archiving and restoring from the screen move the row in the tree (US-0
 
 // ---------------------------------------------------------------------------
 describe("saving a new name shows it in the tree (US-021.AC-1)", () => {
-  it("the tree row carries the saved name — DoD-10", async () => {
+  it("(009 008 DoD-10, amended: Name losing focus saves) the tree row carries the saved name — DoD-5", async () => {
     const user = newUser();
     stubWorkspace([CHAR_A]);
     renderApp(`/characters/${ID_A}`);
@@ -856,7 +931,8 @@ describe("saving a new name shows it in the tree (US-021.AC-1)", () => {
 
     await user.clear(screenNameField());
     await user.type(screenNameField(), EDITED_NAME);
-    await user.click(screenControl(SAVE_NAME));
+    // 018 step 009 (D7): no Save button; the name saves when the field loses focus.
+    await user.tab();
     await flush();
 
     expect(queryTreeRow(EDITED_NAME)).not.toBeNull();
@@ -1125,8 +1201,8 @@ describe("015 step 008 — /sessions/1 renders the Notes section in the main reg
 // "Notes" section after the "Sessions" region (D1). The section's own behaviour is
 // CharacterNotesSection.test.tsx's and its place on the screen CharacterScreen.test.tsx's; this
 // clause is the route-level proof inside the shell. "— DoD-4" is 015 step 009's.
-describe("015 step 009 — /characters/<id> renders the Notes section after the Sessions region", () => {
-  it("the main region holds the Notes region after the Sessions region, from one character notes listing — DoD-4", async () => {
+describe("015 step 009 — /characters/<id> renders the Notes section (order amended by 018 D10)", () => {
+  it("(015 009 DoD-4, amended: Notes now precedes Setups, Configuration, Sessions and Start a session) the main region holds the Notes region, from one character notes listing — DoD-6", async () => {
     const { calls } = stubWorkspace([CHAR_A]);
     renderApp(`/characters/${ID_A}`);
     await flush();
@@ -1134,7 +1210,19 @@ describe("015 step 009 — /characters/<id> renders the Notes section after the 
     const main = within(mainElement());
     const notes = await main.findByRole("region", { name: NOTES_REGION_NAME });
     expect(within(notes).getByRole("heading", { name: NOTES_REGION_NAME })).toBeInTheDocument();
-    expect(sessionsRegion().compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    // 018 D10: Notes → Setups → Configuration → Sessions → Start a session.
+    const ordered = [
+      notes,
+      main.getByRole("region", { name: "Setups" }),
+      main.getByRole("region", { name: "Configuration" }),
+      sessionsRegion(),
+      main.getByRole("region", { name: "Start a session" }),
+    ];
+    for (let index = 0; index + 1 < ordered.length; index += 1) {
+      expect(
+        ordered[index].compareDocumentPosition(ordered[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).not.toBe(0);
+    }
     const listings = calls.filter((call) => call.method === "GET" && call.path === MEMOS_PATH);
     expect(listings).toHaveLength(1);
     expect(listings[0].search).toBe(characterNotesSearch(ID_A));
@@ -1278,5 +1366,157 @@ describe("017 step 011 — /sessions/1 renders the session configuration bar", (
     expect(mainText()).toBe("");
     expect(calls.filter((call) => SESSION_CONFIGURATION_PATTERN.test(call.path))).toEqual([]);
     expect(calls.filter((call) => call.path === MODELS_PATH)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 018, step 009 — the character page inside the app (018 DoD-3, DoD-5, DoD-7, DoD-8).
+// Expected values come from 018's step file and context.md: D5 (the page composer posts once,
+// then pushes to the new session), D6 (the draft page creates on Name's focus loss and replaces
+// the location), D7 (save on focus loss), D10 (no wall) and the UI strings table. Push versus
+// replace is observed through the MemoryRouter's history (a Back probe), never a navigate spy.
+const PROBE_BACK_NAME = /^probe back$/i;
+const START_REGION_NAME = "Start a session";
+
+function BackProbe() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => void navigate(-1)}>
+      probe back
+    </button>
+  );
+}
+
+/** `App` over a given history, with the location probe and a Back probe beside it. */
+function renderAppWithHistory(initialEntries: string[], initialIndex: number) {
+  return render(
+    <AppProviders>
+      <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
+        <App user={USER} storage={null} />
+        <LocationProbe />
+        <BackProbe />
+      </MemoryRouter>
+    </AppProviders>,
+  );
+}
+
+const ID_ARIA = "7250000000000000021";
+const CHAR_ARIA: Character = {
+  id: ID_ARIA,
+  name: "Aria",
+  sheet: "# Aria",
+  archived_at: null,
+  // Older than `stubWorkspace`'s PATCH stamp (LATER_STAMP), as a real save answer is never
+  // older than the row it saved (008 DoD-8 / D7 "not older" rule).
+  created_at: "2026-04-01T09:00:00.000000+00:00",
+  updated_at: "2026-04-01T09:00:00.000000+00:00",
+};
+
+function startRegion(): HTMLElement {
+  return within(mainElement()).getByRole("region", { name: START_REGION_NAME });
+}
+
+describe("018 step 009 — the draft page creates on Name's focus loss and replaces the location (D6)", () => {
+  it("typing Aria and the persona # Aria, then blurring Name, sends one exact POST, lists Aria, lands on the served id, and Back skips /characters/new — DoD-3", async () => {
+    const user = newUser();
+    const { calls } = stubWorkspace([]);
+    renderAppWithHistory(["/", NEW_CHARACTER_ROUTE], 1);
+    await flush();
+    expect(within(mainElement()).queryByRole("button", { name: CREATE_NAME })).toBeNull();
+
+    // The persona first — its focus loss does nothing in a draft — then Name, then Name's
+    // focus loss, which creates with whatever persona the draft holds.
+    await user.type(screenPersonaField(), "# Aria");
+    await user.type(screenNameField(), "Aria");
+    await user.tab();
+    await flush();
+
+    const posts = calls.filter((call) => call.method === "POST" && call.path === COLLECTION_PATH);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toEqual({ name: "Aria", sheet: "# Aria" });
+    expect(queryTreeRow("Aria")).not.toBeNull();
+    expect(currentPath()).toBe(`/characters/${CREATED_ID}`);
+
+    await user.click(screen.getByRole("button", { name: PROBE_BACK_NAME }));
+    await flush();
+
+    expect(currentPath()).not.toBe(NEW_CHARACTER_ROUTE);
+    expect(currentPath()).toBe("/");
+  });
+});
+
+describe("018 step 009 — a renamed character reads the new name in the heading and the tree (D7, US-021.AC-1)", () => {
+  it("with no Save button, changing Name to Aria Vale and blurring sends exactly PATCH {name} and the heading and the tree row read Aria Vale — DoD-5", async () => {
+    const user = newUser();
+    const { calls } = stubWorkspace([CHAR_ARIA]);
+    renderApp(`/characters/${ID_ARIA}`);
+    await flush();
+
+    const main = within(mainElement());
+    expect(main.getByRole("heading", { name: "Aria" })).toBeInTheDocument();
+    expect(main.queryByRole("button", { name: SAVE_NAME })).toBeNull();
+
+    await user.clear(screenNameField());
+    await user.type(screenNameField(), "Aria Vale");
+    await user.tab();
+    await flush();
+
+    const patches = calls.filter(
+      (call) => call.method === "PATCH" && call.path === `${COLLECTION_PATH}/${ID_ARIA}`,
+    );
+    expect(patches.map((call) => call.body)).toEqual([{ name: "Aria Vale" }]);
+    expect(main.getByRole("heading", { name: "Aria Vale" })).toBeInTheDocument();
+    expect(treeRow("Aria Vale")).toBeInTheDocument();
+  });
+});
+
+describe("018 step 009 — the character page renders no note wall (D10, US-095.AC-1)", () => {
+  it("even with a stored pin, /characters/<id> has no Note wall, no Open notes, no Your notes / Session notes group and no /memo-chain request — DoD-7", async () => {
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp(`/characters/${ID_A}`, pinnedStorage());
+    await flush();
+    await within(mainElement()).findByRole("region", { name: NOTES_REGION_NAME });
+
+    expect(screen.queryAllByRole("complementary", { hidden: true })).toHaveLength(0);
+    expect(document.querySelector(`[aria-label="${WALL_NAME}"]`)).toBeNull();
+    expect(screen.queryByRole("button", { name: OPEN_NOTES_NAME, hidden: true })).toBeNull();
+    for (const name of [YOUR_NOTES_REGION, "Session notes"]) {
+      expect(screen.queryByRole("region", { name, hidden: true })).toBeNull();
+      expect(screen.queryByRole("heading", { name, hidden: true })).toBeNull();
+    }
+    expect(calls.filter((call) => call.path.endsWith("/memo-chain"))).toEqual([]);
+  });
+});
+
+describe("018 step 009 — the page composer starts a session with its opening message (D5, US-117)", () => {
+  it("the composer offers no Entry kind group and no Setup choice; Hello there + Send posts exactly {opening_message}, lands on /sessions/<served id> and the tree lists it under the character — DoD-8", async () => {
+    const user = newUser();
+    const { calls } = stubWorkspace([CHAR_A]);
+    renderApp(`/characters/${ID_A}`);
+    await flush();
+
+    const composerRegion = startRegion();
+    const scope = within(composerRegion);
+    expect(scope.queryByRole("radiogroup", { name: /entry kind/i })).toBeNull();
+    expect(scope.queryByRole("group", { name: /entry kind/i })).toBeNull();
+    expect(scope.queryByRole("combobox", { name: /^setup$/i })).toBeNull();
+    expect(scope.queryByRole("textbox", { name: /^setup$/i })).toBeNull();
+    expect(scope.queryByRole("listbox", { name: /^setup$/i })).toBeNull();
+
+    await user.type(scope.getByRole("textbox", { name: COMPOSER_NAME }), "Hello there");
+    await user.click(scope.getByRole("button", { name: "Send" }));
+    await flush();
+
+    const posts = calls.filter(
+      (call) => call.method === "POST" && call.path === characterSessionsPath(ID_A),
+    );
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toEqual({ opening_message: "Hello there" });
+    expect(currentPath()).toBe(`/sessions/${STARTED_SESSION_ID}`);
+    expect(
+      within(treeSessionsListFor(CHAR_A.name))
+        .queryAllByRole("link")
+        .map((link) => link.getAttribute("href") ?? ""),
+    ).toEqual([`/sessions/${STARTED_SESSION_ID}`]);
   });
 });

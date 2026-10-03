@@ -9,9 +9,18 @@ eight keys, never `user_id`), **D12** (`session_not_found` → 404 and `setup_ar
 
 `test_errors.py` is not this step's file, so the two error classes' own coverage lives here
 alongside the models they answer for, exactly as 009 and 010 placed theirs.
+
+Extended by feature 018, step 001 (`docs/plans/018.character-page/
+001.zone-insert-and-models.md`, DoD-5 / DoD-6; feature `context.md` **D3** and the Wire
+contract): `StartSessionRequest` gains an optional `opening_message`, and
+`StartedSessionResponse` is the session's eight keys plus `opening_message`. Three 011
+DoD-8 assertions that pinned the request's field set to exactly `setup_id` are widened to
+include `opening_message` (user-approved mechanical amendment); those tests and the new
+ones carry the suffix `__S018_001_DoD<n>`.
 """
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -20,7 +29,13 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.errors import DomainError, SessionNotFoundError, SetupArchivedError, register_exception_handlers
-from app.models.sessions import SessionListResponse, SessionResponse, StartSessionRequest
+from app.models.sessions import (
+    SessionListResponse,
+    SessionResponse,
+    StartedSessionResponse,
+    StartSessionRequest,
+)
+from app.models.stream import MessageResponse
 
 # context.md: the fixed-width timestamp form, passed through as text.
 CREATED_AT = "2026-09-29T12:00:00.000000+00:00"
@@ -286,12 +301,13 @@ def test_start_request_parses_an_empty_body_with_no_setup__S011_001_DoD8() -> No
     assert request.model_fields_set == set()
 
 
-def test_start_request_treats_an_explicit_null_setup_id_as_no_setup__S011_001_DoD8() -> None:
+def test_start_request_treats_an_explicit_null_setup_id_as_no_setup__S011_001_DoD8__S018_001_DoD5() -> None:
     """011/001 DoD-8 — `{"setup_id": null}` parses the same way as `{}`: no setup, no error,
-    and no sentinel value."""
+    and no sentinel value. Amended by 018/001 DoD-5: the dump now also carries the new
+    optional `opening_message` (None)."""
     request = StartSessionRequest.model_validate({"setup_id": None})
     assert request.setup_id is None
-    assert request.model_dump() == {"setup_id": None}
+    assert request.model_dump() == {"setup_id": None, "opening_message": None}
     assert request.model_dump() == StartSessionRequest.model_validate({}).model_dump()
 
 
@@ -311,9 +327,10 @@ def test_start_request_rejects_a_non_numeric_setup_id__S011_001_DoD8(value: str)
         StartSessionRequest.model_validate({"setup_id": value})
 
 
-def test_start_request_ignores_unknown_keys__S011_001_DoD8() -> None:
+def test_start_request_ignores_unknown_keys__S011_001_DoD8__S018_001_DoD5() -> None:
     """011/001 DoD-8 — D2: `character_id`, `user_id`, `last_used_at` and `title` cannot be set
-    through a body. They are ignored, not rejected, and none lands on the parsed model."""
+    through a body. They are ignored, not rejected, and none lands on the parsed model.
+    Amended by 018/001 DoD-5: the field set is now `setup_id` plus `opening_message`."""
     request = StartSessionRequest.model_validate(
         {
             "setup_id": SETUP_ID_TEXT,
@@ -325,16 +342,247 @@ def test_start_request_ignores_unknown_keys__S011_001_DoD8() -> None:
         }
     )
     assert request.setup_id == SETUP_ID_INT
-    assert set(request.model_dump()) == {"setup_id"}
+    assert set(request.model_dump()) == {"setup_id", "opening_message"}
     for absent in ("character_id", "user_id", "last_used_at", "title", "nonsense"):
         assert not hasattr(request, absent)
         assert absent not in StartSessionRequest.model_fields
 
 
-def test_start_request_ignores_unknown_keys_on_an_otherwise_empty_body__S011_001_DoD8() -> None:
+def test_start_request_ignores_unknown_keys_on_an_otherwise_empty_body__S011_001_DoD8__S018_001_DoD5() -> None:
     """011/001 DoD-8 — unknown keys alone still parse, still mean "no setup", and still leave
-    nothing on the model."""
+    nothing on the model. Amended by 018/001 DoD-5: the field set is now `setup_id` plus
+    `opening_message`."""
     request = StartSessionRequest.model_validate({"title": "t", "character_id": "9"})
     assert request.setup_id is None
-    assert set(request.model_dump()) == {"setup_id"}
+    assert set(request.model_dump()) == {"setup_id", "opening_message"}
     assert not hasattr(request, "title")
+
+
+# ============================================================= 018/001 DoD-5
+# `StartSessionRequest.opening_message`: optional `NonBlankText`. Absent and `null` both mean
+# "none"; a present value is non-blank and kept verbatim; `setup_id` keeps 011's rules and
+# unknown keys are still ignored (018 Wire contract).
+
+# 018 context.md "Test conventions" — ids are "7250000000000000101"-style strings.
+SEEDED_SETUP_ID_TEXT = "7250000000000000201"
+SEEDED_SETUP_ID_INT = 7250000000000000201
+
+
+def test_start_request_with_an_empty_body_has_no_opening_message__S018_001_DoD5() -> None:
+    """018/001 DoD-5 — `{}` gives no opening message."""
+    request = StartSessionRequest.model_validate({})
+    assert request.opening_message is None
+    assert request.setup_id is None
+
+
+def test_start_request_with_a_null_opening_message_has_none__S018_001_DoD5() -> None:
+    """018/001 DoD-5 — `{"opening_message": null}` gives no opening message, no error."""
+    request = StartSessionRequest.model_validate({"opening_message": None})
+    assert request.opening_message is None
+
+
+def test_start_request_with_the_field_omitted_has_no_opening_message__S018_001_DoD5() -> None:
+    """018/001 DoD-5 — a body that sets only `setup_id` (the field omitted) gives no opening
+    message, and the setup is kept as 011 parses it."""
+    request = StartSessionRequest.model_validate({"setup_id": SEEDED_SETUP_ID_TEXT})
+    assert request.opening_message is None
+    assert request.setup_id == SEEDED_SETUP_ID_INT
+
+
+def test_start_request_keeps_the_opening_message_verbatim__S018_001_DoD5() -> None:
+    """018/001 DoD-5 — `{"opening_message": "  Hello\\n"}` keeps the text verbatim, leading
+    spaces and trailing newline included."""
+    request = StartSessionRequest.model_validate({"opening_message": "  Hello\n"})
+    assert request.opening_message == "  Hello\n"
+
+
+@pytest.mark.parametrize("value", ["   ", ""], ids=["whitespace", "empty"])
+def test_start_request_rejects_a_blank_opening_message__S018_001_DoD5(value: str) -> None:
+    """018/001 DoD-5 — a present but blank (empty or whitespace-only) opening message fails
+    validation (which the route answers as 422)."""
+    with pytest.raises(ValidationError):
+        StartSessionRequest.model_validate({"opening_message": value})
+
+
+def test_start_request_keeps_both_setup_and_opening_message__S018_001_DoD5() -> None:
+    """018/001 DoD-5 — `{"setup_id": "7250000000000000201", "opening_message": "Hi"}` keeps
+    both: the setup id as the int, the message as given."""
+    request = StartSessionRequest.model_validate(
+        {"setup_id": SEEDED_SETUP_ID_TEXT, "opening_message": "Hi"}
+    )
+    assert request.setup_id == SEEDED_SETUP_ID_INT
+    assert isinstance(request.setup_id, int)
+    assert request.opening_message == "Hi"
+
+
+def test_start_request_with_an_opening_message_ignores_an_unknown_key__S018_001_DoD5() -> None:
+    """018/001 DoD-5 — an unknown key is ignored, not rejected, and never lands on the model."""
+    request = StartSessionRequest.model_validate(
+        {"opening_message": "Hi", "session_id": "7250000000000000101", "nonsense": True}
+    )
+    assert request.opening_message == "Hi"
+    assert request.setup_id is None
+    assert set(request.model_dump()) == {"setup_id", "opening_message"}
+    for absent in ("session_id", "nonsense"):
+        assert not hasattr(request, absent)
+        assert absent not in StartSessionRequest.model_fields
+
+
+# ============================================================= 018/001 DoD-6
+# `StartedSessionResponse`: exactly `SessionResponse`'s eight keys (same types, ids as
+# decimal strings) plus `opening_message` — 012's eight-key `Message` or null (D3).
+
+STARTED_SESSION_ID = 7250000000000000101
+STARTED_CHARACTER_ID = 7250000000000000102
+STARTED_SETUP_ID = 7250000000000000103
+OPENING_MESSAGE_ID = 7250000000000000104
+
+MESSAGE_WIRE_KEYS = {
+    "id",
+    "session_id",
+    "role",
+    "kind",
+    "text",
+    "settled_at",
+    "created_at",
+    "updated_at",
+}
+
+
+def _session_value(**overrides: Any) -> SimpleNamespace:
+    """A session value (attributes, not a dict), as the router hands the response; it also
+    carries the owner, which must never reach the wire."""
+    values: dict[str, Any] = {
+        "id": STARTED_SESSION_ID,
+        "user_id": 42,
+        "character_id": STARTED_CHARACTER_ID,
+        "setup_id": STARTED_SETUP_ID,
+        "setup_name": "Tavern",
+        "archived_at": None,
+        "last_used_at": LAST_USED_AT,
+        "created_at": CREATED_AT,
+        "updated_at": CREATED_AT,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _message_value() -> SimpleNamespace:
+    """The opening message value: a current-zone user row (kind and settled_at null)."""
+    return SimpleNamespace(
+        id=OPENING_MESSAGE_ID,
+        session_id=STARTED_SESSION_ID,
+        role="user",
+        kind=None,
+        text="  Hello\n",
+        settled_at=None,
+        created_at=CREATED_AT,
+        updated_at=CREATED_AT,
+    )
+
+
+EXPECTED_SESSION_WIRE: dict[str, Any] = {
+    "id": "7250000000000000101",
+    "character_id": "7250000000000000102",
+    "setup_id": "7250000000000000103",
+    "setup_name": "Tavern",
+    "archived_at": None,
+    "last_used_at": LAST_USED_AT,
+    "created_at": CREATED_AT,
+    "updated_at": CREATED_AT,
+}
+
+EXPECTED_MESSAGE_WIRE: dict[str, Any] = {
+    "id": "7250000000000000104",
+    "session_id": "7250000000000000101",
+    "role": "user",
+    "kind": None,
+    "text": "  Hello\n",
+    "settled_at": None,
+    "created_at": CREATED_AT,
+    "updated_at": CREATED_AT,
+}
+
+
+def _started_from_attributes(session: SimpleNamespace, message: Any) -> StartedSessionResponse:
+    source = SimpleNamespace(**vars(session), opening_message=message)
+    return StartedSessionResponse.model_validate(source, from_attributes=True)
+
+
+def test_started_response_without_a_message_is_eight_keys_plus_null__S018_001_DoD6() -> None:
+    """018/001 DoD-6 — built from a session value and no message, it serialises to exactly
+    the eight session keys plus `opening_message: null`, ids as decimal strings."""
+    payload = _wire(_started_from_attributes(_session_value(), None))
+
+    assert payload == {**EXPECTED_SESSION_WIRE, "opening_message": None}
+    assert set(payload) == WIRE_KEYS | {"opening_message"}
+    assert "user_id" not in payload
+    for key in ("id", "character_id", "setup_id"):
+        assert isinstance(payload[key], str)
+
+
+def test_started_response_built_by_keyword_without_a_message__S018_001_DoD6() -> None:
+    """018/001 DoD-6 — the same answer when built from the session's eight fields and
+    `opening_message=None` directly."""
+    fields = {key: value for key, value in vars(_session_value()).items() if key != "user_id"}
+    payload = _wire(StartedSessionResponse(**fields, opening_message=None))
+
+    assert payload == {**EXPECTED_SESSION_WIRE, "opening_message": None}
+
+
+def test_started_response_with_a_null_setup_keeps_the_nulls__S018_001_DoD6() -> None:
+    """018/001 DoD-6 — the eight session keys keep `SessionResponse`'s types: a session with
+    no setup serialises `setup_id` and `setup_name` as null."""
+    payload = _wire(_started_from_attributes(_session_value(setup_id=None, setup_name=None), None))
+
+    assert payload == {
+        **EXPECTED_SESSION_WIRE,
+        "setup_id": None,
+        "setup_name": None,
+        "opening_message": None,
+    }
+
+
+def test_started_response_with_a_message_serialises_the_eight_key_message__S018_001_DoD6() -> None:
+    """018/001 DoD-6 — built with a message value, `opening_message` is 012's eight-key
+    message object with string ids; the session keys are unchanged."""
+    payload = _wire(_started_from_attributes(_session_value(), _message_value()))
+
+    assert set(payload) == WIRE_KEYS | {"opening_message"}
+    assert {key: payload[key] for key in WIRE_KEYS} == EXPECTED_SESSION_WIRE
+    message = payload["opening_message"]
+    assert message == EXPECTED_MESSAGE_WIRE
+    assert set(message) == MESSAGE_WIRE_KEYS
+    assert isinstance(message["id"], str)
+    assert isinstance(message["session_id"], str)
+
+
+def test_started_response_accepts_a_message_response__S018_001_DoD6() -> None:
+    """018/001 DoD-6 — `opening_message` is a 012 `MessageResponse`: one given directly
+    serialises to the same eight-key object."""
+    fields = {key: value for key, value in vars(_session_value()).items() if key != "user_id"}
+    message = MessageResponse(**vars(_message_value()))
+    payload = _wire(StartedSessionResponse(**fields, opening_message=message))
+
+    assert payload == {**EXPECTED_SESSION_WIRE, "opening_message": EXPECTED_MESSAGE_WIRE}
+
+
+def test_started_response_session_keys_serialise_as_session_response__S018_001_DoD6() -> None:
+    """018/001 DoD-6 — its eight session keys serialise identically to `SessionResponse`
+    built from the same session value."""
+    session = _session_value()
+    started = _wire(_started_from_attributes(session, None))
+    plain = _wire(SessionResponse.model_validate(session, from_attributes=True))
+
+    assert {key: started[key] for key in WIRE_KEYS} == plain
+
+
+def test_session_response_still_serialises_exactly_eight_keys__S018_001_DoD6() -> None:
+    """018/001 DoD-6 — `SessionResponse` itself is unchanged: exactly its eight keys, no
+    `opening_message`."""
+    payload = _wire(SessionResponse.model_validate(_session_value(), from_attributes=True))
+
+    assert payload == EXPECTED_SESSION_WIRE
+    assert set(payload) == WIRE_KEYS
+    assert "opening_message" not in payload
+    assert "opening_message" not in SessionResponse.model_fields
