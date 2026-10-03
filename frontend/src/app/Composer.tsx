@@ -6,7 +6,7 @@
 import type * as React from "react";
 import { observer } from "mobx-react-lite";
 import { Button, Text } from "@mantine/core";
-import { IconX } from "@tabler/icons-react";
+import { IconPlayerStop, IconX } from "@tabler/icons-react";
 
 import { IconButton } from "../shared/IconButton";
 import { ComposerCore } from "./ComposerCore";
@@ -17,11 +17,13 @@ import {
   discardZone,
   effectiveKind,
   filePastedPartner,
+  isStreaming,
   sendComposer,
   setDraft,
   settleComposer,
   settlePreviewOf,
   showsDiscard,
+  stopCompose,
 } from "./streamState";
 import type { StreamState } from "./streamState";
 
@@ -53,8 +55,22 @@ export const Composer = observer(function Composer(
   const { state, signal, sendBlockedReason = null } = props;
   const preview = settlePreviewOf(state);
   // 017 D17: on *my turn* a non-null reason disables Send and is shown; Settle is never gated.
+  const streaming = isStreaming(state);
+  // 019 D13: while streaming, Stop holds Send's slot; 017's reason gates Send only, never Stop.
   const blockedReason =
-    sendBlockedReason !== null && effectiveKind(state) === "turn" ? sendBlockedReason : null;
+    !streaming && sendBlockedReason !== null && effectiveKind(state) === "turn"
+      ? sendBlockedReason
+      : null;
+  const sendSlot = streaming ? (
+    <IconButton
+      icon={IconPlayerStop}
+      label="Stop"
+      sizeVariant="main"
+      onClick={() => {
+        stopCompose(state);
+      }}
+    />
+  ) : undefined;
 
   function handlePaste(text: string, event: React.ClipboardEvent<HTMLTextAreaElement>): void {
     // The position is read at paste time (D7); *my turn* pastes behave normally.
@@ -76,6 +92,7 @@ export const Composer = observer(function Composer(
         void sendComposer(state, signal);
       }}
       sendBlockedReason={blockedReason}
+      sendSlot={sendSlot}
       onPaste={handlePaste}
       underArea={
         preview !== null ? (

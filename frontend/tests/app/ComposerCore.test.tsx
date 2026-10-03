@@ -14,6 +14,12 @@
 //   - source guard: Composer.tsx renders ComposerCore with no Textarea of its own, and
 //     ComposerCore.tsx is the only src/app module importing notifyWarning.
 // `fireEvent.paste(...)` returns false iff a handler prevented the default.
+//
+// Amended by feature 019, step 004 (user-approved deviation, 019 status.md "## Ultra phase"):
+// `ComposerCoreProps` gained an optional `sendSlot`. Every 018 case above renders without it and
+// is unchanged. The slot cases are in the block after DoD-4, under a describe naming 019 step 004,
+// so their "— DoD-N" tags are 019 step 004's: a given slot renders in Send's place with "Send"
+// absent and the send-blocked reason still shown; an omitted slot keeps the labelled Send.
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readdirSync, readFileSync } from "node:fs";
@@ -342,6 +348,96 @@ describe("ComposerCore — slots, and nothing of the stream's own (D4, US-117.AC
     expect(screen.queryByText("Entry kind")).toBeNull();
     expect(screen.queryByRole("radio", { name: "My turn" })).toBeNull();
     expect(screen.queryByRole("radio", { name: "Partner" })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 019, step 004 — `sendSlot` replaces Send (Stop in Send's slot). Every "— DoD-N" here is
+// 019 step 004's: DoD-7 (slot present, Send absent) and DoD-9 (no slot, Send as before).
+describe("019 step 004 — ComposerCore's sendSlot (workspace-shell 'The stop control')", () => {
+  it('a given sendSlot renders in place of "Send": the slot is present and no "Send" button exists — DoD-7', () => {
+    renderCore(baseProps({ draft: "Hello", sendSlot: <button type="button">Slot Stop</button> }));
+
+    expect(screen.getByRole("button", { name: "Slot Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(buttonNames()).toEqual(["Slot Stop"]);
+  });
+
+  it("the slot sits where Send sat: after the text area and the under-area slot, before the beside-Send slot — DoD-7", () => {
+    renderCore(
+      baseProps({
+        draft: "Hello",
+        underArea: <p>Under the text area</p>,
+        besideSend: <button type="button">Beside Send</button>,
+        sendSlot: <button type="button">Slot Stop</button>,
+      }),
+    );
+
+    const textbox = composer();
+    const under = screen.getByText("Under the text area");
+    const slot = screen.getByRole("button", { name: "Slot Stop" });
+    const beside = screen.getByRole("button", { name: "Beside Send" });
+
+    expect(precedes(textbox, under)).toBe(true);
+    expect(precedes(under, slot)).toBe(true);
+    expect(precedes(slot, beside)).toBe(true);
+    expect(buttonNames()).toEqual(["Slot Stop", "Beside Send"]);
+  });
+
+  it("with a sendSlot, Send stays absent whatever sendEnabled says, and pressing the slot does not call onSend — DoD-7", async () => {
+    const onSend = vi.fn<() => void>();
+    const onSlot = vi.fn<() => void>();
+    const user = newUser();
+    renderCore(
+      baseProps({
+        draft: "Hello",
+        onSend,
+        sendEnabled: false,
+        sendSlot: (
+          <button type="button" onClick={onSlot}>
+            Slot Stop
+          </button>
+        ),
+      }),
+    );
+
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Slot Stop" }));
+
+    expect(onSlot).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("with a sendSlot and a send-blocked reason, the reason text is still shown and Send is still absent — DoD-7", () => {
+    renderCore(
+      baseProps({
+        draft: "Hello",
+        sendBlockedReason: NO_MODEL_REASON,
+        sendSlot: <button type="button">Slot Stop</button>,
+      }),
+    );
+
+    expect(screen.getByText(NO_MODEL_REASON)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Slot Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+  });
+
+  it('with sendSlot omitted, the labelled "Send" renders as in 018 and follows sendEnabled — DoD-9', async () => {
+    const onSend = vi.fn<() => void>();
+    const user = newUser();
+    renderCore(baseProps({ draft: "Hello", onSend, sendEnabled: true }));
+
+    expect(sendButton()).toBeEnabled();
+    expect(buttonNames()).toEqual(["Send"]);
+    await user.click(sendButton());
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('with sendSlot explicitly undefined, "Send" renders as in 018: disabled when Send is not enabled — DoD-9', () => {
+    renderCore(baseProps({ draft: "Hello", sendEnabled: false, sendSlot: undefined }));
+
+    expect(sendButton()).toBeDisabled();
+    expect(buttonNames()).toEqual(["Send"]);
   });
 });
 

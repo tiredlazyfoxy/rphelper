@@ -4,13 +4,16 @@
 // effect is a free function below, each taking the state first. `003` adds the mutations.
 import { makeAutoObservable, runInAction } from "mobx";
 
+import { ApiError } from "../shared/apiError";
 import { notifyFailure } from "../shared/notifyFailure";
+import type { SseOutcome, SseProgressFrame } from "../shared/sse";
 
 import type { SettlePreview } from "./parens";
 import { previewSettle } from "./parens";
 import type { Message } from "./streamApi";
 import {
   appendZoneMessage,
+  composeZone,
   editMessage,
   fetchEntries,
   fetchZone,
@@ -39,12 +42,22 @@ export class StreamState {
   kindOverride: StreamKind | null = null;
   /** Whether a send / file / settle / re-open is in flight (written by `003`). */
   busy = false;
+  /** 019 D11: the in-flight assistant text; `null` means not streaming. */
+  streamingText: string | null = null;
+  /** 019 D12: the in-flight compose's controller and wound-down promise. Not observable. */
+  composeHandle: ComposeHandle | null = null;
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
-    makeAutoObservable(this, {}, { autoBind: true });
+    makeAutoObservable(this, { composeHandle: false }, { autoBind: true });
   }
 }
+
+/** 019 D12: the in-flight compose's own controller and the promise that settles at wind-down. */
+export type ComposeHandle = {
+  controller: AbortController;
+  woundDown: Promise<void>;
+};
 
 function isAbortRejection(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
@@ -82,9 +95,19 @@ export function effectiveKind(state: StreamState): StreamKind {
   return state.kindOverride ?? defaultKind(state.entries);
 }
 
-/** Pure: true when the draft is not blank and nothing is in flight. */
+/** 019 D12: pure: true iff the streaming text is not null. */
+export function isStreaming(state: StreamState): boolean {
+  return state.streamingText !== null;
+}
+
+/** 019 D12, UC-085: action: aborts the compose handle's controller, if any; writes nothing. */
+export function stopCompose(state: StreamState): void {
+  state.composeHandle?.controller.abort();
+}
+
+/** Pure: true when the draft is not blank, nothing is in flight and not streaming (019 D13). */
 export function canSend(state: StreamState): boolean {
-  return !isBlank(state.draft) && !state.busy;
+  return !isBlank(state.draft) && !state.busy && !isStreaming(state);
 }
 
 /** Pure: true on *my turn*, not busy, with a zone row or a non-blank draft (US-135). */
@@ -95,9 +118,9 @@ export function canSettle(state: StreamState): boolean {
   return state.zone.length > 0 || !isBlank(state.draft);
 }
 
-/** Pure: true when the zone is empty and the draft is blank (D3). */
+/** Pure: true when the zone is empty, the draft is blank and not streaming (D3, 019 D13). */
 export function showsDiscard(state: StreamState): boolean {
-  return state.zone.length === 0 && isBlank(state.draft);
+  return state.zone.length === 0 && isBlank(state.draft) && !isStreaming(state);
 }
 
 /** Pure: true when the zone is empty and the last record entry exists and is not a partner (D4). */
@@ -338,6 +361,16 @@ export async function settleComposer(state: StreamState, signal?: AbortSignal): 
   if (signal?.aborted) {
     return;
   }
+  // 019 D16: a compose in flight is stopped and wound down (its re-read included) first.
+  const handle = state.composeHandle;
+  if (handle !== null) {
+    setBusy(state, true);
+    stopCompose(state);
+    await handle.woundDown;
+    if (signal?.aborted) {
+      return;
+    }
+  }
   const sessionId = state.sessionId;
   const text = state.draft;
   setBusy(state, true);
@@ -379,6 +412,116 @@ export async function settleComposer(state: StreamState, signal?: AbortSignal): 
     return;
   }
   setBusy(state, false);
+}
+
+// ---- 019 005: the compose effect. Never optimistic; never rejects; never touches `busy`. ----
+
+/** Effect: streams a compose of the draft into the zone; outcomes per 019 D14, D15 (UC-085). */
+export async function composeMessage(state: StreamState, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted || isStreaming(state) || state.composeHandle !== null) {
+    return;
+  }
+  const sent = state.draft;
+  if (isBlank(sent)) {
+    return;
+  }
+  const sessionId = state.sessionId;
+
+  // The compose's own controller, linked so that a mount abort (unmount) aborts it (D12).
+  const controller = new AbortController();
+  let resolveWoundDown: () => void = () => undefined;
+  const woundDown = new Promise<void>((resolve) => {
+    resolveWoundDown = resolve;
+  });
+  const onMountAbort = (): void => {
+    controller.abort();
+  };
+  signal?.addEventListener("abort", onMountAbort);
+
+  runInAction(() => {
+    state.streamingText = "";
+    state.composeHandle = { controller, woundDown };
+  });
+
+  try {
+    let acceptedReread: Promise<boolean> | null = null;
+
+    const onFrame = (frame: SseProgressFrame): void => {
+      if (signal?.aborted) {
+        return;
+      }
+      if (frame.event === "accepted") {
+        // D15: the sent text is now a row; adopt its id through a zone re-read.
+        clearDraftIfUnchanged(state, sent);
+        acceptedReread = rereadZone(state, signal);
+      } else if (frame.event === "token") {
+        runInAction(() => {
+          state.streamingText = (state.streamingText ?? "") + frame.text;
+        });
+      }
+      // Tool frames are ignored in 019 (D18).
+    };
+
+    let outcome: SseOutcome;
+    try {
+      outcome = await composeZone(sessionId, sent, onFrame, controller.signal);
+    } catch (error) {
+      // The consumer never rejects; this guards the "never rejects" contract regardless.
+      outcome = controller.signal.aborted
+        ? { kind: "stopped" }
+        : {
+            kind: "error",
+            error: error instanceof ApiError
+              ? error
+              : new ApiError("client_transport_failed", "The server could not be reached.", 0),
+          };
+    }
+    if (signal?.aborted) {
+      return;
+    }
+
+    // D15: the terminal re-read never races ahead of the accepted-triggered one.
+    if (acceptedReread !== null) {
+      await acceptedReread;
+    }
+    if (signal?.aborted) {
+      return;
+    }
+
+    // D14: done and a user stop notify nothing.
+    if (outcome.kind === "error") {
+      notifyFailure(outcome.error);
+    } else if (outcome.kind === "unexpected_end") {
+      notifyFailure(new ApiError("llm_unreachable", "The reply ended unexpectedly.", 0, {}));
+    }
+
+    // D14: the server's rows replace the in-flight text in one action.
+    try {
+      const zone = await fetchZone(sessionId, signal);
+      if (signal?.aborted) {
+        return;
+      }
+      runInAction(() => {
+        state.zone = zone;
+        state.streamingText = null;
+        state.composeHandle = null;
+      });
+    } catch (error) {
+      if (signal?.aborted) {
+        return;
+      }
+      if (!isAbortRejection(error)) {
+        notifyFailure(error);
+      }
+      runInAction(() => {
+        state.streamingText = null;
+        state.composeHandle = null;
+      });
+    }
+  } finally {
+    signal?.removeEventListener("abort", onMountAbort);
+    resolveWoundDown();
+  }
 }
 
 /** Effect: re-opens the last entry, then re-reads both lists (D4). */

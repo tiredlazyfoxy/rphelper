@@ -54,6 +54,35 @@ function malformed(status: number): ApiError {
 }
 
 /**
+ * The non-2xx decode (019 D10), shared by `apiRequest` and `shared/sse.ts`. From a non-2xx
+ * `Response`: navigates to `/login` first when the status is 401, then resolves to the
+ * envelope's `ApiError` (real status) or the `client_malformed_error` fallback. Never rejects.
+ */
+export async function decodeErrorResponse(response: Response): Promise<ApiError> {
+  if (response.status === 401) {
+    documentNavigation.assign(LOGIN_PATH);
+  }
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    text = "";
+  }
+  return decodeEnvelope(text, response.status) ?? malformed(response.status);
+}
+
+/**
+ * The rejection mapping (019 D10). Returns `error` unchanged when `signal` is aborted;
+ * otherwise `ApiError(client_transport_failed, "The server could not be reached.", 0)`.
+ */
+export function mapFetchRejection(error: unknown, signal?: AbortSignal): unknown {
+  if (signal?.aborted) {
+    return error;
+  }
+  return new ApiError(CLIENT_TRANSPORT_FAILED, "The server could not be reached.", 0);
+}
+
+/**
  * The single entry point. Resolves to the parsed JSON body typed as `T` (caller-asserted,
  * not validated); resolves to `undefined` for a 204 or an empty 2xx body. A body is sent
  * iff `body !== undefined`.
@@ -81,10 +110,7 @@ export async function apiRequest<T = unknown>(
   try {
     response = await fetch(path, init);
   } catch (error) {
-    if (signal?.aborted) {
-      throw error;
-    }
-    throw new ApiError(CLIENT_TRANSPORT_FAILED, "The server could not be reached.", 0);
+    throw mapFetchRejection(error, signal);
   }
 
   let text: string;
@@ -115,11 +141,11 @@ export async function apiRequest<T = unknown>(
     }
   }
 
-  const error = decodeEnvelope(text, response.status) ?? malformed(response.status);
-  if (response.status === 401) {
-    documentNavigation.assign(LOGIN_PATH);
-  }
-  throw error;
+  // The body is already read here (an aborted read above rethrows raw, before any 401
+  // navigation), so the shared decode gets an equivalent, already-buffered response.
+  throw await decodeErrorResponse(
+    new Response(text.length === 0 ? null : text, { status: response.status }),
+  );
 }
 
 export async function apiGet<T = unknown>(path: string, signal?: AbortSignal): Promise<T> {

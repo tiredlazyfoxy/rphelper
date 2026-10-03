@@ -69,6 +69,46 @@ def append_message(
     return message
 
 
+def append_assistant_message(
+    connection: Connection,
+    generator: SnowflakeGenerator,
+    user_id: int,
+    session_id: int,
+    text: str,
+) -> StreamMessage:
+    """Insert one assistant zone message (`kind` NULL) and bump the session — 019 D8.
+
+    The one write of a `role='assistant'` current-zone row; no blank-text check.
+    """
+    with connection.begin():
+        _require_session(connection, user_id, session_id)
+        new_id = generator.next_id()
+        now = _now_text()
+        connection.execute(
+            messages.insert().values(
+                id=new_id,
+                user_id=user_id,
+                session_id=session_id,
+                role="assistant",
+                text=text,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        _bump_session(connection, user_id, session_id, now)
+        message = StreamMessage(
+            id=new_id,
+            session_id=session_id,
+            role="assistant",
+            kind=None,
+            text=text,
+            settled_at=None,
+            created_at=now,
+            updated_at=now,
+        )
+    return message
+
+
 def insert_zone_message(
     connection: Connection,
     generator: SnowflakeGenerator,

@@ -3,6 +3,8 @@
 // Ids are decimal strings and are never parsed, coerced or compared numerically. Text is sent
 // verbatim. Failures are the shared client's `ApiError`s, rethrown unchanged.
 import { apiGet, apiPatch, apiPost } from "../shared/api";
+import { postSse } from "../shared/sse";
+import type { SseOutcome, SseProgressFrame } from "../shared/sse";
 
 /** A message's role, as the wire carries it. */
 export type MessageRole = "user" | "assistant" | "tool";
@@ -91,6 +93,19 @@ export async function reopenLastEntry(
   signal?: AbortSignal,
 ): Promise<ReopenResult> {
   return apiPost<ReopenResult>(sessionPath(sessionId, "/reopen"), undefined, signal);
+}
+
+/**
+ * 019 004: `POST /api/sessions/<sessionId>/zone/compose` with `{ text }` over `003`'s SSE
+ * consumer; resolves to the consumer's outcome unchanged. The signal is required (D12).
+ */
+export async function composeZone(
+  sessionId: string,
+  text: string,
+  onFrame: (frame: SseProgressFrame) => void,
+  signal: AbortSignal,
+): Promise<SseOutcome> {
+  return postSse(sessionPath(sessionId, "/zone/compose"), { text }, onFrame, signal);
 }
 
 /** `PATCH /api/messages/<messageId>` with `{ text }`. */

@@ -30,6 +30,12 @@ export type ComposerCoreProps = {
   onPaste?: (text: string, event: React.ClipboardEvent<HTMLTextAreaElement>) => void;
   /** Rendered under the text area. */
   underArea?: React.ReactNode;
+  /**
+   * 019 004: when not undefined, rendered in place of the "Send" button (which is then absent,
+   * so `sendEnabled` and `onSend` are not consulted). The send-blocked reason text still
+   * follows `sendBlockedReason`. Defaults to undefined: "Send" renders as before.
+   */
+  sendSlot?: React.ReactNode;
   /** Rendered in the button row, after "Send". */
   besideSend?: React.ReactNode;
 };
@@ -44,6 +50,7 @@ export function ComposerCore(props: ComposerCoreProps): React.JSX.Element {
     sendBlockedReason = null,
     onPaste,
     underArea,
+    sendSlot,
     besideSend,
   } = props;
 
@@ -77,15 +84,19 @@ export function ComposerCore(props: ComposerCoreProps): React.JSX.Element {
               {sendBlockedReason}
             </Text>
           ) : null}
-          <Button
-            variant="default"
-            disabled={!sendEnabled || sendBlockedReason !== null}
-            onClick={() => {
-              onSend();
-            }}
-          >
-            Send
-          </Button>
+          {sendSlot !== undefined ? (
+            sendSlot
+          ) : (
+            <Button
+              variant="default"
+              disabled={!sendEnabled || sendBlockedReason !== null}
+              onClick={() => {
+                onSend();
+              }}
+            >
+              Send
+            </Button>
+          )}
           {besideSend}
         </Group>
       </Stack>
