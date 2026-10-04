@@ -425,6 +425,10 @@ current_zone = select(messages).where(
     messages.c.settled_at.is_(None),
 )
 
+#: The buried rows (feature `022` D2): every `messages` column of every row whose
+#: `related_to` is set. No owner or session filter and no ordering — callers narrow it.
+buried_messages = select(messages).where(messages.c.related_to.is_not(None))
+
 #: A row's state without its content (D7): only `id`, `user_id`, `session_id`, `related_to`
 #: and `settled_at` — never `text` or `kind`. No filter and no ordering.
 message_states = select(

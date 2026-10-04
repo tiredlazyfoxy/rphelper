@@ -12,7 +12,13 @@ export type MessageRole = "user" | "assistant" | "tool";
 /** A stream entry's kind, as the wire carries it (zone rows carry `null`). */
 export type MessageKind = "partner" | "turn" | "decision";
 
-/** One message, exactly as the stream routes send it. No renaming layer. */
+/** A tool row's outcome, as the wire carries it (022 D3). */
+export type ToolStatus = "ok" | "failed";
+
+/**
+ * One message, exactly as the stream routes send it. No renaming layer. The three tool fields
+ * are optional (022 D15): absent means the same as null; all three are null on a non-tool row.
+ */
 export type Message = {
   id: string;
   session_id: string;
@@ -22,6 +28,9 @@ export type Message = {
   settled_at: string | null;
   created_at: string;
   updated_at: string;
+  tool_name?: string | null;
+  tool_status?: ToolStatus | null;
+  tool_args?: Record<string, unknown> | null;
 };
 
 /** `POST /api/sessions/<id>/settle`'s body: ids only (012 D11). */
@@ -44,6 +53,11 @@ type EntriesResponse = {
 
 /** `GET …/zone`'s body: `{ messages: [...] }`. */
 type ZoneResponse = {
+  messages: Message[];
+};
+
+/** `GET /api/messages/<id>/discussion`'s body: `{ messages: [...] }` (022 D1). */
+type DiscussionResponse = {
   messages: Message[];
 };
 
@@ -108,6 +122,18 @@ export async function composeZone(
 ): Promise<SseOutcome> {
   const body = text === undefined ? {} : { text };
   return postSse(sessionPath(sessionId, "/zone/compose"), body, onFrame, signal);
+}
+
+/**
+ * 022 D1: `GET /api/messages/<entryId>/discussion` — the payload's `messages`, unwrapped, in
+ * the served order (never re-sorted). The shared client's `ApiError` is rethrown unchanged.
+ */
+export async function fetchDiscussion(entryId: string, signal?: AbortSignal): Promise<Message[]> {
+  const body = await apiGet<DiscussionResponse | undefined>(
+    `/api/messages/${encodeURIComponent(entryId)}/discussion`,
+    signal,
+  );
+  return body?.messages ?? [];
 }
 
 /** `PATCH /api/messages/<messageId>` with `{ text }`. */

@@ -46,6 +46,8 @@ export class StreamState {
   streamingText: string | null = null;
   /** 019 D12: the in-flight compose's controller and wound-down promise. Not observable. */
   composeHandle: ComposeHandle | null = null;
+  /** 022 D7: the in-flight compose's tool calls, in arrival order; emptied with the text. */
+  liveTools: LiveToolCall[] = [];
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
@@ -59,6 +61,18 @@ export type ComposeHandle = {
   woundDown: Promise<void>;
 };
 
+/** 022 D7: a live tool call's status. */
+export type LiveToolStatus = "running" | "ok" | "failed";
+
+/** 022 D7: one live tool call, fed by the compose run's `tool_*` frames. */
+export type LiveToolCall = {
+  callId: string;
+  tool: string;
+  args: Record<string, unknown>;
+  status: LiveToolStatus;
+  summary: string | null;
+};
+
 function isAbortRejection(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -69,6 +83,11 @@ function sameIdSequence(a: readonly Message[], b: readonly Message[]): boolean {
     return false;
   }
   return a.every((message, index) => message.id === b[index]?.id);
+}
+
+/** 022 D9: pure: true when the row is not a tool row. */
+function isNonToolRow(message: Message): boolean {
+  return message.role !== "tool";
 }
 
 /** Pure: true when the text is empty or whitespace only (D16). */
@@ -115,12 +134,17 @@ export function canSettle(state: StreamState): boolean {
   if (effectiveKind(state) !== "turn" || state.busy) {
     return false;
   }
-  return state.zone.length > 0 || !isBlank(state.draft);
+  return state.zone.some(isNonToolRow) || !isBlank(state.draft);
 }
 
 /** Pure: true when the zone is empty, the draft is blank and not streaming (D3, 019 D13). */
 export function showsDiscard(state: StreamState): boolean {
   return state.zone.length === 0 && isBlank(state.draft) && !isStreaming(state);
+}
+
+/** 022 D8: pure: true iff not streaming, not busy, and the zone holds a non-tool row. */
+export function showsRegenerate(state: StreamState): boolean {
+  return !isStreaming(state) && !state.busy && state.zone.some(isNonToolRow);
 }
 
 /** Pure: true when the zone is empty and the last record entry exists and is not a partner (D4). */
@@ -137,8 +161,13 @@ export function settleTargetText(state: StreamState): string | null {
   if (!isBlank(state.draft)) {
     return state.draft;
   }
-  const last = state.zone[state.zone.length - 1];
-  return last === undefined ? null : last.text;
+  for (let index = state.zone.length - 1; index >= 0; index -= 1) {
+    const row = state.zone[index];
+    if (row !== undefined && isNonToolRow(row)) {
+      return row.text;
+    }
+  }
+  return null;
 }
 
 /** Pure: the settle preview of the target on *my turn*; null otherwise or with no target. */
@@ -426,6 +455,52 @@ export async function composeMessage(state: StreamState, signal?: AbortSignal): 
   if (isBlank(sent)) {
     return;
   }
+  await runCompose(state, sent, signal);
+}
+
+/** 022 D7: action: applies one tool frame to the live tool list (unknown call ids ignored). */
+function applyToolFrame(state: StreamState, frame: SseProgressFrame): void {
+  runInAction(() => {
+    if (frame.event === "tool_start") {
+      state.liveTools.push({
+        callId: frame.call_id,
+        tool: frame.tool,
+        args: frame.args,
+        status: "running",
+        summary: null,
+      });
+      return;
+    }
+    if (frame.event !== "tool_result" && frame.event !== "tool_fail") {
+      return;
+    }
+    const entry = state.liveTools.find((call) => call.callId === frame.call_id);
+    if (entry === undefined) {
+      return;
+    }
+    if (frame.event === "tool_result") {
+      entry.status = "ok";
+      entry.summary = frame.summary;
+    } else {
+      entry.status = "failed";
+      entry.summary = TOOL_FAILED_SUMMARY;
+    }
+  });
+}
+
+/** 022 D7: the live failed-tool summary, 021's failed-row literal. */
+const TOOL_FAILED_SUMMARY = "The tool failed.";
+
+/**
+ * The compose run shared by `composeMessage` (with the sent text) and `regenerate` (textless,
+ * `sent` undefined): 019 D11–D16 plus 022 D7's live tool list. Never rejects; never touches
+ * `busy`; a textless run never reads or writes the draft.
+ */
+async function runCompose(
+  state: StreamState,
+  sent: string | undefined,
+  signal?: AbortSignal,
+): Promise<void> {
   const sessionId = state.sessionId;
 
   // The compose's own controller, linked so that a mount abort (unmount) aborts it (D12).
@@ -442,6 +517,7 @@ export async function composeMessage(state: StreamState, signal?: AbortSignal): 
   runInAction(() => {
     state.streamingText = "";
     state.composeHandle = { controller, woundDown };
+    state.liveTools = [];
   });
 
   try {
@@ -453,14 +529,19 @@ export async function composeMessage(state: StreamState, signal?: AbortSignal): 
       }
       if (frame.event === "accepted") {
         // D15: the sent text is now a row; adopt its id through a zone re-read.
-        clearDraftIfUnchanged(state, sent);
+        // A textless run (022 D8) never touches the draft; it only re-reads.
+        if (sent !== undefined) {
+          clearDraftIfUnchanged(state, sent);
+        }
         acceptedReread = rereadZone(state, signal);
       } else if (frame.event === "token") {
         runInAction(() => {
           state.streamingText = (state.streamingText ?? "") + frame.text;
         });
+      } else {
+        // 022 D7 (supersedes 019 D18): tool frames feed the live tool list, never `zone`.
+        applyToolFrame(state, frame);
       }
-      // Tool frames are ignored in 019 (D18).
     };
 
     let outcome: SseOutcome;
@@ -506,6 +587,7 @@ export async function composeMessage(state: StreamState, signal?: AbortSignal): 
         state.zone = zone;
         state.streamingText = null;
         state.composeHandle = null;
+        state.liveTools = [];
       });
     } catch (error) {
       if (signal?.aborted) {
@@ -517,12 +599,24 @@ export async function composeMessage(state: StreamState, signal?: AbortSignal): 
       runInAction(() => {
         state.streamingText = null;
         state.composeHandle = null;
+        state.liveTools = [];
       });
     }
   } finally {
     signal?.removeEventListener("abort", onMountAbort);
     resolveWoundDown();
   }
+}
+
+/**
+ * 022 D8: effect: a textless compose (body `{}`) through `composeMessage`'s run machinery;
+ * no-op unless `showsRegenerate`; never reads or writes the draft; never rejects.
+ */
+export async function regenerate(state: StreamState, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted || !showsRegenerate(state) || state.composeHandle !== null) {
+    return;
+  }
+  await runCompose(state, undefined, signal);
 }
 
 /** Effect: re-opens the last entry, then re-reads both lists (D4). */

@@ -1802,7 +1802,8 @@ FORBIDDEN_MESSAGES_COLUMNS = ("position", "discussion_id", "language", "status")
 # D7: `message_states` can classify a row's state but carries no content.
 MESSAGE_STATES_COLUMNS = {"id", "user_id", "session_id", "related_to", "settled_at"}
 
-SELECTABLE_NAMES = ("settled_entries", "current_zone", "message_states")
+# 022/002 DoD-1 (D2): `buried_messages` is the fourth named selectable.
+SELECTABLE_NAMES = ("settled_entries", "current_zone", "message_states", "buried_messages")
 
 SETTLED_AT = "2026-09-30T08:15:30.123456+00:00"
 
@@ -2172,21 +2173,24 @@ def test_settled_entries_returns_the_settled_rows_values__S012_001_DoD5(db_engin
 
 
 @pytest.mark.parametrize("name", SELECTABLE_NAMES)
-def test_each_selectable_is_a_module_level_core_select__S012_001_DoD6(name: str) -> None:
-    """012/001 DoD-6 — D1: each name is a module-level Core `select()`, not a `Table`."""
+def test_each_selectable_is_a_module_level_core_select__S012_001_DoD6__S022_002_DoD1(name: str) -> None:
+    """012/001 DoD-6 — D1: each name is a module-level Core `select()`, not a `Table`.
+    022/002 DoD-1 — `buried_messages` included."""
     value = getattr(schema, name)
     assert isinstance(value, Select)
     assert not isinstance(value, Table)
 
 
 @pytest.mark.parametrize("name", SELECTABLE_NAMES)
-def test_no_selectable_name_is_a_registry_table__S012_001_DoD6(name: str) -> None:
-    """012/001 DoD-6 — none of the three selectable names is a key of `metadata.tables`."""
+def test_no_selectable_name_is_a_registry_table__S012_001_DoD6__S022_002_DoD1(name: str) -> None:
+    """012/001 DoD-6 — none of the selectable names is a key of `metadata.tables`.
+    022/002 DoD-1 / D2 — `buried_messages` included."""
     assert name not in schema.metadata.tables
 
 
-def test_create_all_creates_no_sql_view__S012_001_DoD6(db_engine: Engine) -> None:
-    """012/001 DoD-6 — D1: after `create_all`, `sqlite_master` holds no row of type `view`."""
+def test_create_all_creates_no_sql_view__S012_001_DoD6__S022_002_DoD1(db_engine: Engine) -> None:
+    """012/001 DoD-6 — D1: after `create_all`, `sqlite_master` holds no row of type `view`.
+    022/002 DoD-1 — nor any object named `buried_messages`."""
     with db_engine.connect() as connection:
         schema.metadata.create_all(connection)
         connection.commit()
@@ -2852,3 +2856,124 @@ def test_forbidden_sessions_columns_dropped_only_the_three_017_declares__S017_00
     """017/001 DoD-5 — `rp_language`, `preferred_language` and `system_prompt` left the list;
     the rest stay."""
     assert set(FORBIDDEN_SESSIONS_COLUMNS) == {"title", "partner_label", "model_ref", "tools", "status", "state"}
+
+
+# ======================================================================================
+# Feature 022, step 002 (`002.discussion-read.md`) — the fourth named selectable,
+# `buried_messages`. Expected values come from that step's DoD-1 and feature 022's
+# context.md D2 (every `messages` column, `related_to IS NOT NULL`, no owner or session
+# filter, a name colliding with no registry table). The 012/001 DoD-6 tests that enumerate
+# `SELECTABLE_NAMES` were amended in place above with the chained `__S022_002_DoD1` suffix.
+# Tests are suffixed `__S022_002_DoD<n>`.
+# ======================================================================================
+
+BURIED_ZONE_ID = 300
+BURIED_SETTLED_ID = 301
+BURIED_FIRST_ID = 302
+BURIED_SECOND_ID = 303
+BURIED_FIRST_TEXT = "Should she answer the lighthouse keeper?"
+BURIED_SECOND_TEXT = "Yes, but keep it short."
+
+
+def _buried_state_connection(db_engine: Engine) -> Connection:
+    """Session 30 holding one zone row (NULL/NULL), one settled row (NULL/set) and two rows
+    buried under it (set/NULL)."""
+    connection = _seeded_messages_connection(db_engine)
+    connection.execute(
+        RAW_MESSAGES_INSERT,
+        _raw_message(id=BURIED_ZONE_ID, text="A zone draft.", related_to=None, settled_at=None),
+    )
+    connection.execute(
+        RAW_MESSAGES_INSERT,
+        _raw_message(
+            id=BURIED_SETTLED_ID, kind="turn", text="The settled turn.", related_to=None, settled_at=SETTLED_AT
+        ),
+    )
+    connection.execute(
+        RAW_MESSAGES_INSERT,
+        _raw_message(id=BURIED_FIRST_ID, text=BURIED_FIRST_TEXT, related_to=BURIED_SETTLED_ID, settled_at=None),
+    )
+    connection.execute(
+        RAW_MESSAGES_INSERT,
+        _raw_message(
+            id=BURIED_SECOND_ID,
+            role="assistant",
+            text=BURIED_SECOND_TEXT,
+            related_to=BURIED_SETTLED_ID,
+            settled_at=None,
+        ),
+    )
+    connection.commit()
+    return connection
+
+
+def test_buried_messages_is_a_module_level_core_select__S022_002_DoD1() -> None:
+    """022/002 DoD-1 — D2: `buried_messages` is a module-level Core `select()`, not a `Table`."""
+    value = schema.buried_messages
+    assert isinstance(value, Select)
+    assert not isinstance(value, Table)
+
+
+def test_buried_messages_name_is_not_a_registry_table__S022_002_DoD1() -> None:
+    """022/002 DoD-1 — D2: the name collides with no table in the metadata."""
+    assert "buried_messages" not in schema.metadata.tables
+
+
+def test_buried_messages_returns_exactly_the_messages_columns__S022_002_DoD1(db_engine: Engine) -> None:
+    """022/002 DoD-1 — the result columns are exactly `messages`' columns, under the table's own
+    names."""
+    with _buried_state_connection(db_engine) as connection:
+        result = connection.execute(schema.buried_messages)
+        keys = list(result.keys())
+        result.close()
+        assert len(keys) == len(set(keys))
+        assert set(keys) == MESSAGES_COLUMNS
+        assert set(keys) == {column.name for column in _messages().columns}
+
+
+def test_buried_messages_returns_exactly_the_two_buried_rows__S022_002_DoD1(db_engine: Engine) -> None:
+    """022/002 DoD-1 — over one zone row, one settled row and two rows buried under it, exactly
+    the two buried rows come back; neither the zone nor the settled row."""
+    with _buried_state_connection(db_engine) as connection:
+        rows = connection.execute(schema.buried_messages).all()
+        ids = [row._mapping["id"] for row in rows]
+        assert len(ids) == 2
+        assert set(ids) == {BURIED_FIRST_ID, BURIED_SECOND_ID}
+        assert BURIED_ZONE_ID not in ids
+        assert BURIED_SETTLED_ID not in ids
+
+
+def test_buried_messages_returns_the_buried_rows_text_and_state__S022_002_DoD1(db_engine: Engine) -> None:
+    """022/002 DoD-1 — the buried rows come back with their text included, and as stored:
+    `related_to` the settled row, `settled_at` NULL."""
+    with _buried_state_connection(db_engine) as connection:
+        rows = {row._mapping["id"]: row._mapping for row in connection.execute(schema.buried_messages).all()}
+        assert rows[BURIED_FIRST_ID]["text"] == BURIED_FIRST_TEXT
+        assert rows[BURIED_SECOND_ID]["text"] == BURIED_SECOND_TEXT
+        assert rows[BURIED_FIRST_ID]["role"] == "user"
+        assert rows[BURIED_SECOND_ID]["role"] == "assistant"
+        for row in rows.values():
+            assert row["related_to"] == BURIED_SETTLED_ID
+            assert row["settled_at"] is None
+            assert row["session_id"] == 30
+            assert row["user_id"] == 1
+
+
+def test_buried_messages_has_no_owner_or_session_filter__S022_002_DoD1(db_engine: Engine) -> None:
+    """022/002 DoD-1 — D2: like its siblings it carries no owner or session filter, so a row
+    buried in another owner's session comes back too."""
+    with _buried_state_connection(db_engine) as connection:
+        connection.execute(RAW_INSERT, _raw_row(id=2, username="other"))
+        connection.execute(RAW_CHARACTER_INSERT, _raw_character(id=11, user_id=2))
+        connection.execute(RAW_SESSIONS_INSERT, _raw_sessions_row(id=31, user_id=2, character_id=11, setup_id=None))
+        connection.execute(
+            RAW_MESSAGES_INSERT,
+            _raw_message(id=310, user_id=2, session_id=31, kind="turn", related_to=None, settled_at=SETTLED_AT),
+        )
+        connection.execute(
+            RAW_MESSAGES_INSERT,
+            _raw_message(id=311, user_id=2, session_id=31, related_to=310, settled_at=None),
+        )
+        connection.commit()
+        ids = {row._mapping["id"] for row in connection.execute(schema.buried_messages).all()}
+        assert ids == {BURIED_FIRST_ID, BURIED_SECOND_ID, 311}

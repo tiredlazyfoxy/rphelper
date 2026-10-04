@@ -475,31 +475,67 @@ def _logged_in(application: FastAPI, settings: Settings, username: str, password
 
 
 # =========================================================================================
-# DoD-4: the zone route with a tool row keeps the eight wire keys
+# DoD-4: the zone route with tool rows — amended by feature 022, step 001 (DoD-3, D3, U2):
+# the wire now carries the tool view (`tool_name`, `tool_status`, `tool_args`) — eleven keys —
+# and still never the raw payload, its `call_id` or its `content`.
 # =========================================================================================
 
+#: 022 D3 — the eight 012 keys plus the three tool-view keys.
+MESSAGE_KEYS_022 = MESSAGE_KEYS | {"tool_name", "tool_status", "tool_args"}
 
-def test_the_zone_route_lists_a_tool_row_with_only_the_eight_keys__S021_001_DoD4(
+#: 022 `001.context.md` payload table, row 3 (ok) and row 4 (failed), stored verbatim.
+S022_OK_PAYLOAD = (
+    '{"call_id":"call_1","arguments":"{\\"query\\":\\"lighthouse\\"}","status":"ok",'
+    '"content":"Memo: the lighthouse keeper"}'
+)
+S022_FAILED_PAYLOAD = (
+    '{"call_id":"c9","arguments":"{\\"query\\":\\"x\\"}","status":"failed","code":"tool_failed"}'
+)
+S022_OK_SUMMARY = "Found 1 memo."
+
+
+def test_the_zone_route_lists_a_tool_row_with_only_the_eight_keys__S021_001_DoD4__S022_001_DoD3(
     application: FastAPI, db_settings: Settings, engine: Engine
 ) -> None:
-    """DoD-4 — D7 / 012 wire contract: 200; the tool row appears with `"role":"tool"`; no
-    message object carries `tool_name` or `tool_payload`."""
-    _insert_message(engine, message_id=21, text="Aria asks about the inn.", role="user")
-    _insert_tool(engine, 22)
-    _insert_message(engine, message_id=23, text="She answers.", role="assistant")
+    """021 DoD-4 (amended by 022 001 DoD-3) — zone `[user, assistant, tool(ok), tool(failed)]`:
+    200; every message has exactly the eleven keys; the ok tool row carries
+    `memo_search` / `ok` / `{"query": "lighthouse"}`; no body text contains `tool_payload`,
+    `call_id`, `call_1` or the payload's `content` value."""
+    _insert_message(engine, message_id=21, text="Aria asks about the lighthouse.", role="user")
+    _insert_message(engine, message_id=22, text="Let me look.", role="assistant")
+    _insert_message(
+        engine,
+        message_id=23,
+        text=S022_OK_SUMMARY,
+        role="tool",
+        tool_name="memo_search",
+        tool_payload=S022_OK_PAYLOAD,
+    )
+    _insert_message(
+        engine,
+        message_id=24,
+        text=FAILED_TOOL_TEXT,
+        role="tool",
+        tool_name="session_search",
+        tool_payload=S022_FAILED_PAYLOAD,
+    )
     client = _logged_in(application, db_settings, USER_A_NAME, USER_A_PASSWORD)
 
     response = client.get(f"/api/sessions/{SESSION_A}/zone")
 
     assert response.status_code == 200, response.text
     rows = response.json()["messages"]
-    assert [row["id"] for row in rows] == ["21", "22", "23"]
-    assert [row["role"] for row in rows] == ["user", "tool", "assistant"]
-    assert rows[1]["text"] == TOOL_TEXT
+    assert [row["id"] for row in rows] == ["21", "22", "23", "24"]
+    assert [row["role"] for row in rows] == ["user", "assistant", "tool", "tool"]
     for row in rows:
-        assert set(row) == MESSAGE_KEYS
-        assert "tool_name" not in row
-        assert "tool_payload" not in row
+        assert set(row) == MESSAGE_KEYS_022
+    ok_row = rows[2]
+    assert ok_row["tool_name"] == "memo_search"
+    assert ok_row["tool_status"] == "ok"
+    assert ok_row["tool_args"] == {"query": "lighthouse"}
+    assert ok_row["text"] == S022_OK_SUMMARY
+    for forbidden in ("tool_payload", "call_id", "call_1", "Memo: the lighthouse keeper"):
+        assert forbidden not in response.text
 
 
 # =========================================================================================

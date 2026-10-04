@@ -437,6 +437,8 @@ STARTED_CHARACTER_ID = 7250000000000000102
 STARTED_SETUP_ID = 7250000000000000103
 OPENING_MESSAGE_ID = 7250000000000000104
 
+#: Amended by feature 022, step 001 (D3, DoD-4): 012's `Message` gains `tool_name`,
+#: `tool_status` and `tool_args` — eleven keys, all three null on a non-tool row.
 MESSAGE_WIRE_KEYS = {
     "id",
     "session_id",
@@ -446,6 +448,9 @@ MESSAGE_WIRE_KEYS = {
     "settled_at",
     "created_at",
     "updated_at",
+    "tool_name",
+    "tool_status",
+    "tool_args",
 }
 
 
@@ -501,6 +506,9 @@ EXPECTED_MESSAGE_WIRE: dict[str, Any] = {
     "settled_at": None,
     "created_at": CREATED_AT,
     "updated_at": CREATED_AT,
+    "tool_name": None,
+    "tool_status": None,
+    "tool_args": None,
 }
 
 
@@ -543,9 +551,10 @@ def test_started_response_with_a_null_setup_keeps_the_nulls__S018_001_DoD6() -> 
     }
 
 
-def test_started_response_with_a_message_serialises_the_eight_key_message__S018_001_DoD6() -> None:
-    """018/001 DoD-6 — built with a message value, `opening_message` is 012's eight-key
-    message object with string ids; the session keys are unchanged."""
+def test_started_response_with_a_message_serialises_the_eight_key_message__S018_001_DoD6__S022_001_DoD4() -> None:
+    """018/001 DoD-6 (amended by 022 001 DoD-4) — built with a message value,
+    `opening_message` is 012's message object, now eleven keys with the three tool fields
+    null, with string ids; the session keys are unchanged."""
     payload = _wire(_started_from_attributes(_session_value(), _message_value()))
 
     assert set(payload) == WIRE_KEYS | {"opening_message"}
@@ -557,9 +566,9 @@ def test_started_response_with_a_message_serialises_the_eight_key_message__S018_
     assert isinstance(message["session_id"], str)
 
 
-def test_started_response_accepts_a_message_response__S018_001_DoD6() -> None:
-    """018/001 DoD-6 — `opening_message` is a 012 `MessageResponse`: one given directly
-    serialises to the same eight-key object."""
+def test_started_response_accepts_a_message_response__S018_001_DoD6__S022_001_DoD4() -> None:
+    """018/001 DoD-6 (amended by 022 001 DoD-4) — `opening_message` is a 012
+    `MessageResponse`: one given directly serialises to the same (now eleven-key) object."""
     fields = {key: value for key, value in vars(_session_value()).items() if key != "user_id"}
     message = MessageResponse(**vars(_message_value()))
     payload = _wire(StartedSessionResponse(**fields, opening_message=message))

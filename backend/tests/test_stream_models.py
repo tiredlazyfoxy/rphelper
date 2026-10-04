@@ -45,9 +45,23 @@ CREATED_AT = "2026-09-29T12:00:00.000000+00:00"
 UPDATED_AT = "2026-09-30T08:15:30.123456+00:00"
 SETTLED_AT = "2026-09-30T08:15:30.123456+00:00"
 
-# context.md "Wire contract" — `Message` on the wire has exactly these eight keys.
-MESSAGE_WIRE_KEYS = {"id", "session_id", "role", "kind", "text", "settled_at", "created_at", "updated_at"}
-NEVER_ON_THE_WIRE = ("user_id", "related_to", "tool_name", "tool_payload")
+# context.md "Wire contract" — `Message` on the wire had exactly these eight keys.
+# Amended by feature 022, step 001 (D3, DoD-4): the eight plus `tool_name`, `tool_status`
+# and `tool_args` — eleven keys; `tool_payload` (and `call_id`) never reach the wire.
+MESSAGE_WIRE_KEYS = {
+    "id",
+    "session_id",
+    "role",
+    "kind",
+    "text",
+    "settled_at",
+    "created_at",
+    "updated_at",
+    "tool_name",
+    "tool_status",
+    "tool_args",
+}
+NEVER_ON_THE_WIRE = ("user_id", "related_to", "tool_payload", "call_id")
 
 # The error envelope `errors.py` renders: one `error` key over exactly three.
 ENVELOPE_KEYS = {"error"}
@@ -224,9 +238,10 @@ def test_message_response_passes_the_text_fields_through__S012_001_DoD8() -> Non
     assert payload["updated_at"] == UPDATED_AT
 
 
-def test_message_response_has_exactly_the_eight_wire_keys__S012_001_DoD8() -> None:
-    """012/001 DoD-8 — the serialised object is exactly the eight wire keys, with no
-    `user_id`, `related_to`, `tool_name` or `tool_payload`."""
+def test_message_response_has_exactly_the_eight_wire_keys__S012_001_DoD8__S022_001_DoD4() -> None:
+    """012/001 DoD-8 (amended by 022 001 DoD-4) — the serialised object is exactly the
+    eleven wire keys (the eight plus `tool_name`, `tool_status`, `tool_args`), with no
+    `user_id`, `related_to`, `tool_payload` or `call_id`."""
     for model in (_message(), _message(kind=None, settled_at=None)):
         payload = _wire(model)
         assert set(payload) == MESSAGE_WIRE_KEYS
@@ -234,7 +249,7 @@ def test_message_response_has_exactly_the_eight_wire_keys__S012_001_DoD8() -> No
             assert absent not in payload
 
 
-def test_entry_list_response_wraps_the_rows_under_entries_in_order__S012_001_DoD8() -> None:
+def test_entry_list_response_wraps_the_rows_under_entries_in_order__S012_001_DoD8__S022_001_DoD4() -> None:
     """012/001 DoD-8 — `EntryListResponse` serialises with the single key `entries`,
     preserving the given order."""
     first = _message(id=3, kind="partner")
@@ -248,7 +263,7 @@ def test_entry_list_response_wraps_the_rows_under_entries_in_order__S012_001_DoD
     assert all(set(row) == MESSAGE_WIRE_KEYS for row in payload["entries"])
 
 
-def test_zone_response_wraps_the_rows_under_messages_in_order__S012_001_DoD8() -> None:
+def test_zone_response_wraps_the_rows_under_messages_in_order__S012_001_DoD8__S022_001_DoD4() -> None:
     """012/001 DoD-8 — `ZoneResponse` serialises with the single key `messages`, preserving
     the given order."""
     first = _message(id=20, kind=None, settled_at=None)

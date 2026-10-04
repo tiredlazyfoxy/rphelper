@@ -5,13 +5,16 @@
 import { useState } from "react";
 import type * as React from "react";
 import { observer } from "mobx-react-lite";
-import { Box, Group, Stack, Text, Textarea } from "@mantine/core";
-import { IconEdit } from "@tabler/icons-react";
+import { Box, Button, Group, Stack, Text, Textarea } from "@mantine/core";
+import { IconEdit, IconRefresh } from "@tabler/icons-react";
 
 import { IconButton } from "../shared/IconButton";
+import { AssistantBody } from "./AssistantBody";
+import { LiveMessage } from "./LiveMessage";
 import { MessageBody } from "./MessageBody";
+import { ToolBlock } from "./ToolBlock";
 import type { Message, MessageRole } from "./streamApi";
-import { editZoneMessage } from "./streamState";
+import { editZoneMessage, regenerate, showsRegenerate } from "./streamState";
 import type { StreamState } from "./streamState";
 
 export type ZoneListProps = {
@@ -26,6 +29,11 @@ export type ZoneMessageProps = {
   message: Message;
   /** Passed on to `editZoneMessage`. */
   signal?: AbortSignal;
+  /**
+   * Whether the row offers "Edit message" (default true). Tool rows never do; with false
+   * the control is absent and the editor can never open (022 006, 021 D8).
+   */
+  editable?: boolean;
 };
 
 const AUTHOR_LABELS: Record<MessageRole, string> = {
@@ -38,7 +46,24 @@ const AUTHOR_LABELS: Record<MessageRole, string> = {
 export const ZoneMessage = observer(function ZoneMessage(
   props: ZoneMessageProps,
 ): React.JSX.Element {
-  const { state, message, signal } = props;
+  const { state, message, signal, editable = true } = props;
+  const showsEdit = editable && message.role !== "tool";
+  // The body by role (022 006): assistant rows tuck their thinking away; tool rows are a
+  // collapsed tool block whose summary is the stored text.
+  const body =
+    message.role === "assistant" ? (
+      <AssistantBody text={message.text} live={false} />
+    ) : message.role === "tool" ? (
+      <ToolBlock
+        name={message.tool_name}
+        status={message.tool_status === "ok" ? "ok" : "failed"}
+        args={message.tool_args ?? {}}
+        summary={message.text}
+        startsOpen={false}
+      />
+    ) : (
+      <MessageBody text={message.text} variant="painted" />
+    );
   // View state (D10): whether this row's editor is open, and its draft.
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState("");
@@ -67,7 +92,9 @@ export const ZoneMessage = observer(function ZoneMessage(
           <Text size="sm" fw={600} c="dimmed">
             {AUTHOR_LABELS[message.role]}
           </Text>
-          <IconButton icon={IconEdit} label="Edit message" onClick={openEditor} />
+          {showsEdit ? (
+            <IconButton icon={IconEdit} label="Edit message" onClick={openEditor} />
+          ) : null}
         </Group>
         {editing ? (
           <Textarea
@@ -81,28 +108,44 @@ export const ZoneMessage = observer(function ZoneMessage(
             onBlur={commit}
           />
         ) : (
-          <MessageBody text={message.text} variant="painted" />
+          body
         )}
       </Stack>
     </Box>
   );
 });
 
-/** Renders the session's current zone; renders nothing when the zone is empty (D5, D10). */
+/**
+ * Renders the session's current zone (the list only when non-empty, D5, D10), then the live
+ * reply and, when `showsRegenerate`, the "Regenerate" button (022 006, D6, D8).
+ */
 export const ZoneList = observer(function ZoneList(
   props: ZoneListProps,
 ): React.JSX.Element | null {
   const { state, signal } = props;
   const zone = state.zone;
-  if (zone.length === 0) {
-    return null;
-  }
 
   return (
-    <Box component="ul" aria-label="Zone messages" m={0} p={0} style={{ listStyle: "none" }}>
-      {zone.map((message) => (
-        <ZoneMessage key={message.id} state={state} message={message} signal={signal} />
-      ))}
-    </Box>
+    <>
+      {zone.length > 0 ? (
+        <Box component="ul" aria-label="Zone messages" m={0} p={0} style={{ listStyle: "none" }}>
+          {zone.map((message) => (
+            <ZoneMessage key={message.id} state={state} message={message} signal={signal} />
+          ))}
+        </Box>
+      ) : null}
+      <LiveMessage state={state} />
+      {showsRegenerate(state) ? (
+        <Button
+          variant="subtle"
+          leftSection={<IconRefresh size={16} stroke={1.5} />}
+          onClick={() => {
+            void regenerate(state, signal);
+          }}
+        >
+          Regenerate
+        </Button>
+      ) : null}
+    </>
   );
 });

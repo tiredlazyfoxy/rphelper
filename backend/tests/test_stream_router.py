@@ -64,8 +64,22 @@ PLAYER_B_PASSWORD = "salt and lantern light"
 UNKNOWN_SESSION_ID = "7250000000000000002"
 UNKNOWN_MESSAGE_ID = "7250000000000000004"
 
-#: The ``Message`` wire object's keys — exactly eight (feature context, Wire contract).
-MESSAGE_KEYS = {"id", "session_id", "role", "kind", "text", "settled_at", "created_at", "updated_at"}
+#: The ``Message`` wire object's keys — eight in 012 (feature context, Wire contract).
+#: Amended by feature 022, step 001 (D3, DoD-4): plus ``tool_name``, ``tool_status`` and
+#: ``tool_args`` — eleven keys. Tests that pin the key set chain ``__S022_001_DoD4``.
+MESSAGE_KEYS = {
+    "id",
+    "session_id",
+    "role",
+    "kind",
+    "text",
+    "settled_at",
+    "created_at",
+    "updated_at",
+    "tool_name",
+    "tool_status",
+    "tool_args",
+}
 
 NOT_AUTHENTICATED = "not_authenticated"
 SESSION_NOT_FOUND = "session_not_found"
@@ -318,7 +332,7 @@ def _is_decimal_string(value: Any) -> bool:
 
 
 def _assert_message_shape(message: dict[str, Any]) -> None:
-    """The ``Message`` wire object: exactly eight keys, ids as decimal strings."""
+    """The ``Message`` wire object: exactly eleven keys (022 001 DoD-4), ids as decimal strings."""
     assert set(message) == MESSAGE_KEYS
     assert _is_decimal_string(message["id"])
     assert _is_decimal_string(message["session_id"])
@@ -369,8 +383,11 @@ def test_every_stream_route_answers_401_without_a_login__S012_004_DoD1(
 # --- DoD-2: append, then read zone and entries ----------------------------------------
 
 
-def test_append_answers_201_with_the_message__S012_004_DoD2(application: FastAPI, db_settings: Settings) -> None:
-    """DoD-2 — UC-083 step 2: 201, eight keys, decimal ids, role user, kind/settled_at null, text verbatim."""
+def test_append_answers_201_with_the_message__S012_004_DoD2__S022_001_DoD4(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-2 — UC-083 step 2: 201, eleven keys (022 001 DoD-4), decimal ids, role user,
+    kind/settled_at null, text verbatim."""
     client = _player_a(application, db_settings)
     session = _new_session(client)
 
@@ -433,7 +450,7 @@ def test_settle_a_lone_message_answers_the_turn__S012_004_DoD3(application: Fast
     assert response.json() == {"entry_id": message["id"], "kind": "turn", "buried_ids": []}
 
 
-def test_after_settle_the_zone_is_empty_and_the_entry_is_recorded__S012_004_DoD3(
+def test_after_settle_the_zone_is_empty_and_the_entry_is_recorded__S012_004_DoD3__S022_001_DoD4(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """DoD-3 — US-127.AC-1, US-127.AC-2: zone empty; entries hold the message as a settled turn, text unchanged."""
@@ -541,7 +558,7 @@ def test_settle_takes_a_trailing_assistant_row_as_head__S012_004_DoD5(
 # --- DoD-6: born-settled partner blocks -----------------------------------------------
 
 
-def test_a_partner_block_is_filed_born_settled_and_verbatim__S012_004_DoD6(
+def test_a_partner_block_is_filed_born_settled_and_verbatim__S012_004_DoD6__S022_001_DoD4(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """DoD-6 — US-121.AC-1, US-121.AC-2: 201, kind partner, role user, settled, text byte-for-byte."""
@@ -720,7 +737,7 @@ def test_settle_on_an_empty_zone_answers_409_zone_empty__S012_004_DoD9(
 # --- DoD-10: re-open restores the group -----------------------------------------------
 
 
-def test_reopen_restores_the_group_in_its_original_order__S012_004_DoD10(
+def test_reopen_restores_the_group_in_its_original_order__S012_004_DoD10__S022_001_DoD4(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """DoD-10 — US-041.AC-1, US-128.AC-1, D10: reopened head, restored ids ascending, zone restored."""
@@ -858,7 +875,7 @@ def test_reopen_when_a_partner_block_follows_a_group_answers_nothing_to_reopen__
 # --- DoD-13: editing ------------------------------------------------------------------
 
 
-def test_patch_on_a_zone_message_answers_the_edited_message__S012_004_DoD13(
+def test_patch_on_a_zone_message_answers_the_edited_message__S012_004_DoD13__S022_001_DoD4(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """DoD-13 — US-115.AC-1, R12: 200, the exact text (parens untouched), kind null; the zone shows it."""
@@ -879,7 +896,7 @@ def test_patch_on_a_zone_message_answers_the_edited_message__S012_004_DoD13(
     assert zone[0]["text"] == "Edited ((keep))"
 
 
-def test_patch_on_a_filed_partner_block_answers_the_edited_entry__S012_004_DoD13__S014_001_DoD10(
+def test_patch_on_a_filed_partner_block_answers_the_edited_entry__S012_004_DoD13__S014_001_DoD10__S022_001_DoD4(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """DoD-13 (amended by 014 001 DoD-10) — 014 D1: a filed partner block is editable; 200 with
@@ -903,7 +920,7 @@ def test_patch_on_a_filed_partner_block_answers_the_edited_entry__S012_004_DoD13
     assert entries[0]["kind"] == "partner"
 
 
-def test_patch_on_a_settled_decision_keeps_the_kind__S012_004_DoD13__S014_001_DoD10(
+def test_patch_on_a_settled_decision_keeps_the_kind__S012_004_DoD13__S014_001_DoD10__S022_001_DoD4(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """DoD-13 (amended by 014 001 DoD-10) — a settled decision (`((skip ahead))`, settled)
@@ -1364,7 +1381,7 @@ def _settled_turn_between_partners(client: TestClient) -> tuple[str, dict[str, A
 # --- 014 DoD-9: a settled turn is edited in place -----------------------------------
 
 
-def test_patch_on_a_settled_turn_answers_200_with_the_edited_entry__S014_001_DoD9(
+def test_patch_on_a_settled_turn_answers_200_with_the_edited_entry__S014_001_DoD9__S022_001_DoD4(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """014 DoD-9 — US-110.AC-1, US-032.AC-1: 200, the exact text, kind `turn`, the same

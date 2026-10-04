@@ -12,17 +12,63 @@ a buried row stays refused). There is no delete, no discard and no settle-state 
 this module.
 """
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 from sqlalchemy import Connection, Row, Select, select
 
-from app.db.schema import current_zone, message_states, messages, sessions, settled_entries
+from app.db.schema import (
+    buried_messages,
+    current_zone,
+    message_states,
+    messages,
+    sessions,
+    settled_entries,
+)
 from app.errors import MessageNotEditableError, MessageNotFoundError, SessionNotFoundError
 from app.ids import SnowflakeGenerator
+
+#: A tool row's derived outcome (feature `022` D3): `"ok"` only on a readable ok payload.
+ToolStatus = Literal["ok", "failed"]
+
+
+class ToolView(NamedTuple):
+    """The wire view of one row's tool columns (feature `022` D3) — all `None` on a non-tool row."""
+
+    tool_name: str | None
+    tool_status: ToolStatus | None
+    tool_args: dict[str, Any] | None
+
+
+def tool_view(role: str, tool_name: str | None, tool_payload: str | None) -> ToolView:
+    """Derive `(tool_name, tool_status, tool_args)` from a row's role and tool columns (022 D3).
+
+    Pure: no I/O, and never raises on any payload string, including invalid JSON.
+    """
+    if role != "tool":
+        return ToolView(tool_name=None, tool_status=None, tool_args=None)
+    payload = _json_object(tool_payload)
+    if payload is None:
+        return ToolView(tool_name=tool_name, tool_status="failed", tool_args={})
+    status: ToolStatus = "ok" if payload.get("status") == "ok" else "failed"
+    arguments = payload.get("arguments")
+    args = _json_object(arguments) if isinstance(arguments, str) else None
+    return ToolView(tool_name=tool_name, tool_status=status, tool_args=args if args is not None else {})
+
+
+def _json_object(text: str | None) -> dict[str, Any] | None:
+    """`text` parsed as a JSON object, or `None` when it is absent, unparseable or not an object."""
+    if text is None:
+        return None
+    try:
+        value = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 @dataclass(frozen=True)
@@ -31,8 +77,9 @@ class StreamMessage:
 
     No `user_id`, no `related_to`. The first eight fields are `MessageResponse`'s, in its
     order (`app.models.stream`, step `001`); the two tool columns (feature `021` D7) follow,
-    defaulting to `None`, and never reach the wire. Timestamps are the stored fixed-width UTC
-    text.
+    defaulting to `None`, and never reach the wire. Then the derived tool view (feature `022`
+    D3: `tool_status`, `tool_args`, default `None`; `tool_name` is shared with the columns).
+    Timestamps are the stored fixed-width UTC text.
     """
 
     id: int
@@ -45,6 +92,8 @@ class StreamMessage:
     updated_at: str
     tool_name: str | None = None
     tool_payload: str | None = None
+    tool_status: ToolStatus | None = None
+    tool_args: dict[str, Any] | None = None
 
 
 def list_entries(connection: Connection, user_id: int, session_id: int) -> list[StreamMessage]:
@@ -55,6 +104,28 @@ def list_entries(connection: Connection, user_id: int, session_id: int) -> list[
 def list_zone(connection: Connection, user_id: int, session_id: int) -> list[StreamMessage]:
     """The session's current-zone rows (through `current_zone`), ascending id."""
     return _list_session_rows(connection, current_zone, user_id, session_id)
+
+
+def list_discussion(connection: Connection, user_id: int, entry_id: int) -> list[StreamMessage]:
+    """The rows buried under the owner's settled entry `entry_id`, ascending id (022 D1).
+
+    The entry is confirmed through `settled_entries` (id and owner) first, else
+    `MessageNotFoundError`; the rows are read through `buried_messages`. A read only.
+    """
+    entry_columns = settled_entries.selected_columns
+    buried_columns = buried_messages.selected_columns
+    with _reading(connection):
+        entry = connection.execute(
+            settled_entries.where(entry_columns.id == entry_id, entry_columns.user_id == user_id)
+        ).first()
+        if entry is None:
+            raise MessageNotFoundError()
+        rows = connection.execute(
+            buried_messages.where(
+                buried_columns.related_to == entry_id, buried_columns.user_id == user_id
+            ).order_by(buried_columns.id.asc())
+        ).all()
+    return [_to_message(row) for row in rows]
 
 
 def append_message(
@@ -146,6 +217,7 @@ def append_tool_message(
             )
         )
         _bump_session(connection, user_id, session_id, now)
+        view = tool_view("tool", tool_name, tool_payload)
         message = StreamMessage(
             id=new_id,
             session_id=session_id,
@@ -157,6 +229,8 @@ def append_tool_message(
             updated_at=now,
             tool_name=tool_name,
             tool_payload=tool_payload,
+            tool_status=view.tool_status,
+            tool_args=view.tool_args,
         )
     return message
 
@@ -307,7 +381,8 @@ def _bump_session(connection: Connection, user_id: int, session_id: int, now: st
 
 
 def _to_message(row: Row[Any]) -> StreamMessage:
-    """A full `messages` row (from a selectable) as the returned value."""
+    """A full `messages` row (from a selectable) as the returned value, with its tool view."""
+    view = tool_view(row.role, row.tool_name, row.tool_payload)
     return StreamMessage(
         id=row.id,
         session_id=row.session_id,
@@ -319,6 +394,8 @@ def _to_message(row: Row[Any]) -> StreamMessage:
         updated_at=row.updated_at,
         tool_name=row.tool_name,
         tool_payload=row.tool_payload,
+        tool_status=view.tool_status,
+        tool_args=view.tool_args,
     )
 
 

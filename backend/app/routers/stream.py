@@ -34,6 +34,7 @@ from app.models.ids import SnowflakeIn
 from app.models.stream import (
     AppendMessageRequest,
     ComposeRequest,
+    DiscussionResponse,
     EditMessageRequest,
     EntryListResponse,
     FilePartnerRequest,
@@ -52,6 +53,7 @@ from app.services.messages import (
     append_message,
     edit_message_text,
     file_partner_entry,
+    list_discussion,
     list_entries,
     list_zone,
 )
@@ -210,3 +212,14 @@ def edit_message(
     """Replace a zone message's text via `edit_message_text(..., body.text)`."""
     message = edit_message_text(connection, current_user.id, message_id, body.text)
     return _message_to_response(message)
+
+
+@router.get("/api/messages/{message_id}/discussion", status_code=200)
+def get_discussion(
+    message_id: SnowflakeIn,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+) -> DiscussionResponse:
+    """A settled entry's buried group via `list_discussion(connection, user_id, message_id)` (022 D1)."""
+    messages = list_discussion(connection, current_user.id, message_id)
+    return DiscussionResponse(messages=[_message_to_response(message) for message in messages])

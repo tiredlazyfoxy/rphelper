@@ -13,6 +13,7 @@ import { IconArrowBackUp, IconCopy, IconEdit } from "@tabler/icons-react";
 
 import { IconButton } from "../shared/IconButton";
 import { copyAsPlainText } from "./copyOut";
+import { DiscussionGroup } from "./DiscussionGroup";
 import { MessageBody } from "./MessageBody";
 import type { Message, MessageKind } from "./streamApi";
 import { editEntry, reopenLast, showsReopen } from "./streamState";
@@ -146,6 +147,9 @@ const StreamEntry = observer(function StreamEntry(
         ) : (
           <EntryBody entry={entry} />
         )}
+        {entry.kind !== "partner" ? (
+          <DiscussionGroup key={entry.id} entryId={entry.id} state={state} />
+        ) : null}
       </Stack>
     </Box>
   );

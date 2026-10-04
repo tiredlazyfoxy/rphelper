@@ -1,9 +1,9 @@
 """The stream request and response models — nothing else (feature `012`, D9, D12).
 
-**Responses.** `MessageResponse` is the wire `Message`: exactly eight keys. `id` and
-`session_id` use the outbound snowflake alias, so each leaves as a **decimal string**
-(`data-model.md` § Identifiers). `user_id`, `related_to`, `tool_name` and `tool_payload` are
-never on the wire. Timestamps pass through as the fixed-width UTC text the row stores.
+**Responses.** `MessageResponse` is the wire `Message`: exactly eleven keys (the eight of
+012 plus 022 D3's tool view). `id` and `session_id` use the outbound snowflake alias, so each
+leaves as a **decimal string** (`data-model.md` § Identifiers). `user_id`, `related_to` and
+`tool_payload` are never on the wire. Timestamps pass through as the fixed-width UTC text the row stores.
 `EntryListResponse` wraps the settled record under `entries`, `ZoneResponse` the current zone
 under `messages`. `SettleResponse` / `ReopenResponse` carry only the ids the operation moved
 (D11), every one a decimal string.
@@ -19,7 +19,7 @@ be absent or null (the retry, D2), and is `NonBlankText` when present.
 This module imports neither `app.services`, `app.routers`, `app.db` nor `fastapi`.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict
 
@@ -38,7 +38,9 @@ NonBlankText = Annotated[str, AfterValidator(_require_non_blank)]
 
 
 class MessageResponse(BaseModel):
-    """One `messages` row on the wire. Eight keys, never `user_id` / `related_to` / tool columns."""
+    """One `messages` row on the wire. Eleven keys (022 D3): the eight 012 keys plus the tool
+    view `tool_name` / `tool_status` / `tool_args` (null on a non-tool row). Never `user_id`,
+    `related_to` or `tool_payload`."""
 
     id: SnowflakeOut
     session_id: SnowflakeOut
@@ -48,6 +50,9 @@ class MessageResponse(BaseModel):
     settled_at: str | None
     created_at: str
     updated_at: str
+    tool_name: str | None = None
+    tool_status: Literal["ok", "failed"] | None = None
+    tool_args: dict[str, Any] | None = None
 
 
 class EntryListResponse(BaseModel):
@@ -58,6 +63,12 @@ class EntryListResponse(BaseModel):
 
 class ZoneResponse(BaseModel):
     """The current zone of one session, under the single `messages` field."""
+
+    messages: list[MessageResponse]
+
+
+class DiscussionResponse(BaseModel):
+    """The buried group of one settled entry (022 D1), under the single `messages` field."""
 
     messages: list[MessageResponse]
 

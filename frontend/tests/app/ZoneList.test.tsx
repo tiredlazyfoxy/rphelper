@@ -172,7 +172,7 @@ async function openAssistantEditor(user: ReturnType<typeof userEvent.setup>): Pr
 
 // ---------------------------------------------------------------- tests
 describe("ZoneList — rows, labels, edit controls", () => {
-  it('renders three items in order labelled "You", "Assistant", "Tool", each with "Edit message" — DoD-1', () => {
+  it('renders three items in order labelled "You", "Assistant", "Tool", each with "Edit message" — DoD-1 — DoD-2 (022 006)', () => {
     renderZone(seeded(threeRows()));
 
     const items = zoneItems();
@@ -184,11 +184,12 @@ describe("ZoneList — rows, labels, edit controls", () => {
 
     expect(items[0]?.textContent).toContain("Hi");
     expect(items[1]?.textContent).toContain("Hello there");
-    expect(items[2]?.textContent).toContain("lookup");
+    // 022 006: a tool row is a collapsed tool block, so its summary text is not rendered.
 
-    for (const listItem of items) {
-      expect(within(listItem).getAllByRole("button", { name: EDIT_NAME })).toHaveLength(1);
-    }
+    // 022 006 (021 D8): the user and assistant items keep "Edit message"; the tool item has none.
+    expect(within(items[0] as HTMLElement).getAllByRole("button", { name: EDIT_NAME })).toHaveLength(1);
+    expect(within(items[1] as HTMLElement).getAllByRole("button", { name: EDIT_NAME })).toHaveLength(1);
+    expect(within(items[2] as HTMLElement).queryByRole("button", { name: EDIT_NAME })).toBeNull();
   });
 
   it('with an empty zone renders no "Zone messages" list — DoD-1', () => {
@@ -337,7 +338,7 @@ describe("ZoneList — in-place edit (D10)", () => {
     expect(zoneItems()).toHaveLength(3);
   });
 
-  it("when the zone re-read after a failed PATCH no longer holds the row, its item and editor are gone — DoD-6", async () => {
+  it("when the zone re-read after a failed PATCH no longer holds the row, its item and editor are gone — DoD-6 — DoD-1 (022 006)", async () => {
     const remaining = [zoneRow(USER_ID, "user", "Hi"), zoneRow(TOOL_ID, "tool", "lookup")];
     const log = stubFetch((method, pathname) => {
       if (method === "PATCH" && pathname === ASSISTANT_PATH) return envelope("message_not_editable", 409);
@@ -361,10 +362,11 @@ describe("ZoneList — in-place edit (D10)", () => {
     expect(zoneList().textContent).not.toContain("Hello there");
     expect(within(zoneList()).queryByText("Assistant")).toBeNull();
     expect(item(0).textContent).toContain("Hi");
-    expect(item(1).textContent).toContain("lookup");
+    // 022 006: the tool row is a collapsed tool block (summary not rendered); identify it by label.
+    expect(within(item(1)).getByText("Tool")).toBeInTheDocument();
   });
 
-  it("editing one row leaves every other row's text and the row order unchanged — DoD-7", async () => {
+  it("editing one row leaves every other row's text and the row order unchanged — DoD-7 — DoD-1 (022 006)", async () => {
     stubFetch((method, pathname) =>
       method === "PATCH" && pathname === ASSISTANT_PATH
         ? jsonResponse(zoneRow(ASSISTANT_ID, "assistant", "Hello, friend", LATER), 200)
@@ -389,7 +391,7 @@ describe("ZoneList — in-place edit (D10)", () => {
     expect(within(items[1] as HTMLElement).getByText("Assistant")).toBeInTheDocument();
     expect(within(items[2] as HTMLElement).getByText("Tool")).toBeInTheDocument();
     expect(items[0]?.textContent).toContain("Hi");
-    expect(items[2]?.textContent).toContain("lookup");
+    // 022 006: the tool row's summary sits in a collapsed tool block; its text is pinned in state below.
 
     expect(state.zone.map((row) => row.id)).toEqual([USER_ID, ASSISTANT_ID, TOOL_ID]);
     expect(state.zone[0]?.text).toBe("Hi");

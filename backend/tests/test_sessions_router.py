@@ -79,7 +79,21 @@ SESSION_KEYS = {
 STARTED_SESSION_KEYS = SESSION_KEYS | {"opening_message"}
 
 #: 012's eight-key ``Message`` wire shape, cited by 018's Wire contract.
-MESSAGE_KEYS = {"id", "session_id", "role", "kind", "text", "settled_at", "created_at", "updated_at"}
+#: Amended by feature 022, step 001 (D3, DoD-4): plus `tool_name`, `tool_status`, `tool_args`
+#: — eleven keys.
+MESSAGE_KEYS = {
+    "id",
+    "session_id",
+    "role",
+    "kind",
+    "text",
+    "settled_at",
+    "created_at",
+    "updated_at",
+    "tool_name",
+    "tool_status",
+    "tool_args",
+}
 
 NOT_AUTHENTICATED = "not_authenticated"
 CHARACTER_NOT_FOUND = "character_not_found"
@@ -1003,7 +1017,7 @@ def _count_rows(engine: Engine, table: Any) -> int:
 
 
 def _assert_message_wire_shape(message: Any) -> None:
-    """012's `Message`: exactly eight keys, ids as decimal strings."""
+    """012's `Message`: exactly eleven keys (022 001 DoD-4), ids as decimal strings."""
     assert isinstance(message, dict)
     assert set(message) == MESSAGE_KEYS
     assert isinstance(message["id"], str)
@@ -1015,7 +1029,7 @@ def _assert_message_wire_shape(message: Any) -> None:
 # --- DoD-6: the opening message arrives as a current-zone row --------------------------
 
 
-def test_starting_with_an_opening_message_answers_the_started_session__S018_002_DoD6(
+def test_starting_with_an_opening_message_answers_the_started_session__S018_002_DoD6__S022_001_DoD4(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """DoD-6 — US-117.AC-1/AC-2, R11: 201, the eight session keys plus `opening_message`, a
