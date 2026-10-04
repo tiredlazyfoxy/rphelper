@@ -284,7 +284,10 @@ async function rereadBoth(state: StreamState, signal?: AbortSignal): Promise<boo
   return entriesAlive && zoneAlive && !signal?.aborted;
 }
 
-/** Effect: appends (my turn) or files as partner the non-blank draft, then re-reads (D6, D7). */
+/**
+ * Effect: on *my turn* composes the draft (021 D12, delegated to `composeMessage`, which owns
+ * the outcome and never sets `busy`); on *partner* files the non-blank draft, then re-reads (D7).
+ */
 export async function sendComposer(state: StreamState, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
     return;
@@ -293,17 +296,17 @@ export async function sendComposer(state: StreamState, signal?: AbortSignal): Pr
   if (isBlank(text)) {
     return;
   }
-  const sessionId = state.sessionId;
   const kind = effectiveKind(state);
+  if (kind === "turn") {
+    await composeMessage(state, signal);
+    return;
+  }
+  const sessionId = state.sessionId;
   setBusy(state, true);
 
   let sent = false;
   try {
-    if (kind === "turn") {
-      await appendZoneMessage(sessionId, text, signal);
-    } else {
-      await filePartnerEntry(sessionId, text, signal);
-    }
+    await filePartnerEntry(sessionId, text, signal);
     sent = true;
   } catch (error) {
     if (signal?.aborted || isAbortRejection(error)) {
@@ -318,9 +321,7 @@ export async function sendComposer(state: StreamState, signal?: AbortSignal): Pr
     clearDraftIfUnchanged(state, text);
   }
 
-  const alive = kind === "turn"
-    ? await rereadZone(state, signal)
-    : await rereadEntries(state, signal);
+  const alive = await rereadEntries(state, signal);
   if (!alive) {
     return;
   }

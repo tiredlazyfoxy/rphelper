@@ -29,8 +29,10 @@ from app.ids import SnowflakeGenerator
 class StreamMessage:
     """One `messages` row as every operation here returns it — and nothing more.
 
-    No `user_id`, no `related_to`, no tool columns. The field order is `MessageResponse`'s
-    (`app.models.stream`, step `001`). Timestamps are the stored fixed-width UTC text.
+    No `user_id`, no `related_to`. The first eight fields are `MessageResponse`'s, in its
+    order (`app.models.stream`, step `001`); the two tool columns (feature `021` D7) follow,
+    defaulting to `None`, and never reach the wire. Timestamps are the stored fixed-width UTC
+    text.
     """
 
     id: int
@@ -41,6 +43,8 @@ class StreamMessage:
     settled_at: str | None
     created_at: str
     updated_at: str
+    tool_name: str | None = None
+    tool_payload: str | None = None
 
 
 def list_entries(connection: Connection, user_id: int, session_id: int) -> list[StreamMessage]:
@@ -105,6 +109,54 @@ def append_assistant_message(
             settled_at=None,
             created_at=now,
             updated_at=now,
+        )
+    return message
+
+
+def append_tool_message(
+    connection: Connection,
+    generator: SnowflakeGenerator,
+    user_id: int,
+    session_id: int,
+    text: str,
+    tool_name: str,
+    tool_payload: str,
+) -> StreamMessage:
+    """Insert one `role='tool'` current-zone row and bump the session — feature `021` D7.
+
+    `kind`, `related_to` and `settled_at` NULL; `tool_name` and `tool_payload` stored verbatim
+    (the payload is not interpreted). One transaction, same ownership check
+    (`SessionNotFoundError`) and session bump as `append_assistant_message`.
+    """
+    with connection.begin():
+        _require_session(connection, user_id, session_id)
+        new_id = generator.next_id()
+        now = _now_text()
+        connection.execute(
+            messages.insert().values(
+                id=new_id,
+                user_id=user_id,
+                session_id=session_id,
+                role="tool",
+                text=text,
+                tool_name=tool_name,
+                tool_payload=tool_payload,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        _bump_session(connection, user_id, session_id, now)
+        message = StreamMessage(
+            id=new_id,
+            session_id=session_id,
+            role="tool",
+            kind=None,
+            text=text,
+            settled_at=None,
+            created_at=now,
+            updated_at=now,
+            tool_name=tool_name,
+            tool_payload=tool_payload,
         )
     return message
 
@@ -201,6 +253,14 @@ def edit_message_text(connection: Connection, user_id: int, message_id: int, tex
             raise MessageNotFoundError()
         if state.related_to is not None:
             raise MessageNotEditableError()
+        selectable = settled_entries if state.settled_at is not None else current_zone
+        columns = selectable.selected_columns
+        current = connection.execute(
+            selectable.where(columns.id == message_id, columns.user_id == user_id)
+        ).one()
+        if current.role == "tool":
+            # 021 D8: a tool row's text summarises its payload; editing one half desyncs them.
+            raise MessageNotEditableError()
         now = _now_text()
         connection.execute(
             messages.update()
@@ -208,8 +268,6 @@ def edit_message_text(connection: Connection, user_id: int, message_id: int, tex
             .values(text=text, updated_at=now)
         )
         _bump_session(connection, user_id, state.session_id, now)
-        selectable = settled_entries if state.settled_at is not None else current_zone
-        columns = selectable.selected_columns
         row = connection.execute(selectable.where(columns.id == message_id, columns.user_id == user_id)).one()
         message = _to_message(row)
     return message
@@ -259,6 +317,8 @@ def _to_message(row: Row[Any]) -> StreamMessage:
         settled_at=row.settled_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        tool_name=row.tool_name,
+        tool_payload=row.tool_payload,
     )
 
 

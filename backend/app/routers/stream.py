@@ -11,20 +11,29 @@ non-numeric id answers 422.
 The router owns HTTP and nothing else: no SQL, no `app.db.schema` import, no
 `app.services.parens` import (R12 parse-once lives in the settle service). Domain errors
 propagate to the one registered `DomainError` handler; the router catches nothing. No
-discard, stop, compose or delete route exists (R11, UC-086).
+discard, stop or delete route exists (R11, UC-086).
+
+Feature `021`, step `006` adds the one streaming route, `POST …/zone/compose` (D1, D2):
+`begin_compose` commits the text (or, textless, checks there is something to retry) on the
+handler's connection — its domain errors answer as JSON before any stream — then the handler
+returns 019's `sse_response` over `compose_stream` with the own-connection persister. The
+chat-client factory and the tool registry arrive through two overridable dependencies (D14).
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import Connection
 
-from app.db.engine import get_connection
+from app.config import Settings, get_settings
+from app.db.engine import get_connection, get_engine
 from app.dependencies import CurrentUser, require_user
 from app.ids import SnowflakeGenerator
 from app.models.ids import SnowflakeIn
 from app.models.stream import (
     AppendMessageRequest,
+    ComposeRequest,
     EditMessageRequest,
     EntryListResponse,
     FilePartnerRequest,
@@ -34,6 +43,10 @@ from app.models.stream import (
     ZoneResponse,
 )
 from app.routers.bootstrap import get_id_generator
+from app.services.compose import begin_compose, compose_stream
+from app.services.llm.client import LlmClient
+from app.services.llm.frames import own_connection_persister, sse_response
+from app.services.llm_registry import ChatClientFactory
 from app.services.messages import (
     StreamMessage,
     append_message,
@@ -43,6 +56,7 @@ from app.services.messages import (
     list_zone,
 )
 from app.services.settle import ReopenResult, SettleResult, reopen, settle
+from app.services.tools import PRODUCTION_TOOL_REGISTRY, ToolRegistry
 
 router = APIRouter(
     tags=["stream"],
@@ -121,6 +135,49 @@ def append_zone_message(
     """Append a user message to the zone via `append_message(..., body.text)`; answers 201."""
     message = append_message(connection, generator, current_user.id, session_id, body.text)
     return _message_to_response(message)
+
+
+def get_chat_client_factory() -> ChatClientFactory:
+    """The chat-client factory dependency: the real `LlmClient` class (D14). Tests override it."""
+    return LlmClient
+
+
+def get_tool_registry() -> ToolRegistry:
+    """The tool-registry dependency: `PRODUCTION_TOOL_REGISTRY` (004, D14). Tests override it."""
+    return PRODUCTION_TOOL_REGISTRY
+
+
+@router.post("/api/sessions/{session_id}/zone/compose", status_code=200)
+def compose_zone(
+    session_id: SnowflakeIn,
+    body: ComposeRequest,
+    request: Request,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+    generator: Annotated[SnowflakeGenerator, Depends(get_id_generator)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[ChatClientFactory, Depends(get_chat_client_factory)],
+    registry: Annotated[ToolRegistry, Depends(get_tool_registry)],
+) -> StreamingResponse:
+    """Commit (or check) via `begin_compose`, then stream `compose_stream` (D1, D2).
+
+    Returns `sse_response(request, compose_stream(engine=get_engine(settings), ...),
+    own_connection_persister(get_engine(settings), generator, user id, session id))`.
+    """
+    accepted_id = begin_compose(connection, generator, current_user.id, session_id, body.text)
+    engine = get_engine(settings)
+    source = compose_stream(
+        engine,
+        generator,
+        current_user.id,
+        session_id,
+        accepted_id,
+        settings.llm_request_timeout_seconds,
+        client_factory,
+        registry,
+    )
+    on_partial = own_connection_persister(engine, generator, current_user.id, session_id)
+    return sse_response(request, source, on_partial)
 
 
 @router.post("/api/sessions/{session_id}/settle", status_code=200)

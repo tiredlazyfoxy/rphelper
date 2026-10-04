@@ -18,7 +18,7 @@ import pytest
 from app.services import context as context_module
 from app.services.context import ForcedNoteLevel, render_system_prompt, to_chat_messages
 from app.services.llm import chat as chat_module
-from app.services.llm.chat import ChatMessage
+from app.services.llm.chat import ChatMessage, ToolCall
 from app.services.messages import StreamMessage
 
 # --- literals from context.md "The prompt format" ----------------------------------------
@@ -543,11 +543,12 @@ def test_both_empty_gives_empty_list__S020_001_DoD13() -> None:
     assert to_chat_messages([], []) == []
 
 
-# --- DoD-14: tool rows skipped -----------------------------------------------------------------
+# --- DoD-14: tool rows (amended by 021 `002` DoD-9 to 021 D9: replayed when replayable) -------
 
 
-def test_tool_rows_are_skipped_in_either_list__S020_001_DoD14() -> None:
-    """DoD-14 / D3 — a `tool` row in either list is absent; the rest keep id order."""
+def test_tool_rows_are_skipped_in_either_list__S020_001_DoD14__S021_002_DoD9() -> None:
+    """DoD-14, amended to 021 D9 — a `tool` row with no payload / name cannot be replayed and is
+    absent; the rest keep id order."""
     entries = [
         _settled(40, "turn", "settled-40"),
         _settled(20, "turn", "settled-tool-20", "tool"),
@@ -569,6 +570,41 @@ def test_tool_rows_are_skipped_in_either_list__S020_001_DoD14() -> None:
         assert "tool-20" not in message.content
         assert "tool-30" not in message.content
         assert message.role in ("user", "assistant")
+
+
+def test_tool_row_with_valid_payload_is_replayed_not_dropped__S020_001_DoD14__S021_002_DoD9() -> None:
+    """021 `002` DoD-9 / D9 — a `role="tool"` zone row with a valid payload is replayed at its id
+    position as an assistant message carrying its one call, then a tool message with that call id."""
+    tool_row = StreamMessage(
+        id=30,
+        session_id=1,
+        role="tool",
+        kind=None,
+        text="zone-tool-30 summary",
+        settled_at=None,
+        created_at=_TS,
+        updated_at=_TS,
+        tool_name="memo_search",
+        tool_payload='{"call_id": "c1", "arguments": "{\\"query\\": \\"inn\\"}", "status": "ok", '
+        '"content": "Inn is the Gull"}',
+    )
+    entries = [_settled(10, "partner", "settled-10")]
+    zone = [_zone(50, "zone-50", "assistant"), tool_row, _zone(20, "zone-20")]
+    messages = to_chat_messages(entries, zone)
+    assert [
+        (m.role, m.content, tuple(m.tool_calls), m.tool_call_id) for m in messages
+    ] == [
+        ("user", TAG_PARTNER + "\nsettled-10", (), None),
+        ("user", "zone-20", (), None),
+        (
+            "assistant",
+            "",
+            (ToolCall(call_id="c1", name="memo_search", arguments='{"query": "inn"}'),),
+            None,
+        ),
+        ("tool", "Inn is the Gull", (), "c1"),
+        ("assistant", "zone-50", (), None),
+    ]
 
 
 # --- DoD-15: verbatim texts --------------------------------------------------------------------

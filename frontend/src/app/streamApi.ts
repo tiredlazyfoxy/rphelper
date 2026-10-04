@@ -96,16 +96,18 @@ export async function reopenLastEntry(
 }
 
 /**
- * 019 004: `POST /api/sessions/<sessionId>/zone/compose` with `{ text }` over `003`'s SSE
- * consumer; resolves to the consumer's outcome unchanged. The signal is required (D12).
+ * 019 004: `POST /api/sessions/<sessionId>/zone/compose` with `{ text }` — or exactly `{}`
+ * when no text is given (021 D2, D12) — over `003`'s SSE consumer; resolves to the consumer's
+ * outcome unchanged. The signal is required (D12).
  */
 export async function composeZone(
   sessionId: string,
-  text: string,
+  text: string | undefined,
   onFrame: (frame: SseProgressFrame) => void,
   signal: AbortSignal,
 ): Promise<SseOutcome> {
-  return postSse(sessionPath(sessionId, "/zone/compose"), { text }, onFrame, signal);
+  const body = text === undefined ? {} : { text };
+  return postSse(sessionPath(sessionId, "/zone/compose"), body, onFrame, signal);
 }
 
 /** `PATCH /api/messages/<messageId>` with `{ text }`. */

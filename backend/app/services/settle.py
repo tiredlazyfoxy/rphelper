@@ -3,9 +3,9 @@
 Feature `012`, step `003` (R11, D10, D16). Each operation is one write transaction, takes
 the Core `Connection` first and the owner's `user_id` as a required positional argument,
 and takes no target message id. This module imports nothing HTTP-shaped and, from
-`app.services.`, only `parens` (D11); its session check, session bump and clock are its own
-private helpers. Settle is two UPDATEs on `messages` (bury, then stamp the head) and adds or
-removes no row; re-open is its exact mirror.
+`app.services.`, only `parens` (D11) and `llm.chat`'s `strip_think` (feature `021` D4); its
+session check, session bump and clock are its own private helpers. Settle is two UPDATEs on
+`messages` (bury, then stamp the head) and adds or removes no row; re-open is its exact mirror.
 """
 
 from dataclasses import dataclass
@@ -21,6 +21,7 @@ from app.errors import (
     ZoneNotEmptyError,
 )
 from app.services import parens
+from app.services.llm.chat import strip_think
 
 
 @dataclass(frozen=True)
@@ -50,13 +51,17 @@ def settle(connection: Connection, user_id: int, session_id: int) -> SettleResul
                 zone_columns.session_id == session_id, zone_columns.user_id == user_id
             ).order_by(zone_columns.id.asc())
         ).all()
-        if not zone_rows:
+        # 021 D8: the head is the last non-tool row; a zone of only tool rows counts as empty.
+        heads = [row for row in zone_rows if row.role != "tool"]
+        if not heads:
             raise ZoneEmptyError()
-        head = zone_rows[-1]
+        head = heads[-1]
         head_id = int(head.id)
-        kind = parens.classify(head.text)
-        settled_text = head.text if kind == "decision" else parens.strip_fragments(head.text)
-        buried_ids = [int(row.id) for row in zone_rows[:-1]]
+        # 021 D4: an assistant head loses its think blocks before the `(( ))` classification.
+        head_text = strip_think(head.text) if head.role == "assistant" else head.text
+        kind = parens.classify(head_text)
+        settled_text = head_text if kind == "decision" else parens.strip_fragments(head_text)
+        buried_ids = [int(row.id) for row in zone_rows if int(row.id) != head_id]
         now = _now_text()
         # Bury first: once the head carries `settled_at` it has left the zone.
         if buried_ids:

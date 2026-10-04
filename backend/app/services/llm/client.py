@@ -1,14 +1,17 @@
-"""The one OpenAI-compatible client — models-listing probe and embeddings.
+"""The one OpenAI-compatible client — models-listing probe, embeddings and streaming chat.
 
 Feature `006`, step `002`. Parameterised by base URL and an already-resolved credential;
 there is no branch on provider kind. Resolves no secret, reads no settings, imports no
 `fastapi`, touches no database. No log line, exception message or `detail` carries the
 credential, the authorization header or a provider response body.
 
-`chat_stream` is deliberately absent (features `019`/`021`).
+`chat_stream` (feature `021`, step `003`, D10) streams one chat-completions request and
+yields the provider's deltas per chunk, unaccumulated; closing the iterator early exits the
+httpx stream, which cancels the upstream request.
 """
 
-from collections.abc import Sequence
+import json
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
@@ -16,6 +19,7 @@ from typing import Final
 import httpx
 
 from app.errors import LlmUnreachableError
+from app.services.llm.chat import ChatMessage, to_wire_message
 
 
 class ProbeOutcome(StrEnum):
@@ -42,6 +46,32 @@ class ProbeResult:
     outcome: ProbeOutcome
     model_names: tuple[str, ...] = ()
     note: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolCallDelta:
+    """What one provider chunk carried for one tool call — unaccumulated (D10, D11).
+
+    `index` identifies the call within the round; `call_id` / `name` are set only on the
+    chunk that carried them; `arguments` is this chunk's argument fragment, verbatim.
+    """
+
+    index: int
+    call_id: str | None = None
+    name: str | None = None
+    arguments: str | None = None
+
+
+@dataclass(frozen=True)
+class ChatDelta:
+    """One provider chunk's `choices[0].delta` as `chat_stream` yields it (D10).
+
+    `reasoning` comes from the delta's `reasoning_content`, else its `reasoning`.
+    """
+
+    content: str | None = None
+    reasoning: str | None = None
+    tool_calls: tuple[ToolCallDelta, ...] = ()
 
 
 class LlmClient:
@@ -125,10 +155,112 @@ class LlmClient:
             raise _unreachable(EMBED_NO_VECTOR_REASON)
         return vectors
 
+    async def chat_stream(
+        self,
+        model: str,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[Mapping[str, object]],
+    ) -> AsyncIterator[ChatDelta]:
+        """Stream `POST <base>/v1/chat/completions` and yield one `ChatDelta` per non-empty chunk.
+
+        Body `{"model", "messages": [to_wire_message(m)...], "stream": true}` plus `"tools"`
+        only when `tools` is non-empty. Stops at `data: [DONE]` or a clean end of body. A
+        non-2xx status (before any delta), a transport error or timeout, or an unparseable
+        `data:` payload raises `LlmUnreachableError` via `_unreachable`. `aclose()` exits the
+        httpx stream and client contexts.
+        """
+        payload: dict[str, object] = {
+            "model": model,
+            "messages": [to_wire_message(message) for message in messages],
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = [dict(tool) for tool in tools]
+        try:
+            # Both contexts are entered inside the generator, so `aclose()` unwinds them and
+            # closing the response stream is what cancels the upstream request.
+            async with self._http() as http:
+                async with http.stream(
+                    "POST", self._url("chat/completions"), headers=self._headers(), json=payload
+                ) as response:
+                    if response.status_code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN):
+                        raise _unreachable(ProbeOutcome.AUTH_FAILED.value)
+                    if not response.is_success:
+                        raise _unreachable(ProbeOutcome.UNREACHABLE.value)
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:") :]
+                        if data.startswith(" "):
+                            data = data[1:]
+                        if data.strip() == "[DONE]":
+                            return
+                        if not data.strip():
+                            continue
+                        delta = _chat_delta(data)
+                        if delta is not None:
+                            yield delta
+        except (httpx.HTTPError, httpx.InvalidURL):
+            raise _unreachable(ProbeOutcome.UNREACHABLE.value) from None
+
 
 def _unreachable(reason: str) -> LlmUnreachableError:
     """The one failure shape `embed` raises: a structured reason and nothing else."""
     return LlmUnreachableError("The LLM server could not produce embeddings.", {"reason": reason})
+
+
+def _text_or_none(value: object) -> str | None:
+    """A non-empty string as-is; anything else (absent, null, `""`, non-string) is `None`."""
+    return value if isinstance(value, str) and value else None
+
+
+def _chat_delta(data: str) -> ChatDelta | None:
+    """One `data:` payload's `choices[0].delta`, or `None` when the chunk carries nothing.
+
+    Raises `LlmUnreachableError` when the payload is not JSON.
+    """
+    try:
+        chunk: object = json.loads(data)
+    except ValueError:
+        raise _unreachable(ProbeOutcome.UNREACHABLE.value) from None
+    if not isinstance(chunk, dict):
+        return None
+    choices = chunk.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return None
+    delta = choices[0].get("delta")
+    if not isinstance(delta, dict):
+        return None
+
+    content = _text_or_none(delta.get("content"))
+    reasoning = _text_or_none(delta.get("reasoning_content")) or _text_or_none(delta.get("reasoning"))
+    tool_calls: list[ToolCallDelta] = []
+    raw_calls = delta.get("tool_calls")
+    if isinstance(raw_calls, list):
+        for position, raw in enumerate(raw_calls):
+            if not isinstance(raw, dict):
+                continue
+            index = raw.get("index", position)
+            if isinstance(index, bool) or not isinstance(index, int):
+                index = position
+            function = raw.get("function")
+            if not isinstance(function, dict):
+                function = {}
+            call_id = raw.get("id")
+            name = function.get("name")
+            arguments = function.get("arguments")
+            tool_calls.append(
+                ToolCallDelta(
+                    index=index,
+                    call_id=call_id if isinstance(call_id, str) else None,
+                    name=name if isinstance(name, str) else None,
+                    arguments=arguments if isinstance(arguments, str) else None,
+                )
+            )
+
+    if content is None and reasoning is None and not tool_calls:
+        return None
+    return ChatDelta(content=content, reasoning=reasoning, tool_calls=tuple(tool_calls))
 
 
 def _json_body(response: httpx.Response) -> object:

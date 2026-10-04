@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -28,7 +29,7 @@ from app.errors import SessionNotFoundError
 from app.roles import Role
 from app.services import context as context_module
 from app.services.context import AssembledContext, assemble_context
-from app.services.llm.chat import ChatMessage
+from app.services.llm.chat import ChatMessage, ToolCall
 
 TIMESTAMP = "2026-01-01T00:00:00.000000+00:00"
 ARCHIVED_AT = "2026-02-01T00:00:00.000000+00:00"
@@ -233,6 +234,8 @@ def _insert_message(
     kind: str | None = None,
     related_to: int | None = None,
     settled_at: str | None = None,
+    tool_name: str | None = None,
+    tool_payload: str | None = None,
 ) -> None:
     with engine.begin() as connection:
         connection.execute(
@@ -247,6 +250,8 @@ def _insert_message(
                 settled_at=settled_at,
                 created_at=TIMESTAMP,
                 updated_at=TIMESTAMP,
+                tool_name=tool_name,
+                tool_payload=tool_payload,
             )
         )
 
@@ -858,25 +863,89 @@ def test_an_archived_session_under_an_archived_character_assembles__S020_002_DoD
     ]
 
 
-# --- DoD-13: tool rows are skipped --------------------------------------------------------
+# --- DoD-13: tool rows (amended by 021 `002` DoD-8 to 021 D9: zone tool rows are replayed) --
 
 
-def test_a_tool_zone_row_is_skipped_and_the_rest_keep_their_order__S020_002_DoD13(
+def _shapes(context: AssembledContext) -> list[tuple[str, str, tuple[ToolCall, ...], str | None]]:
+    return [
+        (m.role, m.content, tuple(m.tool_calls), m.tool_call_id) for m in context.messages
+    ]
+
+
+def test_a_tool_zone_row_is_replayed_at_its_id_position__S020_002_DoD13__S021_002_DoD8(
     engine: Engine,
 ) -> None:
+    """021 `002` DoD-8 / D9 — a zone tool row becomes an assistant call + a tool result."""
     _zone(engine, 4_131, "Zone row before the tool row.")
     _settled(engine, 4_132, "partner", "Partner block filed between zone rows.")
-    _zone(engine, 4_133, "TOOL ROW PAYLOAD TEXT", role="tool")
+    _insert_message(
+        engine,
+        message_id=4_133,
+        session_id=SESSION_MAIN,
+        text="TOOL ROW SUMMARY TEXT",
+        role="tool",
+        tool_name="memo_search",
+        tool_payload=json.dumps(
+            {
+                "call_id": "c1",
+                "arguments": '{"query": "inn"}',
+                "status": "ok",
+                "content": "Inn is the Gull",
+            }
+        ),
+    )
     _zone(engine, 4_134, "Assistant row after the tool row.", role="assistant")
 
     result = _assemble(engine)
 
-    assert list(result.messages) == [
-        ChatMessage(role="user", content="Zone row before the tool row."),
-        ChatMessage(role="user", content="[partner]\nPartner block filed between zone rows."),
-        ChatMessage(role="assistant", content="Assistant row after the tool row."),
+    assert _shapes(result) == [
+        ("user", "Zone row before the tool row.", (), None),
+        ("user", "[partner]\nPartner block filed between zone rows.", (), None),
+        (
+            "assistant",
+            "",
+            (ToolCall(call_id="c1", name="memo_search", arguments='{"query": "inn"}'),),
+            None,
+        ),
+        ("tool", "Inn is the Gull", (), "c1"),
+        ("assistant", "Assistant row after the tool row.", (), None),
     ]
-    assert "TOOL ROW PAYLOAD TEXT" not in _all_text(result)
+    assert "TOOL ROW SUMMARY TEXT" not in _all_text(result)
+
+
+def test_a_buried_tool_row_is_absent_from_every_message__S021_002_DoD8(engine: Engine) -> None:
+    """021 `002` DoD-8 / D9 / R11 / UC-038 — a tool row buried under a settled head never
+    reaches context: no call, no tool message, none of its content or arguments."""
+    _settled(engine, 4_141, "turn", "The settled head turn.")
+    _insert_message(
+        engine,
+        message_id=4_142,
+        session_id=SESSION_MAIN,
+        text="BURIED tool summary",
+        role="tool",
+        related_to=4_141,
+        tool_name="memo_search",
+        tool_payload=json.dumps(
+            {
+                "call_id": "c_buried",
+                "arguments": '{"query": "BURIED-ARGS"}',
+                "status": "ok",
+                "content": "BURIED tool content",
+            }
+        ),
+    )
+    _zone(engine, 4_143, "A newer zone row.")
+
+    result = _assemble(engine)
+
+    assert _shapes(result) == [
+        ("user", "[my turn]\nThe settled head turn.", (), None),
+        ("user", "A newer zone row.", (), None),
+    ]
+    assert "BURIED" not in _all_text(result)
+    for message in result.messages:
+        assert message.tool_call_id is None
+        assert list(message.tool_calls) == []
 
 
 # --- DoD-14: no compaction ----------------------------------------------------------------

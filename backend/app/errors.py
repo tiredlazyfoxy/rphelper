@@ -500,6 +500,24 @@ class MemoOrderMismatchError(DomainError):
         super().__init__(message, detail)
 
 
+class ToolFailedError(DomainError):
+    """A model-called tool failed while composing a reply.
+
+    Feature `021` (`context.md` D13). 502: like `llm_unreachable`, the fault is a dependency's
+    (search index, embedding model, web provider), not the caller's. The raiser puts the tool
+    name in `detail` (`{"tool": <name>}`). In `021` it only names the `tool_fail` frame's code.
+    """
+
+    code = "tool_failed"
+    http_status = 502
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # The raiser supplies `detail`; an explicit message still wins.
+        if message is None:
+            message = "A tool failed while composing the reply."
+        super().__init__(message, detail)
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later

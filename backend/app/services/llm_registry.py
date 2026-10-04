@@ -12,7 +12,7 @@ designation and the use-time validators to this same module, sharing the client-
 seam declared below.
 """
 
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -26,7 +26,8 @@ from app.db.schema import llm_servers, models
 from app.errors import LlmServerNotFoundError, LlmUnreachableError, ModelNotEnabledError, NoEmbeddingModelError
 from app.ids import SnowflakeGenerator
 from app.secrets import resolve_secret
-from app.services.llm.client import EMBED_NO_VECTOR_REASON, LlmClient, ProbeOutcome, ProbeResult
+from app.services.llm.chat import ChatMessage
+from app.services.llm.client import EMBED_NO_VECTOR_REASON, ChatDelta, LlmClient, ProbeOutcome, ProbeResult
 
 
 class Unset(Enum):
@@ -54,6 +55,22 @@ class LlmClientLike(Protocol):
 LlmClientFactory = Callable[[str, str | None, float], LlmClientLike]
 """`(base_url, resolved_api_key, timeout_seconds) -> client`. The default is `LlmClient`
 itself; tests inject a fake so no network is involved."""
+
+
+class ChatClientLike(Protocol):
+    """What the compose loop needs from a client — `chat_stream` only (feature `021`, D14)."""
+
+    def chat_stream(
+        self,
+        model: str,
+        messages: Sequence[ChatMessage],
+        tools: Sequence[Mapping[str, object]],
+    ) -> AsyncIterator[ChatDelta]: ...
+
+
+ChatClientFactory = Callable[[str, str | None, float], ChatClientLike]
+"""`(base_url, resolved_api_key, timeout_seconds) -> chat client`. `LlmClient` satisfies it;
+tests inject a fake. Separate from `LlmClientFactory` so existing probe/embed fakes stay valid."""
 
 
 @dataclass(frozen=True)
@@ -598,6 +615,31 @@ def first_enabled_chat_model(connection: Connection) -> EnabledChatModel | None:
     """
     enabled = list_enabled_chat_models(connection)
     return enabled[0] if enabled else None
+
+
+def open_chat_client(
+    connection: Connection,
+    enabled_model: EnabledChatModel,
+    timeout_seconds: float,
+    client_factory: ChatClientFactory,
+) -> ChatClientLike:
+    """Build the chat client for `enabled_model`'s server — the `probe_server` pattern (D14).
+
+    Re-reads the server's `api_key_ref`, `resolve_secret`s it (`SecretRefError` /
+    `secret_ref_missing` before the factory is called), then returns
+    `client_factory(server.base_url, api_key, timeout_seconds)`. Writes nothing and leaves no
+    transaction open.
+    """
+    server_id = enabled_model.server.id
+    with _reading(connection):
+        row = connection.execute(
+            select(llm_servers.c.base_url, llm_servers.c.api_key_ref).where(llm_servers.c.id == server_id)
+        ).first()
+    if row is None:
+        raise _not_found()
+    # Resolved at call time; a missing variable raises before any client exists.
+    api_key = resolve_secret(row.api_key_ref)
+    return client_factory(row.base_url, api_key, timeout_seconds)
 
 
 def validate_embedding_model(connection: Connection) -> DesignatedEmbeddingModel:

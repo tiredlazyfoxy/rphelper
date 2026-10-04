@@ -921,15 +921,26 @@ def _called_name(node: ast.Call) -> str | None:
     return None
 
 
-def test_settle_imports_parens_and_no_other_service__S012_003_DoD23() -> None:
-    """DoD-23 — D11: `parens` is imported; nothing else from `app.services.`."""
+#: Feature 021 step 001 (D4): settle think-strips an assistant head with `strip_think`,
+#: imported from `app.services.llm.chat` — the one other allowed `app.services` import.
+_ALLOWED_CHAT_MODULE = f"{_APP_SERVICES}.llm.chat"
+_ALLOWED_CHAT_NAMES = {"strip_think"}
+
+
+def test_settle_imports_parens_and_no_other_service__S012_003_DoD23__S021_001_DoD10() -> None:
+    """DoD-23 — D11: `parens` is imported; nothing else from `app.services.`, except (021
+    001, D4) `strip_think` from `app.services.llm.chat`."""
     imports_parens = False
     offenders: list[str] = []
     for node in ast.walk(_settle_tree()):
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
             names = [alias.name for alias in node.names]
-            if node.level > 0:
+            if node.level == 0 and module == _ALLOWED_CHAT_MODULE:
+                offenders.extend(
+                    f"from {module} import {name}" for name in names if name not in _ALLOWED_CHAT_NAMES
+                )
+            elif node.level > 0:
                 if module == "" and names == ["parens"]:
                     imports_parens = True
                 elif module == "parens":

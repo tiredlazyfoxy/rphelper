@@ -19,6 +19,13 @@
 // tags are 017 step 011's: on *my turn* a non-null reason disables Send whatever the draft and
 // shows the sentence; Settle is never gated; on *partner* the reason is not shown and Send and
 // the paste file as before; a null reason changes nothing.
+//
+// Amended by feature 021, step 007 (DoD-7, D12): Send on *my turn* now composes — POST
+// …/zone/compose {"text"} answered with a streamed `accepted` + `done` body — instead of POST
+// …/zone/messages. The two Send-on-my-turn cases (013 DoD-9, 017 step 011 DoD-7) expect the
+// compose path; 013 DoD-13's pending case moves to *partner* (the branch that keeps `busy`), since
+// a my-turn compose leaves Settle enabled mid-stream (019 D13). Settle still appends via
+// …/zone/messages, so every Settle case is unchanged.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
@@ -40,6 +47,7 @@ const BASE = `/api/sessions/${SESSION_ID}`;
 const ENTRIES_PATH = `${BASE}/entries`;
 const ZONE_PATH = `${BASE}/zone`;
 const APPEND_PATH = `${BASE}/zone/messages`;
+const COMPOSE_PATH = `${BASE}/zone/compose`;
 const SETTLE_PATH = `${BASE}/settle`;
 
 const STAMP = "2026-05-10T09:00:00.000000+00:00";
@@ -118,6 +126,22 @@ function envelope(code: string, status: number): Response {
   return jsonResponse({ error: { code, message: `refused: ${code}`, detail: {} } }, status);
 }
 
+// 021 step 007: the compose route's streamed `accepted` + `done` body, built fresh per call.
+const enc = new TextEncoder();
+function composedOk(): Response {
+  const frames = [
+    { event: "accepted", message_id: "7250000000000000304" },
+    { event: "done", message_id: "7250000000000000305" },
+  ];
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const frame of frames) controller.enqueue(enc.encode(`data: ${JSON.stringify(frame)}\n\n`));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+}
+
 function requestUrl(input: RequestInfo | URL): URL {
   const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   return new URL(raw, "http://localhost");
@@ -157,6 +181,8 @@ function happyBackend(after: { entries?: Message[]; zone?: Message[] } = {}): Se
       return jsonResponse(entry("7250000000000000301", "partner", "filed"), 201);
     if (method === "POST" && pathname === APPEND_PATH)
       return jsonResponse(zoneRow("7250000000000000302", "user", "appended"), 201);
+    // 021 step 007: Send on my turn composes.
+    if (method === "POST" && pathname === COMPOSE_PATH) return composedOk();
     if (method === "POST" && pathname === SETTLE_PATH)
       return jsonResponse({ entry_id: "7250000000000000303", kind: "turn", buried_ids: [] }, 200);
     return undefined;
@@ -419,7 +445,8 @@ describe("Composer — Send (D6, D7)", () => {
     expect(sent[0]?.body).toBe('{"kind":"partner","text":"Typed partner text"}');
   });
 
-  it('on my turn with draft "Discussion line", Send POSTs …/zone/messages {"text":"Discussion line"} — DoD-9', async () => {
+  // 021 step 007 (DoD-7): was POST …/zone/messages; Send on my turn now composes.
+  it('[021 step 007 DoD-7] on my turn with draft "Discussion line", Send POSTs …/zone/compose {"text":"Discussion line"} — DoD-9', async () => {
     const log = happyBackend();
     const user = newUser();
     const state = seeded({ draft: "Discussion line" });
@@ -433,24 +460,27 @@ describe("Composer — Send (D6, D7)", () => {
     await flush();
 
     const sent = posts(log);
-    expect(sent.map((s) => s.line)).toEqual([`POST ${APPEND_PATH}`]);
+    expect(sent.map((s) => s.line)).toEqual([`POST ${COMPOSE_PATH}`]);
     expect(sent[0]?.body).toBe('{"text":"Discussion line"}');
+    expect(lines(log)).not.toContain(`POST ${APPEND_PATH}`);
   });
 
-  it("while a Send is pending, Send and Settle are disabled — DoD-13", async () => {
+  // 021 step 007 (DoD-7): a my-turn Send no longer holds `busy` (019 D13: Settle stays enabled
+  // mid-stream), so the pending case runs on partner, whose filing keeps 013's busy handling.
+  it("[021 step 007 DoD-7] while a partner Send is pending, Send and Settle are disabled — DoD-13", async () => {
     const pending = deferred<Response>();
     stubFetch((method, pathname) => {
-      if (method === "POST" && pathname === APPEND_PATH) return pending.promise;
+      if (method === "POST" && pathname === ENTRIES_PATH) return pending.promise;
       if (method === "GET" && pathname === ZONE_PATH) return jsonResponse({ messages: [] }, 200);
-      if (method === "GET" && pathname === ENTRIES_PATH) return jsonResponse({ entries: [] }, 200);
+      if (method === "GET" && pathname === ENTRIES_PATH) return jsonResponse({ entries: partnerDefaultEntries() }, 200);
       return undefined;
     });
     const user = newUser();
-    const state = seeded({ draft: "Hello" });
+    const state = seeded({ entries: partnerDefaultEntries(), draft: "Hello" });
     renderComposer(state);
+    expect(effectiveKind(state)).toBe("partner");
 
     expect(sendButton()).toBeEnabled();
-    expect(settleButton()).toBeEnabled();
 
     await user.click(sendButton());
 
@@ -460,7 +490,7 @@ describe("Composer — Send (D6, D7)", () => {
     expect(settleButton()).toBeDisabled();
 
     await act(async () => {
-      pending.resolve(jsonResponse(zoneRow("7250000000000000302", "user", "Hello"), 201));
+      pending.resolve(jsonResponse(entry("7250000000000000301", "partner", "Hello"), 201));
     });
     await flush();
   });
@@ -715,7 +745,8 @@ describe("017 step 011 — Composer's sendBlockedReason gate (US-107.AC-1, US-10
     expect(sendButton()).toBeDisabled();
   });
 
-  it("with sendBlockedReason null on my turn, Send is enabled with a draft and POSTs …/zone/messages; no reason is shown — DoD-7", async () => {
+  // 021 step 007 (DoD-7): was POST …/zone/messages; Send on my turn now composes.
+  it("with sendBlockedReason null on my turn, Send is enabled with a draft and POSTs …/zone/compose; no reason is shown [021 step 007 DoD-7] — DoD-7", async () => {
     const log = happyBackend();
     const user = newUser();
     const state = seeded({ draft: "Discussion line" });
@@ -733,7 +764,7 @@ describe("017 step 011 — Composer's sendBlockedReason gate (US-107.AC-1, US-10
     await flush();
 
     const sent = posts(log);
-    expect(sent.map((s) => s.line)).toEqual([`POST ${APPEND_PATH}`]);
+    expect(sent.map((s) => s.line)).toEqual([`POST ${COMPOSE_PATH}`]);
     expect(sent[0]?.body).toBe('{"text":"Discussion line"}');
   });
 

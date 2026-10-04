@@ -893,18 +893,5 @@ def test_module_issues_no_sql__S006_002_DoD14() -> None:
     assert "Engine" not in names
 
 
-# --------------------------------------------------------------------------- DoD-15
-
-
-def test_chat_stream_is_absent_from_the_client__S006_002_DoD15() -> None:
-    """006/002 DoD-15: ``chat_stream`` exists on neither the class nor an instance."""
-    assert not hasattr(LlmClient, "chat_stream")
-    assert not hasattr(LlmClient(HOST, None, TIMEOUT, transport=Recorder(ok_router).transport), "chat_stream")
-    assert "chat_stream" not in dir(client_module)
-
-
-def test_chat_stream_is_not_written_or_stubbed_anywhere_in_the_module__S006_002_DoD15() -> None:
-    """006/002 DoD-15: no def, attribute, name or code string ``chat_stream`` — not even a stub."""
-    tree = module_tree()
-    assert "chat_stream" not in identifiers(tree)
-    assert [value for value in code_strings(tree) if "chat_stream" in value] == []
+# 006/002 DoD-15's two ``chat_stream``-absence tests were removed by feature 021 step 003
+# (``003.chat-stream-client.md`` DoD-8): ``chat_stream`` now exists by design.

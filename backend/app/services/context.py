@@ -6,6 +6,7 @@ the only addition is the kind tag on settled rows (D1, R12). No logging, no cach
 compaction (D11, D12).
 """
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
@@ -13,7 +14,7 @@ from typing import Final, Literal
 from sqlalchemy import Connection
 
 from app.services import characters, configuration, memo_chain, messages, sessions
-from app.services.llm.chat import ChatMessage, ChatRole
+from app.services.llm.chat import ChatMessage, ChatRole, ToolCall, strip_think
 from app.services.messages import StreamMessage
 
 ForcedNoteScope = Literal["user", "character", "setup", "session"]
@@ -122,9 +123,17 @@ def to_chat_messages(
     entries: Sequence[StreamMessage],
     zone: Sequence[StreamMessage],
 ) -> list[ChatMessage]:
-    """Merge settled and zone rows by id ascending into chat messages. Pure."""
+    """Merge settled and zone rows by id ascending into chat messages. Pure.
+
+    A current-zone assistant row is think-stripped (feature `021` D4); a tool row is replayed
+    as an assistant call plus its tool result, or skipped when it cannot be replayed (D9).
+    """
+    zone_ids = {row.id for row in zone}
     result: list[ChatMessage] = []
     for row in sorted([*entries, *zone], key=lambda message: message.id):
+        if row.role == "tool":
+            result.extend(_replay_tool_row(row))
+            continue
         role: ChatRole
         if row.role == "user":
             role = "user"
@@ -132,10 +141,44 @@ def to_chat_messages(
             role = "assistant"
         else:
             continue
+        body = row.text
+        if role == "assistant" and row.id in zone_ids:
+            body = strip_think(body)
         tag = KIND_TAGS.get(row.kind) if row.kind is not None else None
-        content = row.text if tag is None else tag + "\n" + row.text
+        content = body if tag is None else tag + "\n" + body
         result.append(ChatMessage(role=role, content=content))
     return result
+
+
+def _replay_tool_row(row: StreamMessage) -> list[ChatMessage]:
+    """One tool row as its assistant call and tool result (D9); empty when not replayable."""
+    if row.tool_name is None or row.tool_payload is None:
+        return []
+    try:
+        payload = json.loads(row.tool_payload)
+    except ValueError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    call_id = payload.get("call_id")
+    arguments = payload.get("arguments")
+    status = payload.get("status")
+    if not isinstance(call_id, str) or not isinstance(arguments, str) or status is None:
+        return []
+    if status == "ok":
+        content = payload.get("content")
+        if not isinstance(content, str):
+            return []
+    else:
+        content = "The tool failed. Continue without its result."
+    return [
+        ChatMessage(
+            role="assistant",
+            content="",
+            tool_calls=(ToolCall(call_id=call_id, name=row.tool_name, arguments=arguments),),
+        ),
+        ChatMessage(role="tool", content=content, tool_call_id=call_id),
+    ]
 
 
 @dataclass(frozen=True)

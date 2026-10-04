@@ -13,6 +13,14 @@
 //     makes no request; a failure notifies, re-reads the zone and resolves false;
 //   - every failure goes through notifyFailure with the thrown error; no success path calls it;
 //   - nothing is written once the signal is aborted, and no effect rejects.
+//
+// Amended by feature 021, step 007 (DoD-7, D12): Send on *my turn* now composes through 019's
+// `composeMessage` — POST …/zone/compose {"text"} streamed, then a zone re-read; it never sets
+// `busy` and never posts …/zone/messages. The 013 *my turn* `sendComposer` cases (DoD-1, DoD-3's
+// failed append, DoD-4's busy case, and the my-turn rows of DoD-14 / DoD-15) are rewritten to
+// that path; DoD-4's busy-while-pending case moves to the *partner* branch, which keeps `busy`.
+// Partner, paste, settle, re-open and edit cases are unchanged (settle still appends via
+// …/zone/messages).
 import { runInAction, toJS } from "mobx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, MessageKind, MessageRole } from "../../src/app/streamApi";
@@ -39,6 +47,7 @@ const SESSION_ID = "s1";
 const ENTRIES_PATH = `/api/sessions/${SESSION_ID}/entries`;
 const ZONE_PATH = `/api/sessions/${SESSION_ID}/zone`;
 const ZONE_MESSAGES_PATH = `/api/sessions/${SESSION_ID}/zone/messages`;
+const COMPOSE_PATH = `/api/sessions/${SESSION_ID}/zone/compose`;
 const SETTLE_PATH = `/api/sessions/${SESSION_ID}/settle`;
 const REOPEN_PATH = `/api/sessions/${SESSION_ID}/reopen`;
 const messagePath = (id: string): string => `/api/messages/${id}`;
@@ -47,6 +56,7 @@ const GET_ENTRIES = `GET ${ENTRIES_PATH}`;
 const GET_ZONE = `GET ${ZONE_PATH}`;
 const POST_ENTRIES = `POST ${ENTRIES_PATH}`;
 const POST_ZONE_MESSAGES = `POST ${ZONE_MESSAGES_PATH}`;
+const POST_COMPOSE = `POST ${COMPOSE_PATH}`;
 const POST_SETTLE = `POST ${SETTLE_PATH}`;
 const POST_REOPEN = `POST ${REOPEN_PATH}`;
 const patchMessage = (id: string): string => `PATCH ${messagePath(id)}`;
@@ -193,6 +203,36 @@ const created = (message: Message): Route => () => jsonResponse(message, 201);
 const ok = (body: unknown): Route => () => jsonResponse(body, 200);
 const fails = (code: string, status: number): Route => () => envelope(code, status);
 
+// 021 step 007: the compose route's streamed body (accepted, token, done), built fresh per call.
+const enc = new TextEncoder();
+function sseResponse(payloads: unknown[]): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const payload of payloads) controller.enqueue(enc.encode(`data: ${JSON.stringify(payload)}\n\n`));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+}
+const COMPOSE_ACCEPTED_ID = "7250000000000000970";
+const COMPOSE_DONE_ID = "7250000000000000971";
+const composedOk = (): Response =>
+  sseResponse([
+    { event: "accepted", message_id: COMPOSE_ACCEPTED_ID },
+    { event: "token", text: "A reply." },
+    { event: "done", message_id: COMPOSE_DONE_ID },
+  ]);
+const composes: Route = () => composedOk();
+
+/** Rejects if `promise` has not settled within `ms`, so a stuck call fails instead of hanging. */
+function within<T>(promise: Promise<T>, ms = 2000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function expectNotifiedOnceWith(code: string): void {
   expect(notifyFailureSpy).toHaveBeenCalledTimes(1);
   const error = notifyFailureSpy.mock.calls[0]?.[0];
@@ -211,24 +251,29 @@ const REOPEN_RESULT = { reopened_id: "7250000000000000980", restored_ids: ["7250
 
 // ---------------------------------------------------------------------------
 describe("sendComposer on my turn", () => {
-  it("POSTs exactly …/zone/messages with the draft verbatim, then GETs the zone; draft cleared, zone the re-read list — DoD-1", async () => {
+  // 021 step 007 (DoD-7): was POST …/zone/messages; Send on my turn now composes.
+  it("[021 step 007 DoD-7] POSTs exactly …/zone/compose with the draft verbatim, then GETs the zone; draft cleared, zone the re-read list — DoD-1", async () => {
     const held = zoneRow("assistant", "Earlier zone row.");
-    const appended = zoneRow("user", "Hello ((calm))");
-    const reread = [held, appended];
+    const appended = zoneRow("user", "Hello ((calm))", COMPOSE_ACCEPTED_ID);
+    const reread = [held, appended, zoneRow("assistant", "A reply.", COMPOSE_DONE_ID)];
     const backend = serve({
-      [POST_ZONE_MESSAGES]: created(appended),
+      [POST_COMPOSE]: composes,
       [GET_ZONE]: zoneList(reread),
     });
     const state = seeded({ zone: [held], draft: "Hello ((calm))", kindOverride: "turn" });
 
-    await expect(sendComposer(state)).resolves.toBeUndefined();
+    await expect(within(sendComposer(state))).resolves.toBeUndefined();
 
-    expect(backend.keys()).toEqual([POST_ZONE_MESSAGES, GET_ZONE]);
-    expect(backend.bodyOf(POST_ZONE_MESSAGES)).toStrictEqual({ text: "Hello ((calm))" });
+    const keys = backend.keys();
+    expect(keys[0]).toBe(POST_COMPOSE);
+    expect(keys.slice(1).every((k) => k === GET_ZONE)).toBe(true);
+    expect(keys.length).toBeGreaterThan(1);
+    expect(backend.bodyOf(POST_COMPOSE)).toStrictEqual({ text: "Hello ((calm))" });
     expect(state.draft).toBe("");
     expect(toJS(state.zone)).toEqual(reread);
-    expect(backend.keys()).not.toContain(GET_ENTRIES);
-    expect(backend.keys()).not.toContain(POST_ENTRIES);
+    expect(keys).not.toContain(POST_ZONE_MESSAGES);
+    expect(keys).not.toContain(GET_ENTRIES);
+    expect(keys).not.toContain(POST_ENTRIES);
     expect(notifyFailureSpy).not.toHaveBeenCalled();
   });
 });
@@ -255,20 +300,21 @@ describe("sendComposer on partner", () => {
 });
 
 describe("sendComposer failures and blank drafts", () => {
-  it("a 500 on the append notifies once with that ApiError, keeps the draft, re-reads the zone, ends not busy — DoD-3", async () => {
+  // 021 step 007 (DoD-7): was a 500 on POST …/zone/messages; the my-turn request is now the compose.
+  it("[021 step 007 DoD-7] a 500 on the compose notifies once with that ApiError, keeps the draft, re-reads the zone, ends not busy — DoD-3", async () => {
     const held = zoneRow("user", "Held row.");
     const reread = [held, zoneRow("assistant", "Arrived meanwhile.")];
     const backend = serve({
-      [POST_ZONE_MESSAGES]: fails("internal_error", 500),
+      [POST_COMPOSE]: fails("internal_error", 500),
       [GET_ZONE]: zoneList(reread),
     });
     const state = seeded({ zone: [held], draft: "Do not lose me.", kindOverride: "turn" });
 
-    await expect(sendComposer(state)).resolves.toBeUndefined();
+    await expect(within(sendComposer(state))).resolves.toBeUndefined();
 
     expectNotifiedOnceWith("internal_error");
     expect(state.draft).toBe("Do not lose me.");
-    expect(backend.keys()).toEqual([POST_ZONE_MESSAGES, GET_ZONE]);
+    expect(backend.keys()).toEqual([POST_COMPOSE, GET_ZONE]);
     expect(toJS(state.zone)).toEqual(reread);
     expect(state.busy).toBe(false);
   });
@@ -310,22 +356,42 @@ describe("sendComposer failures and blank drafts", () => {
 });
 
 describe("sendComposer and busy", () => {
-  it("is busy while the POST is pending and not busy after it settles — DoD-4", async () => {
+  // 021 step 007 (DoD-7): the my-turn Send no longer sets busy (019 D13); the busy-while-pending
+  // case now runs on the partner branch, which keeps 013's busy handling exactly.
+  it("[021 step 007 DoD-7] on partner, is busy while the POST is pending and not busy after it settles — DoD-4", async () => {
     const answer = deferred<Response>();
-    const appended = zoneRow("user", "Pending text.");
+    const filed = entry("partner", "Pending text.");
     serve({
-      [POST_ZONE_MESSAGES]: () => answer.promise,
-      [GET_ZONE]: zoneList([appended]),
+      [POST_ENTRIES]: () => answer.promise,
+      [GET_ENTRIES]: entriesList([filed]),
     });
-    const state = seeded({ draft: "Pending text.", kindOverride: "turn" });
+    const state = seeded({ draft: "Pending text.", kindOverride: "partner" });
     expect(state.busy).toBe(false);
 
     const running = sendComposer(state);
     await flush();
     expect(state.busy).toBe(true);
 
-    answer.resolve(jsonResponse(appended, 201));
-    await expect(running).resolves.toBeUndefined();
+    answer.resolve(jsonResponse(filed, 201));
+    await expect(within(running)).resolves.toBeUndefined();
+    expect(state.busy).toBe(false);
+  });
+
+  it("[021 step 007 DoD-7] on my turn, is never busy while the compose is pending or after it settles — DoD-4", async () => {
+    const answer = deferred<Response>();
+    serve({
+      [POST_COMPOSE]: () => answer.promise,
+      [GET_ZONE]: zoneList([zoneRow("user", "Pending text.", COMPOSE_ACCEPTED_ID)]),
+    });
+    const state = seeded({ draft: "Pending text.", kindOverride: "turn" });
+    expect(state.busy).toBe(false);
+
+    const running = sendComposer(state);
+    await flush();
+    expect(state.busy).toBe(false);
+
+    answer.resolve(composedOk());
+    await expect(within(running)).resolves.toBeUndefined();
     expect(state.busy).toBe(false);
   });
 });
@@ -620,8 +686,9 @@ const ABORT_CASES: AbortCase[] = [
     label: "sendComposer on my turn",
     seed: () => seeded({ entries: [ABORT_ENTRY], zone: [ABORT_ROW], draft: "Unsent words.", kindOverride: "turn" }),
     run: (state, signal) => sendComposer(state, signal),
-    firstKey: () => POST_ZONE_MESSAGES,
-    firstOk: () => jsonResponse(zoneRow("user", "Unsent words."), 201),
+    // 021 step 007 (DoD-7): the my-turn Send's first request is now the compose.
+    firstKey: () => POST_COMPOSE,
+    firstOk: () => composedOk(),
   },
   {
     label: "sendComposer on partner",
@@ -707,6 +774,7 @@ describe("every effect and its signal", () => {
       const answer = deferred<Response>();
       serve({
         [POST_ZONE_MESSAGES]: () => jsonResponse(zoneRow("user", "Late append."), 201),
+        [POST_COMPOSE]: composes,
         [POST_ENTRIES]: () => jsonResponse(entry("partner", "Late filing."), 201),
         [POST_SETTLE]: ok(SETTLE_RESULT),
         [POST_REOPEN]: ok(REOPEN_RESULT),
@@ -740,6 +808,8 @@ describe("success paths never notify", () => {
   function serveAllSuccess(): void {
     serve({
       [POST_ZONE_MESSAGES]: created(zoneRow("user", "Ok text.")),
+      // 021 step 007 (DoD-7): Send on my turn composes.
+      [POST_COMPOSE]: composes,
       [POST_ENTRIES]: created(entry("partner", "Ok text.")),
       [POST_SETTLE]: ok(SETTLE_RESULT),
       [POST_REOPEN]: ok(REOPEN_RESULT),

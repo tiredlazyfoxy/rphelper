@@ -13,7 +13,8 @@ shared `NonBlankText` type checks it. The value is stored **verbatim** — never
 the rule is an `AfterValidator` that returns its input unchanged, not
 `StringConstraints(strip_whitespace=True)`. No maximum length (R10). `FilePartnerRequest`'s
 `kind` is required and accepts exactly `"partner"` (R11's single exception). Unknown keys are
-ignored.
+ignored. `ComposeRequest` (feature `021`) is the one exception to "required": its `text` may
+be absent or null (the retry, D2), and is `NonBlankText` when present.
 
 This module imports neither `app.services`, `app.routers`, `app.db` nor `fastapi`.
 """
@@ -67,6 +68,17 @@ class AppendMessageRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     text: NonBlankText
+
+
+class ComposeRequest(BaseModel):
+    """The compose body (feature `021`, D1/D2): `text` optional — absent or null is the retry.
+
+    When present, `text` is refused as blank exactly as `AppendMessageRequest` refuses it (422).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    text: NonBlankText | None = None
 
 
 class FilePartnerRequest(BaseModel):
