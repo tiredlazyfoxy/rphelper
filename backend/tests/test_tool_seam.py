@@ -344,30 +344,41 @@ def _all_tool_rows(engine: Engine) -> list[dict[str, Any]]:
 
 
 # =========================================================================================
-# DoD-2: the production registry is empty
+# DoD-2: the production registry holds exactly the registered tools
+# Amended by 026 step 002 (DoD-15): it registers `memo_search`, so "empty" is no longer true.
+# The `__S021_004_DoD2` tag is kept; only the three emptiness assertions moved.
 # =========================================================================================
 
 
-def test_the_production_registry_is_empty__S021_004_DoD2() -> None:
-    """DoD-2 / D5 — no tool is registered in production."""
-    assert len(PRODUCTION_TOOL_REGISTRY) == 0
-    assert list(PRODUCTION_TOOL_REGISTRY) == []
+# Amended by 026 step 002: the registry now holds exactly `memo_search`.
+def test_the_production_registry_holds_exactly_memo_search__S021_004_DoD2() -> None:
+    """DoD-2 / D5 — exactly the tools registered so far: `memo_search` (026), and no other."""
+    assert len(PRODUCTION_TOOL_REGISTRY) == 1
+    assert list(PRODUCTION_TOOL_REGISTRY) == ["memo_search"]
 
 
+# Amended by 026 step 002: the trailing length is 1; the registry is still a `MappingProxyType`.
 def test_the_production_registry_is_read_only__S021_004_DoD2() -> None:
-    """DoD-2 / Interface intent — an empty, read-only mapping: item assignment is refused."""
+    """DoD-2 / Interface intent — a read-only mapping: item assignment is refused."""
     fake = RecordingTool("memo_search")
     with pytest.raises(TypeError):
         PRODUCTION_TOOL_REGISTRY["memo_search"] = fake  # type: ignore[index]
-    assert len(PRODUCTION_TOOL_REGISTRY) == 0
+    assert len(PRODUCTION_TOOL_REGISTRY) == 1
 
 
-def test_offered_tools_over_the_production_registry_is_empty__S021_004_DoD2() -> None:
-    """DoD-2 / D5 / U3 — all three switches on, empty registry → nothing offered."""
+# Amended by 026 step 002: `memo_search` is registered, so the switch is now what decides.
+def test_offered_tools_over_the_production_registry_is_memo_search__S021_004_DoD2() -> None:
+    """DoD-2 / D5 / U3 — all three switches on → exactly the one registered declaration; with
+    the memo-search switch off → nothing."""
     offered = offered_tools(
         _configuration(memo=True, session=True, web=True), PRODUCTION_TOOL_REGISTRY
     )
-    assert list(offered) == []
+    assert list(offered) == [MEMO_SEARCH]
+
+    switched_off = offered_tools(
+        _configuration(memo=False, session=True, web=True), PRODUCTION_TOOL_REGISTRY
+    )
+    assert list(switched_off) == []
 
 
 # =========================================================================================
@@ -780,6 +791,8 @@ ALLOWED_SERVICE_MODULES = {
     "app.services.llm.chat",
     "app.services.llm.frames",
     "app.services.tools.definitions",
+    # Added by 026 step 002 (DoD-15): the seam imports the adapter to register it.
+    "app.services.tools.memo_search",
 }
 
 

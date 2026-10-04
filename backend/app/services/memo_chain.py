@@ -4,12 +4,16 @@ Feature `015`, step `003` (FEAT-008). `resolve_chain` does one owner-scoped sess
 one memo select whose OR-terms are built from the levels that exist (R2); `memo_reach` is
 the backend twin of R3's three-way derivation, `is_enabled` checked first (D7). From
 `app.services.memos` this module imports only `Memo` and its row mapper (D11).
+
+Feature `026`, step `001` adds `chain_clause`: the chain (R2) as a reusable boolean clause over a
+caller-supplied relation, so it has one home (026 D2). `resolve_chain` now builds its OR-terms
+through that clause; its behaviour — rows, order and `SessionNotFoundError` — is unchanged.
 """
 
 from dataclasses import dataclass
 from typing import Literal
 
-from sqlalchemy import ColumnElement, Connection, and_, or_, select
+from sqlalchemy import ColumnElement, Connection, FromClause, and_, or_, select
 
 from app.db.schema import memos, sessions
 from app.errors import SessionNotFoundError
@@ -29,6 +33,42 @@ class MemoChainLevel:
     scope: MemoScope
     scope_id: int | None
     memos: list[Memo]
+
+
+def chain_clause(
+    relation: FromClause,
+    user_id: int,
+    character_id: int,
+    setup_id: int | None,
+    session_id: int,
+) -> ColumnElement[bool]:
+    """The chain as one boolean clause over `relation`: the OR of its existing levels (R2, D2).
+
+    `relation` is any FROM object exposing the `scope` / `scope_id` columns — the `memos` table or
+    an alias of it — and is the only table this clause names. The disjunction's terms are, in this
+    order, `(scope = 'user' AND scope_id = user_id)`, `(scope = 'character' AND scope_id =
+    character_id)`, `(scope = 'setup' AND scope_id = setup_id)` and `(scope = 'session' AND
+    scope_id = session_id)`; the **setup term is present only when `setup_id` is not `None`**, so a
+    session with no setup yields three terms and no gap (US-065.AC-1).
+
+    The ids are the ids memos **store**: a user-level note's `scope_id` is the owner's `user_id`,
+    not `None` the way `MemoChainLevel.scope_id` reports it. Owner scoping is not this clause's
+    business — the caller ANDs `user_id` in (R5).
+
+    Pure: reads nothing, executes nothing, takes no connection.
+    """
+    # `relation.c["..."]` rather than `relation.c....`: a `FromClause`'s columns are only typed
+    # through the mapping access, and the relation may be an alias the port minted (U1).
+    scope_column = relation.c["scope"]
+    scope_id_column = relation.c["scope_id"]
+    levels: list[tuple[MemoScope, int]] = [("user", user_id), ("character", character_id)]
+    if setup_id is not None:
+        levels.append(("setup", setup_id))
+    levels.append(("session", session_id))
+    terms: list[ColumnElement[bool]] = [
+        and_(scope_column == scope, scope_id_column == stored_id) for scope, stored_id in levels
+    ]
+    return or_(*terms)
 
 
 def resolve_chain(connection: Connection, user_id: int, session_id: int) -> list[MemoChainLevel]:
@@ -51,12 +91,11 @@ def resolve_chain(connection: Connection, user_id: int, session_id: int) -> list
         if session_row.setup_id is not None:
             levels.append(("setup", session_row.setup_id, session_row.setup_id))
         levels.append(("session", session_id, session_id))
-        # One select: one OR-term per existing level; the owner predicate stays in SQL (R5).
-        terms: list[ColumnElement[bool]] = [
-            and_(memos.c.scope == scope, memos.c.scope_id == stored_id) for scope, _, stored_id in levels
-        ]
+        # One select, through the one chain clause (026 D2): one OR-term per existing level, in the
+        # same order and over the same stored ids as before. The owner predicate stays in SQL (R5).
+        chain = chain_clause(memos, user_id, session_row.character_id, session_row.setup_id, session_id)
         rows = connection.execute(
-            select(memos).where(memos.c.user_id == user_id, or_(*terms)).order_by(memos.c.sort_key, memos.c.id)
+            select(memos).where(memos.c.user_id == user_id, chain).order_by(memos.c.sort_key, memos.c.id)
         ).all()
     finally:
         if opened_here and connection.in_transaction():

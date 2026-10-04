@@ -216,8 +216,17 @@ RESCUE_TARGET = RESCUE_BASE + 500
 RESCUE_POOL = tuple(f"rescue pool vector source text number {index}" for index in range(300))
 RESCUE_LIMIT = 10
 
-#: The six modules `context.md` "Files this feature touches" lists (DoD-15).
-SEARCH_PACKAGE_MODULES = ("__init__.py", "ports.py", "candidates.py", "lexical.py", "vector.py", "hybrid.py")
+#: The modules `context.md` "Files this feature touches" lists (DoD-15), plus `memo_search.py`,
+#: which feature 026 step 001 adds to the package — so the two scans below keep covering every file.
+SEARCH_PACKAGE_MODULES = (
+    "__init__.py",
+    "ports.py",
+    "candidates.py",
+    "lexical.py",
+    "vector.py",
+    "hybrid.py",
+    "memo_search.py",
+)
 
 #: D3's hit shape, exactly — step 001's frozen field list. No title, ever (US-119).
 EXPECTED_HIT_FIELDS = frozenset(
@@ -1144,8 +1153,11 @@ def _imported_roots(module_path: Path) -> set[str]:
     return roots
 
 
-def test_the_six_search_modules_are_all_present_to_scan__S025_004_DoD15() -> None:
-    """The scan would be vacuous if a module were missing, so pin the file list first."""
+def test_the_seven_search_modules_are_all_present_to_scan__S025_004_DoD15() -> None:  # 026 `001` added the seventh
+    """The scan would be vacuous if a module were missing, so pin the file list first.
+
+    Seven, not six: feature 026 step 001 added `memo_search.py` to the package.
+    """
     directory = _package_directory()
 
     assert {path.name for path in directory.glob("*.py")} == set(SEARCH_PACKAGE_MODULES)

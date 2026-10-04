@@ -29,6 +29,7 @@ from app.services.tools.definitions import (
     WEB_SEARCH_NAME,
     ToolDeclaration,
 )
+from app.services.tools.memo_search import MemoSearchTool
 
 TOOL_FAILED_CONTENT: Final = "The tool failed. Continue without its result."
 """The tool message content sent to the model for a failed call."""
@@ -69,8 +70,8 @@ class Tool(Protocol):
 ToolRegistry = Mapping[str, Tool]
 """Name → `Tool`. Injectable; the production one is empty in `021`."""
 
-PRODUCTION_TOOL_REGISTRY: Final[ToolRegistry] = MappingProxyType({})
-"""The production registry: empty and read-only until `026`–`028` register implementations."""
+PRODUCTION_TOOL_REGISTRY: Final[ToolRegistry] = MappingProxyType({MEMO_SEARCH_NAME: MemoSearchTool()})
+"""The production registry: read-only, and holds `memo_search` from `026` (`027`–`028` follow)."""
 
 
 @dataclass(frozen=True)

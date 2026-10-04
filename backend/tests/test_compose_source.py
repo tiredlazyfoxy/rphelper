@@ -1043,20 +1043,24 @@ def test_closing_the_source_after_a_token_closes_the_provider_stream__S021_005_D
 
 
 # =========================================================================================
-# DoD-13: production registry → empty tools list
+# DoD-13: production registry → the registered declarations
+# Amended by 026 step 002 (DoD-15): it registers `memo_search`, so the real registry no longer
+# yields an empty tools list. The `__S021_005_DoD13` tag is kept.
 # =========================================================================================
 
 
-def test_the_production_registry_sends_an_empty_tools_list__S021_005_DoD13(
+# Amended by 026 step 002: the production registry now holds `memo_search`.
+def test_the_production_registry_sends_the_memo_search_declaration__S021_005_DoD13(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-13 / D5 / U3 — all switches on, empty registry → the client gets `tools == []`."""
+    """DoD-13 / D5 / U3 — all switches on, the real registry → the client gets exactly the
+    `memo_search` declaration."""
     client = FakeChatClient([[_content("Hi")]])
 
     _run(engine, generator, FakeFactory(client), PRODUCTION_TOOL_REGISTRY)
 
     assert len(client.calls) == 1
-    assert client.calls[0].tools == []
+    assert client.calls[0].tools == [dict(MEMO_SEARCH)]
 
 
 # =========================================================================================
