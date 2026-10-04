@@ -43,8 +43,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy import Connection
 
+from app.config import Settings, get_settings
 from app.db.engine import get_connection
-from app.dependencies import CurrentUser, require_user
+from app.dependencies import CurrentUser, get_llm_client_factory, require_user
 from app.ids import SnowflakeGenerator
 from app.models.ids import SnowflakeIn
 from app.models.setups import (
@@ -54,6 +55,7 @@ from app.models.setups import (
     UpdateSetupRequest,
 )
 from app.routers.bootstrap import get_id_generator
+from app.services.llm_registry import LlmClientFactory
 from app.services.setups import (
     Setup,
     archive_setup,
@@ -125,13 +127,30 @@ def update_own_setup(
     body: UpdateSetupRequest,
     current_user: Annotated[CurrentUser, Depends(require_user)],
     connection: Annotated[Connection, Depends(get_connection)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
 ) -> SetupResponse:
-    """Write the supplied fields via `update_setup(...)`; `None` means not supplied."""
+    """Write the supplied fields via `update_setup(...)`; `None` means not supplied.
+
+    The shared client factory and the one outbound timeout go in by keyword (024 D9),
+    because a changed `description` re-indexes every session on this setup strictly: an
+    unusable designation or a failed embed answers 409 `no_embedding_model` / 502
+    `llm_unreachable` through the global `DomainError` handler and stores nothing. Neither
+    dependency shows on the wire, and no other route of this router needs them.
+    """
     # An unsupplied field and an explicit `null` are both `None` on the model, which is
     # exactly the service's "not supplied" (D5, 009 D7): a PATCH supplying neither writes
     # nothing and answers the unchanged setup. `character_id` is not a field of the model,
     # so a body carrying it is ignored and the setup never moves.
-    setup = update_setup(connection, current_user.id, setup_id, body.name, body.description)
+    setup = update_setup(
+        connection,
+        current_user.id,
+        setup_id,
+        body.name,
+        body.description,
+        client_factory=client_factory,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
     return _to_response(setup)
 
 

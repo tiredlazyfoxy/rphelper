@@ -17,6 +17,13 @@ contract): `StartSessionRequest` gains an optional `opening_message`, and
 DoD-8 assertions that pinned the request's field set to exactly `setup_id` are widened to
 include `opening_message` (user-approved mechanical amendment); those tests and the new
 ones carry the suffix `__S018_001_DoD<n>`.
+
+Key-set repaired by feature 024, step 005 (`docs/plans/024.embedding-lifecycle/context.md`
+**Wire contract** and the regression-fallout protocol; authorised by `status.md`
+`## Ultra phase` conflict (5)): the embedded `MessageResponse` gained the required boolean
+`search_coverage_incomplete`, always present on the wire and `false` outside the
+record-keeping routes, so the embedded message's key set is **twelve** keys. Only the
+message key set, the message value and its expected wire object changed.
 """
 
 import json
@@ -439,6 +446,9 @@ OPENING_MESSAGE_ID = 7250000000000000104
 
 #: Amended by feature 022, step 001 (D3, DoD-4): 012's `Message` gains `tool_name`,
 #: `tool_status` and `tool_args` — eleven keys, all three null on a non-tool row.
+#: Amended by feature 024, step 005 (`context.md` **Wire contract**: `search_coverage_incomplete`
+#: is a boolean **always present** on the backend wire, and `false` on any route other than the
+#: record-keeping ones) — twelve keys. Authorised by `status.md` `## Ultra phase` conflict (5).
 MESSAGE_WIRE_KEYS = {
     "id",
     "session_id",
@@ -451,6 +461,7 @@ MESSAGE_WIRE_KEYS = {
     "tool_name",
     "tool_status",
     "tool_args",
+    "search_coverage_incomplete",
 }
 
 
@@ -473,7 +484,11 @@ def _session_value(**overrides: Any) -> SimpleNamespace:
 
 
 def _message_value() -> SimpleNamespace:
-    """The opening message value: a current-zone user row (kind and settled_at null)."""
+    """The opening message value: a current-zone user row (kind and settled_at null).
+
+    024/005 Wire contract: `search_coverage_incomplete` is required on `MessageResponse`, and a
+    zone row always carries `false`.
+    """
     return SimpleNamespace(
         id=OPENING_MESSAGE_ID,
         session_id=STARTED_SESSION_ID,
@@ -483,6 +498,7 @@ def _message_value() -> SimpleNamespace:
         settled_at=None,
         created_at=CREATED_AT,
         updated_at=CREATED_AT,
+        search_coverage_incomplete=False,
     )
 
 
@@ -509,6 +525,8 @@ EXPECTED_MESSAGE_WIRE: dict[str, Any] = {
     "tool_name": None,
     "tool_status": None,
     "tool_args": None,
+    # 024/005 Wire contract: always present; `false` for a zone row.
+    "search_coverage_incomplete": False,
 }
 
 
@@ -552,9 +570,9 @@ def test_started_response_with_a_null_setup_keeps_the_nulls__S018_001_DoD6() -> 
 
 
 def test_started_response_with_a_message_serialises_the_eight_key_message__S018_001_DoD6__S022_001_DoD4() -> None:
-    """018/001 DoD-6 (amended by 022 001 DoD-4) — built with a message value,
-    `opening_message` is 012's message object, now eleven keys with the three tool fields
-    null, with string ids; the session keys are unchanged."""
+    """018/001 DoD-6 (amended by 022 001 DoD-4, then by 024 005) — built with a message value,
+    `opening_message` is 012's message object, now twelve keys with the three tool fields null
+    and `search_coverage_incomplete` false, with string ids; the session keys are unchanged."""
     payload = _wire(_started_from_attributes(_session_value(), _message_value()))
 
     assert set(payload) == WIRE_KEYS | {"opening_message"}
@@ -567,8 +585,8 @@ def test_started_response_with_a_message_serialises_the_eight_key_message__S018_
 
 
 def test_started_response_accepts_a_message_response__S018_001_DoD6__S022_001_DoD4() -> None:
-    """018/001 DoD-6 (amended by 022 001 DoD-4) — `opening_message` is a 012
-    `MessageResponse`: one given directly serialises to the same (now eleven-key) object."""
+    """018/001 DoD-6 (amended by 022 001 DoD-4, then by 024 005) — `opening_message` is a 012
+    `MessageResponse`: one given directly serialises to the same (now twelve-key) object."""
     fields = {key: value for key, value in vars(_session_value()).items() if key != "user_id"}
     message = MessageResponse(**vars(_message_value()))
     payload = _wire(StartedSessionResponse(**fields, opening_message=message))

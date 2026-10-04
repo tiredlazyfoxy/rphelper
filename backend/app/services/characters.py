@@ -11,6 +11,14 @@ The six operations below are the whole surface: nothing here ever removes a row 
 character leaves the working list by `archive_character` and comes back by
 `restore_character`, and the row survives both.
 
+Feature `024`, step `006` adds one seam and nothing else: when `update_character` writes a
+`sheet` that differs from the stored one, every session that persona feeds is re-indexed
+inside the same transaction, strictly (024 D5, D8, U4). That work lives in
+`app.services.session_index` — the single service this module imports — so the outbound
+client factory and the one outbound timeout arrive here as keyword-only arguments with
+defaults (024 D9) and no setting is ever looked up. `create_character`, `archive_character`
+and `restore_character` do no search work at all.
+
 Implementation notes for the coder (nothing below is frozen): the statements run against
 the `characters` Table from `app.db.schema`; reads end the transaction they autobegan so a
 later `connection.begin()` on the same request-scoped connection still works; writes run
@@ -30,6 +38,13 @@ from sqlalchemy import Connection, Row, Select, Update, select
 from app.db.schema import characters
 from app.errors import CharacterNotFoundError
 from app.ids import SnowflakeGenerator
+from app.services.session_index import (
+    DEFAULT_EMBED_TIMEOUT_SECONDS,
+    LlmClient,
+    LlmClientFactory,
+    refresh_session_vectors,
+    session_ids_for_character,
+)
 
 
 @dataclass(frozen=True)
@@ -114,12 +129,23 @@ def update_character(
     character_id: int,
     name: str | None = None,
     sheet: str | None = None,
+    *,
+    client_factory: LlmClientFactory = LlmClient,
+    timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> Character:
     """Write the supplied fields of the owner's character and bump `updated_at`.
 
     `None` means "not supplied". With neither supplied nothing is written and the current
     row comes back. `archived_at` is never touched here, so an archived character can be
     edited.
+
+    A `sheet` that differs from the stored one also re-indexes every session of this
+    character, archived ones included, inside this one transaction and **strictly**: an
+    unusable designation or a failed embed propagates, and the persona edit is not stored
+    (024 D5, D6, D8, U4). A name-only edit, a resent unchanged sheet, and a character with
+    no sessions do no search work and resolve no model, so they need neither keyword
+    argument. `client_factory` and `timeout_seconds` are keyword-only with the usual
+    defaults (024 D9), which is why every existing positional call still binds.
     """
     supplied: dict[str, Any] = {}
     if name is not None:
@@ -128,10 +154,36 @@ def update_character(
         supplied["sheet"] = sheet
     with connection.begin():
         character = _require_character(connection, user_id, character_id)
+        # The pre-update sheet, taken from the owner-scoped read the authorisation already
+        # performs: this is the only moment the stored value is still the old one, and
+        # "changed" is defined against it (024 D5).
+        stored_sheet = character.sheet
         if supplied:
             supplied["updated_at"] = _now_text()
             connection.execute(_owned_update(user_id, character_id).values(supplied))
             character = _fetch_existing(connection, user_id, character_id)
+        # The persona fan-out, last in this write transaction so every composed session text
+        # reads the sheet the block above just wrote (024 D6). The dispatch is narrow on
+        # purpose: a sheet that was not supplied, and a sheet resent identical to the stored
+        # one, both fall through — a name-only edit does no search work and resolves no
+        # model, whatever the registry holds (024 D5).
+        if sheet is not None and sheet != stored_sheet:
+            # Ascending id, archived sessions included, no archive predicate (U4): a restored
+            # session must not come back silently stale.
+            session_ids = session_ids_for_character(connection, user_id, character_id)
+            # Only when N > 0 (U4). A character with no session has nothing to re-index, so
+            # the strict refresh is never entered and no designation is resolved.
+            if session_ids:
+                # Strict (024 D8): nothing here is caught, so an unusable designation or a
+                # failed embed propagates, this transaction rolls back, and the sheet stays
+                # as it was — the persona edit is not stored.
+                refresh_session_vectors(
+                    connection,
+                    user_id,
+                    session_ids,
+                    client_factory=client_factory,
+                    timeout_seconds=timeout_seconds,
+                )
     return character
 
 

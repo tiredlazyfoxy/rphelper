@@ -99,6 +99,10 @@ OK_PAYLOAD = (
 )
 
 #: D3 — the eight 012 keys plus `tool_name`, `tool_status`, `tool_args`.
+#: Amended by feature 024, step 005 (DoD-9 regression fallout; `context.md` **Wire contract**:
+#: always present on the backend wire, and `false` on any route that is not a record-keeping
+#: write) — plus `search_coverage_incomplete`, twelve keys. Scope here is this key set alone;
+#: the flag's behaviour is covered in `test_record_keeping_embedding.py`.
 MESSAGE_KEYS = {
     "id",
     "session_id",
@@ -111,6 +115,7 @@ MESSAGE_KEYS = {
     "tool_name",
     "tool_status",
     "tool_args",
+    "search_coverage_incomplete",
 }
 
 

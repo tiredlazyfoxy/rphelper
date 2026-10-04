@@ -1,9 +1,21 @@
 """A user's memos — create at a level, list one level, update, delete.
 
 Feature `015`, step `002` (FEAT-008). Plain arguments in, a frozen `Memo` out or a typed
-`DomainError` raised. This module imports nothing HTTP-shaped and no other service module.
-Every operation takes a Core `Connection` first and the owner's `user_id` as a required
-positional argument after it (after the id generator, for the create).
+`DomainError` raised. This module imports nothing HTTP-shaped. Every operation takes a Core
+`Connection` first and the owner's `user_id` as a required positional argument after it
+(after the id generator, for the create).
+
+Feature `024`, step `004` added the search seam: a write that stores a new body, or removes
+a memo, keeps that memo's search rows in step **inside the same transaction** (024 D5, D7).
+That makes `app.services.embedding` the **one and only** other service module imported here;
+everything else it needs (the vector table name, the two ensure functions) lives under
+`app.db`. The client factory and the outbound timeout arrive as keyword-only arguments with
+defaults (024 D9), so every existing positional caller still calls the same way.
+
+The posture is **strict** (024 D8): if the designated embedding model is unusable or the
+embed call fails, `NoEmbeddingModelError` / `LlmUnreachableError` propagates, the
+transaction rolls back and nothing is stored. A flag-only update, a body equal to the
+stored one and `reorder_memos` do no search work at all and never touch the factory.
 """
 
 from collections.abc import Iterator
@@ -15,6 +27,7 @@ from typing import Any
 from sqlalchemy import Connection, Row, Update, func, select
 
 from app.db.schema import characters, memos, sessions, setups
+from app.db.search_tables import MEMO_VEC_TABLE, ensure_fts_tables, ensure_vector_tables
 from app.errors import (
     CharacterNotFoundError,
     MemoNotFoundError,
@@ -24,6 +37,15 @@ from app.errors import (
 )
 from app.ids import SnowflakeGenerator
 from app.models.memos import MemoScope
+from app.services.embedding import (
+    DEFAULT_EMBED_TIMEOUT_SECONDS,
+    LlmClient,
+    LlmClientFactory,
+    delete_vector,
+    embed_texts,
+    open_embedding_model,
+    write_vector,
+)
 
 
 @dataclass(frozen=True)
@@ -68,8 +90,17 @@ def create_memo(
     scope: MemoScope,
     scope_id: int | None,
     body: str,
+    *,
+    client_factory: LlmClientFactory = LlmClient,
+    timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> Memo:
-    """Insert one enabled, not-forced memo at the caller's addressed level and return it."""
+    """Insert one enabled, not-forced memo at the caller's addressed level and return it.
+
+    `client_factory` and `timeout_seconds` are keyword-only with defaults (024 D9): the
+    route passes the shared factory and `settings.llm_request_timeout_seconds`, and a caller
+    that passes neither gets the real client and `Settings`' own declared default. They are
+    used only for the search seam below, and a blank body never reaches a model at all.
+    """
     with connection.begin():
         # D12's order: target check, allocation, id minting, insert. A refusal raises before
         # `next_id()`, so it inserts nothing and mints nothing.
@@ -99,6 +130,17 @@ def create_memo(
             )
         )
         memo = _fetch_existing(connection, user_id, new_id)
+        # The search seam, inside this transaction and after the insert (024 D5). Every create
+        # reaches it unguarded: the helper owns D7's blank-body decision, so a whitespace-only
+        # body resolves no model and calls no factory, while a real one embeds strictly and a
+        # failure rolls this insert back with it.
+        _refresh_memo_search_rows(
+            connection,
+            new_id,
+            body,
+            client_factory=client_factory,
+            timeout_seconds=timeout_seconds,
+        )
     return memo
 
 
@@ -132,8 +174,18 @@ def update_memo(
     body: str | None = None,
     is_enabled: bool | None = None,
     is_forced: bool | None = None,
+    *,
+    client_factory: LlmClientFactory = LlmClient,
+    timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> Memo:
-    """Write only the supplied columns (plus `updated_at` if any) and return the row after."""
+    """Write only the supplied columns (plus `updated_at` if any) and return the row after.
+
+    `client_factory` and `timeout_seconds` are keyword-only with defaults (024 D9), exactly
+    as on `create_memo`; the three positional value parameters keep their own defaults, so
+    every existing call shape still binds. They are consulted **only** when a supplied
+    `body` differs from the stored one — a flag-only update, or a body equal to the stored
+    one, must not construct a client whatever the registry holds (UC-044, UC-075).
+    """
     # Only supplied columns reach the SET clause: `is_enabled` alone never writes
     # `is_forced` (R3, US-101), and nothing supplied writes nothing (D6).
     supplied: dict[str, Any] = {}
@@ -145,19 +197,46 @@ def update_memo(
         supplied["is_forced"] = is_forced
     with connection.begin():
         memo = _require_memo(connection, user_id, memo_id)
+        # The owner-scoped read that authorises the update also answers "did the body change":
+        # this is the value **as stored before** the update, captured inside the same
+        # transaction (024 D5, `004.context.md`).
+        stored_body = memo.body
         if supplied:
             supplied["updated_at"] = _now_text()
             connection.execute(_owned_update(user_id, memo_id).values(supplied))
             memo = _fetch_existing(connection, user_id, memo_id)
+        # D5's guard, and the whole point of this step: search work happens only when a `body`
+        # was supplied **and** differs from what was stored. A flag-only update, and a body
+        # resent unchanged alongside a flag, therefore ensure no table, resolve no model and
+        # never call the factory, whatever the registry holds (UC-044, UC-075).
+        if body is not None and body != stored_body:
+            _refresh_memo_search_rows(
+                connection,
+                memo_id,
+                memo.body,
+                client_factory=client_factory,
+                timeout_seconds=timeout_seconds,
+            )
     return memo
 
 
 def delete_memo(connection: Connection, user_id: int, memo_id: int) -> None:
-    """Delete the caller's memo; `MemoNotFoundError` when it is missing or foreign."""
+    """Delete the caller's memo and its search rows; `MemoNotFoundError` when missing or foreign.
+
+    The signature is unchanged (024 D5): dropping a vector row needs no model, so this takes
+    neither a factory nor a timeout and can never answer `no_embedding_model`.
+    """
     with connection.begin():
         result = connection.execute(memos.delete().where(memos.c.id == memo_id, memos.c.user_id == user_id))
         if result.rowcount == 0:
             raise MemoNotFoundError()
+        # Inside this transaction and after the row is gone. The ensure is all a pre-024
+        # instance needs — once `memo_fts` exists its delete trigger has already removed the
+        # text row with the memo. The vector row has no trigger, so it goes by hand;
+        # `delete_vector` tolerates both an absent row and an absent table, and no model is
+        # resolved, so a delete can never answer `no_embedding_model`.
+        ensure_fts_tables(connection)
+        delete_vector(connection, MEMO_VEC_TABLE, memo_id)
 
 
 def reorder_memos(
@@ -233,6 +312,53 @@ def _fetch_existing(connection: Connection, user_id: int, memo_id: int) -> Memo:
     """Read back one memo known to exist, inside the caller's transaction."""
     row = connection.execute(select(memos).where(memos.c.id == memo_id, memos.c.user_id == user_id)).one()
     return to_memo(row)
+
+
+def _refresh_memo_search_rows(
+    connection: Connection,
+    memo_id: int,
+    body: str,
+    *,
+    client_factory: LlmClientFactory,
+    timeout_seconds: float,
+) -> None:
+    """Leave this memo's search rows matching `body`, inside the caller's transaction (024 D5/D7).
+
+    The one search seam of this module, and the only place a client is ever built here. `body`
+    is the body **as now stored**; `memo_id` is a memo that exists. Both keyword arguments are
+    required, so neither call site can drift onto a default.
+
+    The work, in this order (`004.context.md`):
+
+    1. ensure the full-text half — all a pre-024 instance needs; the `memo_fts` triggers keep
+       the text half in step by themselves once the table exists.
+    2. A non-blank `body` (024 D7): open the designated model, ensure the vector tables at its
+       dimension, make **one** embed call carrying the body **alone** — US-119 means a memo is
+       nothing but its body — and write the `memo_vec` row.
+    3. A whitespace-only `body`: drop the `memo_vec` row and nothing else. No model is
+       resolved and no embed call is made, because a blank memo has nothing to retrieve and an
+       empty string is an invalid embed input for common providers.
+
+    Strict (024 D8): nothing is caught. `NoEmbeddingModelError` (including the dimension
+    mismatch) and `LlmUnreachableError` propagate, and the caller's transaction rolls back
+    the relational write together with any DDL an ensure created.
+    """
+    # Step 1 runs on every call, blank body included, so a pre-024 instance ends up with its
+    # back-filled full-text tables even when there is nothing to embed.
+    ensure_fts_tables(connection)
+    if not body.strip():
+        # Step 3. Tolerant of an absent row and of a database with no vector table at all.
+        delete_vector(connection, MEMO_VEC_TABLE, memo_id)
+        return
+    # Step 2. The model is opened **before** the vector ensure, so a missing or unusable
+    # designation fails before any DDL; the ensure then precedes the write, so a dimension
+    # mismatch fails before any vector row is touched.
+    handle = open_embedding_model(connection, client_factory=client_factory, timeout_seconds=timeout_seconds)
+    ensure_vector_tables(connection, handle.embedding_dim)
+    # One call carrying one text. Unpacking a single vector makes a provider that answers the
+    # wrong count a `ValueError` instead of a silent miss (step 003's posture).
+    (vector,) = embed_texts(handle, [body])
+    write_vector(connection, MEMO_VEC_TABLE, memo_id, vector)
 
 
 @contextmanager

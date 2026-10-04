@@ -10,6 +10,12 @@ Covers step 002 DoD-1, DoD-2, DoD-3 (the new-surface half), DoD-5 .. DoD-12. DoD
 ``test_errors.py``; the deleted ``003/001`` purity clause is in ``test_db_schema.py``.
 DoD-13 and DoD-14 are ``[manual/live]``.
 
+Feature 024 step ``002`` adds one test at the end of this file for **its** DoD-9 (the shared
+``get_llm_client_factory`` dependency, D9). Its expected values come from
+``docs/plans/024.embedding-lifecycle/002.embedding-service.md`` and that feature's
+``context.md`` D9; its binding comes from 024's ``## Skeleton`` -> "Step 002". Nothing above
+it changed.
+
 Test applications are built locally: a bare ``FastAPI()`` with the one registered error
 handler, settings pinned through ``app.dependency_overrides[get_settings]``. The
 ``require_role(...)`` factory is only ever called inside fixtures or test bodies.
@@ -31,12 +37,14 @@ from fastapi import APIRouter, Depends, FastAPI, Response
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, Table, select, update
 
+from app import dependencies as dependencies_module
 from app import roles as roles_module
 from app.config import Settings, get_settings
 from app.db import schema
 from app.dependencies import (
     CurrentUser,
     clear_session_cookie,
+    get_llm_client_factory,
     require_role,
     require_user,
     set_session_cookie,
@@ -44,7 +52,9 @@ from app.dependencies import (
 from app.errors import register_exception_handlers
 from app.ids import SnowflakeGenerator
 from app.roles import ROLE_LADDER, Role, role_at_least
+from app.routers import admin_llm as admin_llm_module
 from app.services.auth import open_session, revoke_session
+from app.services.llm.client import LlmClient
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -700,3 +710,28 @@ def test_require_role_is_a_factory_returning_a_dependency__DoD12() -> None:
     assert callable(dependency)
     router = APIRouter(dependencies=[Depends(dependency)])  # constructible at router level
     assert len(router.dependencies) == 1
+
+
+# ============================================ feature 024, step 002 — DoD-9
+
+
+def test_the_shared_llm_client_factory_answers_the_real_client__S024_002_DoD9() -> None:
+    """024/002 DoD-9 — ``app.dependencies.get_llm_client_factory()`` returns the real
+    ``LlmClient`` class (D9: the move changes the home, never the answer).
+    """
+    assert dependencies_module.get_llm_client_factory is get_llm_client_factory
+    assert get_llm_client_factory() is LlmClient
+
+
+def test_the_admin_router_exposes_the_very_same_factory_object__S024_002_DoD9() -> None:
+    """024/002 DoD-9 — ``app.routers.admin_llm.get_llm_client_factory`` **is** the same object
+    as ``app.dependencies.get_llm_client_factory``. That identity is what keeps an existing
+    ``app.dependency_overrides`` entry keyed on the admin router's name valid (D9).
+    """
+    assert admin_llm_module.get_llm_client_factory is dependencies_module.get_llm_client_factory
+
+    # The practical consequence, stated as the override dict sees it: one key, not two.
+    app = FastAPI()
+    app.dependency_overrides[admin_llm_module.get_llm_client_factory] = lambda: LlmClient
+    assert dependencies_module.get_llm_client_factory in app.dependency_overrides
+    assert len(app.dependency_overrides) == 1

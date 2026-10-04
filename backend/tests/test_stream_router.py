@@ -15,6 +15,14 @@ Amended by feature 014, step 001 (``docs/plans/014.entry-editing-and-copy-out/
 entry of any kind; only a buried message stays 409 ``message_not_editable``. 012 DoD-13's
 settled-refusal cases are rewritten as successes; the 014 cases carry ``__S014_001_DoD<n>``.
 
+Amended by feature 024, step 005 (``docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md``
+DoD-9; ``context.md`` **Wire contract**, **D6**, **D8**, **U5**): settle, re-open, partner filing
+and the settled-row edit now answer ``search_coverage_incomplete``. This file designates no
+embedding model, so the degraded path answers ``true`` wherever the session text is non-empty and
+``false`` where D6 makes it empty (nothing to embed counts as complete). Only the key sets and the
+three exact-equality bodies were widened; every other assertion is untouched. The flag's own
+behaviour is covered in ``test_record_keeping_embedding.py``.
+
 The application is always the real factory's (``create_app()``), pinned to the per-test
 database through ``dependency_overrides[get_settings]``. Each signed-in caller gets its own
 ``TestClient`` carrying exactly one session cookie. Characters come from 009's
@@ -67,6 +75,8 @@ UNKNOWN_MESSAGE_ID = "7250000000000000004"
 #: The ``Message`` wire object's keys — eight in 012 (feature context, Wire contract).
 #: Amended by feature 022, step 001 (D3, DoD-4): plus ``tool_name``, ``tool_status`` and
 #: ``tool_args`` — eleven keys. Tests that pin the key set chain ``__S022_001_DoD4``.
+#: Amended by feature 024, step 005 (DoD-9 regression fallout, Wire contract): plus
+#: ``search_coverage_incomplete``, always present on the backend wire — twelve keys.
 MESSAGE_KEYS = {
     "id",
     "session_id",
@@ -79,6 +89,7 @@ MESSAGE_KEYS = {
     "tool_name",
     "tool_status",
     "tool_args",
+    "search_coverage_incomplete",
 }
 
 NOT_AUTHENTICATED = "not_authenticated"
@@ -332,7 +343,8 @@ def _is_decimal_string(value: Any) -> bool:
 
 
 def _assert_message_shape(message: dict[str, Any]) -> None:
-    """The ``Message`` wire object: exactly eleven keys (022 001 DoD-4), ids as decimal strings."""
+    """The ``Message`` wire object: exactly twelve keys (022 001 DoD-4 plus 024 005), ids as
+    decimal strings."""
     assert set(message) == MESSAGE_KEYS
     assert _is_decimal_string(message["id"])
     assert _is_decimal_string(message["session_id"])
@@ -447,7 +459,16 @@ def test_settle_a_lone_message_answers_the_turn__S012_004_DoD3(application: Fast
     response = client.post(_settle_path(session["id"]))
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"entry_id": message["id"], "kind": "turn", "buried_ids": []}
+    # 024 step 005 (DoD-9 fallout, Wire contract): `SettleResponse` gained the coverage flag.
+    # This file designates no embedding model, and the session text after the settle is
+    # non-empty (it holds the settled entry), so the degraded refresh cannot embed and the
+    # flag is `true` (`context.md` D8, U5). The ids and `kind` are unchanged.
+    assert response.json() == {
+        "entry_id": message["id"],
+        "kind": "turn",
+        "buried_ids": [],
+        "search_coverage_incomplete": True,
+    }
 
 
 def test_after_settle_the_zone_is_empty_and_the_entry_is_recorded__S012_004_DoD3__S022_001_DoD4(
@@ -502,7 +523,14 @@ def test_a_wholly_parenthesised_message_settles_as_a_decision__S012_004_DoD4(
 
     settled = _settle(client, session["id"])
 
-    assert settled == {"entry_id": decision["id"], "kind": "decision", "buried_ids": []}
+    # 024 step 005 (DoD-9 fallout): the flag is `true` — no model is designated here and the
+    # record holds two entries, so the session text is non-empty and cannot be embedded.
+    assert settled == {
+        "entry_id": decision["id"],
+        "kind": "decision",
+        "buried_ids": [],
+        "search_coverage_incomplete": True,
+    }
     entries = _entries(client, session["id"])
     assert _ids(entries) == [first["id"], decision["id"]]
     assert entries[1]["kind"] == "decision"
@@ -755,9 +783,14 @@ def test_reopen_restores_the_group_in_its_original_order__S012_004_DoD10__S022_0
     response = client.post(_reopen_path(session["id"]))
 
     assert response.status_code == 200, response.text
+    # 024 step 005 (DoD-9 fallout, Wire contract): `ReopenResponse` gained the coverage flag.
+    # Here the re-open empties the record, and `_new_session` gives the character a blank
+    # `sheet` and no setup, so the session text is **empty**: by `context.md` D6 there is
+    # nothing to embed, no model is resolved, and the outcome counts as complete — `false`.
     assert response.json() == {
         "reopened_id": appended[2]["id"],
         "restored_ids": [appended[0]["id"], appended[1]["id"]],
+        "search_coverage_incomplete": False,
     }
     zone = _zone(client, session["id"])
     assert _ids(zone) == [m["id"] for m in appended]

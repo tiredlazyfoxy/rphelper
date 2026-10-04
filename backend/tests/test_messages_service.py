@@ -22,12 +22,26 @@ Amended by feature 014, step 001 (`docs/plans/014.entry-editing-and-copy-out/
 `edit_message_text`; only a buried row stays `MessageNotEditableError`. 012 DoD-9's two
 settled-refusal cases are removed and every refusal loop is narrowed to the buried row. The
 014 cases carry the suffix `__S014_001_DoD<n>`.
+
+Amended by feature 024, step 005 (`docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md`,
+DoD-9): DoD-13's import guard below is **narrowed** to permit `app.services.session_index`, the
+module `file_partner_entry` and `edit_message_text` reach their degraded `session_vec` refresh
+through. That is an approved deviation, cited at `_PERMITTED_SERVICE_IMPORT`. With no model
+designated every write here still succeeds — the record-keeping posture degrades, it does not
+fail (`context.md` D8) — but a record-keeping write's result then carries
+`search_coverage_incomplete = True` (005 DoD-5 / DoD-7) while a list read carries the field's
+`False` default (005's Interface intent, the feature Wire contract). The two places that compared
+a write's result against a list read as whole objects therefore go through `_message_fields`,
+which leaves that one field out of the equality and keeps the other twelve in; their meaning —
+position and zone-absence — is unchanged. The flag's own behaviour is covered in
+`test_record_keeping_embedding.py`.
 """
 
 import ast
 import inspect
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -289,6 +303,23 @@ def _ids(values: list[StreamMessage]) -> list[int]:
     return [value.id for value in values]
 
 
+def _message_fields(value: StreamMessage) -> StreamMessage:
+    """The message with 024's coverage flag normalised away, for whole-object comparisons
+    between a record-keeping write's result and a list read.
+
+    Feature 024, step 005 (DoD-9): `search_coverage_incomplete` is **not** a message field in
+    the sense the assertions below are about — it reports the posture of the write that
+    produced the value. A list read always answers `False` (`005`'s Interface intent, the
+    feature Wire contract), while a record-keeping write with no designated embedding model
+    answers `True` (**D8**, 005 DoD-5 / DoD-7), and this file designates no model. Comparing
+    through this helper keeps every one of the other twelve fields — id, session_id, role,
+    kind, text, the three instants, `related_to` and the tool columns — in the comparison, so
+    a row that moved position, changed text or landed in the wrong list still fails. The
+    flag's own values are pinned in `test_record_keeping_embedding.py`.
+    """
+    return replace(value, search_coverage_incomplete=False)
+
+
 # --- direct reads of stored state (tests may read the raw table) -------------------------
 
 
@@ -450,7 +481,7 @@ def test_a_filed_partner_block_is_in_the_entries_and_not_the_zone__S012_002_DoD3
     zone = _zone(engine, USER_A, SESSION_A)
     stored = _stored_message(engine, filed.id)
 
-    assert filed in entries
+    assert _message_fields(filed) in [_message_fields(entry) for entry in entries]
     assert _ids(entries) == [filed.id]
     assert filed.id not in _ids(zone)
     assert stored["related_to"] is None
@@ -1012,6 +1043,19 @@ _FORBIDDEN_IMPORT_ROOT = "app.services"
 #: deleted from, and `messages` is still not it.
 _PERMITTED_DELETE_TABLE = "translations"
 
+#: Feature 024, step 005 (`context.md` D5 / D9, `005.context.md` "Built state") narrows 012's
+#: "no `app.services` import at all" half of the guard below: `file_partner_entry` and
+#: `edit_message_text` reach their degraded `session_vec` refresh through
+#: `app.services.session_index`, which also re-exports `LlmClient`, `LlmClientFactory` and
+#: `DEFAULT_EMBED_TIMEOUT_SECONDS`. **Approved deviation** — the user's principle of
+#: 2026-10-04, applied to this fourth guard of the same kind by the orchestrator and recorded
+#: under `## Ultra phase` conflict (4) and step 005's `## Tests` in
+#: `docs/plans/024.embedding-lifecycle/status.md`. Exactly this one named module is permitted
+#: (an exact match, not a prefix): every other `app.services` module, `from app.services
+#: import session_index`, and every relative import stay offenders, and the `fastapi` and
+#: `parens` halves of the guard are untouched.
+_PERMITTED_SERVICE_IMPORT = "app.services.session_index"
+
 
 def _module_tree() -> ast.Module:
     return ast.parse(inspect.getsource(messages_module))
@@ -1123,9 +1167,18 @@ def test_the_module_has_no_delete_path__S012_002_DoD13() -> None:
     assert _DELETE_SQL_KEYWORD.search(inspect.getsource(messages_module)) is None
 
 
+def _is_forbidden_service_import(module: str) -> bool:
+    """A service import this module may not make: anything under `app.services` except the one
+    module 024 step 005 permits (an exact match, so no submodule of it slips through either)."""
+    if module == _PERMITTED_SERVICE_IMPORT:
+        return False
+    return module == _FORBIDDEN_IMPORT_ROOT or module.startswith(_FORBIDDEN_IMPORT_ROOT + ".")
+
+
 def test_the_module_imports_no_fastapi_no_service_and_no_parens__S012_002_DoD13() -> None:
     """DoD-13 — D11 / R12: nothing from `fastapi`, nothing from any `app.services.` module
-    (nor relatively), and nothing named `parens`."""
+    (nor relatively) **except `app.services.session_index`** (024 step 005, the narrowing cited
+    at `_PERMITTED_SERVICE_IMPORT`), and nothing named `parens`."""
     offenders: list[str] = []
     for node in ast.walk(_module_tree()):
         if isinstance(node, ast.ImportFrom):
@@ -1135,9 +1188,7 @@ def test_the_module_imports_no_fastapi_no_service_and_no_parens__S012_002_DoD13(
                 offenders.append(f"relative import, level {node.level}")
             if module == "fastapi" or module.startswith("fastapi."):
                 offenders.append(f"from {module} import ...")
-            if module == _FORBIDDEN_IMPORT_ROOT or module.startswith(
-                _FORBIDDEN_IMPORT_ROOT + "."
-            ):
+            if _is_forbidden_service_import(module):
                 offenders.append(f"from {module} import ...")
             if "parens" in module or any("parens" in name for name in imported):
                 offenders.append(f"from {module} import {imported}")
@@ -1146,7 +1197,7 @@ def test_the_module_imports_no_fastapi_no_service_and_no_parens__S012_002_DoD13(
                 name = alias.name
                 if name == "fastapi" or name.startswith("fastapi."):
                     offenders.append(f"import {name}")
-                if name == _FORBIDDEN_IMPORT_ROOT or name.startswith(_FORBIDDEN_IMPORT_ROOT + "."):
+                if _is_forbidden_service_import(name):
                     offenders.append(f"import {name}")
                 if "parens" in name:
                     offenders.append(f"import {name}")
@@ -1275,7 +1326,7 @@ def test_the_edited_turn_stays_at_its_position_in_the_entries_not_the_zone__S014
     entries = _entries(engine, USER_A, SESSION_A)
 
     assert _ids(entries) == [RAW_WEEKS_OLD_BEFORE, RAW_WEEKS_OLD_TURN, RAW_WEEKS_OLD_AFTER]
-    assert entries[1] == edited
+    assert _message_fields(entries[1]) == _message_fields(edited)
     assert entries[1].text == "Fixed the typo."
     assert entries[0] == before[0]
     assert entries[2] == before[2]

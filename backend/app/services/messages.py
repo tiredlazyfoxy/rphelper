@@ -11,12 +11,24 @@ row (D16). Feature `014` step `001` widens the edit to settled rows of any kind 
 a buried row stays refused). The one delete in this module is the edited message's cached
 `translations` rows, discarded inside the edit's own transaction (feature `023` D11); nothing
 else is deleted or discarded here, and there is no settle-state operation.
+
+Feature `024`, step `005` (D5, D8, U1, U5) makes two of these operations record-keeping
+writes: `file_partner_entry` (a born-settled row) and `edit_message_text` **on a record row**
+refresh that session's `session_vec` through `app.services.session_index`, inside their own
+transaction and after the write, so the composed text observes the new state. The posture is
+**degraded**: "unavailable" is caught inside that refresh, the row still commits, no vector is
+written and any existing one is left stale; the outcome rides home on `StreamMessage` as
+`search_coverage_incomplete`, which **defaults to false** so every other construction and
+every list read here is untouched. A zone append and a zone-row edit do no vector work at all
+(US-115) and answer false. The client factory and the request timeout arrive as keyword-only
+parameters with D9's defaults, so nothing here reads settings and every existing positional
+call still binds.
 """
 
 import json
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, NamedTuple
 
@@ -33,6 +45,12 @@ from app.db.schema import (
 )
 from app.errors import MessageNotEditableError, MessageNotFoundError, SessionNotFoundError
 from app.ids import SnowflakeGenerator
+from app.services.session_index import (
+    DEFAULT_EMBED_TIMEOUT_SECONDS,
+    LlmClient,
+    LlmClientFactory,
+    refresh_session_vector_degraded,
+)
 
 #: A tool row's derived outcome (feature `022` D3): `"ok"` only on a readable ok payload.
 ToolStatus = Literal["ok", "failed"]
@@ -82,6 +100,11 @@ class StreamMessage:
     defaulting to `None`, and never reach the wire. Then the derived tool view (feature `022`
     D3: `tool_status`, `tool_args`, default `None`; `tool_name` is shared with the columns).
     Timestamps are the stored fixed-width UTC text.
+
+    `search_coverage_incomplete` (feature `024`, D8 / Wire contract) is last and **defaults to
+    `False`**. The default is load-bearing: every read, every zone write and every other
+    construction of this value keeps working unchanged and answers "coverage complete", and
+    only the two record-keeping writes ever set it to `True`.
     """
 
     id: int
@@ -96,6 +119,7 @@ class StreamMessage:
     tool_payload: str | None = None
     tool_status: ToolStatus | None = None
     tool_args: dict[str, Any] | None = None
+    search_coverage_incomplete: bool = False
 
 
 def list_entries(connection: Connection, user_id: int, session_id: int) -> list[StreamMessage]:
@@ -280,8 +304,17 @@ def file_partner_entry(
     user_id: int,
     session_id: int,
     text: str,
+    *,
+    client_factory: LlmClientFactory = LlmClient,
+    timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> StreamMessage:
-    """Insert one born-settled partner block (`kind` 'partner') and bump the session."""
+    """Insert one born-settled partner block (`kind` 'partner') and bump the session.
+
+    The positional inputs are unchanged. `client_factory` and `timeout_seconds` are 024 D9's
+    keyword-only pair, defaulted to the real client and to `Settings`' own declared timeout, and
+    are forwarded to the degraded refresh. `SessionNotFoundError` still refuses before any write
+    and before any client is built.
+    """
     with connection.begin():
         _require_session(connection, user_id, session_id)
         new_id = generator.next_id()
@@ -300,6 +333,19 @@ def file_partner_entry(
             )
         )
         _bump_session(connection, user_id, session_id, now)
+        # 024 D5 / U1: after the insert and the session bump, inside this transaction, so 003's
+        # composition sees the filed row among the session's settled entries. D8 / U5: the
+        # degraded posture lives inside this call — it catches `NoEmbeddingModelError` and
+        # `LlmUnreachableError`, writes no vector, leaves any existing row untouched (stale) and
+        # returns True, meaning coverage is INCOMPLETE. Any other exception propagates and rolls
+        # this transaction back.
+        search_coverage_incomplete = refresh_session_vector_degraded(
+            connection,
+            user_id,
+            session_id,
+            client_factory=client_factory,
+            timeout_seconds=timeout_seconds,
+        )
         message = StreamMessage(
             id=new_id,
             session_id=session_id,
@@ -309,16 +355,30 @@ def file_partner_entry(
             settled_at=now,
             created_at=now,
             updated_at=now,
+            search_coverage_incomplete=search_coverage_incomplete,
         )
     return message
 
 
-def edit_message_text(connection: Connection, user_id: int, message_id: int, text: str) -> StreamMessage:
+def edit_message_text(
+    connection: Connection,
+    user_id: int,
+    message_id: int,
+    text: str,
+    *,
+    client_factory: LlmClientFactory = LlmClient,
+    timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
+) -> StreamMessage:
     """Replace a zone or settled message's text verbatim, bump its session, return the stored row.
 
     A buried row (`related_to` set) is refused with `MessageNotEditableError`; `kind`,
     `settled_at` and `related_to` are never written (014 D1). The row is read back through
     `settled_entries` when settled, `current_zone` otherwise.
+
+    The positional inputs are unchanged. `client_factory` and `timeout_seconds` are 024 D9's
+    keyword-only pair, as on `file_partner_entry`, and are used only on the record-row branch
+    (D5): a zone-row edit builds no client at all. Every refusal (missing, foreign, buried,
+    tool) still happens before any write and before any client is built.
     """
     with connection.begin():
         state_columns = message_states.selected_columns
@@ -354,9 +414,31 @@ def edit_message_text(connection: Connection, user_id: int, message_id: int, tex
                 translations.c.user_id == user_id,
             )
         )
+        # 024 D5 — the record-row vs. zone-row dispatch, on the classification `message_states`
+        # already gave above and which this module keeps using: a buried row was refused, so
+        # `state.settled_at is not None` is exactly "a record row" (`context.md` Vocabulary) and
+        # the NULL case is a zone row, which does no vector work, builds no client and keeps the
+        # flag false (US-115). It sits here, right after the text update and the
+        # cached-translation discard of feature 023 (their order between each other is
+        # immaterial), inside this one transaction, so 003's composition reads the new text.
+        # D8 / U5: the degraded posture lives inside the refresh — it catches
+        # `NoEmbeddingModelError` and `LlmUnreachableError`, writes no vector, leaves any existing
+        # row untouched (stale) and returns True, meaning coverage is INCOMPLETE; anything else
+        # propagates and rolls this transaction back.
+        search_coverage_incomplete = False
+        if state.settled_at is not None:
+            search_coverage_incomplete = refresh_session_vector_degraded(
+                connection,
+                user_id,
+                state.session_id,
+                client_factory=client_factory,
+                timeout_seconds=timeout_seconds,
+            )
         _bump_session(connection, user_id, state.session_id, now)
         row = connection.execute(selectable.where(columns.id == message_id, columns.user_id == user_id)).one()
-        message = _to_message(row)
+        # `_to_message` is shared with the read paths, so the flag is put on afterwards rather
+        # than threaded through it.
+        message = replace(_to_message(row), search_coverage_incomplete=search_coverage_incomplete)
     return message
 
 

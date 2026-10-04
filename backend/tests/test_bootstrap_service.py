@@ -30,6 +30,12 @@ import pytest
 from sqlalchemy import Connection, Engine, MetaData, select
 
 from app.db import schema
+from app.db.search_tables import (
+    MEMO_FTS_TABLE,
+    MEMO_VEC_TABLE,
+    MESSAGE_FTS_TABLE,
+    SESSION_VEC_TABLE,
+)
 from app.errors import AlreadyConfiguredError
 from app.ids import EPOCH_MS, SnowflakeGenerator
 from app.roles import Role
@@ -864,3 +870,22 @@ def test_ttl_is_a_required_plain_parameter__S004_004_DoD8() -> None:
     parameter = inspect.signature(create_first_administrator).parameters["ttl_hours"]
     assert parameter.default is inspect.Parameter.empty
     assert "Request" not in str(parameter)
+
+
+# =====================================================================================
+# Feature 024, step 001 — the creation also ensures the **full-text** half, in the same
+# transaction, and creates no vector table (there is no designated model at bootstrap).
+# Expected values: ``024.embedding-lifecycle/001.search-tables.md`` DoD-8 and the feature
+# ``context.md`` D2. Bindings: ``## Skeleton`` → "Step 001 — frozen interface" (the four
+# table-name constants). Only this one test is added here; every test above is unchanged.
+# =====================================================================================
+
+
+def test_creation_ensures_the_full_text_tables_only__S024_001_DoD8(db_engine: Engine) -> None:
+    """DoD-8 — on an empty database bootstrap leaves both FTS tables present, both vec0 absent (D2)."""
+    _bootstrap(db_engine, _FixedIdGenerator(24_001_000_000_000_001))
+    present = _table_names(db_engine)
+    assert MEMO_FTS_TABLE in present
+    assert MESSAGE_FTS_TABLE in present
+    assert MEMO_VEC_TABLE not in present
+    assert SESSION_VEC_TABLE not in present

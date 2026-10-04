@@ -23,6 +23,7 @@ from loguru import logger
 from sqlalchemy import Connection, select, text
 
 from app.db.schema import metadata, users
+from app.db.search_tables import ensure_fts_tables
 from app.errors import AlreadyConfiguredError
 from app.ids import SnowflakeGenerator
 from app.roles import Role
@@ -77,10 +78,12 @@ def create_first_administrator(
     """Create the schema and the first administrator in one transaction.
 
     Inside one `with connection.begin():` block: re-check `is_configured` and raise
-    `AlreadyConfiguredError` if true; apply the registry (create-if-missing); mint the id
-    from `generator`; hash `password`; insert the `users` row with role `admin`; open the
+    `AlreadyConfiguredError` if true; apply the registry (create-if-missing); ensure the
+    FTS5 virtual tables, which live outside `metadata` (024 D2); mint the id from
+    `generator`; hash `password`; insert the `users` row with role `admin`; open the
     administrator's session via `open_session(connection, generator, new_id, ttl_hours)`.
-    Returns the id, username, role, session token and session expiry.
+    Returns the id, username, role, session token and session expiry. No vector table is
+    created: no embedding model is designated at bootstrap.
     """
     with connection.begin():
         if is_configured(connection):
@@ -88,6 +91,11 @@ def create_first_administrator(
             raise AlreadyConfiguredError()
 
         metadata.create_all(connection)
+        # The FTS5 virtual tables live outside `metadata` (024 D2), so `create_all`
+        # cannot make them. Ensuring them here — inside this same block, after the
+        # `AlreadyConfiguredError` guard — keeps a refused create leaving an empty
+        # database. No vector table: no embedding model is designated at bootstrap.
+        ensure_fts_tables(connection)
 
         new_id = generator.next_id()
         password_hash = hash_password(password)

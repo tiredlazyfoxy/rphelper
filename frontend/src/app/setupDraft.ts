@@ -9,6 +9,7 @@
 // carries no useful prose; the modal's inline `Alert` is the general-key render.
 import { makeAutoObservable, runInAction } from "mobx";
 
+import { embeddingFailureSentence } from "../shared/embeddingFailure";
 import type { Setup } from "./setupsApi";
 import { createSetup, updateSetup } from "./setupsApi";
 
@@ -116,8 +117,12 @@ export async function submitSetup(
     if (signal?.aborted || isAbortRejection(error)) {
       return;
     }
+    // 024 step 008 (D8): a changed description is embedded (024 D5), so either submit may be
+    // refused for want of an index and then names that cause. Every other failure keeps the
+    // action's own sentence, chosen before the request.
+    const refusal: string | null = embeddingFailureSentence(error);
     runInAction(() => {
-      draft.error = failureMessage;
+      draft.error = refusal ?? failureMessage;
     });
     return;
   } finally {

@@ -10,6 +10,14 @@ exactly `"partner"`). Tests are suffixed `__S012_001_DoD<n>`.
 
 `test_errors.py` is not this step's file, so the error classes' own coverage lives here
 alongside the models they answer for, exactly as 009, 010 and 011 placed theirs.
+
+Amended by feature 024, step 005 (`docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md`,
+DoD-8 and DoD-9; `context.md` **Wire contract**): `SettleResponse`, `ReopenResponse` and
+`MessageResponse` each gained `search_coverage_incomplete`, a boolean always present on the
+backend wire. The existing key-set and exact-equality pins accept the new key — every other
+assertion (the ids, `kind`, `buried_ids`, `restored_ids`, the message fields) is unchanged — and
+DoD-8's "each declares the boolean field" clause is covered by the `__S024_005_DoD8` tests at the
+end of the file.
 """
 
 import json
@@ -48,6 +56,8 @@ SETTLED_AT = "2026-09-30T08:15:30.123456+00:00"
 # context.md "Wire contract" — `Message` on the wire had exactly these eight keys.
 # Amended by feature 022, step 001 (D3, DoD-4): the eight plus `tool_name`, `tool_status`
 # and `tool_args` — eleven keys; `tool_payload` (and `call_id`) never reach the wire.
+# Amended by feature 024, step 005 (DoD-9 regression fallout, Wire contract): plus
+# `search_coverage_incomplete`, always present on the backend wire — twelve keys.
 MESSAGE_WIRE_KEYS = {
     "id",
     "session_id",
@@ -60,6 +70,7 @@ MESSAGE_WIRE_KEYS = {
     "tool_name",
     "tool_status",
     "tool_args",
+    "search_coverage_incomplete",
 }
 NEVER_ON_THE_WIRE = ("user_id", "related_to", "tool_payload", "call_id")
 
@@ -117,6 +128,10 @@ def _message(**overrides: Any) -> MessageResponse:
         "settled_at": SETTLED_AT,
         "created_at": CREATED_AT,
         "updated_at": UPDATED_AT,
+        # 024 step 005: the field is required on the response model, so every hand-built
+        # `MessageResponse` passes it. False is the value a row that needed no vector work
+        # carries (`context.md` Wire contract).
+        "search_coverage_incomplete": False,
     }
     values.update(overrides)
     return MessageResponse(**values)
@@ -290,17 +305,25 @@ def test_empty_listings_serialise_as_empty_lists__S012_001_DoD8() -> None:
 def test_settle_response_serialises_every_id_as_a_decimal_string__S012_001_DoD9(kind: str) -> None:
     """012/001 DoD-9 — `entry_id` and each element of `buried_ids` leave as decimal strings."""
     big = 7_205_759_403_792_793_600
-    payload = _wire(SettleResponse(entry_id=big, kind=kind, buried_ids=[11, 12, big + 1]))
+    payload = _wire(
+        SettleResponse(
+            entry_id=big, kind=kind, buried_ids=[11, 12, big + 1], search_coverage_incomplete=False
+        )
+    )
     assert payload == {
         "entry_id": str(big),
         "kind": kind,
         "buried_ids": ["11", "12", str(big + 1)],
+        # 024 step 005 (DoD-9 fallout): the response gained this key; the ids are unchanged.
+        "search_coverage_incomplete": False,
     }
 
 
 def test_settle_response_keeps_an_empty_buried_list_empty__S012_001_DoD9() -> None:
     """012/001 DoD-9 — an empty `buried_ids` stays `[]`."""
-    payload = _wire(SettleResponse(entry_id=5, kind="turn", buried_ids=[]))
+    payload = _wire(
+        SettleResponse(entry_id=5, kind="turn", buried_ids=[], search_coverage_incomplete=False)
+    )
     assert payload["buried_ids"] == []
     assert payload["entry_id"] == "5"
 
@@ -309,14 +332,25 @@ def test_reopen_response_serialises_every_id_as_a_decimal_string__S012_001_DoD9(
     """012/001 DoD-9 — `reopened_id` and each element of `restored_ids` leave as decimal
     strings."""
     big = 7_205_759_403_792_793_600
-    payload = _wire(ReopenResponse(reopened_id=big, restored_ids=[21, big + 2]))
-    assert payload == {"reopened_id": str(big), "restored_ids": ["21", str(big + 2)]}
+    payload = _wire(
+        ReopenResponse(reopened_id=big, restored_ids=[21, big + 2], search_coverage_incomplete=False)
+    )
+    assert payload == {
+        "reopened_id": str(big),
+        "restored_ids": ["21", str(big + 2)],
+        # 024 step 005 (DoD-9 fallout): the response gained this key; the ids are unchanged.
+        "search_coverage_incomplete": False,
+    }
 
 
 def test_reopen_response_keeps_an_empty_restored_list_empty__S012_001_DoD9() -> None:
     """012/001 DoD-9 — an empty `restored_ids` stays `[]`."""
-    payload = _wire(ReopenResponse(reopened_id=7, restored_ids=[]))
-    assert payload == {"reopened_id": "7", "restored_ids": []}
+    payload = _wire(ReopenResponse(reopened_id=7, restored_ids=[], search_coverage_incomplete=False))
+    assert payload == {
+        "reopened_id": "7",
+        "restored_ids": [],
+        "search_coverage_incomplete": False,
+    }
 
 
 # ====================================================================== DoD-10
@@ -411,6 +445,49 @@ def test_file_partner_request_refuses_blank_text__S012_001_DoD11(text_value: Any
         body["text"] = text_value
     with pytest.raises(ValidationError):
         FilePartnerRequest.model_validate(body)
+
+
+# ============================================================ 024 step 005, DoD-8
+# The coverage flag is declared on all three record-keeping response models, and is a plain
+# boolean that is always present on the backend wire (`context.md` Wire contract; the
+# step file's DoD-8 last clause).
+
+COVERAGE_RESPONSE_MODELS: list[type[BaseModel]] = [SettleResponse, ReopenResponse, MessageResponse]
+COVERAGE_RESPONSE_IDS = ["settle", "reopen", "message"]
+
+
+@pytest.mark.parametrize("model", COVERAGE_RESPONSE_MODELS, ids=COVERAGE_RESPONSE_IDS)
+def test_each_record_keeping_response_declares_the_coverage_flag__S024_005_DoD8(
+    model: type[BaseModel],
+) -> None:
+    """024/005 DoD-8 — `SettleResponse`, `ReopenResponse` and `MessageResponse` each declare
+    `search_coverage_incomplete` as a boolean field."""
+    assert "search_coverage_incomplete" in model.model_fields
+    assert model.model_fields["search_coverage_incomplete"].annotation is bool
+
+
+@pytest.mark.parametrize("model", COVERAGE_RESPONSE_MODELS, ids=COVERAGE_RESPONSE_IDS)
+def test_the_coverage_flag_is_always_on_the_wire__S024_005_DoD8(model: type[BaseModel]) -> None:
+    """024/005 DoD-8 — Wire contract: "one new response field, boolean, always present on the
+    backend wire" — so it is a required property of each serialised object."""
+    schema_properties = model.model_json_schema()
+    assert "search_coverage_incomplete" in schema_properties["properties"]
+    assert "search_coverage_incomplete" in schema_properties["required"]
+
+
+@pytest.mark.parametrize("flag", [True, False], ids=["incomplete", "complete"])
+def test_each_record_keeping_response_serialises_the_flag_as_a_json_boolean__S024_005_DoD8(
+    flag: bool,
+) -> None:
+    """024/005 DoD-8 — the value given reaches the wire as a JSON boolean, on all three."""
+    settled = _wire(
+        SettleResponse(entry_id=5, kind="turn", buried_ids=[], search_coverage_incomplete=flag)
+    )
+    reopened = _wire(ReopenResponse(reopened_id=7, restored_ids=[], search_coverage_incomplete=flag))
+    message = _wire(_message(search_coverage_incomplete=flag))
+
+    for payload in (settled, reopened, message):
+        assert payload["search_coverage_incomplete"] is flag
 
 
 def test_file_partner_request_keeps_ooc_parentheses_intact__S012_001_DoD11() -> None:

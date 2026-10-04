@@ -8,7 +8,7 @@
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
-import { Box, Button, Center, Divider, Loader, Stack, Text } from "@mantine/core";
+import { Alert, Box, Button, Center, Divider, Loader, Stack, Text } from "@mantine/core";
 
 import { Composer } from "./Composer";
 import { KindSwitch } from "./KindSwitch";
@@ -25,6 +25,13 @@ export type SessionStreamProps = {
 
 /** The ruler's visible label and accessible name — the stream's only separator (D12). */
 const RULER_LABEL = "Current zone";
+
+/**
+ * 024 step 007 (US-112.AC-2): the coverage banner's sentence, exactly as `007.context.md`
+ * pins it. Non-blocking: it informs and disables nothing.
+ */
+const COVERAGE_BANNER_TEXT =
+  "Search coverage is incomplete. Your latest change was saved, but it could not be indexed for search.";
 
 /** The session's record, ruler, kind switch, zone and composer (D12, D13, D15). */
 export const SessionStream = observer(function SessionStream(
@@ -87,6 +94,16 @@ export const SessionStream = observer(function SessionStream(
   return (
     <Box maw={720} mx="auto" px={18} w="100%">
       <Stack gap="md">
+        {/*
+          024 step 007 (D11, US-112.AC-2): the coverage notice, rendered only while the flag is
+          set, immediately above the record and before the first entry in document order. No
+          close button, no new prop, and nothing below it is disabled.
+        */}
+        {state.searchCoverageIncomplete ? (
+          <Alert role="alert" color="yellow">
+            {COVERAGE_BANNER_TEXT}
+          </Alert>
+        ) : null}
         <StreamRecord state={state} signal={signal} translations={translations} />
         <Divider label={RULER_LABEL} labelPosition="center" aria-label={RULER_LABEL} />
         <KindSwitch state={state} />

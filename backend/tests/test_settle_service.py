@@ -16,6 +16,14 @@ narrowed by session and owner, and individual rows through the raw table (test-s
 
 Timestamps are asserted by their fixed-width shape and by equality / non-decrease, never
 by exact value; ordering is asserted by integer id.
+
+Amended by feature 024, step 005 (`docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md`,
+DoD-9): DoD-23's import guard below is **narrowed** to permit `app.services.session_index`,
+the module settle and re-open now reach their degraded `session_vec` refresh through. That is
+an approved deviation, cited at the guard. No behavioural assertion in this file changed: the
+two results' new `search_coverage_incomplete` field is read nowhere here, no result is compared
+as a whole object, and with no model designated every settle and re-open still succeeds (the
+record-keeping posture degrades, it does not fail — `context.md` D8).
 """
 
 import ast
@@ -926,10 +934,21 @@ def _called_name(node: ast.Call) -> str | None:
 _ALLOWED_CHAT_MODULE = f"{_APP_SERVICES}.llm.chat"
 _ALLOWED_CHAT_NAMES = {"strip_think"}
 
+#: Feature 024 step 005 (`context.md` D5 / D9, `005.context.md` "Built state"): settle and
+#: re-open refresh the session's `session_vec` through `app.services.session_index`, which
+#: also re-exports `LlmClient`, `LlmClientFactory` and `DEFAULT_EMBED_TIMEOUT_SECONDS`. That
+#: makes it the one further permitted `app.services` module here — an **approved deviation**
+#: (the user's decision of 2026-10-04, recorded under `## Ultra phase` conflict (1) and under
+#: step 005's `## Tests` in `docs/plans/024.embedding-lifecycle/status.md`). The guard is
+#: narrowed, not weakened: exactly this one named module is permitted, and every other
+#: `app.services` module — and every relative import — stays an offender.
+_ALLOWED_INDEX_MODULE = f"{_APP_SERVICES}.session_index"
+
 
 def test_settle_imports_parens_and_no_other_service__S012_003_DoD23__S021_001_DoD10() -> None:
     """DoD-23 — D11: `parens` is imported; nothing else from `app.services.`, except (021
-    001, D4) `strip_think` from `app.services.llm.chat`."""
+    001, D4) `strip_think` from `app.services.llm.chat` and (024 005) the whole of
+    `app.services.session_index`."""
     imports_parens = False
     offenders: list[str] = []
     for node in ast.walk(_settle_tree()):
@@ -940,6 +959,8 @@ def test_settle_imports_parens_and_no_other_service__S012_003_DoD23__S021_001_Do
                 offenders.extend(
                     f"from {module} import {name}" for name in names if name not in _ALLOWED_CHAT_NAMES
                 )
+            elif node.level == 0 and module == _ALLOWED_INDEX_MODULE:
+                pass  # 024 005: permitted outright — the degraded refresh and the D9 defaults.
             elif node.level > 0:
                 if module == "" and names == ["parens"]:
                     imports_parens = True

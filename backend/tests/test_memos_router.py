@@ -18,6 +18,16 @@ through ``dependency_overrides[get_settings]``. Each signed-in caller has its ow
 ``TestClient`` carrying exactly one session cookie. Characters, setups and sessions are
 created and archived through their own routes; disabled / forced states are reached through
 ``PATCH /api/memos/{id}``. ``conftest.py`` is untouched: every fixture below is file-local.
+
+Feature 024 step 004 (``docs/plans/024.embedding-lifecycle/004.memo-write-paths.md``, DoD-10,
+``context.md`` "Regression fallout") makes ``POST /api/memos`` and a body-changing
+``PATCH /api/memos/{id}`` require a designated embedding model (D5, strict per D8). That is a
+**precondition**, not a changed expectation: ``_seed`` now also seeds the designation (one
+``llm_servers`` row and one enabled, designated ``models`` row at dimension 8), and the
+``application`` fixture adds a ``dependency_overrides`` entry for the shared
+``app.dependencies.get_llm_client_factory`` (D9) returning the fake from ``tests/llm_fakes.py``
+alongside the existing ``get_settings`` override. **No assertion in this file was changed or
+loosened**, and no route, status code or wire key moved.
 """
 
 import ast
@@ -34,10 +44,12 @@ from sqlalchemy import Engine, func, select
 
 from app.config import Settings, get_settings
 from app.db import schema
+from app.dependencies import get_llm_client_factory
 from app.main import create_app
 from app.roles import Role
 from app.routers import memos as memos_router_module
 from app.services.passwords import hash_password
+from tests.llm_fakes import FAKE_EMBEDDING_DIM, FakeClientFactory, fake_factory
 
 CHARACTERS_PATH = "/api/characters"
 SETUPS_PATH = "/api/setups"
@@ -57,6 +69,12 @@ PLAYER_A_PASSWORD = "a quiet river at dusk"
 PLAYER_B_ID = 9_500_002
 PLAYER_B_NAME = "briar"
 PLAYER_B_PASSWORD = "salt and lantern light"
+
+#: 024 step 004: the designation every create / body edit now needs (``context.md`` D5, D9).
+EMBEDDING_SERVER_ID = 1_400_000_000_000_000_311
+EMBEDDING_MODEL_ID = 1_400_000_000_000_000_312
+EMBEDDING_BASE_URL = "http://embedding.test:8080/v1"
+EMBEDDING_MODEL_NAME = "the-designated-embedding-model"
 
 #: Large decimal id strings no row holds (004.context.md "Test seeding").
 UNKNOWN_CHARACTER_ID = "7250000000000000101"
@@ -121,6 +139,44 @@ def _insert_user(
         )
 
 
+def _seed_embedding_designation(engine: Engine) -> None:
+    """One server and one enabled, designated embedding model at dimension 8.
+
+    024 step 004's precondition for ``POST /api/memos`` and a body-changing ``PATCH``
+    (``context.md`` D5 / D9). Raw inserts, no service, and a null ``api_key_ref`` so no secret
+    has to resolve. It touches no table any assertion in this file reads.
+    """
+    servers = schema.metadata.tables["llm_servers"]
+    models = schema.metadata.tables["models"]
+    with engine.begin() as connection:
+        connection.execute(
+            servers.insert().values(
+                id=EMBEDDING_SERVER_ID,
+                name="the embedding server",
+                kind="llamaswap",
+                base_url=EMBEDDING_BASE_URL,
+                api_key_ref=None,
+                last_test_at=None,
+                last_test_ok=None,
+                last_test_error=None,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+        connection.execute(
+            models.insert().values(
+                id=EMBEDDING_MODEL_ID,
+                server_id=EMBEDDING_SERVER_ID,
+                model_name=EMBEDDING_MODEL_NAME,
+                is_enabled=True,
+                is_embedding_designated=True,
+                embedding_dim=FAKE_EMBEDDING_DIM,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+
+
 def _seed(engine: Engine) -> None:
     with engine.begin() as connection:
         schema.metadata.create_all(connection)
@@ -130,20 +186,34 @@ def _seed(engine: Engine) -> None:
     _insert_user(
         engine, user_id=PLAYER_B_ID, username=PLAYER_B_NAME, password=PLAYER_B_PASSWORD, role=Role.ROLEPLAYER
     )
+    _seed_embedding_designation(engine)
 
 
 @pytest.fixture
 def engine(db_engine: Engine) -> Engine:
-    """A per-test database with the registry applied and the two roleplayers seeded."""
+    """A per-test database with the registry applied, the two roleplayers and the designation."""
     _seed(db_engine)
     return db_engine
 
 
 @pytest.fixture
-def application(db_settings: Settings, engine: Engine) -> Iterator[FastAPI]:
-    """The factory's application, pinned to the seeded per-test database."""
+def embedding_factory() -> FakeClientFactory:
+    """024 step 004: the provider the overridden shared dependency hands every memo route."""
+    return fake_factory(FAKE_EMBEDDING_DIM)
+
+
+@pytest.fixture
+def application(
+    db_settings: Settings, engine: Engine, embedding_factory: FakeClientFactory
+) -> Iterator[FastAPI]:
+    """The factory's application, pinned to the seeded per-test database.
+
+    024 step 004 adds the second override: the shared ``get_llm_client_factory`` (D9), so no
+    route ever builds a real client.
+    """
     app = create_app()
     app.dependency_overrides[get_settings] = lambda: db_settings
+    app.dependency_overrides[get_llm_client_factory] = lambda: embedding_factory
     try:
         yield app
     finally:

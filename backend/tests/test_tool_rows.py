@@ -481,7 +481,12 @@ def _logged_in(application: FastAPI, settings: Settings, username: str, password
 # =========================================================================================
 
 #: 022 D3 — the eight 012 keys plus the three tool-view keys.
-MESSAGE_KEYS_022 = MESSAGE_KEYS | {"tool_name", "tool_status", "tool_args"}
+#: Amended by feature 024, step 005 (DoD-9 regression fallout; `context.md` **Wire contract**:
+#: always present on the backend wire, and `false` on every route that is not a record-keeping
+#: write — the zone listing included) — plus `search_coverage_incomplete`, twelve keys. Scope
+#: here is this key set alone; the flag's behaviour is covered in
+#: `test_record_keeping_embedding.py`.
+MESSAGE_KEYS_022 = MESSAGE_KEYS | {"tool_name", "tool_status", "tool_args", "search_coverage_incomplete"}
 
 #: 022 `001.context.md` payload table, row 3 (ok) and row 4 (failed), stored verbatim.
 S022_OK_PAYLOAD = (

@@ -6,6 +6,7 @@
 // Ids are decimal strings, used only as keys and compared only for equality.
 import { makeAutoObservable, runInAction } from "mobx";
 
+import { embeddingFailureSentence } from "../shared/embeddingFailure";
 import type { Memo, MemoPatch, MemoScope } from "./memosApi";
 import { createMemo, deleteMemo, fetchMemos, reorderMemos, updateMemo } from "./memosApi";
 
@@ -190,9 +191,12 @@ export async function saveNote(state: MemoLevelState, memoId: string): Promise<v
   let row: Memo;
   try {
     row = await updateMemo(memoId, { body: snapshot });
-  } catch {
+  } catch (error) {
+    // 024 step 008 (D8): a body edit the backend refused because the note could not be
+    // indexed names that cause; every other failure keeps the generic sentence.
+    const refusal: string | null = embeddingFailureSentence(error);
     runInAction(() => {
-      state.failures = { ...state.failures, [memoId]: SAVE_FAILED };
+      state.failures = { ...state.failures, [memoId]: refusal ?? SAVE_FAILED };
     });
     return;
   }
@@ -248,10 +252,13 @@ export async function saveNewNote(state: MemoLevelState): Promise<void> {
   let row: Memo;
   try {
     row = await createMemo(state.scope, state.scopeId, snapshot);
-  } catch {
+  } catch (error) {
+    // 024 step 008 (D8): same rule as `saveNote` — a refused create names its cause, any
+    // other failure keeps the generic sentence, and the typed text is kept either way.
+    const refusal: string | null = embeddingFailureSentence(error);
     runInAction(() => {
       const text = state.newNote?.text ?? snapshot;
-      state.newNote = { text, saving: false, failure: SAVE_FAILED };
+      state.newNote = { text, saving: false, failure: refusal ?? SAVE_FAILED };
     });
     return;
   }

@@ -6,6 +6,17 @@ and takes no target message id. This module imports nothing HTTP-shaped and, fro
 `app.services.`, only `parens` (D11) and `llm.chat`'s `strip_think` (feature `021` D4); its
 session check, session bump and clock are its own private helpers. Settle is two UPDATEs on
 `messages` (bury, then stamp the head) and adds or removes no row; re-open is its exact mirror.
+
+Feature `024`, step `005` (D5, D8, U1, U5) makes both operations record-keeping writes: each
+refreshes its session's `session_vec` through `app.services.session_index` — the one
+`app.services.` import this module gains — as the **last** statement of its own transaction,
+after every relational write, so the composed text observes the new state (the head's
+rewritten text and its `settled_at`, or their removal). The posture is **degraded**:
+"unavailable" is caught inside that refresh, the relational write still commits, no vector is
+written and any existing row is left stale; the outcome rides home on the result as
+`search_coverage_incomplete` (**true** means coverage is incomplete). The client factory and
+the request timeout arrive as keyword-only parameters with D9's defaults, so nothing here
+reads settings and every existing positional call still binds.
 """
 
 from dataclasses import dataclass
@@ -22,27 +33,58 @@ from app.errors import (
 )
 from app.services import parens
 from app.services.llm.chat import strip_think
+from app.services.session_index import (
+    DEFAULT_EMBED_TIMEOUT_SECONDS,
+    LlmClient,
+    LlmClientFactory,
+    refresh_session_vector_degraded,
+)
 
 
 @dataclass(frozen=True)
 class SettleResult:
-    """The settled head, the kind it was stamped with, and the ids buried under it (ascending)."""
+    """The settled head, the kind it was stamped with, and the ids buried under it (ascending).
+
+    `search_coverage_incomplete` is 024's coverage flag (D8, Wire contract): **true** when the
+    degraded `session_vec` refresh could not embed. Required, with no default — settle always
+    decides it, and a default would let a caller silently answer "complete".
+    """
 
     entry_id: int
     kind: parens.Kind
     buried_ids: list[int]
+    search_coverage_incomplete: bool
 
 
 @dataclass(frozen=True)
 class ReopenResult:
-    """The former head and the former group's ids restored to the zone (ascending, never empty)."""
+    """The former head and the former group's ids restored to the zone (ascending, never empty).
+
+    `search_coverage_incomplete` is 024's coverage flag (D8, Wire contract): **true** when the
+    degraded `session_vec` refresh could not embed. Required, with no default, exactly as on
+    `SettleResult`.
+    """
 
     reopened_id: int
     restored_ids: list[int]
+    search_coverage_incomplete: bool
 
 
-def settle(connection: Connection, user_id: int, session_id: int) -> SettleResult:
-    """Settle the session's current zone onto its last row; bury the rest under it."""
+def settle(
+    connection: Connection,
+    user_id: int,
+    session_id: int,
+    *,
+    client_factory: LlmClientFactory = LlmClient,
+    timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
+) -> SettleResult:
+    """Settle the session's current zone onto its last row; bury the rest under it.
+
+    The positional inputs are unchanged. `client_factory` and `timeout_seconds` are 024 D9's
+    keyword-only pair, defaulted to the real client and to `Settings`' own declared timeout, and
+    are forwarded to the degraded refresh. Every existing refusal (`ZoneEmptyError`, a foreign
+    or missing session) still happens before any refresh and before any client is built.
+    """
     with connection.begin():
         _require_session(connection, user_id, session_id)
         zone_columns = current_zone.selected_columns
@@ -76,11 +118,41 @@ def settle(connection: Connection, user_id: int, session_id: int) -> SettleResul
             .values(settled_at=now, kind=kind, text=settled_text, updated_at=now)
         )
         _bump_session(connection, user_id, session_id, now)
-    return SettleResult(entry_id=head_id, kind=kind, buried_ids=buried_ids)
+        # 024 D5 / U1: the LAST statement of this transaction, after every relational write, so
+        # 003's composition observes the new state — the head's rewritten `settled_text` and its
+        # `settled_at`, which the UPDATE above stamped in one go. D8 / U5: the degraded posture
+        # lives inside this call — it catches `NoEmbeddingModelError` and `LlmUnreachableError`,
+        # writes no vector, leaves any existing row untouched (stale) and returns True, meaning
+        # coverage is INCOMPLETE. Any other exception propagates and rolls this transaction back.
+        search_coverage_incomplete = refresh_session_vector_degraded(
+            connection,
+            user_id,
+            session_id,
+            client_factory=client_factory,
+            timeout_seconds=timeout_seconds,
+        )
+    return SettleResult(
+        entry_id=head_id,
+        kind=kind,
+        buried_ids=buried_ids,
+        search_coverage_incomplete=search_coverage_incomplete,
+    )
 
 
-def reopen(connection: Connection, user_id: int, session_id: int) -> ReopenResult:
-    """Re-open the session's last settled group back into an empty zone."""
+def reopen(
+    connection: Connection,
+    user_id: int,
+    session_id: int,
+    *,
+    client_factory: LlmClientFactory = LlmClient,
+    timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
+) -> ReopenResult:
+    """Re-open the session's last settled group back into an empty zone.
+
+    The positional inputs are unchanged; `client_factory` and `timeout_seconds` are 024 D9's
+    keyword-only pair, as on `settle`. `ZoneNotEmptyError` and `NothingToReopenError` still
+    refuse before any refresh and before any client is built.
+    """
     with connection.begin():
         _require_session(connection, user_id, session_id)
         zone_columns = current_zone.selected_columns
@@ -124,7 +196,25 @@ def reopen(connection: Connection, user_id: int, session_id: int) -> ReopenResul
             .values(settled_at=None, kind=None, updated_at=now)
         )
         _bump_session(connection, user_id, session_id, now)
-    return ReopenResult(reopened_id=head_id, restored_ids=group_ids)
+        # 024 D5 / U1: the LAST statement of this transaction, after every relational write, so
+        # 003's composition observes the new state — the re-opened head has left
+        # `settled_entries` and its text is no longer part of the session text. D8 / U5: the
+        # degraded posture lives inside this call — it catches `NoEmbeddingModelError` and
+        # `LlmUnreachableError`, writes no vector, leaves any existing row untouched (stale) and
+        # returns True, meaning coverage is INCOMPLETE. Any other exception propagates and rolls
+        # this transaction back.
+        search_coverage_incomplete = refresh_session_vector_degraded(
+            connection,
+            user_id,
+            session_id,
+            client_factory=client_factory,
+            timeout_seconds=timeout_seconds,
+        )
+    return ReopenResult(
+        reopened_id=head_id,
+        restored_ids=group_ids,
+        search_coverage_incomplete=search_coverage_incomplete,
+    )
 
 
 def _require_session(connection: Connection, user_id: int, session_id: int) -> None:

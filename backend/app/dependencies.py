@@ -17,6 +17,14 @@ imports `fastapi`; nothing under `db/` or `services/` imports it. It holds five 
   **off** (HTTP only; mandatory once TLS exists), `Max-Age` = the TTL in seconds. The
   clearer uses the same name and path.
 
+Feature 024 (D9) added a sixth, unrelated to authentication: `get_llm_client_factory`, the
+one dependency that answers "how do I build an outbound LLM client". It moved here from
+`app.routers.admin_llm` because 024 wires it into the memo, stream, character and setup
+routers too, and a dependency two routers share does not belong to either. `admin_llm`
+re-exports it by importing it, so the attribute it exposes is **the same function object**
+and every `app.dependency_overrides[admin_llm.get_llm_client_factory]` keyed on it keeps
+working.
+
 No SQL, no route path, no status-code literal and no business rule appear here.
 """
 
@@ -32,6 +40,8 @@ from app.db.engine import get_connection
 from app.errors import InsufficientRoleError, NotAuthenticatedError
 from app.roles import Role, role_at_least
 from app.services.auth import resolve_session
+from app.services.llm.client import LlmClient
+from app.services.llm_registry import LlmClientFactory
 
 
 @dataclass(frozen=True)
@@ -91,3 +101,11 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
         httponly=True,
         samesite="lax",
     )
+
+
+def get_llm_client_factory() -> LlmClientFactory:
+    """The registry's client factory for outbound calls; production answer is `LlmClient`.
+
+    Tests override this with `app.dependency_overrides[get_llm_client_factory]`.
+    """
+    return LlmClient

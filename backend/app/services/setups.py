@@ -13,6 +13,14 @@ The six operations below are the whole surface: nothing here ever removes a row 
 nothing here writes a `setups` row except `create_setup` (R2). A setup leaves the working
 list by `archive_setup` and comes back by `restore_setup`, and the row survives both.
 
+Feature `024`, step `006` adds one seam and nothing else: when `update_setup` writes a
+`description` that differs from the stored one, every session using this setup is re-indexed
+inside the same transaction, strictly (024 D5, D8, U4). That work lives in
+`app.services.session_index` — the single service this module imports, and still never the
+characters service (D6) — so the outbound client factory and the one outbound timeout arrive
+here as keyword-only arguments with defaults (024 D9) and no setting is ever looked up.
+`create_setup`, `archive_setup` and `restore_setup` do no search work at all.
+
 The statements run against the `setups` Table from `app.db.schema`, and the parent check
 against the `characters` Table from the same module — this service never calls the
 characters service (D6). Reads end the transaction they autobegan, on the normal return
@@ -33,6 +41,13 @@ from sqlalchemy import Connection, Row, Select, Update, select
 from app.db.schema import characters, setups
 from app.errors import CharacterNotFoundError, SetupNotFoundError
 from app.ids import SnowflakeGenerator
+from app.services.session_index import (
+    DEFAULT_EMBED_TIMEOUT_SECONDS,
+    LlmClient,
+    LlmClientFactory,
+    refresh_session_vectors,
+    session_ids_for_setup,
+)
 
 
 @dataclass(frozen=True)
@@ -136,12 +151,23 @@ def update_setup(
     setup_id: int,
     name: str | None = None,
     description: str | None = None,
+    *,
+    client_factory: LlmClientFactory = LlmClient,
+    timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> Setup:
     """Write the supplied fields of the owner's setup and bump `updated_at`.
 
     `None` means "not supplied". With neither supplied nothing is written and the current
     row comes back. `character_id` and `archived_at` are never touched here, so an archived
     setup can be edited (D5, D9). Raises `SetupNotFoundError`.
+
+    A `description` that differs from the stored one also re-indexes every session using
+    this setup, archived ones included, inside this one transaction and **strictly**: an
+    unusable designation or a failed embed propagates, and the edit is not stored (024 D5,
+    D6, D8, U4). A name-only edit, a resent unchanged description, and a setup no session
+    uses do no search work and resolve no model, so they need neither keyword argument.
+    `client_factory` and `timeout_seconds` are keyword-only with the usual defaults
+    (024 D9), which is why every existing positional call still binds.
     """
     supplied: dict[str, Any] = {}
     if name is not None:
@@ -150,10 +176,36 @@ def update_setup(
         supplied["description"] = description
     with connection.begin():
         setup = _require_setup(connection, user_id, setup_id)
+        # The pre-update description, taken from the owner-scoped read the authorisation
+        # already performs: the only moment the stored value is still the old one, and
+        # "changed" is defined against it (024 D5).
+        stored_description = setup.description
         if supplied:
             supplied["updated_at"] = _now_text()
             connection.execute(_owned_update(user_id, setup_id).values(supplied))
             setup = _fetch_existing(connection, user_id, setup_id)
+        # The setup-text fan-out, last in this write transaction so every composed session
+        # text reads the description the block above just wrote (024 D6). The dispatch is
+        # narrow on purpose: a description that was not supplied, and one resent identical to
+        # the stored value, both fall through — a name-only edit does no search work and
+        # resolves no model, whatever the registry holds (024 D5).
+        if description is not None and description != stored_description:
+            # Ascending id, archived sessions included, no archive predicate (U4); the
+            # `setup_id` equality leaves a sibling setup's and a setup-less session alone.
+            session_ids = session_ids_for_setup(connection, user_id, setup_id)
+            # Only when N > 0 (U4). A setup no session uses has nothing to re-index, so the
+            # strict refresh is never entered and no designation is resolved.
+            if session_ids:
+                # Strict (024 D8): nothing here is caught, so an unusable designation or a
+                # failed embed propagates, this transaction rolls back, and the description
+                # stays as it was — the edit is not stored.
+                refresh_session_vectors(
+                    connection,
+                    user_id,
+                    session_ids,
+                    client_factory=client_factory,
+                    timeout_seconds=timeout_seconds,
+                )
     return setup
 
 

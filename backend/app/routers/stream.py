@@ -18,6 +18,14 @@ Feature `021`, step `006` adds the one streaming route, `POST …/zone/compose` 
 handler's connection — its domain errors answer as JSON before any stream — then the handler
 returns 019's `sse_response` over `compose_stream` with the own-connection persister. The
 chat-client factory and the tool registry arrive through two overridable dependencies (D14).
+
+Feature `024`, step `005` (D9, Wire contract): the four record-keeping routes — settle, re-open,
+`POST …/entries` and `PATCH /api/messages/{message_id}` — also depend on the shared
+`get_llm_client_factory` (`app.dependencies`) and on `get_settings`, and pass the factory and
+`settings.llm_request_timeout_seconds` to their service call. The handlers stay sync `def` and
+gain no body or query parameter, so the two dependencies are invisible on the wire. Every other
+handler here is unchanged: the zone append and the three list reads pick
+`search_coverage_incomplete` up from `StreamMessage`'s false default.
 """
 
 from typing import Annotated
@@ -28,7 +36,7 @@ from sqlalchemy import Connection
 
 from app.config import Settings, get_settings
 from app.db.engine import get_connection, get_engine
-from app.dependencies import CurrentUser, require_user
+from app.dependencies import CurrentUser, get_llm_client_factory, require_user
 from app.ids import SnowflakeGenerator
 from app.models.ids import SnowflakeIn
 from app.models.stream import (
@@ -47,7 +55,7 @@ from app.routers.bootstrap import get_id_generator
 from app.services.compose import begin_compose, compose_stream
 from app.services.llm.client import LlmClient
 from app.services.llm.frames import own_connection_persister, sse_response
-from app.services.llm_registry import ChatClientFactory
+from app.services.llm_registry import ChatClientFactory, LlmClientFactory
 from app.services.messages import (
     StreamMessage,
     append_message,
@@ -77,6 +85,7 @@ def _settle_to_response(result: SettleResult) -> SettleResponse:
         entry_id=result.entry_id,
         kind=result.kind,
         buried_ids=list(result.buried_ids),
+        search_coverage_incomplete=result.search_coverage_incomplete,
     )
 
 
@@ -85,6 +94,7 @@ def _reopen_to_response(result: ReopenResult) -> ReopenResponse:
     return ReopenResponse(
         reopened_id=result.reopened_id,
         restored_ids=list(result.restored_ids),
+        search_coverage_incomplete=result.search_coverage_incomplete,
     )
 
 
@@ -106,12 +116,23 @@ def file_partner(
     current_user: Annotated[CurrentUser, Depends(require_user)],
     connection: Annotated[Connection, Depends(get_connection)],
     generator: Annotated[SnowflakeGenerator, Depends(get_id_generator)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
 ) -> MessageResponse:
     """File a partner block via `file_partner_entry(..., body.text)`; answers 201.
 
-    The body's `kind` is validated by the model and not passed on.
+    The body's `kind` is validated by the model and not passed on. 024 D9: the shared client
+    factory and `settings.llm_request_timeout_seconds` are forwarded for the degraded refresh.
     """
-    message = file_partner_entry(connection, generator, current_user.id, session_id, body.text)
+    message = file_partner_entry(
+        connection,
+        generator,
+        current_user.id,
+        session_id,
+        body.text,
+        client_factory=client_factory,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
     return _message_to_response(message)
 
 
@@ -187,9 +208,22 @@ def settle_zone(
     session_id: SnowflakeIn,
     current_user: Annotated[CurrentUser, Depends(require_user)],
     connection: Annotated[Connection, Depends(get_connection)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
 ) -> SettleResponse:
-    """Settle the current zone via `settle(connection, user_id, session_id)`. No body."""
-    return _settle_to_response(settle(connection, current_user.id, session_id))
+    """Settle the current zone via `settle(connection, user_id, session_id)`. No body.
+
+    024 D9: the shared client factory and `settings.llm_request_timeout_seconds` are forwarded
+    for the degraded refresh, and the result's coverage flag reaches the response.
+    """
+    result = settle(
+        connection,
+        current_user.id,
+        session_id,
+        client_factory=client_factory,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
+    return _settle_to_response(result)
 
 
 @router.post("/api/sessions/{session_id}/reopen", status_code=200)
@@ -197,9 +231,22 @@ def reopen_group(
     session_id: SnowflakeIn,
     current_user: Annotated[CurrentUser, Depends(require_user)],
     connection: Annotated[Connection, Depends(get_connection)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
 ) -> ReopenResponse:
-    """Re-open the last settled group via `reopen(connection, user_id, session_id)`. No body."""
-    return _reopen_to_response(reopen(connection, current_user.id, session_id))
+    """Re-open the last settled group via `reopen(connection, user_id, session_id)`. No body.
+
+    024 D9: the shared client factory and `settings.llm_request_timeout_seconds` are forwarded
+    for the degraded refresh, and the result's coverage flag reaches the response.
+    """
+    result = reopen(
+        connection,
+        current_user.id,
+        session_id,
+        client_factory=client_factory,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
+    return _reopen_to_response(result)
 
 
 @router.patch("/api/messages/{message_id}", status_code=200)
@@ -208,9 +255,22 @@ def edit_message(
     body: EditMessageRequest,
     current_user: Annotated[CurrentUser, Depends(require_user)],
     connection: Annotated[Connection, Depends(get_connection)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
 ) -> MessageResponse:
-    """Replace a zone message's text via `edit_message_text(..., body.text)`."""
-    message = edit_message_text(connection, current_user.id, message_id, body.text)
+    """Replace a zone message's text via `edit_message_text(..., body.text)`.
+
+    024 D9: the shared client factory and `settings.llm_request_timeout_seconds` are forwarded;
+    the service uses them only when the edited row is a record row (D5).
+    """
+    message = edit_message_text(
+        connection,
+        current_user.id,
+        message_id,
+        body.text,
+        client_factory=client_factory,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
     return _message_to_response(message)
 
 

@@ -81,6 +81,11 @@ STARTED_SESSION_KEYS = SESSION_KEYS | {"opening_message"}
 #: 012's eight-key ``Message`` wire shape, cited by 018's Wire contract.
 #: Amended by feature 022, step 001 (D3, DoD-4): plus `tool_name`, `tool_status`, `tool_args`
 #: — eleven keys.
+#: Amended by feature 024, step 005 (DoD-9 regression fallout; ``context.md`` **Wire
+#: contract**: the field is always present on the backend wire, and ``false`` wherever the
+#: source carries ``StreamMessage``'s default — which the opening message does): plus
+#: ``search_coverage_incomplete`` — twelve keys. Scope here is this key set alone; the flag's
+#: behaviour is covered in ``test_record_keeping_embedding.py``.
 MESSAGE_KEYS = {
     "id",
     "session_id",
@@ -93,6 +98,7 @@ MESSAGE_KEYS = {
     "tool_name",
     "tool_status",
     "tool_args",
+    "search_coverage_incomplete",
 }
 
 NOT_AUTHENTICATED = "not_authenticated"

@@ -60,6 +60,10 @@ SESSION_B = 6_101
 LOGIN_PATH = "/api/auth/login"
 
 #: D3 — the eight 012 keys plus `tool_name`, `tool_status`, `tool_args`.
+#: Amended by feature 024, step 005 (DoD-9 regression fallout; `context.md` **Wire contract**:
+#: always present on the backend wire, and **always `false`** for a zone row and a zone append)
+#: — plus `search_coverage_incomplete`, twelve keys. Scope here is this key set alone; the
+#: flag's behaviour is covered in `test_record_keeping_embedding.py`.
 MESSAGE_KEYS = {
     "id",
     "session_id",
@@ -72,6 +76,7 @@ MESSAGE_KEYS = {
     "tool_name",
     "tool_status",
     "tool_args",
+    "search_coverage_incomplete",
 }
 
 #: `001.context.md` row 3 — the ok payload.

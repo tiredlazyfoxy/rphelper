@@ -16,7 +16,15 @@ router is registered in `app.main` **after every other router**.
 
 The router translates no error by hand: `MemoNotFoundError`, `CharacterNotFoundError`,
 `SetupNotFoundError` and `SessionNotFoundError` propagate to the one `DomainError` handler
-registered in `app.main`.
+registered in `app.main`. Feature `024` adds two more that travel the same way, from the
+create and the body-changing patch: `no_embedding_model` (409) and `llm_unreachable` (502).
+
+**Feature `024`, step `004` — the two embedding dependencies** (`024 D9`). Create and patch
+also depend on `app.dependencies.get_llm_client_factory` (the shared factory, overridden in
+tests) and on `get_settings`, and hand the service the factory plus
+`settings.llm_request_timeout_seconds` as keyword arguments. The service imports no
+`fastapi`, so this wiring is the only way those two values reach it. `GET`, `DELETE` and the
+reorder route need neither: none of them can require an embedding model.
 """
 
 from typing import Annotated
@@ -25,8 +33,9 @@ from fastapi import APIRouter, Depends, Response
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy import Connection
 
+from app.config import Settings, get_settings
 from app.db.engine import get_connection
-from app.dependencies import CurrentUser, require_user
+from app.dependencies import CurrentUser, get_llm_client_factory, require_user
 from app.ids import SnowflakeGenerator
 from app.models.ids import SnowflakeIn
 from app.models.memos import (
@@ -40,6 +49,7 @@ from app.models.memos import (
     UpdateMemoRequest,
 )
 from app.routers.bootstrap import get_id_generator
+from app.services.llm_registry import LlmClientFactory
 from app.services.memo_chain import MemoChainLevel, resolve_chain
 from app.services.memos import Memo, create_memo, delete_memo, list_memos, reorder_memos, update_memo
 
@@ -100,10 +110,26 @@ def create_own_memo(
     current_user: Annotated[CurrentUser, Depends(require_user)],
     connection: Annotated[Connection, Depends(get_connection)],
     generator: Annotated[SnowflakeGenerator, Depends(get_id_generator)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
 ) -> MemoResponse:
-    """Create one note via `create_memo(...)` (`scope_id` passed as `None` for `"user"`); 201."""
+    """Create one note via `create_memo(...)` (`scope_id` passed as `None` for `"user"`); 201.
+
+    The factory and the one outbound timeout go in by keyword (024 D9). A create embeds
+    strictly, so an unusable designation or a failed embed answers 409 / 502 through the
+    global handler and stores nothing.
+    """
     scope_id = None if body.scope == "user" else body.scope_id
-    memo = create_memo(connection, generator, current_user.id, body.scope, scope_id, body.body)
+    memo = create_memo(
+        connection,
+        generator,
+        current_user.id,
+        body.scope,
+        scope_id,
+        body.body,
+        client_factory=client_factory,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
     return _to_response(memo)
 
 
@@ -128,8 +154,15 @@ def update_own_memo(
     body: UpdateMemoRequest,
     current_user: Annotated[CurrentUser, Depends(require_user)],
     connection: Annotated[Connection, Depends(get_connection)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
 ) -> MemoResponse:
-    """Forward to `update_memo(...)` only the fields that were set and are not null."""
+    """Forward to `update_memo(...)` only the fields that were set and are not null.
+
+    The factory and the timeout are passed on every patch (024 D9); whether they are used is
+    the service's decision, and a flag-only patch never touches them. Which fields were sent
+    stays this handler's business, exactly as before.
+    """
     supplied = body.model_fields_set
     memo = update_memo(
         connection,
@@ -138,6 +171,8 @@ def update_own_memo(
         body=body.body if "body" in supplied and body.body is not None else None,
         is_enabled=body.is_enabled if "is_enabled" in supplied and body.is_enabled is not None else None,
         is_forced=body.is_forced if "is_forced" in supplied and body.is_forced is not None else None,
+        client_factory=client_factory,
+        timeout_seconds=settings.llm_request_timeout_seconds,
     )
     return _to_response(memo)
 

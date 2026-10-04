@@ -10,7 +10,7 @@ import type { SseOutcome, SseProgressFrame } from "../shared/sse";
 
 import type { SettlePreview } from "./parens";
 import { previewSettle } from "./parens";
-import type { Message } from "./streamApi";
+import type { Message, ReopenResult, SettleResult } from "./streamApi";
 import {
   appendZoneMessage,
   composeZone,
@@ -48,6 +48,12 @@ export class StreamState {
   composeHandle: ComposeHandle | null = null;
   /** 022 D7: the in-flight compose's tool calls, in arrival order; emptied with the text. */
   liveTools: LiveToolCall[] = [];
+  /**
+   * 024 D11: whether the latest record-keeping write in this mount committed without being
+   * indexed for search. False on construction — no staleness is persisted (024 U5) — and
+   * written only by the effects below, never by a method on this class.
+   */
+  searchCoverageIncomplete = false;
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
@@ -333,10 +339,11 @@ export async function sendComposer(state: StreamState, signal?: AbortSignal): Pr
   const sessionId = state.sessionId;
   setBusy(state, true);
 
-  let sent = false;
+  // 024 007: the filed row is captured (it was discarded before) so its coverage flag can be
+  // read. `undefined` means the request failed, which is exactly the old `sent === false`.
+  let filed: Message | undefined;
   try {
-    await filePartnerEntry(sessionId, text, signal);
-    sent = true;
+    filed = await filePartnerEntry(sessionId, text, signal);
   } catch (error) {
     if (signal?.aborted || isAbortRejection(error)) {
       return;
@@ -346,8 +353,17 @@ export async function sendComposer(state: StreamState, signal?: AbortSignal): Pr
   if (signal?.aborted) {
     return;
   }
-  if (sent) {
+  if (filed !== undefined) {
     clearDraftIfUnchanged(state, text);
+  }
+
+  // 024 007 (D10, D11): a settled filing reports its coverage; a zone row (null `settled_at`)
+  // and a failed request both leave the flag as it is, so nothing is written in the `catch`.
+  if (filed !== undefined && filed.settled_at !== null) {
+    const incomplete = filed.search_coverage_incomplete ?? false;
+    runInAction(() => {
+      state.searchCoverageIncomplete = incomplete;
+    });
   }
 
   const alive = await rereadEntries(state, signal);
@@ -368,8 +384,10 @@ export async function filePastedPartner(
   }
   setBusy(state, true);
 
+  // 024 007: the filed row is captured (it was discarded before) for its coverage flag.
+  let filed: Message | undefined;
   try {
-    await filePartnerEntry(state.sessionId, text, signal);
+    filed = await filePartnerEntry(state.sessionId, text, signal);
   } catch (error) {
     if (signal?.aborted || isAbortRejection(error)) {
       return;
@@ -378,6 +396,15 @@ export async function filePastedPartner(
   }
   if (signal?.aborted) {
     return;
+  }
+
+  // 024 007 (D10, D11): same rule as `sendComposer`'s partner branch — only a settled filing
+  // writes the flag. Zone rows and failures leave it unchanged.
+  if (filed !== undefined && filed.settled_at !== null) {
+    const incomplete = filed.search_coverage_incomplete ?? false;
+    runInAction(() => {
+      state.searchCoverageIncomplete = incomplete;
+    });
   }
 
   if (!(await rereadEntries(state, signal))) {
@@ -426,8 +453,10 @@ export async function settleComposer(state: StreamState, signal?: AbortSignal): 
     clearDraftIfUnchanged(state, text);
   }
 
+  // 024 007: the settle result is captured (it was discarded before) for its coverage flag.
+  let settled: SettleResult | undefined;
   try {
-    await settleZone(sessionId, signal);
+    settled = await settleZone(sessionId, signal);
   } catch (error) {
     if (signal?.aborted || isAbortRejection(error)) {
       return;
@@ -436,6 +465,15 @@ export async function settleComposer(state: StreamState, signal?: AbortSignal): 
   }
   if (signal?.aborted) {
     return;
+  }
+
+  // 024 007 (D10, D11): the settle reports its coverage, an absent field reading as complete.
+  // A failed settle leaves the flag as it is, so nothing is written in the `catch`.
+  if (settled !== undefined) {
+    const incomplete = settled.search_coverage_incomplete ?? false;
+    runInAction(() => {
+      state.searchCoverageIncomplete = incomplete;
+    });
   }
 
   if (!(await rereadBoth(state, signal))) {
@@ -626,8 +664,10 @@ export async function reopenLast(state: StreamState, signal?: AbortSignal): Prom
   }
   setBusy(state, true);
 
+  // 024 007: the re-open result is captured (it was discarded before) for its coverage flag.
+  let reopened: ReopenResult | undefined;
   try {
-    await reopenLastEntry(state.sessionId, signal);
+    reopened = await reopenLastEntry(state.sessionId, signal);
   } catch (error) {
     if (signal?.aborted || isAbortRejection(error)) {
       return;
@@ -636,6 +676,15 @@ export async function reopenLast(state: StreamState, signal?: AbortSignal): Prom
   }
   if (signal?.aborted) {
     return;
+  }
+
+  // 024 007 (D10, D11): the re-open reports its coverage, an absent field reading as complete.
+  // A failed re-open leaves the flag as it is.
+  if (reopened !== undefined) {
+    const incomplete = reopened.search_coverage_incomplete ?? false;
+    runInAction(() => {
+      state.searchCoverageIncomplete = incomplete;
+    });
   }
 
   if (!(await rereadBoth(state, signal))) {
@@ -720,13 +769,18 @@ export async function editEntry(
   }
 
   if (updated.settled_at === null) {
-    // Re-opened elsewhere: the row is no longer an entry, so both lists are re-read.
+    // Re-opened elsewhere: the row is no longer an entry, so both lists are re-read. 024 D11:
+    // a zone row leaves the coverage flag unchanged, so this early return stays flagless.
     return rereadBoth(state, signal);
   }
 
   // Only the edited row is replaced; the id sequence is unchanged, so the override stays.
+  // 024 007 (D10, D11): reached only on the settled path, so this is also where the edit's
+  // coverage is recorded, an absent field reading as complete. Nothing is written in the
+  // `catch`.
   runInAction(() => {
     state.entries = state.entries.map((message) => (message.id === messageId ? updated : message));
+    state.searchCoverageIncomplete = updated.search_coverage_incomplete ?? false;
   });
   return true;
 }

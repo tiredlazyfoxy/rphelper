@@ -18,6 +18,15 @@ user_id, scope, scope_id, memo_ids) -> list[Memo]` (D6); its tests are suffixed
 Targets (users, characters, setups, sessions) are raw-inserted with their committed
 columns; memos are created through the service except where a DoD needs a precise state
 (another user's row, chosen `sort_key` values, a disabled or forced row).
+
+Feature 024 step 004 (`docs/plans/024.embedding-lifecycle/004.memo-write-paths.md`, DoD-10,
+`context.md` "Regression fallout") makes a memo create and a memo **body** edit require a
+designated embedding model (D5, strict per D8). That is a **precondition**, not a changed
+expectation: the `engine` fixture now also seeds the designation (one `llm_servers` row and one
+enabled, designated `models` row at dimension 8), and the `_create` / `_update` wrappers inject
+the shared fake from `tests/llm_fakes.py` through the frozen `client_factory=` keyword seam
+(D9). **No assertion about memo behaviour in this file was changed or loosened.** The two import
+guards were narrowed — see `_PERMITTED_SERVICE_IMPORT`.
 """
 
 from __future__ import annotations
@@ -49,8 +58,15 @@ from app.services.memos import (
     reorder_memos,
     update_memo,
 )
+from tests.llm_fakes import FAKE_EMBEDDING_DIM, FakeClientFactory, fake_factory
 
 TIMESTAMP = "2026-01-01T00:00:00.000000+00:00"
+
+#: 024 step 004: the designation every create / body edit now needs (`context.md` D5, D9).
+EMBEDDING_SERVER_ID = 1_400_000_000_000_000_301
+EMBEDDING_MODEL_ID = 1_400_000_000_000_000_302
+EMBEDDING_BASE_URL = "http://embedding.test:8080/v1"
+EMBEDDING_MODEL_NAME = "the-designated-embedding-model"
 
 USER_A = 101
 USER_B = 202
@@ -201,11 +217,50 @@ def _insert_memo(
         )
 
 
+def _seed_embedding_designation(engine: Engine) -> None:
+    """One server and one enabled, designated embedding model at dimension 8.
+
+    024 step 004's precondition for every create and every body edit (`context.md` D5 / D9 and
+    "Regression fallout"). Raw inserts, no service, and a null `api_key_ref` so no secret has to
+    resolve. The `memos` table is untouched by this, so no assertion in this file is affected.
+    """
+    servers = schema.metadata.tables["llm_servers"]
+    models = schema.metadata.tables["models"]
+    with engine.begin() as connection:
+        connection.execute(
+            servers.insert().values(
+                id=EMBEDDING_SERVER_ID,
+                name="the embedding server",
+                kind="llamaswap",
+                base_url=EMBEDDING_BASE_URL,
+                api_key_ref=None,
+                last_test_at=None,
+                last_test_ok=None,
+                last_test_error=None,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+        connection.execute(
+            models.insert().values(
+                id=EMBEDDING_MODEL_ID,
+                server_id=EMBEDDING_SERVER_ID,
+                model_name=EMBEDDING_MODEL_NAME,
+                is_enabled=True,
+                is_embedding_designated=True,
+                embedding_dim=FAKE_EMBEDDING_DIM,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+
+
 @pytest.fixture
 def engine(db_engine: Engine) -> Engine:
-    """Two owners, each with characters, a setup and a session."""
+    """Two owners, each with characters, a setup and a session, plus 024's designated model."""
     with db_engine.begin() as connection:
         schema.metadata.create_all(connection)
+    _seed_embedding_designation(db_engine)
     _insert_user(db_engine, user_id=USER_A, username="alice")
     _insert_user(db_engine, user_id=USER_B, username="bob")
     _insert_character(db_engine, character_id=CHAR_A1, user_id=USER_A, name="Aria")
@@ -230,6 +285,11 @@ def generator() -> SnowflakeGenerator:
 # --- one connection per service call ------------------------------------------------------
 
 
+def _fake_factory() -> FakeClientFactory:
+    """A fresh happy-path fake per service call — 024 step 004's injected provider (D9)."""
+    return fake_factory(FAKE_EMBEDDING_DIM)
+
+
 def _create(
     engine: Engine,
     generator: Any,
@@ -237,9 +297,12 @@ def _create(
     scope: str,
     scope_id: int | None,
     body: str = "a note",
+    factory: FakeClientFactory | None = None,
 ) -> Memo:
+    client_factory = factory if factory is not None else _fake_factory()
+    memo_scope: Any = scope
     with engine.connect() as connection:
-        return create_memo(connection, generator, user_id, scope, scope_id, body)  # type: ignore[arg-type]
+        return create_memo(connection, generator, user_id, memo_scope, scope_id, body, client_factory=client_factory)
 
 
 def _list(engine: Engine, user_id: int, scope: str, scope_id: int | None) -> list[Memo]:
@@ -247,9 +310,13 @@ def _list(engine: Engine, user_id: int, scope: str, scope_id: int | None) -> lis
         return list_memos(connection, user_id, scope, scope_id)  # type: ignore[arg-type]
 
 
-def _update(engine: Engine, user_id: int, memo_id: int, **changes: Any) -> Memo:
+def _update(
+    engine: Engine, user_id: int, memo_id: int, factory: FakeClientFactory | None = None, **changes: Any
+) -> Memo:
+    """024 step 004: a body edit needs the injected provider; a flag-only edit ignores it (D5)."""
+    client_factory = factory if factory is not None else _fake_factory()
     with engine.connect() as connection:
-        return update_memo(connection, user_id, memo_id, **changes)
+        return update_memo(connection, user_id, memo_id, client_factory=client_factory, **changes)
 
 
 def _delete(engine: Engine, user_id: int, memo_id: int) -> object:
@@ -829,6 +896,23 @@ def test_a_refused_list_leaves_no_transaction_open__S015_002_DoD14(
 _FASTAPI_IMPORT = re.compile(r"^\s*(?:from|import)\s+fastapi\b", re.MULTILINE)
 _FORBIDDEN_IMPORT_ROOT = "app.services"
 
+#: Feature 024 step 004 — **approved deviation** (user decision, 2026-10-04, recorded under
+#: `## Ultra phase` in `docs/plans/024.embedding-lifecycle/status.md`). `app/services/memos.py`
+#: must import the embedding seam (`004.memo-write-paths.md` Interface intent, `context.md` D5 /
+#: D7 / D9), which the two guards below forbade outright. The guards are **narrowed to permit
+#: only this one named module** — the skeleton re-exports `LlmClient`, `LlmClientFactory` and
+#: `DEFAULT_EMBED_TIMEOUT_SECONDS` through it, so one import is genuinely all that is needed.
+#: Every other `app.services` import, and every relative import, stays an offender, so the
+#: invariant still bites: adding `app.services.characters` to `memos.py` still fails these tests.
+_PERMITTED_SERVICE_IMPORT = "app.services.embedding"
+
+
+def _is_forbidden_service_import(module: str) -> bool:
+    """Is `module` an `app.services` import other than the single permitted one?"""
+    if module == _PERMITTED_SERVICE_IMPORT:
+        return False
+    return module == _FORBIDDEN_IMPORT_ROOT or module.startswith(_FORBIDDEN_IMPORT_ROOT + ".")
+
 
 def test_the_service_module_has_no_fastapi_import__S015_002_DoD15() -> None:
     source = inspect.getsource(memos_module)
@@ -844,6 +928,8 @@ def test_the_service_module_has_no_fastapi_import__S015_002_DoD15() -> None:
 
 
 def test_the_service_module_imports_no_other_service__S015_002_DoD15() -> None:
+    """015/002 DoD-15, narrowed by 024 step 004: the only permitted `app.services` import is
+    `app.services.embedding` (see `_PERMITTED_SERVICE_IMPORT`). Anything else still offends."""
     tree = ast.parse(inspect.getsource(memos_module))
 
     offenders: list[str] = []
@@ -851,16 +937,11 @@ def test_the_service_module_imports_no_other_service__S015_002_DoD15() -> None:
         if isinstance(node, ast.ImportFrom):
             if node.level > 0:
                 offenders.append(f"relative import, level {node.level}")
-            elif node.module is not None and (
-                node.module == _FORBIDDEN_IMPORT_ROOT
-                or node.module.startswith(_FORBIDDEN_IMPORT_ROOT + ".")
-            ):
+            elif node.module is not None and _is_forbidden_service_import(node.module):
                 offenders.append(f"from {node.module} import ...")
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == _FORBIDDEN_IMPORT_ROOT or alias.name.startswith(
-                    _FORBIDDEN_IMPORT_ROOT + "."
-                ):
+                if _is_forbidden_service_import(alias.name):
                     offenders.append(f"import {alias.name}")
 
     assert offenders == []
@@ -1206,6 +1287,8 @@ def test_a_target_refusal_leaves_no_transaction_open__S016_001_DoD7(
 
 
 def test_the_service_module_still_has_no_fastapi_and_no_service_import__S016_001_DoD14() -> None:
+    """016/001 DoD-14, narrowed by 024 step 004 exactly as the 015 guard above: no `fastapi`, no
+    relative import, and no `app.services` import other than `app.services.embedding`."""
     tree = ast.parse(inspect.getsource(memos_module))
 
     offenders: list[str] = []
@@ -1216,15 +1299,13 @@ def test_the_service_module_still_has_no_fastapi_and_no_service_import__S016_001
                 offenders.append(f"relative import, level {node.level}")
             elif module == "fastapi" or module.startswith("fastapi."):
                 offenders.append(f"from {module} import ...")
-            elif module == _FORBIDDEN_IMPORT_ROOT or module.startswith(_FORBIDDEN_IMPORT_ROOT + "."):
+            elif _is_forbidden_service_import(module):
                 offenders.append(f"from {module} import ...")
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name == "fastapi" or alias.name.startswith("fastapi."):
                     offenders.append(f"import {alias.name}")
-                if alias.name == _FORBIDDEN_IMPORT_ROOT or alias.name.startswith(
-                    _FORBIDDEN_IMPORT_ROOT + "."
-                ):
+                if _is_forbidden_service_import(alias.name):
                     offenders.append(f"import {alias.name}")
 
     assert offenders == []

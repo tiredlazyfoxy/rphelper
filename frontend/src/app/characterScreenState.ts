@@ -6,6 +6,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 
 import { isApiError } from "../shared/apiError";
+import { embeddingFailureSentence } from "../shared/embeddingFailure";
 import type { Character } from "./charactersApi";
 import {
   archiveCharacter,
@@ -164,9 +165,13 @@ export async function commitPersona(
   let saved: Character;
   try {
     saved = await updateCharacter(held.id, { sheet: sent });
-  } catch {
+  } catch (error) {
+    // 024 step 008 (D8): a changed persona is the only character write that is embedded
+    // (024 D5), so it is the only one that can be refused for want of an index. Such a
+    // refusal names its cause; every other failure keeps the generic sentence.
+    const refusal: string | null = embeddingFailureSentence(error);
     runInAction(() => {
-      state.error = SAVE_FAILED;
+      state.error = refusal ?? SAVE_FAILED;
     });
     return;
   } finally {

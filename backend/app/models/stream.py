@@ -1,12 +1,20 @@
 """The stream request and response models — nothing else (feature `012`, D9, D12).
 
-**Responses.** `MessageResponse` is the wire `Message`: exactly eleven keys (the eight of
-012 plus 022 D3's tool view). `id` and `session_id` use the outbound snowflake alias, so each
-leaves as a **decimal string** (`data-model.md` § Identifiers). `user_id`, `related_to` and
-`tool_payload` are never on the wire. Timestamps pass through as the fixed-width UTC text the row stores.
+**Responses.** `MessageResponse` is the wire `Message`: exactly twelve keys (the eight of
+012, 022 D3's tool view and 024's `search_coverage_incomplete`). `id` and `session_id` use the
+outbound snowflake alias, so each leaves as a **decimal string** (`data-model.md` §
+Identifiers). `user_id`, `related_to` and `tool_payload` are never on the wire. Timestamps pass
+through as the fixed-width UTC text the row stores.
 `EntryListResponse` wraps the settled record under `entries`, `ZoneResponse` the current zone
-under `messages`. `SettleResponse` / `ReopenResponse` carry only the ids the operation moved
-(D11), every one a decimal string.
+under `messages`. `SettleResponse` / `ReopenResponse` carry the ids the operation moved
+(D11), every one a decimal string, plus the same coverage flag.
+
+Feature `024`, step `005` (Wire contract) adds `search_coverage_incomplete: bool` to those
+three responses. It is **required and always present** on the backend wire, and is read off the
+service value's attribute of the same name. `StreamMessage` defaults that attribute to false,
+so every other route answering a `MessageResponse` — the zone append, the three list reads and
+the seeded-session opening message — carries `false` with no handler change. A zone row and a
+zone append are always `false`.
 
 **Requests.** `text` in all three bodies is required, a string and **not blank** (D9): one
 shared `NonBlankText` type checks it. The value is stored **verbatim** — never trimmed — so
@@ -38,9 +46,9 @@ NonBlankText = Annotated[str, AfterValidator(_require_non_blank)]
 
 
 class MessageResponse(BaseModel):
-    """One `messages` row on the wire. Eleven keys (022 D3): the eight 012 keys plus the tool
-    view `tool_name` / `tool_status` / `tool_args` (null on a non-tool row). Never `user_id`,
-    `related_to` or `tool_payload`."""
+    """One `messages` row on the wire. Twelve keys: the eight 012 keys, 022 D3's tool view
+    `tool_name` / `tool_status` / `tool_args` (null on a non-tool row) and 024's
+    `search_coverage_incomplete`. Never `user_id`, `related_to` or `tool_payload`."""
 
     id: SnowflakeOut
     session_id: SnowflakeOut
@@ -53,6 +61,9 @@ class MessageResponse(BaseModel):
     tool_name: str | None = None
     tool_status: Literal["ok", "failed"] | None = None
     tool_args: dict[str, Any] | None = None
+    #: 024 D8 / Wire contract: true only when a record-keeping write could not re-embed this
+    #: row's session. Required here; the source `StreamMessage` defaults it to false.
+    search_coverage_incomplete: bool
 
 
 class EntryListResponse(BaseModel):
@@ -110,15 +121,19 @@ class EditMessageRequest(BaseModel):
 
 
 class SettleResponse(BaseModel):
-    """What settle moved: the head's id, its kind and the ids buried under it (ascending)."""
+    """What settle moved: the head's id, its kind and the ids buried under it (ascending), plus
+    024's coverage flag."""
 
     entry_id: SnowflakeOut
     kind: Literal["turn", "decision"]
     buried_ids: list[SnowflakeOut]
+    search_coverage_incomplete: bool
 
 
 class ReopenResponse(BaseModel):
-    """What re-open moved: the head's id and the ids restored to the zone (ascending)."""
+    """What re-open moved: the head's id and the ids restored to the zone (ascending), plus
+    024's coverage flag."""
 
     reopened_id: SnowflakeOut
     restored_ids: list[SnowflakeOut]
+    search_coverage_incomplete: bool

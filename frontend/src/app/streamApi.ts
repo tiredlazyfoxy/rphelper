@@ -18,6 +18,7 @@ export type ToolStatus = "ok" | "failed";
 /**
  * One message, exactly as the stream routes send it. No renaming layer. The three tool fields
  * are optional (022 D15): absent means the same as null; all three are null on a non-tool row.
+ * 024 D10: `search_coverage_incomplete` is optional too, and absent reads as `false`.
  */
 export type Message = {
   id: string;
@@ -31,19 +32,25 @@ export type Message = {
   tool_name?: string | null;
   tool_status?: ToolStatus | null;
   tool_args?: Record<string, unknown> | null;
+  /** 024 D10: true when the write committed but could not be indexed for search. */
+  search_coverage_incomplete?: boolean;
 };
 
-/** `POST /api/sessions/<id>/settle`'s body: ids only (012 D11). */
+/** `POST /api/sessions/<id>/settle`'s body: ids only (012 D11), plus 024's coverage flag. */
 export type SettleResult = {
   entry_id: string;
   kind: MessageKind;
   buried_ids: string[];
+  /** 024 D10: true when the entry settled but its session could not be re-indexed. */
+  search_coverage_incomplete?: boolean;
 };
 
-/** `POST /api/sessions/<id>/reopen`'s body: ids only (012 D11). */
+/** `POST /api/sessions/<id>/reopen`'s body: ids only (012 D11), plus 024's coverage flag. */
 export type ReopenResult = {
   reopened_id: string;
   restored_ids: string[];
+  /** 024 D10: true when the re-open committed but its session could not be re-indexed. */
+  search_coverage_incomplete?: boolean;
 };
 
 /** `GET …/entries`'s body: `{ entries: [...] }`. */
