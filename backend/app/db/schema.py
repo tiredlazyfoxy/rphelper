@@ -414,6 +414,37 @@ memos = Table(
 )
 
 
+#: Cached translations of settled partner rows (`data-model.md` § `translations`; feature
+#: `023`, D7). Exactly six columns. `user_id` is the direct owner column every read scopes by
+#: (R5). `message_id` is the translated row; its foreign key is bare, with **no `ON DELETE`** —
+#: nothing deletes a message (R6), and an edit discards the row's translations explicitly
+#: (D11). Unique on `(message_id, target_language)`: one cached text per row and language.
+#: Deliberately absent: `updated_at` (a row is only ever inserted or deleted, never updated)
+#: and any state column (absence means "not translated"). Timestamps are the fixed-width UTC
+#: text form.
+translations = Table(
+    "translations",
+    metadata,
+    Column("id", BigInteger().with_variant(Integer(), "sqlite"), primary_key=True, autoincrement=False),
+    Column(
+        "user_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("users.id"),
+        nullable=False,
+    ),
+    Column(
+        "message_id",
+        BigInteger().with_variant(Integer(), "sqlite"),
+        ForeignKey("messages.id"),
+        nullable=False,
+    ),
+    Column("target_language", Text, nullable=False),
+    Column("text", Text, nullable=False),
+    Column("created_at", Text, nullable=False),
+    UniqueConstraint("message_id", "target_language", name="uq_translations_message_id_target_language"),
+)
+
+
 #: The settled record (D1): every `messages` column of every row whose `settled_at` is set.
 #: No session filter and no ordering — callers narrow and order it on its own columns.
 settled_entries = select(messages).where(messages.c.settled_at.is_not(None))

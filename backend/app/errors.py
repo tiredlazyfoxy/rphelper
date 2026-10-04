@@ -518,6 +518,27 @@ class ToolFailedError(DomainError):
         super().__init__(message, detail)
 
 
+class TranslationFailedError(DomainError):
+    """A partner row's translation could not be produced on a cache miss.
+
+    Feature `023` (`context.md` D5). 502: like `llm_unreachable`, the fault is a dependency's.
+    Raised when the provider call fails or the joined result is empty. `detail` is
+    `{"message_id": <the id as a decimal string>}`; the default message is used when the
+    raiser gives none.
+    """
+
+    code = "translation_failed"
+    http_status = 502
+
+    def __init__(self, message_id: int, message: str | None = None) -> None:
+        # The id is the only `detail` key, as a decimal string (the JSON id boundary).
+        detail = {"message_id": str(message_id)}
+        # Raised with just the id by the generic path; a cause-specific message still wins.
+        if message is None:
+            message = "The translation failed. Showing the original."
+        super().__init__(message, detail)
+
+
 async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     """Render a raised `DomainError` as its `http_status` plus `to_wire()`'s body."""
     # Redaction rule: the code and the status, and nothing else. `detail` is where later

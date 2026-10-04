@@ -809,8 +809,10 @@ def test_delete_touches_only_the_two_registry_tables__S006_003_DoD10(engine: Eng
     touched = recorder.tables_touched()
     assert touched <= {"llm_servers", "models"}, touched
     other_tables = set(schema.metadata.tables) - {"llm_servers", "models"}
+    # 023/001 DoD-3: `translations` joins the belt-and-braces list of tables the registry
+    # must never name (feature 023 context.md R8 — only `services/translation.py` reads it).
     for statement in recorder.statements:
-        for table_name in other_tables | {"sessions", "characters", "memos"}:
+        for table_name in other_tables | {"sessions", "characters", "memos", "translations"}:
             assert not re.search(rf"\b{re.escape(table_name)}\b", statement, re.IGNORECASE), statement
 
 

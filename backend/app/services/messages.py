@@ -8,8 +8,9 @@ inserts). Reads go only through the schema layer's selectables (`settled_entries
 `current_zone`, `message_states` — D1, D7); every write bumps the session (D3); nothing here
 ever names `related_to` in an insert or update, nor touches the settle columns of an existing
 row (D16). Feature `014` step `001` widens the edit to settled rows of any kind (text only;
-a buried row stays refused). There is no delete, no discard and no settle-state operation in
-this module.
+a buried row stays refused). The one delete in this module is the edited message's cached
+`translations` rows, discarded inside the edit's own transaction (feature `023` D11); nothing
+else is deleted or discarded here, and there is no settle-state operation.
 """
 
 import json
@@ -28,6 +29,7 @@ from app.db.schema import (
     messages,
     sessions,
     settled_entries,
+    translations,
 )
 from app.errors import MessageNotEditableError, MessageNotFoundError, SessionNotFoundError
 from app.ids import SnowflakeGenerator
@@ -340,6 +342,17 @@ def edit_message_text(connection: Connection, user_id: int, message_id: int, tex
             messages.update()
             .where(messages.c.id == message_id, messages.c.user_id == user_id)
             .values(text=text, updated_at=now)
+        )
+        # 023 D11 / US-111.AC-1: new text invalidates every cached translation of this row, in
+        # every target language. Inside the same transaction as the update, so the edit and the
+        # discard commit or fail together, and a refused edit (missing, foreign, buried, tool)
+        # never reaches here. Owner-scoped like every other statement (R5). A no-op for zone
+        # rows and turns, which never have cached rows.
+        connection.execute(
+            translations.delete().where(
+                translations.c.message_id == message_id,
+                translations.c.user_id == user_id,
+            )
         )
         _bump_session(connection, user_id, state.session_id, now)
         row = connection.execute(selectable.where(columns.id == message_id, columns.user_id == user_id)).one()

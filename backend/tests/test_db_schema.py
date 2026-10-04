@@ -658,7 +658,14 @@ NEW_006_TABLES = {"llm_servers", "models"}
 # "the registry, minus what pre-dated it, minus what later features added". A feature
 # that adds a table appends it here and gives its own delta a `LATER_THAN_<n>_TABLES`
 # set of its own, so the shape stays the same for 010 and beyond.
-LATER_THAN_006_TABLES = {"characters", "setups", "sessions", "messages", "memos"}  # 009/001 .. 012/001, 015/001
+LATER_THAN_006_TABLES = {
+    "characters",
+    "setups",
+    "sessions",
+    "messages",
+    "memos",
+    "translations",
+}  # 009/001 .. 012/001, 015/001, 023/001
 
 # context.md D1: the "active" switch admin-surfaces.md describes is deliberately dropped.
 FORBIDDEN_SERVER_FLAG_COLUMNS = ("active", "is_active", "enabled")
@@ -1094,7 +1101,7 @@ NEW_009_TABLES = {"characters"}
 # DoD-1/DoD-11's shared shape: features after 009 append their tables here (010/001 DoD-8
 # added "setups"; 011/001 DoD-9 added "sessions"; 012/001 DoD-1 added "messages"), so this
 # delta keeps meaning "009 added exactly `characters`".
-LATER_THAN_009_TABLES: set[str] = {"setups", "sessions", "messages", "memos"}
+LATER_THAN_009_TABLES: set[str] = {"setups", "sessions", "messages", "memos", "translations"}
 
 # 017/001 DoD-5 (feature 017 001.context.md "Amending the schema tests"): 009's seven
 # columns, widened deliberately by 017's six assistant-chain columns (D4, D5).
@@ -1253,7 +1260,7 @@ NEW_010_TABLES = {"setups"}
 # this delta keeps meaning "010 added exactly `setups`" once a later feature declares one.
 # 011/001 DoD-9 appended "sessions" — the first entry this set ever needed; 012/001 DoD-1
 # appended "messages".
-LATER_THAN_010_TABLES: set[str] = {"sessions", "messages", "memos"}
+LATER_THAN_010_TABLES: set[str] = {"sessions", "messages", "memos", "translations"}
 
 SETUPS_COLUMNS = {
     "id",
@@ -1472,7 +1479,7 @@ NEW_011_TABLES = {"sessions"}
 # 011/001 DoD-1, in 009/001 DoD-11's shape: features after 011 append their tables here, so
 # this delta keeps meaning "011 added exactly `sessions`" once a later feature declares one.
 # 012/001 DoD-1 appended "messages" — the first entry this set ever needed.
-LATER_THAN_011_TABLES: set[str] = {"messages", "memos"}
+LATER_THAN_011_TABLES: set[str] = {"messages", "memos", "translations"}
 
 # 017/001 DoD-5 (feature 017 001.context.md "Amending the schema tests"): 011's eight
 # columns, widened deliberately by 017's six assistant-chain columns and two language
@@ -1776,7 +1783,7 @@ PRE_012_TABLES = PRE_011_TABLES | NEW_011_TABLES
 NEW_012_TABLES = {"messages"}
 # 012/001 DoD-1, in 009/001 DoD-11's shape: features after 012 append their tables here, so
 # this delta keeps meaning "012 added exactly `messages`" once a later feature declares one.
-LATER_THAN_012_TABLES: set[str] = {"memos"}  # 015/001
+LATER_THAN_012_TABLES: set[str] = {"memos", "translations"}  # 015/001, 023/001
 
 MESSAGES_COLUMNS = {
     "id",
@@ -2217,7 +2224,7 @@ PRE_015_TABLES = PRE_012_TABLES | NEW_012_TABLES
 NEW_015_TABLES = {"memos"}
 # 015/001 DoD-1, in 009/001 DoD-11's shape: features after 015 append their tables here, so
 # this delta keeps meaning "015 added exactly `memos`" once a later feature declares one.
-LATER_THAN_015_TABLES: set[str] = set()
+LATER_THAN_015_TABLES: set[str] = {"translations"}  # 023/001
 
 MEMOS_COLUMNS = {
     "id",
@@ -2977,3 +2984,108 @@ def test_buried_messages_has_no_owner_or_session_filter__S022_002_DoD1(db_engine
         connection.commit()
         ids = {row._mapping["id"] for row in connection.execute(schema.buried_messages).all()}
         assert ids == {BURIED_FIRST_ID, BURIED_SECOND_ID, 311}
+
+
+# ======================================================================================
+# Feature 023, step 001 (`001.table-error-model-invalidation.md`) — the `translations`
+# table. Expected values come from that step's DoD-1 and DoD-3 and feature 023's context.md
+# D7. Only the **table-set ladder** lives here: the column, NOT NULL, foreign-key and named
+# unique-constraint assertions are in `tests/test_translation_schema.py`, beside the error
+# and the response model. In 009/001 DoD-11's shape, every earlier `LATER_THAN_*_TABLES` set
+# above gained `translations` rather than having its assertion rewritten, so each earlier
+# feature's delta still means exactly what it meant. Tests are suffixed `__S023_001_DoD<n>`.
+# ======================================================================================
+
+# The registry as it stood before this step (003/001 + 005/001, 004/001, 006/001, 009/001,
+# 010/001, 011/001, 012/001, 015/001).
+PRE_023_TABLES = PRE_015_TABLES | NEW_015_TABLES
+NEW_023_TABLES = {"translations"}
+# 023/001 DoD-3, in 009/001 DoD-11's shape: features after 023 append their tables here, so
+# this delta keeps meaning "023 added exactly `translations`" once a later feature declares one.
+LATER_THAN_023_TABLES: set[str] = set()
+
+
+def test_registry_gains_exactly_the_translations_table__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — `translations` is registered, and it is the only table 023 declares."""
+    assert "translations" in schema.metadata.tables
+    assert isinstance(schema.metadata.tables["translations"], Table)
+    assert schema.metadata.tables["translations"].name == "translations"
+    assert set(schema.metadata.tables) - PRE_023_TABLES - LATER_THAN_023_TABLES == NEW_023_TABLES
+
+
+def test_registry_still_carries_every_pre_023_table__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — 023 only adds: every table declared before it is still registered."""
+    assert PRE_023_TABLES <= set(schema.metadata.tables)
+    assert "translations" not in PRE_023_TABLES
+
+
+def test_the_023_delta_survives_a_table_a_later_feature_declares__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — the delta is later-table-proof: a future table named in the
+    later-features set leaves it meaning "023 added exactly `translations`"."""
+    future_table = "a_table_a_later_feature_declares"
+    future_registry = set(schema.metadata.tables) | {future_table}
+    future_later = LATER_THAN_023_TABLES | {future_table}
+
+    assert future_registry - PRE_023_TABLES - future_later == NEW_023_TABLES
+
+
+def test_create_all_on_a_fresh_file_creates_translations__S023_001_DoD3(db_engine: Engine) -> None:
+    """023/001 DoD-3 — `create_all` against a fresh file creates `translations`, and the
+    created set obeys the same delta."""
+    with db_engine.connect() as connection:
+        schema.metadata.create_all(connection)
+        connection.commit()
+        created = _created_table_names(connection)
+    assert "translations" in created
+    assert created - PRE_023_TABLES - LATER_THAN_023_TABLES == NEW_023_TABLES
+
+
+# --- 023/001 DoD-3: every earlier delta still holds with `translations` registered ---------
+
+
+def test_the_006_delta_still_holds_with_translations_registered__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — 006's delta still means "006 added exactly `llm_servers` and `models`"."""
+    assert PRE_006_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_006_TABLES - LATER_THAN_006_TABLES == NEW_006_TABLES
+
+
+def test_the_009_delta_still_holds_with_translations_registered__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — 009's delta still means "009 added exactly `characters`"."""
+    assert PRE_009_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_009_TABLES - LATER_THAN_009_TABLES == NEW_009_TABLES
+
+
+def test_the_010_delta_still_holds_with_translations_registered__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — 010's delta still means "010 added exactly `setups`"."""
+    assert PRE_010_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_010_TABLES - LATER_THAN_010_TABLES == NEW_010_TABLES
+
+
+def test_the_011_delta_still_holds_with_translations_registered__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — 011's delta still means "011 added exactly `sessions`"."""
+    assert PRE_011_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_011_TABLES - LATER_THAN_011_TABLES == NEW_011_TABLES
+
+
+def test_the_012_delta_still_holds_with_translations_registered__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — 012's delta still means "012 added exactly `messages`"."""
+    assert PRE_012_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_012_TABLES - LATER_THAN_012_TABLES == NEW_012_TABLES
+
+
+def test_the_015_delta_still_holds_with_translations_registered__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — 015's delta still means "015 added exactly `memos`"."""
+    assert PRE_015_TABLES <= set(schema.metadata.tables)
+    assert set(schema.metadata.tables) - PRE_015_TABLES - LATER_THAN_015_TABLES == NEW_015_TABLES
+
+
+def test_every_earlier_later_features_set_now_names_translations__S023_001_DoD3() -> None:
+    """023/001 DoD-3 — the later-table-proof shape is kept by *adding* `translations` to each
+    earlier delta's later-features set rather than by rewriting its assertion."""
+    assert "translations" in LATER_THAN_006_TABLES
+    assert "translations" in LATER_THAN_009_TABLES
+    assert "translations" in LATER_THAN_010_TABLES
+    assert "translations" in LATER_THAN_011_TABLES
+    assert "translations" in LATER_THAN_012_TABLES
+    assert "translations" in LATER_THAN_015_TABLES
+    assert "translations" not in PRE_023_TABLES

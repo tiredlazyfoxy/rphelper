@@ -1002,9 +1002,15 @@ def test_a_write_can_follow_a_read_on_one_connection__S012_002_DoD12(
 
 # --- DoD-13: source check -----------------------------------------------------------------
 
-_DELETE_CALL = re.compile(r"\bdelete\s*\(", re.IGNORECASE)
 _DELETE_SQL_KEYWORD = re.compile(r"\bDELETE\b")
 _FORBIDDEN_IMPORT_ROOT = "app.services"
+
+#: Feature 023, step 001 (D11, US-111.AC-1) narrowed 012's "no delete path" guard, by the
+#: user's decision of 2026-10-04 recorded under step 001's `## Tests` in
+#: `docs/plans/023.partner-translation/status.md`: `edit_message_text` discards the edited
+#: message's cached translations inside its own transaction, so exactly one table may be
+#: deleted from, and `messages` is still not it.
+_PERMITTED_DELETE_TABLE = "translations"
 
 
 def _module_tree() -> ast.Module:
@@ -1020,6 +1026,48 @@ def _names_the_messages_table(node: ast.AST) -> bool:
         if isinstance(inner, ast.Attribute) and inner.attr == "messages":
             return True
     return False
+
+
+def _names_table(node: ast.AST, table: str) -> bool:
+    """True if the expression mentions the named Table (bare or `schema.<table>`), including
+    any of its columns (`<table>.c.<col>`)."""
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Name) and inner.id == table:
+            return True
+        if isinstance(inner, ast.Attribute) and inner.attr == table:
+            return True
+    return False
+
+
+def _is_delete_call(node: ast.Call) -> bool:
+    """True for `delete(...)` and for `<something>.delete(...)`, however the name was bound."""
+    func_node = node.func
+    if isinstance(func_node, ast.Name):
+        return func_node.id == "delete"
+    if isinstance(func_node, ast.Attribute):
+        return func_node.attr == "delete"
+    return False
+
+
+def _delete_operands(node: ast.Call) -> list[ast.AST]:
+    """Everything a delete call could name as its target: its arguments, plus the receiver of
+    a `<table>.delete()` form."""
+    operands: list[ast.AST] = [*node.args, *(kw.value for kw in node.keywords)]
+    if isinstance(node.func, ast.Attribute):
+        operands.append(node.func.value)
+    return operands
+
+
+def _delete_aliases(tree: ast.Module) -> list[str]:
+    """Imports that rebind `delete` under another name — the one way a name-based check could
+    be evaded, so it is refused outright."""
+    aliases: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name.rsplit(".", 1)[-1] == "delete" and alias.asname is not None:
+                    aliases.append(f"{alias.name} as {alias.asname}")
+    return aliases
 
 
 def _is_select_call(node: ast.Call) -> bool:
@@ -1049,11 +1097,30 @@ def test_no_select_call_takes_the_messages_table_or_its_columns__S012_002_DoD13(
 
 
 def test_the_module_has_no_delete_path__S012_002_DoD13() -> None:
-    """DoD-13 — D16: no `delete(` call and no `DELETE` SQL keyword."""
-    source = inspect.getsource(messages_module)
+    """DoD-13 — D16: no delete path, **narrowed** by feature 023, step 001 (D11,
+    US-111.AC-1) on the user's decision of 2026-10-04: the *only* permitted delete in this
+    module targets the `translations` table — the edited message's cached translations,
+    discarded inside `edit_message_text`'s own transaction. 012's half of the guard keeps
+    biting: no delete reaches `messages`, and no raw `DELETE` SQL keyword appears.
 
-    assert _DELETE_CALL.search(source) is None
-    assert _DELETE_SQL_KEYWORD.search(source) is None
+    The target check is AST-based rather than a regex, so neither an alias
+    (`from sqlalchemy import delete as _drop`) nor a `<table>.delete()` receiver can slip a
+    `messages` delete past it.
+    """
+    tree = _module_tree()
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not _is_delete_call(node):
+            continue
+        operands = _delete_operands(node)
+        if not any(_names_table(operand, _PERMITTED_DELETE_TABLE) for operand in operands):
+            offenders.append(f"delete not targeting {_PERMITTED_DELETE_TABLE}: {ast.unparse(node)}")
+        if any(_names_the_messages_table(operand) for operand in operands):
+            offenders.append(f"delete naming the messages table: {ast.unparse(node)}")
+
+    assert offenders == []
+    assert _delete_aliases(tree) == []
+    assert _DELETE_SQL_KEYWORD.search(inspect.getsource(messages_module)) is None
 
 
 def test_the_module_imports_no_fastapi_no_service_and_no_parens__S012_002_DoD13() -> None:

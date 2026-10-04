@@ -1063,18 +1063,39 @@ def _ordered_api_routes(routes: Any, found: list[APIRoute], seen: set[int]) -> N
         _ordered_api_routes(getattr(getattr(route, "original_router", None), "routes", None), found, seen)
 
 
+#: Routers registered after the configuration router by features later than 017 — the only routes
+#: permitted to follow it. Feature 023 step 003 D12 appends the translation router last, so D13's
+#: "included last" means "last before later features" (approved mechanical knock-on, 023's
+#: `## Ultra phase` policy of 2026-10-03).
+LATER_FEATURE_ROUTES = {
+    ("/api/messages/{message_id}/translation", "POST"),
+}
+
+
 def test_the_configuration_router_is_included_last__S017_005_DoD9(application: FastAPI) -> None:
-    """DoD-9 — D13: every configuration route follows every other router's route in the app."""
+    """DoD-9 — D13: every configuration route follows every route of every router that pre-dates it,
+    and the only routes after it belong to later features (023's translation router)."""
     ordered: list[APIRoute] = []
     _ordered_api_routes(application.routes, ordered, set())
     is_configuration = [
         any((route.path, method) in CONFIGURATION_ROUTES for method in route.methods) for route in ordered
     ]
+    is_later_feature = [
+        any((route.path, method) in LATER_FEATURE_ROUTES for method in route.methods) for route in ordered
+    ]
 
     assert sum(is_configuration) == len(CONFIGURATION_ROUTES)
     first_configuration = is_configuration.index(True)
-    assert all(is_configuration[first_configuration:])
-    assert not all(is_configuration)
+    # D13's half that 017 owns: nothing that pre-dates the configuration router may follow it.
+    assert all(
+        configuration or later
+        for configuration, later in zip(
+            is_configuration[first_configuration:], is_later_feature[first_configuration:], strict=True
+        )
+    )
+    # The configuration routes are still a contiguous block, and earlier routers precede them.
+    assert not any(is_later_feature[:first_configuration])
+    assert first_configuration > 0
 
 
 # --- DoD-10: write bookkeeping --------------------------------------------------------

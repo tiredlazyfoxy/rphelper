@@ -3,6 +3,8 @@
 // centred loader, the in-place "Could not load the stream" / "Retry" failure, or, ready, the
 // 720px column: `StreamRecord`, the single "Current zone" ruler, `KindSwitch`, `ZoneList`,
 // `Composer`. Mounted by `SessionScreen`'s ready render; keyed per session by `SessionRoute`.
+// Feature 023, step 005 (D13): it owns one `TranslationState` per mount the same way, hands it
+// to `StreamRecord`, and disposes it — aborting every pending translate request — on unmount.
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
@@ -13,6 +15,7 @@ import { KindSwitch } from "./KindSwitch";
 import { StreamRecord } from "./StreamRecord";
 import { ZoneList } from "./ZoneList";
 import { StreamState, loadStream } from "./streamState";
+import { TranslationState, disposeTranslations } from "./translationState";
 
 export type SessionStreamProps = {
   sessionId: string;
@@ -30,7 +33,17 @@ export const SessionStream = observer(function SessionStream(
   // Created once per mount; `SessionRoute` keys the screen by session id, so another session
   // remounts the stream with fresh state.
   const [state] = useState(() => new StreamState(props.sessionId));
+  // 023 D13: one flicker state per mount too, so its per-row cache lives exactly as long as the
+  // record it belongs to. Another session remounts and starts empty.
+  const [translations] = useState(() => new TranslationState());
   const controllerRef = useRef<AbortController | null>(null);
+
+  // 023 D13: on unmount every pending translate request is aborted. Nothing is notified.
+  useEffect(() => {
+    return () => {
+      disposeTranslations(translations);
+    };
+  }, [translations]);
 
   // One controller per mount, created inside the effect so a StrictMode double-mount aborts
   // the first and creates a second; a late response after unmount writes nothing.
@@ -74,7 +87,7 @@ export const SessionStream = observer(function SessionStream(
   return (
     <Box maw={720} mx="auto" px={18} w="100%">
       <Stack gap="md">
-        <StreamRecord state={state} signal={signal} />
+        <StreamRecord state={state} signal={signal} translations={translations} />
         <Divider label={RULER_LABEL} labelPosition="center" aria-label={RULER_LABEL} />
         <KindSwitch state={state} />
         <ZoneList state={state} signal={signal} />
