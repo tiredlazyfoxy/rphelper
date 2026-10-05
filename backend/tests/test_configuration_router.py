@@ -1073,13 +1073,18 @@ def _ordered_api_routes(routes: Any, found: list[APIRoute], seen: set[int]) -> N
 #: under the same policy (030's `## Ultra phase` decision 1 of 2026-10-05). `GET
 #: /api/admin/database/export` is deliberately **not** here: `admin_db` pre-dates the configuration
 #: router and is included before it, so its routes legitimately precede the block and this allow-set
-#: governs only what follows.
+#: governs only what follows. Feature 031 step 005 (S031_005_DoD11) adds the **two roleplayer import
+#: routes** to that same transfer router, so they join the set under the same policy (031's
+#: `## Ultra phase` decision 1 of 2026-10-05). `POST /api/admin/database/import` is likewise **not**
+#: here, for the same reason as the admin export: it is on the pre-dating `admin_db` router.
 LATER_FEATURE_ROUTES = {
     ("/api/messages/{message_id}/translation", "POST"),
     ("/api/search", "GET"),
     ("/api/export", "GET"),
     ("/api/characters/{character_id}/export", "GET"),
     ("/api/sessions/{session_id}/export", "GET"),
+    ("/api/import", "POST"),
+    ("/api/characters/{character_id}/import", "POST"),
 }
 
 

@@ -27,6 +27,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CharactersState } from "../../src/app/charactersState";
+import { SessionsState } from "../../src/app/sessionsState";
 import { UserMenu } from "../../src/app/UserMenu";
 import { documentNavigation } from "../../src/shared/api";
 import { AppProviders } from "../../src/shared/AppProviders";
@@ -158,7 +160,12 @@ function renderMenu(role: CurrentUser["role"]) {
   return render(
     <AppProviders>
       <MemoryRouter initialEntries={["/"]}>
-        <UserMenu user={identity(role)} compact={false} />
+        <UserMenu
+          user={identity(role)}
+          compact={false}
+          charactersState={new CharactersState()}
+          sessionsState={new SessionsState()}
+        />
       </MemoryRouter>
     </AppProviders>,
   );

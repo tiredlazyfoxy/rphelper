@@ -45,11 +45,15 @@ export type WorkspaceShellProps = {
   user: CurrentUser;
   /** The persisted-layout storage, or `null` when none is available (005 supplies it). */
   storage: LayoutStorage | null;
-  /** The one workspace characters state `App` creates (009 D11); fed to `CharacterTree`. */
+  /**
+   * The one workspace characters state `App` creates (009 D11); fed to `CharacterTree`, and
+   * (031 007) on to `UserMenu` in both column states so an import can reload the list.
+   */
   characters: CharactersState;
   /**
    * The one workspace sessions state `App` creates (011 D15); passed straight to
-   * `CharacterTree` with `storage`, and read by nothing in this file.
+   * `CharacterTree` with `storage`, and (031 007) on to `UserMenu` in both column states,
+   * whose "Import…" item reloads it after an import.
    */
   sessions: SessionsState;
   /** The centre column's content — the active route's element. */
@@ -120,7 +124,12 @@ export const WorkspaceShell = observer(function WorkspaceShell(
               }}
             />
             <Box mt="auto" w="100%">
-              <UserMenu user={user} compact />
+              <UserMenu
+                user={user}
+                compact
+                charactersState={characters}
+                sessionsState={sessions}
+              />
             </Box>
           </Stack>
         ) : (
@@ -139,7 +148,12 @@ export const WorkspaceShell = observer(function WorkspaceShell(
               <CharacterTree characters={characters} sessions={sessions} storage={storage} />
             </Box>
             <Box w="100%">
-              <UserMenu user={user} compact={false} />
+              <UserMenu
+                user={user}
+                compact={false}
+                charactersState={characters}
+                sessionsState={sessions}
+              />
             </Box>
           </Stack>
         )}

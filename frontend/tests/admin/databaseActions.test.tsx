@@ -104,11 +104,14 @@ const CONFIRM_SYNC = /^\s*sync\s*$/i;
 const CANCEL_NAME = /cancel/i;
 /**
  * S030_005_DoD1/DoD-7 — narrowed: feature 030 ships the page-level **Export** action, so
- * `export` is no longer out of scope for a page-wide control sweep. `rebuild` / `re-index`
- * (`fast/002`) and `import` (031) have **not** shipped and this guard still protects them —
- * never widen it to permit either.
+ * `export` is no longer out of scope for a page-wide control sweep.
+ *
+ * S031_008_DoD1 — narrowed again: feature 031 ships the page-level **Import** action, so
+ * `import` is no longer out of scope for that sweep either. `rebuild` / `re-index`
+ * (`fast/002`) have **not** shipped and this guard still protects them — never widen it to
+ * permit either.
  */
-const OUT_OF_SCOPE_ITEM = /rebuild|import|re-?index/i;
+const OUT_OF_SCOPE_ITEM = /rebuild|re-?index/i;
 /**
  * S030_005_DoD1 — the row-menu clause keeps the full regex: 030 puts Export in the page
  * header, never in a per-row dropdown, so no Export item may appear there.
@@ -1235,9 +1238,10 @@ describe("nothing out of scope in the menu", () => {
     },
   );
 
-  // S030_005_DoD1 — page-wide sweep, so it narrowed to Rebuild/Import; the row-menu clause
-  // above keeps the full regex and still forbids an Export item in a dropdown.
-  it("no control anywhere on the page is named Rebuild or Import — DoD-14 (S030_005_DoD1)", async () => {
+  // S030_005_DoD1, S031_008_DoD1 — page-wide sweep, so it narrowed to Rebuild/Re-index; the
+  // row-menu clause above keeps the full regex and still forbids an Export or Import item in a
+  // dropdown.
+  it("no control anywhere on the page is named Rebuild or Re-index — DoD-14 (S030_005_DoD1)", async () => {
     const user = newUser();
     await renderLoaded();
     await openRowMenu(user, MISSING_ROW.table_name);
@@ -1251,7 +1255,8 @@ describe("nothing out of scope in the menu", () => {
 // ===========================================================================
 describe("effects are free functions; predicates are pure; the store has no methods", () => {
   // S030_005_DoD10 — 030 step 005 adds three observable fields (`exportStatus`,
-  // `exportSizeBytes`, `exportErrorMessage`). This is this file's own independent copy of the
+  // `exportSizeBytes`, `exportErrorMessage`); S031_008_DoD9 adds three more (`importFile`,
+  // `importStatus`, `importErrorMessage`). This is this file's own independent copy of the
   // list; it stays alphabetical and still pins the store's whole surface.
   const ALLOWED_FIELDS = [
     "applyingTable",
@@ -1259,6 +1264,9 @@ describe("effects are free functions; predicates are pure; the store has no meth
     "exportErrorMessage",
     "exportSizeBytes",
     "exportStatus",
+    "importErrorMessage",
+    "importFile",
+    "importStatus",
     "rows",
     "status",
   ];

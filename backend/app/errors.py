@@ -17,7 +17,7 @@ never the message text (`deployment.md`'s redaction rule).
 """
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Final, Literal
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -536,6 +536,94 @@ class TranslationFailedError(DomainError):
         # Raised with just the id by the generic path; a cause-specific message still wins.
         if message is None:
             message = "The translation failed. Showing the original."
+        super().__init__(message, detail)
+
+
+ExportInvalidReason = Literal[
+    "not_an_export",
+    "unsupported_version",
+    "schema_mismatch",
+    "wrong_granularity",
+    "malformed_payload",
+]
+"""The five reasons an import may refuse a file, as `export_invalid`'s `detail["reason"]`.
+
+Feature `031` (`context.md` §"The failure contract"). The vocabulary is **closed** and lives
+here, beside the error that carries it, so no raise site in `services/transfer_import.py` or
+`routers/` ever re-types one of the strings. The five constants below are the values; this
+alias is the type a raiser's parameter and a policy's field are annotated with.
+"""
+
+REASON_NOT_AN_EXPORT: Final[ExportInvalidReason] = "not_an_export"
+"""The body is not an object, its header key set is wrong, or `format` / `granularity` is not ours."""
+
+REASON_UNSUPPORTED_VERSION: Final[ExportInvalidReason] = "unsupported_version"
+"""`version` is not an integer equal to 030's `ENVELOPE_VERSION`."""
+
+REASON_SCHEMA_MISMATCH: Final[ExportInvalidReason] = "schema_mismatch"
+"""`schema_version` is not an integer equal to 030's `SCHEMA_VERSION` — newer and older both refuse."""
+
+REASON_WRONG_GRANULARITY: Final[ExportInvalidReason] = "wrong_granularity"
+"""The envelope's granularity is a real one, but not one this route accepts."""
+
+REASON_MALFORMED_PAYLOAD: Final[ExportInvalidReason] = "malformed_payload"
+"""Everything about the payload: key set, row shapes, cell types, references, root count, refusals."""
+
+_EXPORT_INVALID_MESSAGES: Final[Mapping[ExportInvalidReason, str]] = {
+    "not_an_export": "This file is not an RPHelper export.",
+    "unsupported_version": "This export was made by an incompatible version of RPHelper.",
+    "schema_mismatch": "This export was made with a different database layout and cannot be imported here.",
+    "wrong_granularity": "This kind of export cannot be imported here.",
+    "malformed_payload": "This export is damaged or incomplete and cannot be imported.",
+}
+"""One fixed sentence per reason — the subclass's default message, per the `already_configured`
+precedent (`backend-structure.md` §"The error model"): the message lives on the subclass and the
+base class keeps none. Each sentence names the reason's *kind* and never a table, a column, a
+value or a row, so the redaction rule holds in the message as well as in `detail`.
+"""
+
+
+class ExportInvalidError(DomainError):
+    """An uploaded file is not an export this instance can import.
+
+    Feature `031` (`context.md` §"The failure contract"). 400: the caller can fix it by
+    choosing a different file. `detail` is **exactly** `{"reason": <one of the five>}` — no
+    table name, no column, no value and no row content ever reaches the wire or a log line
+    (R5, `deployment.md`'s redaction rule), which is why the reason is the only constructor
+    argument and the message is derived from it rather than passed in.
+    """
+
+    code = "export_invalid"
+    http_status = 400
+
+    reason: ExportInvalidReason
+
+    def __init__(self, reason: ExportInvalidReason) -> None:
+        # The reason decides both halves: `detail` carries it under its one key, and the
+        # message is its fixed sentence. No raiser supplies either.
+        self.reason = reason
+        super().__init__(_EXPORT_INVALID_MESSAGES[reason], {"reason": reason})
+
+
+class DatabaseNotEmptyError(DomainError):
+    """A whole-database import was attempted on an instance that already holds material.
+
+    Feature `031`, raised by `services.transfer_import.import_database` (step `004`). The
+    replace is allowed only while the instance holds no account at all, or exactly one whose
+    role is admin. 409, like `already_configured`: the request conflicts with the instance's
+    current state, and `detail` carries nothing.
+    """
+
+    code = "database_not_empty"
+    http_status = 409
+
+    def __init__(self, message: str | None = None, detail: Mapping[str, Any] | None = None) -> None:
+        # Raised with no arguments by the eligibility guard; an explicit message still wins.
+        if message is None:
+            message = (
+                "The database can only be replaced while it holds no account other than a "
+                "single administrator."
+            )
         super().__init__(message, detail)
 
 

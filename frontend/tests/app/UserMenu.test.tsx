@@ -8,6 +8,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { CharactersState } from "../../src/app/charactersState";
+import { SessionsState } from "../../src/app/sessionsState";
 import { UserMenu } from "../../src/app/UserMenu";
 import { documentNavigation } from "../../src/shared/api";
 import { AppProviders } from "../../src/shared/AppProviders";
@@ -54,7 +56,12 @@ function renderMenu(account: CurrentUser, compact: boolean, initialPath = "/") {
   return render(
     <AppProviders>
       <MemoryRouter initialEntries={[initialPath]}>
-        <UserMenu user={account} compact={compact} />
+        <UserMenu
+          user={account}
+          compact={compact}
+          charactersState={new CharactersState()}
+          sessionsState={new SessionsState()}
+        />
         <LocationProbe />
       </MemoryRouter>
     </AppProviders>,

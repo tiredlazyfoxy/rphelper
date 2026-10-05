@@ -449,11 +449,17 @@ def _feature_operations(application: FastAPI) -> dict[tuple[str, str], dict[str,
 # `require_admin` guard (030's `## Ultra phase` decision 2 of 2026-10-05). It declares no pydantic
 # model — it answers a raw `Response` — so it adds no field to the count/size guard below. Its own
 # behaviour is covered in `test_admin_db_export.py`.
+# S031_005_DoD11: feature 031 step 005 adds a fifth route, `POST /api/admin/database/import`, for the
+# same reason — the whole-database import inherits the router-level `require_admin` guard (031's
+# `## Ultra phase` decision 2 of 2026-10-05). It declares no pydantic model either (it answers 204
+# with no body), so it adds no field to the count/size guard below. Its own behaviour is covered in
+# `test_admin_db_import.py`.
 EXPECTED_OPERATIONS = {
     ("GET", f"{PREFIX}/tables"),
     ("POST", f"{PREFIX}/tables/{{table_name}}/create"),
     ("POST", f"{PREFIX}/tables/{{table_name}}/sync"),
     ("GET", f"{PREFIX}/export"),
+    ("POST", f"{PREFIX}/import"),
 }
 
 
@@ -636,13 +642,15 @@ def test_router_declares_no_query_parameter_and_no_non_table_key__DoD3(applicati
     """DoD-3 — D9: no query parameter anywhere; the only path parameter is the table name.
 
     S030_003_DoD10: 030's `GET /export` takes no id at all, like `GET /tables`, so it joins the
-    no-path-parameter arm of the branch below.
+    no-path-parameter arm of the branch below. S031_005_DoD11: 031's `POST /import` takes no id
+    either, so it joins that same arm. The query-parameter half is untouched and still holds for
+    every operation, the two new ones included.
     """
     for (method, path), operation in _feature_operations(application).items():
         parameters = operation.get("parameters", [])
         assert [p["name"] for p in parameters if p["in"] == "query"] == [], (method, path)
         path_names = [p["name"] for p in parameters if p["in"] == "path"]
-        if path.endswith(("/tables", "/export")):
+        if path.endswith(("/tables", "/export", "/import")):
             assert path_names == [], (method, path)
         else:
             assert path_names == ["table_name"], (method, path)
@@ -1456,13 +1464,23 @@ def test_database_contact_goes_only_through_the_connection_dependency__DoD13(
 # on that single operation and nowhere else. `rebuild`, `import`, `vector` and `vec0` stay
 # rejected across the whole surface — 031 owns Import and `fast/002` owns Rebuild, and this
 # guard is what keeps either from appearing early.
+# S031_005_DoD11: `import` now has exactly one admitted operation too, `POST
+# /api/admin/database/import`, which feature 031 step 005 delivers. The word list itself keeps all
+# four members: `rebuild`, `vector` and `vec0` stay rejected on **every** operation, `export` on
+# everything but 030's single export operation, and `import` on everything but that one import
+# operation. `fast/002`'s Rebuild still cannot appear early.
 FORBIDDEN_SURFACE = ("rebuild", "import", "vector", "vec0")
 
 #: S030_003_DoD1 — the one operation permitted to name an export.
 PERMITTED_EXPORT_OPERATION = ("GET", f"{PREFIX}/export")
 
+#: S031_005_DoD11 — the one operation permitted to name an import.
+PERMITTED_IMPORT_OPERATION = ("POST", f"{PREFIX}/import")
 
-def test_route_surface_has_no_rebuild_import_or_vector_route__DoD14(application: FastAPI) -> None:
+
+def test_route_surface_has_no_rebuild_or_vector_route_and_one_import_route__DoD14(
+    application: FastAPI,
+) -> None:
     """DoD-14 — brief Scope Out: exactly the expected routes, none of them naming
     out-of-scope work.
 
@@ -1470,11 +1488,17 @@ def test_route_surface_has_no_rebuild_import_or_vector_route__DoD14(application:
     `EXPECTED_OPERATIONS`, every path is still rejected for `rebuild` / `import` /
     `vector` / `vec0`, and `export` is still rejected on every operation other than the
     single `GET .../export` that 030 delivers.
+
+    S031_005_DoD11: narrowed once more, the same way. `import` is now admitted on the single
+    `POST .../import` that 031 delivers and on nothing else; `rebuild`, `vector` and `vec0`
+    remain rejected everywhere.
     """
     operations = _feature_operations(application)
     assert set(operations) == EXPECTED_OPERATIONS
     for method, path in operations:
         for word in FORBIDDEN_SURFACE:
+            if word == "import" and (method, path) == PERMITTED_IMPORT_OPERATION:
+                continue
             assert word not in path.lower(), (method, path)
         if (method, path) != PERMITTED_EXPORT_OPERATION:
             assert "export" not in path.lower(), (method, path)
@@ -1506,17 +1530,23 @@ def test_route_surface_documents_nothing_about_a_vector_index__DoD14(application
         # S030_003_DoD1: `GET {PREFIX}/export` has left this list — 030 step 003 delivers
         # it. `POST {PREFIX}/export` stays: 030 ships a GET download and nothing else.
         ("POST", f"{PREFIX}/export"),
-        ("POST", f"{PREFIX}/import"),
+        # S031_005_DoD11: `POST {PREFIX}/import` has left this list — 031 step 005 delivers it.
+        # `GET {PREFIX}/import` replaces it: 031 ships a POST and nothing else, so the GET answers
+        # 405 and this entry pins the route as POST-only rather than disarming the guard.
+        ("GET", f"{PREFIX}/import"),
         ("GET", f"{PREFIX}/vector-index"),
     ],
 )
 def test_out_of_scope_routes_do_not_exist__DoD14(
     application: FastAPI, db_settings: Settings, method: str, path: str
 ) -> None:
-    """DoD-14 — an administrator reaching for a rebuild or import route, or for an export
-    verb this feature does not offer, finds none.
+    """DoD-14 — an administrator reaching for a rebuild route, or for an export or import verb
+    this feature does not offer, finds none.
 
     S030_003_DoD1: the one admitted route is `GET .../export`; every other member of this
     list stays armed, so 031's Import and `fast/002`'s Rebuild still cannot appear early.
+
+    S031_005_DoD11: the one admitted import route is `POST .../import`; `fast/002`'s Rebuild
+    entries and 030's `POST .../export` and `GET .../vector-index` entries all stay armed.
     """
     assert _admin(application, db_settings).request(method, path).status_code in (404, 405)

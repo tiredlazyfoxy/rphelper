@@ -23,6 +23,12 @@
 //                   order) plus a labelled "Start session" `Button`, disabled ONLY while the
 //                   start is in flight — never because the choices are empty or failed
 //                   (R2, US-024.AC-3). No modal: one choice is not a form (D1).
+//   import session  (031 007) an "Import session" `Button` (`variant="default"`) in that same
+//                   row, beside "Start session": the two session-creating actions read as a
+//                   pair, and the row already aligns buttons against the labelled `Select`.
+//                   It is wrapped in a Mantine `FileButton` accepting `.json`, and it shows a
+//                   loading state from component-local `useState` while the import is in
+//                   flight. No confirm — an import is additive and destroys nothing.
 //   the alerts      `startError` and `error`, each when non-null, inline inside the region
 //                   (D18). No notification anywhere: 011 adds no notification call site
 //                   and this module imports no notification helper.
@@ -42,6 +48,7 @@ import {
   Badge,
   Box,
   Button,
+  FileButton,
   Group,
   Loader,
   Menu,
@@ -58,11 +65,13 @@ import {
   IconDots,
   IconDownload,
   IconPlus,
+  IconUpload,
 } from "@tabler/icons-react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { IconButton } from "../shared/IconButton";
 import { runExport, sessionExportPath } from "./exportDownloads";
+import { runSessionImport } from "./importUploads";
 import { formatSessionStart } from "./sessionLabel";
 import { isSessionArchived } from "./sessionsApi";
 import type { Session } from "./sessionsApi";
@@ -86,6 +95,12 @@ import {
  * section state, the API client or the wire (R2, "no sentinel").
  */
 const NO_SETUP_VALUE = "none";
+
+/**
+ * 031 007: the file types the session import offers. An export is a `.json` document, and
+ * both the extension and the media type are listed so a picker on either platform filters.
+ */
+const IMPORT_ACCEPT = ".json,application/json";
 
 /** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
 const ICON_SIZE = 18;
@@ -127,6 +142,12 @@ export const SessionsSection = observer(function SessionsSection(
   // reload must never cancel the listing (and the other way round).
   const listControllerRef = useRef<AbortController | null>(null);
   const choicesControllerRef = useRef<AbortController | null>(null);
+  // 031 007: the in-flight flag for the one import control. Component-local, never in the
+  // section state — no store owns domain state about an import.
+  const [importing, setImporting] = useState(false);
+  // Mantine fills this with `FileButton`'s own reset, which clears the hidden input's value
+  // so the same file can be chosen a second time.
+  const importResetRef = useRef<() => void>(null);
 
   // Read during render, so the `observer` re-renders — and the effect re-runs — when the
   // switch flips. `loadSectionSessions` reads the same field for the query, so the two agree.
@@ -171,6 +192,32 @@ export const SessionsSection = observer(function SessionsSection(
 
   const retry = (): void => {
     void loadSectionSessions(state, listControllerRef.current?.signal);
+  };
+
+  /**
+   * 031 007: a chosen session export. It calls `importResetRef.current?.()` so the same file
+   * can be chosen again, sets the local in-flight flag, runs `runSessionImport(characterId,
+   * file, props.sessions, () => loadSectionSessions(state, listControllerRef.current?.signal))`
+   * and clears the flag when that settles. An empty choice does nothing. `runSessionImport`
+   * never rejects, so there is nothing to catch, and no confirm stands between the choice and
+   * the request.
+   */
+  const onImportSessionFileChosen = (file: File | null): void => {
+    if (file === null) {
+      return;
+    }
+    // Reset straight away, not when the import settles: `FileButton` keeps the chosen file on
+    // its hidden input, so until the value is cleared a second pick of the same file fires no
+    // `change` and the repeat import would never start (US-136.AC-2).
+    importResetRef.current?.();
+    setImporting(true);
+    void runSessionImport(characterId, file, props.sessions, () =>
+      loadSectionSessions(state, listControllerRef.current?.signal),
+    ).then(() => {
+      // `runSessionImport` never rejects — success and handled failure both land here — so
+      // the loading state is cleared on one path and there is nothing to catch.
+      setImporting(false);
+    });
   };
 
   const start = (): void => {
@@ -349,6 +396,25 @@ export const SessionsSection = observer(function SessionsSection(
             >
               Start session
             </Button>
+            {/* 031 007: beside "Start session", because both bring a session into being.
+                `FileButton` renders its own hidden input and works here — unlike in a
+                `Menu`, nothing portals or unmounts this row on click. */}
+            <FileButton
+              accept={IMPORT_ACCEPT}
+              resetRef={importResetRef}
+              onChange={onImportSessionFileChosen}
+            >
+              {(fileButtonProps) => (
+                <Button
+                  {...fileButtonProps}
+                  variant="default"
+                  leftSection={<IconUpload size={ICON_SIZE} stroke={ICON_STROKE} />}
+                  loading={importing}
+                >
+                  Import session
+                </Button>
+              )}
+            </FileButton>
           </Group>
           {/* D18: a silent failure would hide why the list holds only "No setup". No retry,
               and no effect at all on starting (R2, US-024.AC-3). */}

@@ -163,7 +163,7 @@ def serialize_row(table: Table, row: Row[Any], *, drop_columns: Collection[str] 
     key_names = {column.name for column in table.primary_key.columns}
     values = row._mapping
     return {
-        column.name: _serialize_value(values[column.name], is_id=_is_id_column(column, key_names))
+        column.name: _serialize_value(values[column.name], is_id=is_id_column(column, key_names))
         for column in table.columns
         if column.name not in dropped
     }
@@ -406,12 +406,16 @@ def export_filename(envelope: ExportEnvelope) -> str:
     return f"rphelper-{granularity}-{stamp}.json"
 
 
-def _is_id_column(column: Column[Any], primary_key_names: Collection[str]) -> bool:
+def is_id_column(column: Column[Any], primary_key_names: Collection[str]) -> bool:
     """Whether `column` holds a reference, so its value leaves as decimal text.
 
     The three arms of `context.md`'s rule, each read off the column itself: it is part of its
     table's primary key, it carries a foreign key (which is the only arm that catches
     `messages.related_to`), or its name matches the reference-name pattern.
+
+    Public, not private, because 031's `services.transfer_import` deserializes a cell with the
+    **same** predicate, so the two directions of the id rule cannot disagree
+    (`031/context.md` §"Deserialization"). Its behaviour is unchanged by that exposure.
     """
     name = column.name
     return (

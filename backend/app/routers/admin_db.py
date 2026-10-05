@@ -16,11 +16,19 @@ plain string and never used to build SQL here; `db/sync.py` validates it.
 **`require_role(Role.ADMIN)` is attached to the router, never to a handler**, so a route
 added later cannot forget the guard.
 
-**Four routes.** The first three are feature `007`'s (`context.md` D9); the fourth is feature
-`030`'s `GET /export` — the whole-database export (FEAT-018, UC-061, US-077), which lives here
-rather than in `routers/transfer.py` precisely so it inherits the router-level admin guard.
-No route takes a query parameter or a request body, and there is still **no rebuild and no
-import route** anywhere on this router.
+**Five routes.** The first three are feature `007`'s (`context.md` D9); the fourth is feature
+`030`'s `GET /export` — the whole-database export (FEAT-018, UC-061, US-077) — and the fifth is
+feature `031`'s `POST /import`, its mirror image (UC-061, US-077.AC-2). Both live here rather than
+in `routers/transfer.py` precisely so they inherit the router-level admin guard. No route takes a
+query parameter; `POST /import` is the **only** route with a request body, and there is still
+**no rebuild route** anywhere on this router.
+
+**This module contains no `try`, no `except` and no `raise`, and that is load-bearing.** Every
+refusal of the whole-database import — `database_not_empty` (409) for an ineligible instance, the
+typed 400 for a payload the service or the database rejects — is raised inside
+`app.services.transfer_import` and rendered by the one `DomainError` handler, exactly as the drift
+routes' `unknown_table` is. The constraint translation that wraps the import's write pass lives in
+that service and never here.
 
 `GET /export` is the one handler that answers a raw `Response` instead of a model: it is a JSON
 **file download**, and the export envelope is column-agnostic, so no static model can describe
@@ -30,16 +38,17 @@ response is built **locally** here; this module and `routers/transfer.py` share 
 an import.
 """
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response
 from sqlalchemy import Connection
 
+from app.config import Settings, get_settings
 from app.db.drift import ColumnShape, IndexShape, TableReport, build_drift_report
 from app.db.engine import get_connection
 from app.db.schema import metadata
 from app.db.sync import create_table, sync_table
-from app.dependencies import require_role
+from app.dependencies import clear_session_cookie, require_role
 from app.models.admin_db import (
     ChangedColumnResponse,
     ColumnShapeResponse,
@@ -49,6 +58,7 @@ from app.models.admin_db import (
 )
 from app.roles import Role
 from app.services.transfer import encode_envelope, export_database, export_filename
+from app.services.transfer_import import import_database
 
 #: The router's one guard.
 require_admin = require_role(Role.ADMIN)
@@ -139,3 +149,35 @@ def export_whole_database(
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{export_filename(envelope)}"'},
     )
+
+
+@router.post("/import", status_code=204)
+def import_whole_database(
+    body: dict[str, Any],
+    response: Response,
+    connection: Annotated[Connection, Depends(get_connection)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> None:
+    """Replace the whole database from a `database`-granularity payload via `import_database`.
+
+    Full path `/api/admin/database/import`; admin-only through the **router-level** guard, which
+    this route names nowhere, like the other four. It takes no path parameter and no query
+    parameter — the body is all it reads.
+
+    `body` is the raw JSON object (`031/005.context.md`): the payload is column-agnostic, so no
+    static model can describe it, and `app.services.transfer_import` validates it before writing
+    anything. A body that is not a JSON object answers **422** from FastAPI before this handler
+    runs; an object that is not a recognised envelope answers **400** from the service.
+
+    Answers **204** with no body. It then clears the session cookie on the injected `Response`
+    through `clear_session_cookie(response, settings)` — `app/dependencies.py`'s writer, the same
+    one `POST /api/auth/logout` uses. A successful replace deletes every `auth_sessions` row,
+    including the caller's, so the browser would otherwise keep sending a token the server can no
+    longer resolve; the frontend navigates to the login page regardless.
+
+    Translates nothing, catches nothing, and contains neither `try` nor `raise`: an ineligible
+    instance (`database_not_empty`, 409) and a payload the service or the database refuses (400,
+    `app/errors.py`) both travel through the single `DomainError` handler.
+    """
+    import_database(connection, body)
+    clear_session_cookie(response, settings)

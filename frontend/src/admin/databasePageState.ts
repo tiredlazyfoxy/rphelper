@@ -3,7 +3,14 @@
 // functions below.
 import { makeAutoObservable, runInAction } from "mobx";
 import type { MantineColor } from "@mantine/core";
-import { type DownloadResult, apiDownload, apiGet, apiPost } from "../shared/api";
+import {
+  type DownloadResult,
+  apiDownload,
+  apiGet,
+  apiPost,
+  documentNavigation,
+} from "../shared/api";
+import { type ReadableTextFile, postExportFile } from "../shared/importFile";
 
 /** The backend's closed three-value table status — never widened to `string`. */
 export type TableStatus = "in_sync" | "missing" | "drifted";
@@ -53,6 +60,12 @@ export type DatabaseLoadStatus = "idle" | "loading" | "ready";
 /** The whole-database export's own two-value status: gates the Export button's loading state. */
 export type DatabaseExportStatus = "idle" | "exporting";
 
+/**
+ * The whole-database import's own two-value status, shaped like `DatabaseExportStatus`: gates
+ * the Import button's and the replace confirm's loading state. Never widened to `string`.
+ */
+export type DatabaseImportStatus = "idle" | "importing";
+
 /** The status badge's rendering, derived by `statusBadgeOf`. The label is the status word. */
 export type StatusBadge = {
   label: string;
@@ -87,6 +100,21 @@ export class DatabasePageState {
    * overwrites the other's message.
    */
   exportErrorMessage: string | null = null;
+  /**
+   * The file the administrator chose for a whole-database import, or `null` when none is
+   * chosen. There is no separate open flag: the replace confirm's openness is **derived** from
+   * this field being non-null, and cancelling clears it. Nothing about the file's contents is
+   * ever read into the store (US-078).
+   */
+  importFile: ReadableTextFile | null = null;
+  /** `"importing"` while a whole-database import is in flight; `"idle"` otherwise. */
+  importStatus: DatabaseImportStatus = "idle";
+  /**
+   * The last import failure's message, for the page's own inline red Alert; `null` when none.
+   * Deliberately separate from `errorMessage` (the drift report's) and from
+   * `exportErrorMessage`, so no failure ever overwrites another's message.
+   */
+  importErrorMessage: string | null = null;
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -98,6 +126,12 @@ export const DRIFT_REPORT_PATH = "/api/admin/database/tables";
 
 /** The whole-database export route. Sent with no query parameter and no body. */
 const DATABASE_EXPORT_PATH = "/api/admin/database/export";
+
+/** The whole-database import route. Answers 204 and clears the session cookie. */
+const DATABASE_IMPORT_PATH = "/api/admin/database/import";
+
+/** Where the browser goes after a successful replace: the replace signs the administrator out. */
+const LOGIN_PATH = "/login";
 
 const NO_DIFFERENCE = "—";
 
@@ -372,4 +406,78 @@ export function formatByteSize(bytes: number): string {
     return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`;
   }
   return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
+}
+
+/**
+ * Stores the file the administrator chose for a whole-database import and clears the previous
+ * import failure's message, both inside `runInAction`. It sends nothing and confirms nothing:
+ * storing the file is what **opens** the replace confirm, because the confirm's openness is
+ * derived from `importFile` being non-null. Reads nothing from the file.
+ */
+export function chooseImportFile(state: DatabasePageState, file: ReadableTextFile): void {
+  runInAction(() => {
+    state.importFile = file;
+    state.importErrorMessage = null;
+  });
+}
+
+/**
+ * Clears the chosen import file inside `runInAction`, which is what **closes** the replace
+ * confirm. It sends nothing, leaves `importStatus` and every message alone, and so leaves the
+ * rest of the page exactly as it was.
+ */
+export function cancelImport(state: DatabasePageState): void {
+  runInAction(() => {
+    state.importFile = null;
+  });
+}
+
+/**
+ * The whole-database replace: posts the chosen `importFile` to
+ * `/api/admin/database/import` through step 006's `postExportFile`, whose own unreadable-file
+ * `ApiError` is raised before any request.
+ *
+ * Sets `importStatus` to `"importing"` first. On success — the route answers 204, so the
+ * resolved value is `unknown` and nothing is read from it — it calls
+ * `documentNavigation.assign("/login")`, because the replace signs the administrator out. On a
+ * failure it stores the error's message in `importErrorMessage`, clears `importFile` (which
+ * closes the confirm) and returns `importStatus` to `"idle"`. Every write is inside
+ * `runInAction`. Returns without writing when `signal` is already aborted, and on an abort
+ * mid-flight. Raises **no** notification — the admin page's failure place is its inline Alert
+ * and nothing else — and renders nothing about the file. Does not reject.
+ */
+export async function importDatabase(state: DatabasePageState, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return;
+  }
+  const file = state.importFile;
+  if (file === null) {
+    return;
+  }
+  runInAction(() => {
+    state.importStatus = "importing";
+  });
+
+  try {
+    // The 204 resolves with no body; nothing is read from the resolved value (US-078).
+    await postExportFile(DATABASE_IMPORT_PATH, file, signal);
+  } catch (error) {
+    if (signal?.aborted || isAbortRejection(error)) {
+      return;
+    }
+    const message = failureMessageOf(error, "The database could not be replaced.");
+    runInAction(() => {
+      state.importStatus = "idle";
+      state.importErrorMessage = message;
+      state.importFile = null;
+    });
+    return;
+  }
+
+  if (signal?.aborted) {
+    return;
+  }
+  // No write on success: the page is leaving. The confirm stays in its loading state until the
+  // navigation takes effect.
+  documentNavigation.assign(LOGIN_PATH);
 }

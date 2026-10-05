@@ -419,7 +419,14 @@ describe("no viewer, no preview, no search over the export", () => {
     expect(screen.queryAllByRole("textbox")).toEqual([]);
     expect(screen.queryAllByRole("searchbox")).toEqual([]);
     expect(screen.queryAllByRole("combobox")).toEqual([]);
-    expect(Array.from(document.body.querySelectorAll("input, textarea"))).toEqual([]);
+    // S031_008 — `input[type="file"]` is excluded: 031 adds an Import button whose Mantine
+    // `FileButton` renders a hidden file input unconditionally. 030's intent is preserved —
+    // no search, filter or free-text input on the page.
+    expect(
+      Array.from(document.body.querySelectorAll("input, textarea")).filter(
+        (el) => !el.matches('input[type="file"]'),
+      ),
+    ).toEqual([]);
   });
 
   it("after a successful export the page still offers no search or filter input — DoD-4", async () => {
@@ -435,7 +442,12 @@ describe("no viewer, no preview, no search over the export", () => {
     expect(screen.queryAllByRole("textbox")).toEqual([]);
     expect(screen.queryAllByRole("searchbox")).toEqual([]);
     expect(screen.queryAllByRole("combobox")).toEqual([]);
-    expect(Array.from(document.body.querySelectorAll("input, textarea"))).toEqual([]);
+    // S031_008 — same exclusion as the clause above, for the same reason.
+    expect(
+      Array.from(document.body.querySelectorAll("input, textarea")).filter(
+        (el) => !el.matches('input[type="file"]'),
+      ),
+    ).toEqual([]);
   });
 });
 

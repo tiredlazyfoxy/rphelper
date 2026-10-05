@@ -18,6 +18,12 @@ vi.mock("@mantine/notifications", async (importOriginal) => {
 
 const PASTE_SENTENCE = "This paste is very large and will take up a lot of the assistant's context.";
 
+// Feature 031, step 006 — the second warning id. The sentence is pinned verbatim in
+// `docs/plans/031.import-and-id-remapping/006.context.md`; the id is the frozen
+// `### Step 006` member `"import-search-coverage"`.
+const COVERAGE_SENTENCE =
+  "Imported material won't appear in semantic search until an administrator rebuilds the search index.";
+
 beforeEach(() => {
   showSpy.mockClear();
 });
@@ -74,5 +80,26 @@ describe("notifyWarning — the paste context-cost warning (D4, US-035.AC-1)", (
       notifyWarning("Something went fine!");
     });
     expect(showSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("notifyWarning — the import search-coverage warning (031 step 006)", () => {
+  it('"import-search-coverage" shows exactly the pinned coverage sentence, in yellow — DoD-6', () => {
+    notifyWarning("import-search-coverage");
+
+    const data = onlyShowArgument();
+    expect(data.message).toBe(COVERAGE_SENTENCE);
+    expect(data.color).toBe("yellow");
+    expect(data.color).not.toBe("red");
+  });
+
+  it("the two warning ids map to two different sentences — DoD-6", () => {
+    notifyWarning("paste-context-cost");
+    notifyWarning("import-search-coverage");
+
+    expect(showSpy.mock.calls.map(([data]) => (data as Record<string, unknown>).message)).toEqual([
+      PASTE_SENTENCE,
+      COVERAGE_SENTENCE,
+    ]);
   });
 });

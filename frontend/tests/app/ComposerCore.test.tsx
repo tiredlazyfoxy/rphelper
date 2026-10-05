@@ -493,12 +493,15 @@ describe("ComposerCore — one composer, one paste-warning site (D4)", () => {
     expect(source).not.toMatch(/<textarea\b/);
   });
 
-  it("ComposerCore.tsx is the only src/app module that imports notifyWarning — DoD-6", () => {
+  // Feature 031 step 006 (orchestrator decision 5): `src/app/importUploads.ts` raises the import
+  // search-coverage warning, so it joins ComposerCore as a legitimate warner. The set stays EXACT,
+  // so a third `src/app` warner still fails this clause.
+  it("ComposerCore.tsx and importUploads.ts are the only src/app modules that import notifyWarning — DoD-6", () => {
     const files = allFiles(APP_SRC).filter((file) => /\.(ts|tsx)$/.test(file));
     expect(files.map(relative)).toEqual(expect.arrayContaining(["src/app/Composer.tsx", "src/app/ComposerCore.tsx"]));
 
     const importers = files.filter((file) => importsNotifyWarning(readSource(file))).map(relative);
 
-    expect(importers).toEqual(["src/app/ComposerCore.tsx"]);
+    expect([...importers].sort()).toEqual(["src/app/ComposerCore.tsx", "src/app/importUploads.ts"]);
   });
 });

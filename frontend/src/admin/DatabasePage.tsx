@@ -10,6 +10,7 @@ import {
   Button,
   Center,
   Container,
+  FileButton,
   Group,
   Loader,
   Menu,
@@ -17,16 +18,19 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconDots, IconDownload } from "@tabler/icons-react";
+import { IconDots, IconDownload, IconUpload } from "@tabler/icons-react";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { IconButton } from "../shared/IconButton";
 import {
   type DriftTableRow,
   DatabasePageState,
+  cancelImport,
+  chooseImportFile,
   createDriftTable,
   differencesSummaryOf,
   exportDatabase,
   formatByteSize,
+  importDatabase,
   isLossySync,
   loadDriftReport,
   statusBadgeOf,
@@ -37,6 +41,16 @@ import {
 /** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
 const ICON_SIZE = 18;
 const ICON_STROKE = 1.5;
+
+/** The import file picker's filter: the extension and the media type, in that order. */
+const IMPORT_ACCEPT = ".json,application/json";
+
+/** The replace confirm's pinned text (`008.context.md`), used verbatim and nowhere else. */
+const IMPORT_CONFIRM_TITLE = "Replace the whole database?";
+const IMPORT_CONFIRM_CONSEQUENCE =
+  "Everything in this instance, including your own account, is replaced by the contents of " +
+  "the file, and you will be signed out.";
+const IMPORT_CONFIRM_LABEL = "Replace database";
 
 function ignoreRejection(): void {
   // Free functions never reject; this only keeps a surprise from going unhandled.
@@ -58,6 +72,9 @@ export const DatabasePage = observer(function DatabasePage(
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const [syncTarget, setSyncTarget] = useState<DriftTableRow | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  // Mantine fills this with `FileButton`'s own reset, which clears the hidden input's value so
+  // the same file can be chosen again after a cancel or a failure.
+  const importResetRef = useRef<() => void>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -76,6 +93,33 @@ export const DatabasePage = observer(function DatabasePage(
   // No notification and no confirm: an export is not lossy, and a failure renders inline.
   const startExport = (): void => {
     void exportDatabase(state, currentSignal()).catch(ignoreRejection);
+  };
+
+  /**
+   * A chosen import file. It calls `chooseImportFile(state, file)` — which opens the replace
+   * confirm, since the confirm is open exactly while `state.importFile` is non-null — and then
+   * `importResetRef.current?.()` so the same file can be chosen again. An empty choice does
+   * nothing. No request is made here: only the confirm's Replace button starts one.
+   */
+  const onImportFileChosen = (file: File | null): void => {
+    if (file === null) {
+      return;
+    }
+    chooseImportFile(state, file);
+    importResetRef.current?.();
+  };
+
+  /** The replace confirm's Cancel: `cancelImport(state)` and nothing else. No request. */
+  const cancelImportChoice = (): void => {
+    cancelImport(state);
+  };
+
+  /**
+   * The replace confirm's Replace: `importDatabase(state, currentSignal())`, which posts the
+   * chosen file and navigates to `/login` on success. No notification, ever.
+   */
+  const confirmImport = (): void => {
+    void importDatabase(state, currentSignal()).catch(ignoreRejection);
   };
 
   const createTable = (row: DriftTableRow): void => {
@@ -114,8 +158,8 @@ export const DatabasePage = observer(function DatabasePage(
     <Container size="lg" py="md">
       <Group justify="space-between" align="center" mb="md" wrap="nowrap">
         <Title order={2}>Database</Title>
-        {/* The page-level action group. 031 adds Import and `fast/002` adds Rebuild index to
-            this same group; neither is rendered here, not even as a placeholder. */}
+        {/* The page-level action group. 031 adds Import beside Export; `fast/002` adds Rebuild
+            index to this same group and is not rendered here, not even as a placeholder. */}
         <Group gap="sm" wrap="nowrap">
           <Button
             variant="default"
@@ -125,6 +169,24 @@ export const DatabasePage = observer(function DatabasePage(
           >
             Export
           </Button>
+          {/* `FileButton` renders its own hidden file input — unnamed, and the only input on
+              this page — then the Button its render prop returns. Nothing portals this row. */}
+          <FileButton
+            accept={IMPORT_ACCEPT}
+            resetRef={importResetRef}
+            onChange={onImportFileChosen}
+          >
+            {(fileButtonProps) => (
+              <Button
+                {...fileButtonProps}
+                variant="default"
+                leftSection={<IconUpload size={ICON_SIZE} stroke={ICON_STROKE} />}
+                loading={state.importStatus === "importing"}
+              >
+                Import
+              </Button>
+            )}
+          </FileButton>
         </Group>
       </Group>
 
@@ -138,6 +200,14 @@ export const DatabasePage = observer(function DatabasePage(
       {state.exportErrorMessage !== null && (
         <Alert color="red" mb="md">
           {state.exportErrorMessage}
+        </Alert>
+      )}
+
+      {/* An import failure, in its own slot so it never overwrites the drift or export message.
+          Inline and never also a notification (031 008 DoD-5, DoD-6). */}
+      {state.importErrorMessage !== null && (
+        <Alert color="red" mb="md">
+          {state.importErrorMessage}
         </Alert>
       )}
 
@@ -219,6 +289,20 @@ export const DatabasePage = observer(function DatabasePage(
         loading={syncTarget !== null && state.applyingTable === syncTarget.table_name}
         onCancel={cancelSync}
         onConfirm={confirmSync}
+      />
+
+      {/* The replace confirm. Its openness is derived from the chosen file, so the store keeps
+          no open flag. The text names the action only — no count, no table, nothing from the
+          file (R5, US-078). */}
+      <ConfirmModal
+        opened={state.importFile !== null}
+        title={IMPORT_CONFIRM_TITLE}
+        consequence={IMPORT_CONFIRM_CONSEQUENCE}
+        confirmLabel={IMPORT_CONFIRM_LABEL}
+        confirmColor="red"
+        loading={state.importStatus === "importing"}
+        onCancel={cancelImportChoice}
+        onConfirm={confirmImport}
       />
     </Container>
   );
