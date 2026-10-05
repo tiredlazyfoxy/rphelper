@@ -346,39 +346,50 @@ def _all_tool_rows(engine: Engine) -> list[dict[str, Any]]:
 # =========================================================================================
 # DoD-2: the production registry holds exactly the registered tools
 # Amended by 026 step 002 (DoD-15): it registers `memo_search`, so "empty" is no longer true.
-# The `__S021_004_DoD2` tag is kept; only the three emptiness assertions moved.
+# Amended again by 027 step 003 (S027_003_DoD15): `session_search` is registered too, so the
+# registry holds two entries and the offered list is a three-case switch matrix.
+# The `__S021_004_DoD2` tag is kept; only the registry-contents assertions moved.
 # =========================================================================================
 
 
-# Amended by 026 step 002: the registry now holds exactly `memo_search`.
-def test_the_production_registry_holds_exactly_memo_search__S021_004_DoD2() -> None:
-    """DoD-2 / D5 — exactly the tools registered so far: `memo_search` (026), and no other."""
-    assert len(PRODUCTION_TOOL_REGISTRY) == 1
-    assert list(PRODUCTION_TOOL_REGISTRY) == ["memo_search"]
+# Amended by 026 step 002, then by 027 step 003 (S027_003_DoD15): the registry now holds
+# exactly `memo_search` and `session_search`.
+def test_the_production_registry_holds_the_two_registered_tools__S021_004_DoD2() -> None:
+    """DoD-2 / D5 — exactly the tools registered so far: `memo_search` (026) and
+    `session_search` (027), and no other."""
+    assert len(PRODUCTION_TOOL_REGISTRY) == 2
+    assert list(PRODUCTION_TOOL_REGISTRY) == ["memo_search", "session_search"]
 
 
-# Amended by 026 step 002: the trailing length is 1; the registry is still a `MappingProxyType`.
+# Amended by 026 step 002, then by 027 step 003 (S027_003_DoD15): the trailing length is 2; the
+# registry is still a `MappingProxyType`.
 def test_the_production_registry_is_read_only__S021_004_DoD2() -> None:
     """DoD-2 / Interface intent — a read-only mapping: item assignment is refused."""
     fake = RecordingTool("memo_search")
     with pytest.raises(TypeError):
         PRODUCTION_TOOL_REGISTRY["memo_search"] = fake  # type: ignore[index]
-    assert len(PRODUCTION_TOOL_REGISTRY) == 1
+    assert len(PRODUCTION_TOOL_REGISTRY) == 2
 
 
-# Amended by 026 step 002: `memo_search` is registered, so the switch is now what decides.
-def test_offered_tools_over_the_production_registry_is_memo_search__S021_004_DoD2() -> None:
-    """DoD-2 / D5 / U3 — all three switches on → exactly the one registered declaration; with
-    the memo-search switch off → nothing."""
+# Amended by 026 step 002, then by 027 step 003 (S027_003_DoD15): both names are registered, so
+# the switches are what decide, and the off-case needs both of them off.
+def test_offered_tools_over_the_production_registry_is_the_switched_on_subset__S021_004_DoD2() -> None:
+    """DoD-2 / D5 / U3 — all three switches on → both registered declarations in declaration
+    order; with the memo-search switch off → `session_search` alone; with both off → nothing."""
     offered = offered_tools(
         _configuration(memo=True, session=True, web=True), PRODUCTION_TOOL_REGISTRY
     )
-    assert list(offered) == [MEMO_SEARCH]
+    assert list(offered) == [MEMO_SEARCH, SESSION_SEARCH]
 
-    switched_off = offered_tools(
+    memo_off = offered_tools(
         _configuration(memo=False, session=True, web=True), PRODUCTION_TOOL_REGISTRY
     )
-    assert list(switched_off) == []
+    assert list(memo_off) == [SESSION_SEARCH]
+
+    both_off = offered_tools(
+        _configuration(memo=False, session=False, web=True), PRODUCTION_TOOL_REGISTRY
+    )
+    assert list(both_off) == []
 
 
 # =========================================================================================
@@ -793,6 +804,8 @@ ALLOWED_SERVICE_MODULES = {
     "app.services.tools.definitions",
     # Added by 026 step 002 (DoD-15): the seam imports the adapter to register it.
     "app.services.tools.memo_search",
+    # Added by 027 step 003 (S027_003_DoD15): the second registered adapter, same reason.
+    "app.services.tools.session_search",
 }
 
 

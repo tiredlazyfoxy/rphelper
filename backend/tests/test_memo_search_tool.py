@@ -962,10 +962,12 @@ def test_a_failed_run_leaves_no_transaction_in_progress__S026_002_DoD10(engine: 
 # --- DoD-11: the registration (D3, 021 D5) --------------------------------------------------
 
 
-def test_the_production_registry_holds_exactly_memo_search__S026_002_DoD11() -> None:
-    """D3: one entry, keyed `memo_search`, whose value's `name` is `memo_search`."""
-    assert len(PRODUCTION_TOOL_REGISTRY) == 1
-    assert list(PRODUCTION_TOOL_REGISTRY) == [EXPECTED_TOOL_NAME]
+# Amended by 027 step 003 (S027_003_DoD15): the "exactly one entry" claim is dropped — a second
+# tool is registered now, and the two-entry claim lives in 027 DoD-11. What 026 owns is that
+# `memo_search` is registered and that its value names itself.
+def test_the_production_registry_holds_memo_search__S026_002_DoD11() -> None:
+    """D3: an entry keyed `memo_search`, whose value's `name` is `memo_search`."""
+    assert EXPECTED_TOOL_NAME in PRODUCTION_TOOL_REGISTRY
     assert PRODUCTION_TOOL_REGISTRY[EXPECTED_TOOL_NAME].name == EXPECTED_TOOL_NAME
 
 
@@ -975,20 +977,28 @@ def test_the_adapters_name_is_the_declared_name__S026_002_DoD11() -> None:
     assert _tool().name == MEMO_SEARCH_NAME
 
 
-def test_offered_tools_over_the_production_registry_is_the_declaration__S026_002_DoD11() -> None:
-    """021 D5: all three switches on → exactly `definitions.py`'s `memo_search` declaration."""
+# Amended by 027 step 003 (S027_003_DoD15): the "exactly one declaration" claim is dropped — the
+# offered list now also carries `session_search`. `memo_search` stays index 0 of
+# `TOOL_DECLARATIONS`, so the declaration's own assertions are unchanged.
+def test_offered_tools_over_the_production_registry_includes_the_declaration__S026_002_DoD11() -> None:
+    """021 D5: all three switches on → `definitions.py`'s `memo_search` declaration, unchanged
+    and first, with its single `query` parameter."""
     offered = offered_tools(_configuration(memo=True, session=True, web=True), PRODUCTION_TOOL_REGISTRY)
 
-    assert list(offered) == [MEMO_SEARCH]
+    assert MEMO_SEARCH in offered
+    assert offered[0] == MEMO_SEARCH
     function = offered[0]["function"]
     assert function["name"] == EXPECTED_TOOL_NAME
     assert list(function["parameters"]["properties"]) == ["query"]
     assert function["parameters"]["required"] == ["query"]
 
 
-def test_offered_tools_with_the_memo_switch_off_offers_nothing__S026_002_DoD11() -> None:
+# Amended by 027 step 003 (S027_003_DoD15): `session_search` is registered too, so the session
+# switch goes off as well. The clause's point — registered is not enough, the switch gates it —
+# is unchanged, and the assertion stays `== []`.
+def test_offered_tools_with_the_tool_switches_off_offers_nothing__S026_002_DoD11() -> None:
     """021 D5: registered is not enough — the switch gates it."""
-    offered = offered_tools(_configuration(memo=False, session=True, web=True), PRODUCTION_TOOL_REGISTRY)
+    offered = offered_tools(_configuration(memo=False, session=False, web=True), PRODUCTION_TOOL_REGISTRY)
 
     assert list(offered) == []
 

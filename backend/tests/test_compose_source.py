@@ -57,7 +57,7 @@ from app.services.llm.frames import (
     ToolStartFrame,
 )
 from app.services.tools import PRODUCTION_TOOL_REGISTRY, Tool, ToolOutcome, ToolScope
-from app.services.tools.definitions import MEMO_SEARCH
+from app.services.tools.definitions import MEMO_SEARCH, SESSION_SEARCH
 
 TIMESTAMP = "2026-01-01T00:00:00.000000+00:00"
 
@@ -1045,22 +1045,23 @@ def test_closing_the_source_after_a_token_closes_the_provider_stream__S021_005_D
 # =========================================================================================
 # DoD-13: production registry → the registered declarations
 # Amended by 026 step 002 (DoD-15): it registers `memo_search`, so the real registry no longer
-# yields an empty tools list. The `__S021_005_DoD13` tag is kept.
+# yields an empty tools list. Amended again by 027 step 003 (S027_003_DoD15): it registers
+# `session_search` too, so the real registry now yields both. The `__S021_005_DoD13` tag is kept.
 # =========================================================================================
 
 
-# Amended by 026 step 002: the production registry now holds `memo_search`.
-def test_the_production_registry_sends_the_memo_search_declaration__S021_005_DoD13(
+# Amended by 026 step 002, then by 027 step 003: the production registry holds both tools.
+def test_the_production_registry_sends_both_registered_declarations__S021_005_DoD13(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
     """DoD-13 / D5 / U3 — all switches on, the real registry → the client gets exactly the
-    `memo_search` declaration."""
+    `memo_search` and `session_search` declarations, in `TOOL_DECLARATIONS` order."""
     client = FakeChatClient([[_content("Hi")]])
 
     _run(engine, generator, FakeFactory(client), PRODUCTION_TOOL_REGISTRY)
 
     assert len(client.calls) == 1
-    assert client.calls[0].tools == [dict(MEMO_SEARCH)]
+    assert client.calls[0].tools == [dict(MEMO_SEARCH), dict(SESSION_SEARCH)]
 
 
 # =========================================================================================

@@ -46,7 +46,7 @@ from app.routers.stream import get_chat_client_factory, get_tool_registry
 from app.services.llm.chat import ChatMessage
 from app.services.llm.client import ChatDelta
 from app.services.passwords import hash_password
-from app.services.tools.definitions import MEMO_SEARCH
+from app.services.tools.definitions import MEMO_SEARCH, SESSION_SEARCH
 
 TIMESTAMP = "2026-01-01T00:00:00.000000+00:00"
 
@@ -883,18 +883,20 @@ def test_compose_without_a_cookie_answers_401__S021_006_DoD9(
 
 # =========================================================================================
 # DoD-10: the production registry dependency offers what is registered
-# Amended by 026 step 002 (DoD-15): it registers `memo_search`, so the real dependency now
-# sends that one declaration — hence the module-level import of `MEMO_SEARCH` from
+# Amended by 026 step 002 (DoD-15), then by 027 step 003 (S027_003_DoD15): `memo_search` and
+# `session_search` are both registered, so the real dependency now sends both declarations —
+# hence the module-level import of `MEMO_SEARCH` and `SESSION_SEARCH` from
 # `app.services.tools.definitions`. The `__S021_006_DoD10` tag is kept.
 # =========================================================================================
 
 
-# Amended by 026 step 002: the production registry is no longer empty.
-def test_the_production_registry_dependency_sends_the_memo_search_tool__S021_006_DoD10(
+# Amended by 026 step 002, then by 027 step 003 (S027_003_DoD15): the production registry now
+# holds both `memo_search` and `session_search`.
+def test_the_production_registry_dependency_sends_both_registered_tools__S021_006_DoD10(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """DoD-10 / D5 / U3 — the registry dependency is NOT overridden; all switches on; the fake
-    client receives exactly the `memo_search` declaration."""
+    client receives exactly the `memo_search` and `session_search` declarations, in order."""
     application.dependency_overrides.pop(get_tool_registry, None)
     client_fake = FakeChatClient([[_content("Hi")]])
     _use_factory(application, FakeFactory(client_fake))
@@ -904,21 +906,24 @@ def test_the_production_registry_dependency_sends_the_memo_search_tool__S021_006
 
     assert _events(frames)[-1] == "done"
     assert len(client_fake.calls) == 1
-    assert client_fake.calls[0].tools == [dict(MEMO_SEARCH)]
+    assert client_fake.calls[0].tools == [dict(MEMO_SEARCH), dict(SESSION_SEARCH)]
 
 
-# Added by 026 step 002: the other half — registered, but switched off for this session.
-def test_the_production_registry_with_the_switch_off_sends_no_tools__S021_006_DoD10(
+# Added by 026 step 002, then amended by 027 step 003 (S027_003_DoD15): the seeded session has
+# all three switches on, so switching only `tool_memo_search` off would now still offer
+# `session_search`. Both registered switches go off to keep the clause's point.
+def test_the_production_registry_with_both_switches_off_sends_no_tools__S021_006_DoD10(
     application: FastAPI, db_settings: Settings, engine: Engine
 ) -> None:
     """DoD-10 / D5 / U3 — the registry dependency is NOT overridden, but the session's
-    memo-search switch is off, so the fake client receives an empty tools list."""
+    memo-search and session-search switches are both off, so the fake client receives an empty
+    tools list."""
     application.dependency_overrides.pop(get_tool_registry, None)
     with engine.begin() as connection:
         connection.execute(
             update(schema.sessions)
             .where(schema.sessions.c.id == SESSION_A)
-            .values(tool_memo_search=False)
+            .values(tool_memo_search=False, tool_session_search=False)
         )
     client_fake = FakeChatClient([[_content("Hi")]])
     _use_factory(application, FakeFactory(client_fake))
@@ -929,6 +934,31 @@ def test_the_production_registry_with_the_switch_off_sends_no_tools__S021_006_Do
     assert _events(frames)[-1] == "done"
     assert len(client_fake.calls) == 1
     assert client_fake.calls[0].tools == []
+
+
+# Added by 027 step 003 (S027_003_DoD15): the third case of the matrix — only the session-search
+# switch off, so the memo-search declaration alone is offered.
+def test_the_production_registry_with_the_session_switch_off_sends_memo_search__S021_006_DoD10(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-10 / D5 / U3 — the registry dependency is NOT overridden and only the session's
+    session-search switch is off, so the fake client receives the `memo_search` declaration."""
+    application.dependency_overrides.pop(get_tool_registry, None)
+    with engine.begin() as connection:
+        connection.execute(
+            update(schema.sessions)
+            .where(schema.sessions.c.id == SESSION_A)
+            .values(tool_session_search=False)
+        )
+    client_fake = FakeChatClient([[_content("Hi")]])
+    _use_factory(application, FakeFactory(client_fake))
+    client = _player_a(application, db_settings)
+
+    frames = _frames(_compose(client, SESSION_A, {"text": COMPOSE_TEXT}))
+
+    assert _events(frames)[-1] == "done"
+    assert len(client_fake.calls) == 1
+    assert client_fake.calls[0].tools == [dict(MEMO_SEARCH)]
 
 
 # =========================================================================================
