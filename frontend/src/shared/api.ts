@@ -180,3 +180,105 @@ export async function apiPut<T = unknown>(
 export async function apiDelete<T = unknown>(path: string, signal?: AbortSignal): Promise<T> {
   return apiRequest<T>(path, "DELETE", undefined, signal);
 }
+
+/**
+ * What one completed browser download reports back: the saved file's name and its byte count.
+ * Never its content — the body is opaque to every caller (US-078).
+ */
+export type DownloadResult = {
+  filename: string;
+  size: number;
+};
+
+const FALLBACK_DOWNLOAD_FILENAME = "rphelper-export.json";
+
+/**
+ * The `filename="…"` parameter. The leading boundary keeps a `filename="…"` buried inside
+ * another parameter's name (an `xfilename=`) from matching, and the group may be empty, which
+ * the reader treats as absent.
+ */
+const CONTENT_DISPOSITION_FILENAME = /(?:^|[;\s])filename\s*=\s*"([^"]*)"/i;
+
+/**
+ * Pure. Reads the quoted filename out of a `Content-Disposition` header value, e.g.
+ * `attachment; filename="rphelper-user-20261005T101112Z.json"`. Returns the fallback
+ * `rphelper-export.json` when `header` is `null`, carries no `filename="…"`, or is otherwise
+ * unparseable. Never throws.
+ */
+export function filenameFromContentDisposition(header: string | null): string {
+  if (header === null) {
+    return FALLBACK_DOWNLOAD_FILENAME;
+  }
+  const filename = CONTENT_DISPOSITION_FILENAME.exec(header)?.[1] ?? "";
+  return filename.trim().length > 0 ? filename : FALLBACK_DOWNLOAD_FILENAME;
+}
+
+/**
+ * Saves `blob` under `filename` through a temporary object URL and a clicked anchor, then
+ * removes the anchor and revokes the URL on every exit. The anchor is in the document for the
+ * click (so the click reaches the document) and never outlives it.
+ */
+function saveBlobAsFile(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+/**
+ * The blob download, beside the JSON calls so it shares their one decode. `GET path` (an
+ * `/api/...` path) with `credentials: "same-origin"`; on a 2xx the body is read as a `Blob` and
+ * saved through a temporary object URL and a clicked `download=<filename>` anchor, which are then
+ * removed and revoked, and the call resolves with that filename (from `Content-Disposition`, or
+ * the fallback) and the blob's byte size. On a non-2xx it throws the same `ApiError` the JSON
+ * calls throw, through `decodeErrorResponse` — so a well-formed envelope gives the backend code,
+ * a malformed body gives `client_malformed_error`, and a 401 navigates to `/login` first. A
+ * rejected `fetch` throws `client_transport_failed` through `mapFetchRejection`, and an abort
+ * propagates unchanged and unwrapped. The body is never parsed as JSON and never reaches the
+ * caller.
+ */
+export async function apiDownload(path: string, signal?: AbortSignal): Promise<DownloadResult> {
+  const init: RequestInit = { method: "GET", credentials: "same-origin" };
+  if (signal !== undefined) {
+    init.signal = signal;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(path, init);
+  } catch (error) {
+    throw mapFetchRejection(error, signal);
+  }
+
+  if (!response.ok) {
+    // The JSON calls' one decode: the envelope's own ApiError or the malformed fallback, with
+    // the 401 navigation first. No object URL has been created on this path, and none is.
+    throw await decodeErrorResponse(response);
+  }
+
+  const filename = filenameFromContentDisposition(response.headers.get("Content-Disposition"));
+
+  let blob: Blob;
+  try {
+    // The body is read as bytes and never parsed; only its size leaves this function.
+    blob = await response.blob();
+  } catch (error) {
+    throw mapFetchRejection(error, signal);
+  }
+
+  if (signal?.aborted) {
+    // A caller that abandoned the download saves no file: the abort propagates unwrapped and
+    // no object URL is created.
+    throw signal.reason ?? new DOMException("The download was aborted.", "AbortError");
+  }
+
+  saveBlobAsFile(blob, filename);
+  return { filename, size: blob.size };
+}

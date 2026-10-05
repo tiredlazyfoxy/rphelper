@@ -32,7 +32,8 @@
 //   a row           a router `Link` to `/sessions/<id>` whose text is the start-time label,
 //                   the `setup_name` beside it or nothing at all (US-088.AC-2), dimmed with
 //                   a `Badge` reading exactly "Archived" when archived, and one overflow
-//                   `Menu` offering "Archive" or "Restore" with no confirm (D5).
+//                   `Menu` offering "Archive" or "Restore" with no confirm (D5), plus an
+//                   "Export" item present in both states (030 006, also with no confirm).
 import type * as React from "react";
 import { useEffect, useId, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
@@ -51,10 +52,17 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconArchive, IconArchiveOff, IconDots, IconPlus } from "@tabler/icons-react";
+import {
+  IconArchive,
+  IconArchiveOff,
+  IconDots,
+  IconDownload,
+  IconPlus,
+} from "@tabler/icons-react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { IconButton } from "../shared/IconButton";
+import { runExport, sessionExportPath } from "./exportDownloads";
 import { formatSessionStart } from "./sessionLabel";
 import { isSessionArchived } from "./sessionsApi";
 import type { Session } from "./sessionsApi";
@@ -244,6 +252,18 @@ export const SessionsSection = observer(function SessionsSection(
                   Archive
                 </Menu.Item>
               )}
+              {/* 030 006: present for an active and for an archived row alike. No confirm
+                  — an export destroys nothing — and success is the browser's download. */}
+              <Menu.Item
+                leftSection={<IconDownload size={MENU_ICON_SIZE} stroke={ICON_STROKE} />}
+                onClick={() => {
+                  // This row's id, used exactly as the server sent it. `runExport` never
+                  // rejects, so the bare `void` is the whole handler.
+                  void runExport(sessionExportPath(session.id));
+                }}
+              >
+                Export
+              </Menu.Item>
             </Menu.Dropdown>
           </Menu>
         </Table.Td>

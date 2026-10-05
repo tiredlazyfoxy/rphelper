@@ -6,7 +6,8 @@ transaction. Its only database contact is `app.db.engine.get_connection`. Like
 plain argument; `db/drift.py` and `db/sync.py` never import the registry.
 
 Each handler calls **exactly one** operation — `build_drift_report` for the read,
-`create_table` / `sync_table` for an apply — and maps its plain result onto a model. Each
+`create_table` / `sync_table` for an apply, `export_database` for the export — and maps its
+plain result onto a model, the export excepted: it answers a raw `Response` (see below). Each
 apply route answers with the **re-derived** report row the operation returns. No handler
 translates a domain error by hand: the single `DomainError` handler renders
 `unknown_table` (404) and `schema_apply_failed` (500). `{table_name}` is passed down as a
@@ -15,13 +16,23 @@ plain string and never used to build SQL here; `db/sync.py` validates it.
 **`require_role(Role.ADMIN)` is attached to the router, never to a handler**, so a route
 added later cannot forget the guard.
 
-Three routes (`context.md` D9). No query parameter, no request body, no rebuild, export or
-import route anywhere on this router.
+**Four routes.** The first three are feature `007`'s (`context.md` D9); the fourth is feature
+`030`'s `GET /export` — the whole-database export (FEAT-018, UC-061, US-077), which lives here
+rather than in `routers/transfer.py` precisely so it inherits the router-level admin guard.
+No route takes a query parameter or a request body, and there is still **no rebuild and no
+import route** anywhere on this router.
+
+`GET /export` is the one handler that answers a raw `Response` instead of a model: it is a JSON
+**file download**, and the export envelope is column-agnostic, so no static model can describe
+it (`003.context.md`, `outcome.md`). The JSON id boundary still holds, because
+`services/transfer.py` stringifies every id before the router sees the envelope. The attachment
+response is built **locally** here; this module and `routers/transfer.py` share the shape, not
+an import.
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy import Connection
 
 from app.db.drift import ColumnShape, IndexShape, TableReport, build_drift_report
@@ -37,6 +48,7 @@ from app.models.admin_db import (
     TableReportResponse,
 )
 from app.roles import Role
+from app.services.transfer import encode_envelope, export_database, export_filename
 
 #: The router's one guard.
 require_admin = require_role(Role.ADMIN)
@@ -101,3 +113,29 @@ def sync_registry_table(
 ) -> TableReportResponse:
     """D4's Sync via `sync_table(connection, metadata, table_name)`; answers the re-derived row."""
     return _table_response(sync_table(connection, metadata, table_name))
+
+
+@router.get("/export", status_code=200)
+def export_whole_database(
+    connection: Annotated[Connection, Depends(get_connection)],
+) -> Response:
+    """The whole-database export via `export_database(connection)`, as a JSON file attachment.
+
+    Full path `/api/admin/database/export`; admin-only through the **router-level** guard, which
+    this route names nowhere. It takes no path parameter, no query parameter and no body, like
+    `GET /tables`.
+
+    The response is built here, in a few lines, and is exactly: status **200**, body
+    `encode_envelope(envelope)`, media type `application/json`, and `Content-Disposition:
+    attachment; filename="<export_filename(envelope)>"`. Nothing else is set, and nothing about
+    the response is derived from the payload — the filename comes from the envelope's
+    `granularity` and `created_at` alone (US-078 opacity). `routers/transfer.py` builds the same
+    shape independently; neither module imports the other.
+    """
+    envelope = export_database(connection)
+    return Response(
+        content=encode_envelope(envelope),
+        status_code=200,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{export_filename(envelope)}"'},
+    )

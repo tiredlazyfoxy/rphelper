@@ -95,8 +95,16 @@ const COUNT_CLAIM =
   /\d[\d,.\s]*\s*(rows?|records?|sessions?|characters?|setups?|messages?|memos?|users?|entries)\b/i;
 const BYTE_SIZE = /\d[\d,.\s]*\s*(bytes?|[kmgt]i?b)\b/i;
 const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
-/** DoD-10 — whole words (with plain inflections) only, so a substring such as CSS `!important` never counts. */
-const OUT_OF_SCOPE_CONTROL = /\b(export|import|rebuild|re-?index)(s|ed|ing)?\b/i;
+/**
+ * DoD-10 — whole words (with plain inflections) only, so a substring such as CSS `!important`
+ * never counts.
+ *
+ * S030_005_DoD1/DoD-7 — narrowed: feature 030 ships the page-level **Export** action, so
+ * `export` is no longer out of scope. `import` (031) and `rebuild` / `re-index` (`fast/002`)
+ * have **not** shipped and this guard still protects them — never widen it to permit either.
+ * 030's own Export assertions live in `DatabasePage.export.test.tsx`.
+ */
+const OUT_OF_SCOPE_CONTROL = /\b(import|rebuild|re-?index)(s|ed|ing)?\b/i;
 
 // ---------------------------------------------------------------- fixtures (no digit anywhere)
 
@@ -891,7 +899,9 @@ describe("no sorting, filtering or pagination", () => {
 
 // ===========================================================================
 describe("nothing out of scope on the page", () => {
-  it("no control, enabled or disabled, is named Export, Import or Rebuild — DoD-10", async () => {
+  // S030_005_DoD1/DoD-7 — the four regex clauses below keep their assertions unchanged; only
+  // the shared `OUT_OF_SCOPE_CONTROL` narrowed (Export shipped; Import and Rebuild have not).
+  it("no control, enabled or disabled, is named Import or Rebuild — DoD-10 (S030_005_DoD1)", async () => {
     await renderLoaded();
     const offenders = controls()
       .map(controlName)
@@ -899,24 +909,27 @@ describe("nothing out of scope on the page", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("nothing on the page reads Export, Import or Rebuild — DoD-10", async () => {
+  it("nothing on the page reads Import or Rebuild — DoD-10 (S030_005_DoD1)", async () => {
     await renderLoaded();
     expect(readableText()).not.toMatch(OUT_OF_SCOPE_CONTROL);
   });
 
-  it("the page has no control outside the report table — no header action bar — DoD-10", async () => {
+  // S030_005_DoD3/DoD-7 — replaced, not disarmed. 030 adds exactly one page-level action group
+  // beside the title, holding only Export, so the clause now permits that single control and
+  // nothing else: a stray second control outside the report table still fails here.
+  it("the only control outside the report table is the Export action — DoD-10 (S030_005_DoD3)", async () => {
     await renderLoaded();
     const outside = controls().filter((el) => !table().contains(el));
-    expect(outside.map(controlName)).toEqual([]);
+    expect(outside.map(controlName).map(squash)).toEqual(["Export"]);
   });
 
-  it("an empty report and a failed load show no Export, Import or Rebuild either — DoD-10", async () => {
+  it("an empty report and a failed load show no Import or Rebuild either — DoD-10 (S030_005_DoD1)", async () => {
     await renderLoaded([]);
     expect(readableText()).not.toMatch(OUT_OF_SCOPE_CONTROL);
     expect(controls().map(controlName).filter((name) => OUT_OF_SCOPE_CONTROL.test(name))).toEqual([]);
   });
 
-  it("the page source renders no Export, Import or Rebuild wording in any string or JSX text — DoD-10", () => {
+  it("the page source renders no Import or Rebuild wording in any string or JSX text — DoD-10 (S030_005_DoD1)", () => {
     const page = readSource(PAGE_SOURCE);
     const literals = Array.from(page.matchAll(/"([^"\n]*)"|'([^'\n]*)'|`([^`]*)`|>([^<>{}]+)</g), (m) =>
       (m[1] ?? m[2] ?? m[3] ?? m[4] ?? "").trim(),
@@ -927,7 +940,18 @@ describe("nothing out of scope on the page", () => {
 
 // ===========================================================================
 describe("the store is a data class; the load is a free function", () => {
-  const ALLOWED_FIELDS = ["applyingTable", "errorMessage", "rows", "status"];
+  // S030_005_DoD10 — 030 step 005 adds three observable fields (`exportStatus`,
+  // `exportSizeBytes`, `exportErrorMessage`); the list stays alphabetical and still pins the
+  // store's whole surface, so any *other* new own property still fails this block.
+  const ALLOWED_FIELDS = [
+    "applyingTable",
+    "errorMessage",
+    "exportErrorMessage",
+    "exportSizeBytes",
+    "exportStatus",
+    "rows",
+    "status",
+  ];
   const REQUIRED_FIELDS = ["errorMessage", "rows", "status"];
 
   it("the class prototype carries no method and no getter — DoD-11 (D13)", () => {

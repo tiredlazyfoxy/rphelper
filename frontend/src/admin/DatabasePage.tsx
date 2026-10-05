@@ -3,8 +3,21 @@
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
-import { Alert, Badge, Box, Center, Container, Loader, Menu, Table, Title } from "@mantine/core";
-import { IconDots } from "@tabler/icons-react";
+import {
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Center,
+  Container,
+  Group,
+  Loader,
+  Menu,
+  Table,
+  Text,
+  Title,
+} from "@mantine/core";
+import { IconDots, IconDownload } from "@tabler/icons-react";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { IconButton } from "../shared/IconButton";
 import {
@@ -12,12 +25,18 @@ import {
   DatabasePageState,
   createDriftTable,
   differencesSummaryOf,
+  exportDatabase,
+  formatByteSize,
   isLossySync,
   loadDriftReport,
   statusBadgeOf,
   syncConsequenceOf,
   syncDriftTable,
 } from "./databasePageState";
+
+/** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
+const ICON_SIZE = 18;
+const ICON_STROKE = 1.5;
 
 function ignoreRejection(): void {
   // Free functions never reject; this only keeps a surprise from going unhandled.
@@ -54,6 +73,11 @@ export const DatabasePage = observer(function DatabasePage(
 
   const currentSignal = (): AbortSignal | undefined => controllerRef.current?.signal;
 
+  // No notification and no confirm: an export is not lossy, and a failure renders inline.
+  const startExport = (): void => {
+    void exportDatabase(state, currentSignal()).catch(ignoreRejection);
+  };
+
   const createTable = (row: DriftTableRow): void => {
     void createDriftTable(state, row.table_name, currentSignal()).catch(ignoreRejection);
   };
@@ -88,14 +112,41 @@ export const DatabasePage = observer(function DatabasePage(
 
   return (
     <Container size="lg" py="md">
-      <Title order={2} mb="md">
-        Database
-      </Title>
+      <Group justify="space-between" align="center" mb="md" wrap="nowrap">
+        <Title order={2}>Database</Title>
+        {/* The page-level action group. 031 adds Import and `fast/002` adds Rebuild index to
+            this same group; neither is rendered here, not even as a placeholder. */}
+        <Group gap="sm" wrap="nowrap">
+          <Button
+            variant="default"
+            leftSection={<IconDownload size={ICON_SIZE} stroke={ICON_STROKE} />}
+            loading={state.exportStatus === "exporting"}
+            onClick={startExport}
+          >
+            Export
+          </Button>
+        </Group>
+      </Group>
 
       {state.errorMessage !== null && (
         <Alert color="red" mb="md">
           {state.errorMessage}
         </Alert>
+      )}
+
+      {/* An export failure, inline and above the table — never also a notification. */}
+      {state.exportErrorMessage !== null && (
+        <Alert color="red" mb="md">
+          {state.exportErrorMessage}
+        </Alert>
+      )}
+
+      {/* The one permitted report about an export: the saved file's size. Nothing about its
+          content, no table name, no row count (US-078). */}
+      {state.exportSizeBytes !== null && (
+        <Text size="sm" c="dimmed" mb="md">
+          {`Export downloaded — ${formatByteSize(state.exportSizeBytes)}`}
+        </Text>
       )}
 
       {state.status !== "ready" ? (

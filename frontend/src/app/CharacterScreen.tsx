@@ -23,7 +23,7 @@ import {
   TextInput,
   Title,
 } from "@mantine/core";
-import { IconArchive, IconArchiveOff } from "@tabler/icons-react";
+import { IconArchive, IconArchiveOff, IconDownload } from "@tabler/icons-react";
 
 import { MarkdownEditor } from "../shared/MarkdownEditor";
 import { isArchived } from "./charactersApi";
@@ -39,6 +39,7 @@ import {
   submitCreate,
   submitRestore,
 } from "./characterScreenState";
+import { characterExportPath, runExport } from "./exportDownloads";
 import { SetupsSection } from "./SetupsSection";
 import { SessionsSection } from "./SessionsSection";
 import { CharacterNotesSection } from "./CharacterNotesSection";
@@ -113,6 +114,26 @@ export const CharacterScreen = observer(function CharacterScreen(
   const character = state.character;
   const archived = character !== null && isArchived(character);
   const submitting = state.submitStatus === "submitting";
+  // 030 006: the Export button's in-flight flag. Component-local on purpose — an export
+  // owns no domain state, so `CharacterScreenState` learns nothing about it.
+  const [exporting, setExporting] = useState(false);
+
+  /**
+   * 030 006: the Export click. One click goes straight to the request — no confirm, no
+   * success text and no notification on success. `runExport` never rejects, so the flag is
+   * cleared from a `finally` that runs on a completed download and on a handled failure
+   * alike. The id is the screen's, used exactly as the route gave it.
+   */
+  const onExport = (): void => {
+    const exportId = state.characterId;
+    if (exportId === null) {
+      return;
+    }
+    setExporting(true);
+    void runExport(characterExportPath(exportId)).finally(() => {
+      setExporting(false);
+    });
+  };
 
   const retry = (): void => {
     void loadCharacter(state, controllerRef.current?.signal);
@@ -286,6 +307,17 @@ export const CharacterScreen = observer(function CharacterScreen(
               Archive
             </Button>
           )}
+          {/* 030 006: beside Archive/Restore and inside the same `Group`, so its render
+              condition is that button's exactly — the draft page returns above and offers
+              no export. No confirm: an export is not lossy. */}
+          <Button
+            variant="default"
+            leftSection={<IconDownload size={ICON_SIZE} stroke={ICON_STROKE} />}
+            loading={exporting}
+            onClick={onExport}
+          >
+            Export
+          </Button>
         </Group>
         {/* 018 D10: the body order — Notes (the page's grid) → Setups → Configuration →
             Sessions → the page composer last. Each section is keyed by the character id

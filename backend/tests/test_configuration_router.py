@@ -1068,10 +1068,18 @@ def _ordered_api_routes(routes: Any, found: list[APIRoute], seen: set[int]) -> N
 #: "included last" means "last before later features" (approved mechanical knock-on, 023's
 #: `## Ultra phase` policy of 2026-10-03). Feature 029 step 003 (D1, decision 6) appends the
 #: search router after the translation router, so `GET /api/search` joins the set under the same
-#: policy (029's `## Ultra phase` decision 2 of 2026-10-05).
+#: policy (029's `## Ultra phase` decision 2 of 2026-10-05). Feature 030 step 003 (S030_003_DoD10)
+#: registers the transfer router last of all, so its **three roleplayer export routes** join the set
+#: under the same policy (030's `## Ultra phase` decision 1 of 2026-10-05). `GET
+#: /api/admin/database/export` is deliberately **not** here: `admin_db` pre-dates the configuration
+#: router and is included before it, so its routes legitimately precede the block and this allow-set
+#: governs only what follows.
 LATER_FEATURE_ROUTES = {
     ("/api/messages/{message_id}/translation", "POST"),
     ("/api/search", "GET"),
+    ("/api/export", "GET"),
+    ("/api/characters/{character_id}/export", "GET"),
+    ("/api/sessions/{session_id}/export", "GET"),
 }
 
 

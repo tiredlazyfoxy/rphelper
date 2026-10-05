@@ -3,7 +3,7 @@
 // functions below.
 import { makeAutoObservable, runInAction } from "mobx";
 import type { MantineColor } from "@mantine/core";
-import { apiGet, apiPost } from "../shared/api";
+import { type DownloadResult, apiDownload, apiGet, apiPost } from "../shared/api";
 
 /** The backend's closed three-value table status — never widened to `string`. */
 export type TableStatus = "in_sync" | "missing" | "drifted";
@@ -50,6 +50,9 @@ export type DriftReportResponse = {
 /** Explicit load status: gates the Loader, not "rows are empty". */
 export type DatabaseLoadStatus = "idle" | "loading" | "ready";
 
+/** The whole-database export's own two-value status: gates the Export button's loading state. */
+export type DatabaseExportStatus = "idle" | "exporting";
+
 /** The status badge's rendering, derived by `statusBadgeOf`. The label is the status word. */
 export type StatusBadge = {
   label: string;
@@ -70,6 +73,20 @@ export class DatabasePageState {
   errorMessage: string | null = null;
   /** The table a Create or Sync is currently being applied to; `null` when none is. */
   applyingTable: string | null = null;
+  /** `"exporting"` while a whole-database export is in flight; `"idle"` otherwise. */
+  exportStatus: DatabaseExportStatus = "idle";
+  /**
+   * The last successful export's size in bytes; `null` when no export has succeeded in this
+   * page's lifetime. The only thing the page keeps about an export — never its content, never
+   * a table name, never a row count (US-078).
+   */
+  exportSizeBytes: number | null = null;
+  /**
+   * The last export failure's message, for the page's inline red Alert; `null` when none.
+   * Deliberately separate from `errorMessage` (the drift report's), so neither failure ever
+   * overwrites the other's message.
+   */
+  exportErrorMessage: string | null = null;
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -79,7 +96,14 @@ export class DatabasePageState {
 /** The drift report route. Sent with no query parameter. */
 export const DRIFT_REPORT_PATH = "/api/admin/database/tables";
 
+/** The whole-database export route. Sent with no query parameter and no body. */
+const DATABASE_EXPORT_PATH = "/api/admin/database/export";
+
 const NO_DIFFERENCE = "—";
+
+/** `formatByteSize`'s 1024-based thresholds. */
+const BYTES_PER_KB = 1024;
+const BYTES_PER_MB = 1024 * 1024;
 
 function isAbortRejection(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
@@ -289,4 +313,63 @@ export function syncConsequenceOf(row: Pick<DriftTableRow, "table_name" | "extra
     `Syncing ${row.table_name} drops the ${noun} ${row.extra_columns.join(", ")} ` +
     `and the data in ${pronoun}; the data in every other column is preserved.`
   );
+}
+
+/**
+ * `GET /api/admin/database/export` through `apiDownload`, which saves the file in the browser.
+ * Sets `exportStatus` to `"exporting"` and clears `exportSizeBytes` and `exportErrorMessage`
+ * first, then stores the resolved `size` on success or the failure's message on failure, and
+ * returns `exportStatus` to `"idle"`. Every write is inside `runInAction`. Returns without
+ * writing when `signal` is already aborted, and on an abort mid-flight. Raises **no**
+ * notification — the admin page's failure place is its inline Alert and nothing else — and
+ * reads nothing from the response but its byte count (US-078). Does not reject.
+ */
+export async function exportDatabase(state: DatabasePageState, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return;
+  }
+  runInAction(() => {
+    state.exportStatus = "exporting";
+    state.exportSizeBytes = null;
+    state.exportErrorMessage = null;
+  });
+
+  let result: DownloadResult;
+  try {
+    result = await apiDownload(DATABASE_EXPORT_PATH, signal);
+  } catch (error) {
+    if (signal?.aborted || isAbortRejection(error)) {
+      return;
+    }
+    const message = failureMessageOf(error, "The export could not be downloaded.");
+    runInAction(() => {
+      state.exportStatus = "idle";
+      state.exportErrorMessage = message;
+    });
+    return;
+  }
+
+  if (signal?.aborted) {
+    return;
+  }
+  const sizeBytes = result.size;
+  runInAction(() => {
+    state.exportStatus = "idle";
+    state.exportSizeBytes = sizeBytes;
+  });
+}
+
+/**
+ * Pure: a byte count as short human text, 1024-based, with one decimal above bytes —
+ * `0` → `"0 B"`, `512` → `"512 B"`, `12_600` → `"12.3 KB"`, `4_194_304` → `"4.0 MB"`. Bytes
+ * carry no decimal. Never throws.
+ */
+export function formatByteSize(bytes: number): string {
+  if (bytes < BYTES_PER_KB) {
+    return `${bytes} B`;
+  }
+  if (bytes < BYTES_PER_MB) {
+    return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`;
+  }
+  return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
 }

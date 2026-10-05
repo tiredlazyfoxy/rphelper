@@ -5,9 +5,10 @@
 import type * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { Avatar, Group, Menu, Text, UnstyledButton } from "@mantine/core";
-import { IconLogout, IconSettings, IconShield } from "@tabler/icons-react";
+import { IconDownload, IconLogout, IconSettings, IconShield } from "@tabler/icons-react";
 
 import type { CurrentUser } from "../shared/currentUser";
+import { ownDataExportPath, runExport } from "./exportDownloads";
 import { logOut } from "./logout";
 
 /** Inline-control sizing from `ui-conventions.md`; stroke 1.5 is the one visual weight. */
@@ -28,12 +29,22 @@ export type UserMenuProps = {
 /**
  * The menu's trigger (accessible name "User menu" in both modes) and its dropdown:
  * "Settings" (in-entry router navigation to `/settings`), "Admin area" (a real
- * `<a href="/admin">`, rendered only for an administrator) and "Log out" (`logOut`).
+ * `<a href="/admin">`, rendered only for an administrator), "Export my data" (030 006 —
+ * every role, and no confirm: an export is not lossy) and "Log out" (`logOut`).
  */
 export function UserMenu(props: UserMenuProps): React.JSX.Element {
   const { user, compact } = props;
   const navigate = useNavigate();
   const initial = user.username.slice(0, 1).toUpperCase();
+
+  /**
+   * 030 006: the "Export my data" click. One click goes straight to the request — no
+   * confirm, no success text, and no local state (the menu closes on choose). `runExport`
+   * never rejects, so the bare `void` is the whole handler.
+   */
+  const onExportMyData = (): void => {
+    void runExport(ownDataExportPath());
+  };
 
   return (
     <Menu position="top-start" withinPortal>
@@ -69,6 +80,14 @@ export function UserMenu(props: UserMenuProps): React.JSX.Element {
             Admin area
           </Menu.Item>
         )}
+        {/* 030 006: every role, and above "Log out". An export destroys nothing, so no
+            confirm; success is the browser's download, so no notification. */}
+        <Menu.Item
+          leftSection={<IconDownload size={ITEM_ICON_SIZE} stroke={ITEM_ICON_STROKE} />}
+          onClick={onExportMyData}
+        >
+          Export my data
+        </Menu.Item>
         <Menu.Item
           leftSection={<IconLogout size={ITEM_ICON_SIZE} stroke={ITEM_ICON_STROKE} />}
           onClick={() => {

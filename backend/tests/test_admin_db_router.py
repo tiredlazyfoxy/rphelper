@@ -1,4 +1,4 @@
-"""Tests for the admin database router: ``/api/admin/database`` and its three routes.
+"""Tests for the admin database router: ``/api/admin/database`` and its routes.
 
 Feature 007, step 004 (``004.admin-database-router.md``). Every expected value comes from that
 step's Interface intent and DoD-1 .. DoD-14, ``004.context.md`` and feature 007 ``context.md``
@@ -17,6 +17,18 @@ The real registry (``users``, ``auth_sessions``, ``llm_servers``, ``models``) is
 dropping ``models``.
 
 Tests are suffixed ``__DoD<n>``. DoD-15 .. DoD-18 are ``[manual/live]``.
+
+Amended by feature 030, step 003 (``003.export-routes.md``, DoD-1), an approved deviation
+recorded in 030's ``status.md``. That step adds a fourth route to this router, ``GET
+/api/admin/database/export``, so the whole-database export inherits the router-level
+``require_admin`` guard. Every amendment is cited inline with ``S030_003_DoD1`` (or
+``S030_003_DoD10`` where it is the route-count guard) next to what changed:
+``EXPECTED_OPERATIONS`` gains the operation, the no-path-parameter branch widens, and the
+two DoD-14 scope guards are **narrowed** to admit that one route. They are not disarmed:
+``rebuild``, ``import``, ``vector`` and ``vec0`` remain rejected across the whole surface,
+and ``POST .../export`` remains rejected, because 031 owns Import and ``fast/002`` owns
+Rebuild and neither may appear early. No behavioural assertion about the three original
+routes changed.
 """
 
 import ast
@@ -432,10 +444,16 @@ def _feature_operations(application: FastAPI) -> dict[tuple[str, str], dict[str,
     return operations
 
 
+# S030_003_DoD10: feature 030 step 003 adds a fourth route to this router, `GET
+# /api/admin/database/export`, so that the whole-database export inherits the router-level
+# `require_admin` guard (030's `## Ultra phase` decision 2 of 2026-10-05). It declares no pydantic
+# model — it answers a raw `Response` — so it adds no field to the count/size guard below. Its own
+# behaviour is covered in `test_admin_db_export.py`.
 EXPECTED_OPERATIONS = {
     ("GET", f"{PREFIX}/tables"),
     ("POST", f"{PREFIX}/tables/{{table_name}}/create"),
     ("POST", f"{PREFIX}/tables/{{table_name}}/sync"),
+    ("GET", f"{PREFIX}/export"),
 }
 
 
@@ -606,18 +624,25 @@ def test_response_models_declare_no_count_size_or_time_field__DoD3() -> None:
     assert '"number"' not in schema_text
 
 
-def test_router_declares_only_the_three_routes__DoD3(application: FastAPI) -> None:
-    """DoD-3 — no route that could return a count exists on this router's surface."""
+def test_router_declares_exactly_the_expected_routes__DoD3(application: FastAPI) -> None:
+    """DoD-3 — this router's surface is exactly `EXPECTED_OPERATIONS`: the three 007 routes plus
+    030's export, and nothing else. S030_003_DoD10: reworded from "only the three routes"; the
+    count guard that DoD-3 owns is asserted on the response models, which the export has none of.
+    """
     assert set(_feature_operations(application)) == EXPECTED_OPERATIONS
 
 
 def test_router_declares_no_query_parameter_and_no_non_table_key__DoD3(application: FastAPI) -> None:
-    """DoD-3 — D9: no query parameter anywhere; the only path parameter is the table name."""
+    """DoD-3 — D9: no query parameter anywhere; the only path parameter is the table name.
+
+    S030_003_DoD10: 030's `GET /export` takes no id at all, like `GET /tables`, so it joins the
+    no-path-parameter arm of the branch below.
+    """
     for (method, path), operation in _feature_operations(application).items():
         parameters = operation.get("parameters", [])
         assert [p["name"] for p in parameters if p["in"] == "query"] == [], (method, path)
         path_names = [p["name"] for p in parameters if p["in"] == "path"]
-        if path.endswith("/tables"):
+        if path.endswith(("/tables", "/export")):
             assert path_names == [], (method, path)
         else:
             assert path_names == ["table_name"], (method, path)
@@ -1426,16 +1451,33 @@ def test_database_contact_goes_only_through_the_connection_dependency__DoD13(
 # =========================================================================== DoD-14
 
 
-FORBIDDEN_SURFACE = ("rebuild", "export", "import", "vector", "vec0")
+# S030_003_DoD1: `export` leaves the blanket word list. Feature 030 step 003 ships exactly
+# one export route on this router, `GET /api/admin/database/export`, so the word is admitted
+# on that single operation and nowhere else. `rebuild`, `import`, `vector` and `vec0` stay
+# rejected across the whole surface — 031 owns Import and `fast/002` owns Rebuild, and this
+# guard is what keeps either from appearing early.
+FORBIDDEN_SURFACE = ("rebuild", "import", "vector", "vec0")
+
+#: S030_003_DoD1 — the one operation permitted to name an export.
+PERMITTED_EXPORT_OPERATION = ("GET", f"{PREFIX}/export")
 
 
-def test_route_surface_has_no_rebuild_export_import_or_vector_route__DoD14(application: FastAPI) -> None:
-    """DoD-14 — brief Scope Out: exactly the three D9 routes, none of them naming the out-of-scope work."""
+def test_route_surface_has_no_rebuild_import_or_vector_route__DoD14(application: FastAPI) -> None:
+    """DoD-14 — brief Scope Out: exactly the expected routes, none of them naming
+    out-of-scope work.
+
+    S030_003_DoD1: narrowed, not disarmed. The surface is still pinned to
+    `EXPECTED_OPERATIONS`, every path is still rejected for `rebuild` / `import` /
+    `vector` / `vec0`, and `export` is still rejected on every operation other than the
+    single `GET .../export` that 030 delivers.
+    """
     operations = _feature_operations(application)
     assert set(operations) == EXPECTED_OPERATIONS
     for method, path in operations:
         for word in FORBIDDEN_SURFACE:
             assert word not in path.lower(), (method, path)
+        if (method, path) != PERMITTED_EXPORT_OPERATION:
+            assert "export" not in path.lower(), (method, path)
 
 
 def test_route_surface_documents_nothing_about_a_vector_index__DoD14(application: FastAPI) -> None:
@@ -1461,7 +1503,8 @@ def test_route_surface_documents_nothing_about_a_vector_index__DoD14(application
         ("POST", f"{PREFIX}/rebuild"),
         ("POST", f"{PREFIX}/vector-index/rebuild"),
         ("POST", f"{TABLES_PATH}/models/rebuild"),
-        ("GET", f"{PREFIX}/export"),
+        # S030_003_DoD1: `GET {PREFIX}/export` has left this list — 030 step 003 delivers
+        # it. `POST {PREFIX}/export` stays: 030 ships a GET download and nothing else.
         ("POST", f"{PREFIX}/export"),
         ("POST", f"{PREFIX}/import"),
         ("GET", f"{PREFIX}/vector-index"),
@@ -1470,5 +1513,10 @@ def test_route_surface_documents_nothing_about_a_vector_index__DoD14(application
 def test_out_of_scope_routes_do_not_exist__DoD14(
     application: FastAPI, db_settings: Settings, method: str, path: str
 ) -> None:
-    """DoD-14 — an administrator reaching for a rebuild / export / import route finds none."""
+    """DoD-14 — an administrator reaching for a rebuild or import route, or for an export
+    verb this feature does not offer, finds none.
+
+    S030_003_DoD1: the one admitted route is `GET .../export`; every other member of this
+    list stays armed, so 031's Import and `fast/002`'s Rebuild still cannot appear early.
+    """
     assert _admin(application, db_settings).request(method, path).status_code in (404, 405)
