@@ -8,14 +8,26 @@ import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
 import { Link, useMatch, useNavigate } from "react-router-dom";
-import { Badge, Box, Button, Group, Loader, NavLink, Stack, Switch, Text } from "@mantine/core";
-import { IconChevronDown, IconPlus, IconSearch } from "@tabler/icons-react";
+import {
+  Badge,
+  Box,
+  Button,
+  Group,
+  Loader,
+  NavLink,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+} from "@mantine/core";
+import { IconChevronDown, IconPlus } from "@tabler/icons-react";
 
 import { IconButton } from "../shared/IconButton";
 import type { IconButtonProps } from "../shared/IconButton";
 import { isArchived } from "./charactersApi";
 import type { CharactersState } from "./charactersState";
 import { loadCharacters, setShowArchived } from "./charactersState";
+import { searchHref } from "./searchState";
 import { formatSessionStart } from "./sessionLabel";
 import type { SessionsState } from "./sessionsState";
 import { loadSessions, orderCharactersByUse, sessionsOfCharacter } from "./sessionsState";
@@ -26,9 +38,15 @@ import {
 } from "./treeCollapse";
 import type { LayoutStorage } from "./workspaceLayout";
 
-/** The header's two in-entry destinations (D13); the same pair the rail offers. */
-const SEARCH_PATH = "/search";
+/** The header's in-entry destination (D13); the rail offers it too. */
 const NEW_CHARACTER_PATH = "/characters/new";
+
+/**
+ * The search box's accessible name (029 `006`, `context.md` literals) — and the whole of the
+ * box's labelling: an `aria-label`, never a visible Mantine `label`, so the header gains no
+ * new text node. The path it submits to is `searchHref` (029 `004`), not a constant here.
+ */
+const SEARCH_LABEL = "Search";
 
 /**
  * The static segment `/characters/new` also matches the `:id` pattern; it is the create
@@ -96,11 +114,11 @@ export type CharacterTreeProps = {
 };
 
 /**
- * The tree: a header carrying "Search", "New character" and the "Show archived" switch
- * (D13 — no chevron, no session rows), and below it the character level, which renders a
- * loader while loading, "Could not load characters" plus "Retry" on failure (inline, no
- * notification — D12), and otherwise a "Characters" list with one router link per
- * character in state order. Archived rows are dimmed and badged "Archived"; the row
+ * The tree: a header carrying the "Search" box (029 `006`), the "New character" button and
+ * the "Show archived" switch (D13 — no chevron, no session rows), and below it the character
+ * level, which renders a loader while loading, "Could not load characters" plus "Retry" on
+ * failure (inline, no notification — D12), and otherwise a "Characters" list with one router
+ * link per character in state order. Archived rows are dimmed and badged "Archived"; the row
  * matching the current `/characters/:id` is active and carries `aria-current="page"`.
  *
  * 011 step 006 adds the session level on top of that: the rows are ordered by newest
@@ -122,6 +140,11 @@ export const CharacterTree = observer(function CharacterTree(
   // record. The tree remounts whenever the column expands, so the read re-runs then — which
   // is exactly why the set is persisted rather than kept in a store.
   const [collapsed, setCollapsed] = useState<string[]>(() => readCollapsedCharacters(storage));
+
+  // 029 `006`: the header search box's text, component-local and nothing else's business. The
+  // tree remounts whenever the column expands, so this is deliberately NOT seeded from, nor
+  // synced with, the URL — the query itself lives in `/search?q=` (U4).
+  const [searchText, setSearchText] = useState("");
 
   // Read during render, so the `observer` re-renders — and the effect re-runs — when the
   // flag flips. `loadCharacters` reads the same field for the query, so the two agree.
@@ -295,11 +318,24 @@ export const CharacterTree = observer(function CharacterTree(
   return (
     <Stack gap="xs" h="100%">
       <Group gap="xs" wrap="nowrap">
-        <IconButton
-          icon={IconSearch}
-          label="Search"
-          onClick={() => {
-            void navigate(SEARCH_PATH);
+        {/* 029 `006`: 009's "Search" `IconButton` is now the box itself (US-118.AC-1, U4).
+            Enter pushes in-entry to `searchHref(text)` (029 `004`), which answers `/search`
+            for a blank box — so no special case here. The typed text is never synced from
+            the URL: the tree remounts on expand, and the query lives in the URL (U4). */}
+        <TextInput
+          size="xs"
+          flex={1}
+          miw={0}
+          aria-label={SEARCH_LABEL}
+          value={searchText}
+          onChange={(event) => {
+            setSearchText(event.currentTarget.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") {
+              return;
+            }
+            void navigate(searchHref(searchText));
           }}
         />
         <IconButton

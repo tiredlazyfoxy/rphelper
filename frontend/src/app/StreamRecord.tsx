@@ -9,7 +9,12 @@
 // *partner* entry also offers the translate flicker inside that same actions group and shows
 // its translation in place of the original; committing an edit of a partner entry drops that
 // row's cached translation. Without the state nothing changes for any kind.
-import { useState } from "react";
+//
+// Feature 029, step 006 (D8): every item carries `data-entry-id`, and an optional
+// `focusEntryId` — forwarded from `SessionScreen` through `SessionStream`, never read from a
+// router here — marks at most one item as the arrival's focus entry, which scrolls itself into
+// view once and is highlighted briefly.
+import { useEffect, useRef, useState } from "react";
 import type * as React from "react";
 import { observer } from "mobx-react-lite";
 import { Blockquote, Box, Group, Stack, Text, Textarea } from "@mantine/core";
@@ -36,7 +41,27 @@ export type StreamRecordProps = {
    * and 013 / 014's tests — are unaffected.
    */
   translations?: TranslationState;
+  /**
+   * 029 `006` (D8): the `?entry=` message id this arrival anchors on, as `SessionStream`
+   * forwarded it. **Optional, defaults to none.** The record reads no URL itself (no router
+   * hook anywhere in this module); it only compares this id with each entry's. An id that
+   * matches no loaded entry does nothing at all, and without it no entry is the focus entry.
+   */
+  focusEntryId?: string | null;
 };
+
+/**
+ * 029 `006` (`context.md` literals): how long the focus entry stays highlighted, in
+ * milliseconds. The value is part of the freeze — DoD-4 pins it at 1999 / 2000.
+ */
+const HIGHLIGHT_DURATION_MS = 2000;
+
+/**
+ * 029 `006` (orchestrator decision 10, D7): the highlight is a **Mantine `bg` prop** on the
+ * item, never CSS — there is no stylesheet to add to (`tests/stylesheets.test.ts`). The shade
+ * is this constant; what the tests bind to is `data-highlighted="true"`, not the colour.
+ */
+const HIGHLIGHT_BG = "yellow.1";
 
 const KIND_LABELS: Record<MessageKind, string> = {
   partner: "Partner",
@@ -121,6 +146,11 @@ type StreamEntryProps = {
   entry: Message;
   /** Whether this is the record's last entry (re-open candidate under `showsReopen`). */
   isLast: boolean;
+  /**
+   * 029 `006` (D8): whether this entry is the arrival's focus entry — `StreamRecord` resolves
+   * the id, so the item itself never sees one. True on at most one item of a record.
+   */
+  isFocusEntry: boolean;
   /** Passed on to `reopenLast` and `editEntry`. */
   signal?: AbortSignal;
   /** The mount's flicker state (023 D13). Absent → no flicker, no invalidation. */
@@ -135,7 +165,7 @@ type StreamEntryProps = {
 const StreamEntry = observer(function StreamEntry(
   props: StreamEntryProps,
 ): React.JSX.Element {
-  const { state, entry, isLast, signal, translations } = props;
+  const { state, entry, isFocusEntry, isLast, signal, translations } = props;
   const reopenOffered = isLast && showsReopen(state);
   // 023 `005`: the flicker exists only for a settled partner entry, and only when this mount
   // handed the record its flicker state (D13, D15). Turns and decisions never get one.
@@ -145,9 +175,36 @@ const StreamEntry = observer(function StreamEntry(
   // Reveal (D6): hovered, focus within, or a device that cannot hover.
   const { hovered, ref: hoverRef } = useHover<HTMLLIElement>();
   const { focused, ref: focusRef } = useFocusWithin<HTMLLIElement>();
-  const itemRef = useMergedRef<HTMLLIElement>(hoverRef, focusRef);
+  // 029 `006`: the anchor's handle on the element. It JOINS the reveal refs as a third ref —
+  // `itemRef` is the single `ref` the item receives, so neither existing ref may be replaced.
+  const scrollRef = useRef<HTMLLIElement>(null);
+  const itemRef = useMergedRef<HTMLLIElement>(hoverRef, focusRef, scrollRef);
   const noHover = useMediaQuery("(hover: none)") === true;
   const revealed = hovered || focused || noHover;
+
+  // 029 `006` (D8): the arrival's anchor. Only the focus entry acts, and only once.
+  const [highlighted, setHighlighted] = useState(false);
+  // Which entry id this item has already scrolled for. A ref, not state, so the guard is read
+  // and written inside the effect without re-rendering: the item re-renders for plenty of
+  // unrelated reasons (hover, focus, a translation arriving, the discussion group expanding,
+  // and the highlight clearing itself), and none of them may scroll a second time.
+  const scrolledForId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isFocusEntry || scrolledForId.current === entry.id) {
+      return;
+    }
+    scrolledForId.current = entry.id;
+    scrollRef.current?.scrollIntoView({ block: "center" });
+    setHighlighted(true);
+    // Cleared on unmount (and before any re-run), so the timer can never land on a gone item.
+    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      setHighlighted(false);
+    }, HIGHLIGHT_DURATION_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [isFocusEntry, entry.id]);
 
   // View state (D10): whether this entry's editor is open, and its draft.
   const [editing, setEditing] = useState(false);
@@ -176,7 +233,18 @@ const StreamEntry = observer(function StreamEntry(
   }
 
   return (
-    <Box component="li" ref={itemRef} mb="md">
+    // 029 `006` (D8, `context.md` literals): `data-entry-id` is on EVERY item, always, and is
+    // spelled with the `-id` suffix (`data-entry` is the Vite entry marker, something else
+    // entirely). `data-highlighted` and the Mantine `bg` are the anchor's, and both are gone
+    // — the attribute absent, the background back to the theme's — once the 2000 ms are up.
+    <Box
+      component="li"
+      ref={itemRef}
+      data-entry-id={entry.id}
+      data-highlighted={highlighted ? "true" : undefined}
+      bg={highlighted ? HIGHLIGHT_BG : undefined}
+      mb="md"
+    >
       <Stack gap="xs">
         <Group gap="xs" justify="space-between" wrap="nowrap">
           <Text size="sm" fw={600} c="dimmed">
@@ -247,6 +315,9 @@ export const StreamRecord = observer(function StreamRecord(
   const { state, signal, translations } = props;
   const entries = state.entries;
   const lastIndex = entries.length - 1;
+  // 029 `006`: `null` when this arrival named no entry; an id naming no loaded entry simply
+  // matches nothing. Ids are strings, compared by equality — never parsed.
+  const focusEntryId = props.focusEntryId ?? null;
 
   return (
     <Box
@@ -265,6 +336,7 @@ export const StreamRecord = observer(function StreamRecord(
             state={state}
             entry={entry}
             isLast={index === lastIndex}
+            isFocusEntry={entry.id === focusEntryId}
             signal={signal}
             translations={translations}
           />

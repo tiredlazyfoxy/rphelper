@@ -45,9 +45,11 @@ The factory's order is therefore fixed:
    `app.include_router(configuration_router)` (feature `017`), no prefix, full paths
    `/api/models`, `/api/me/settings`, `/api/sessions/{session_id}/configuration` and
    `/api/characters/{character_id}/configuration`, registered after every earlier router.
-   After it, last of all, comes `app.include_router(translation_router)` (feature `023`),
-   no prefix, the single full path `/api/messages/{message_id}/translation`, registered
-   **after every other router** so every earlier router's routes keep matching first.
+   After it comes `app.include_router(translation_router)` (feature `023`), no prefix, the
+   single full path `/api/messages/{message_id}/translation`, registered after every
+   earlier router. After it, last of all, comes `app.include_router(search_router)`
+   (feature `029`), no prefix, the single full path `/api/search`, registered **after every
+   other router** so every earlier router's routes keep matching first.
 
 **The lifespan runs no DDL.** No table creation, no upgrade, no schema check, and no
 create-if-missing convenience. Remediation is admin-triggered and belongs to feature
@@ -82,6 +84,7 @@ from app.routers.characters import router as characters_router
 from app.routers.configuration import router as configuration_router
 from app.routers.health import router as health_router
 from app.routers.memos import router as memos_router
+from app.routers.search import router as search_router
 from app.routers.sessions import router as sessions_router
 from app.routers.setups import router as setups_router
 from app.routers.stream import router as stream_router
@@ -111,12 +114,12 @@ def create_app() -> FastAPI:
     `app.include_router(admin_llm_router)`, `app.include_router(admin_db_router)`,
     `app.include_router(characters_router)`, `app.include_router(setups_router)`,
     `app.include_router(sessions_router)`, `app.include_router(stream_router)`,
-    `app.include_router(memos_router)`, `app.include_router(configuration_router)` and
-    `app.include_router(translation_router)` — the setups router immediately after the
-    characters router, the sessions router immediately after setups, the stream router
-    immediately after sessions, the memos router immediately after stream, the
-    configuration router after those (feature `017`), and the translation router last
-    (feature `023`).
+    `app.include_router(memos_router)`, `app.include_router(configuration_router)`,
+    `app.include_router(translation_router)` and `app.include_router(search_router)` — the
+    setups router immediately after the characters router, the sessions router immediately
+    after setups, the stream router immediately after sessions, the memos router immediately
+    after stream, the configuration router after those (feature `017`), the translation
+    router after that (feature `023`), and the search router last (feature `029`).
 
     Constructed with `FastAPI(lifespan=lifespan)`.
 
@@ -145,6 +148,7 @@ def create_app() -> FastAPI:
     app.include_router(memos_router)
     app.include_router(configuration_router)
     app.include_router(translation_router)
+    app.include_router(search_router)
     return app
 
 

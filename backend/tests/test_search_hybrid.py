@@ -217,8 +217,9 @@ RESCUE_POOL = tuple(f"rescue pool vector source text number {index}" for index i
 RESCUE_LIMIT = 10
 
 #: The modules `context.md` "Files this feature touches" lists (DoD-15), plus `memo_search.py`,
-#: which feature 026 step 001 adds to the package, and `session_search.py`, which feature 027 step
-#: 001 adds — so the two scans below keep covering every file.
+#: which feature 026 step 001 adds to the package, `session_search.py`, which feature 027 step
+#: 001 adds, and `my_search.py`, which feature 029 step 001 adds — so the two scans below keep
+#: covering every file.
 SEARCH_PACKAGE_MODULES = (
     "__init__.py",
     "ports.py",
@@ -228,6 +229,7 @@ SEARCH_PACKAGE_MODULES = (
     "hybrid.py",
     "memo_search.py",
     "session_search.py",
+    "my_search.py",
 )
 
 #: D3's hit shape, exactly — step 001's frozen field list. No title, ever (US-119).
@@ -1155,11 +1157,11 @@ def _imported_roots(module_path: Path) -> set[str]:
     return roots
 
 
-def test_the_eight_search_modules_are_all_present_to_scan__S025_004_DoD15() -> None:  # 027 `001` added the eighth
+def test_the_nine_search_modules_are_all_present_to_scan__S025_004_DoD15() -> None:  # 029 `001` added the ninth
     """The scan would be vacuous if a module were missing, so pin the file list first.
 
-    Eight, not seven: feature 026 step 001 added `memo_search.py` to the package and feature 027
-    step 001 added `session_search.py`.
+    Nine, not seven: feature 026 step 001 added `memo_search.py` to the package, feature 027
+    step 001 added `session_search.py`, and feature 029 step 001 added `my_search.py`.
     """
     directory = _package_directory()
 

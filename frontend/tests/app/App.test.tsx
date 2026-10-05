@@ -137,6 +137,18 @@
 //   "Notes after Sessions" (→ the 018 D10 order, 018 DoD-6). Each amended title ends with the
 //   018 "— DoD-N" that amends it. No other assertion changes. 018 step 009's own clauses
 //   (DoD-3, DoD-5, DoD-7, DoD-8) are the block at the bottom of this file.
+//
+// Amended by feature 029, step 005 (DoD-11, DoD-12): `/search` is no longer an empty centre — it
+// renders `SearchScreen`, whose own box carries the accessible name "Search query" (029
+// context.md literals), so `EMPTY_CENTRE_ROUTES` **loses its `/search` entry** and keeps only
+// `/`; the two clauses at the bottom of this file cover `/search` instead. `NO_SESSION_ROUTES`
+// **keeps** `/search`: the search screen grows no note wall, and that clause is what proves it.
+// `stubWorkspace` needs **no** `/api/search` branch — a blank `q` makes no request (029 decision
+// 10) and every render here reaches `/search` without one. Two clauses are added at the bottom:
+// the collapsed rail's "Search" button lands on `/search` with the box focused, and `/search`
+// with the tree expanded renders the box in the centre (029 U4, D9). A collapse is a stored
+// `navCollapsed: true` layout record, WorkspaceShell.test.tsx's own mechanism. No other existing
+// assertion is dropped, and `WorkspaceShell.test.tsx` is not amended.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
@@ -186,9 +198,12 @@ const NOT_FOUND_TEXT = /page not found/i;
  * The declared routes whose centre is still empty: 009 filled the two character routes, and
  * 011 step 009 filled `/sessions/:id` (D17), which is why that path is no longer listed here —
  * this step's own clauses at the bottom of the file cover it. 017 step 007 filled `/settings`
- * (D15), so it is no longer listed either; its clauses are at the bottom of the file.
+ * (D15), so it is no longer listed either; its clauses are at the bottom of the file. 029 step
+ * 005 filled `/search` with `SearchScreen` (029 U4), which renders the "Search query" box, so
+ * that path is no longer listed either; its clauses are at the bottom of the file too. Only `/`
+ * is still an empty centre.
  */
-const EMPTY_CENTRE_ROUTES = ["/", "/search"];
+const EMPTY_CENTRE_ROUTES = ["/"];
 
 const UNDECLARED_ROUTE = "/nope";
 
@@ -1518,5 +1533,88 @@ describe("018 step 009 — the page composer starts a session with its opening m
         .queryAllByRole("link")
         .map((link) => link.getAttribute("href") ?? ""),
     ).toEqual([`/sessions/${STARTED_SESSION_ID}`]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 029, step 005 — `/search` renders `SearchScreen` inside the same shell, and the
+// collapsed rail's existing "Search" button reaches it with its box focused (029 U4, D9,
+// US-118.AC-2). The screen's own behaviour is SearchScreen.test.tsx's; these clauses assert the
+// route `App` declares, the rail's way into it and the two route-set amendments this step owns.
+// "— DoD-11" / "— DoD-12" are 029 step 005's. Expected strings come from 029 context.md's
+// Literals table. No `/api/search` branch is added to `stubWorkspace`: every render here lands on
+// `/search` with a blank `q`, which makes no request (029 decision 10, step 005 DoD-7).
+const SEARCH_ROUTE = "/search";
+const SEARCH_BOX_NAME = "Search query";
+const RAIL_SEARCH_NAME = /^search$/i;
+
+/** A file-local in-memory `LayoutStorage` seeded with the nav collapsed to the rail. */
+function collapsedStorage(): LayoutStorage {
+  const entries = new Map<string, string>([
+    [LAYOUT_KEY, JSON.stringify({ navCollapsed: true, wallPinned: false })],
+  ]);
+  const getItem = vi.fn<GetItem>((key) => entries.get(key) ?? null);
+  const setItem = vi.fn<SetItem>((key, value) => {
+    entries.set(key, value);
+  });
+  return { getItem, setItem };
+}
+
+function searchBox(): HTMLElement {
+  return within(mainElement()).getByRole("textbox", { name: SEARCH_BOX_NAME });
+}
+
+describe("029 step 005 — the rail's Search trigger reaches the results page (US-118.AC-2, D9)", () => {
+  it("with the tree collapsed to the rail, the rail's Search button lands on /search with the Search query box focused — DoD-11", async () => {
+    const user = newUser();
+    stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp("/", collapsedStorage());
+    await flush();
+
+    await user.click(within(navElement()).getByRole("button", { name: RAIL_SEARCH_NAME }));
+    await flush();
+
+    expect(currentPath()).toBe(SEARCH_ROUTE);
+    expect(searchBox()).toBeInTheDocument();
+    expect(searchBox()).toHaveFocus();
+  });
+
+  it("with the tree expanded, /search renders the Search query box in the centre beside the tree — DoD-11", async () => {
+    stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp(SEARCH_ROUTE);
+    await flush();
+
+    expect(navElement()).toBeInTheDocument();
+    expect(queryTreeRow(CHAR_A.name)).not.toBeNull();
+    expect(searchBox()).toBeInTheDocument();
+    expect(searchBox()).toHaveFocus();
+    expect(within(mainElement()).queryByText(NOT_FOUND_TEXT)).toBeNull();
+  });
+});
+
+describe("029 step 005 — the two route-set amendments this step owns (005.context.md)", () => {
+  it("/search has left the empty-centre set and its centre now holds the Search query box — DoD-12", async () => {
+    expect(EMPTY_CENTRE_ROUTES).toEqual(["/"]);
+
+    stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp(SEARCH_ROUTE);
+    await flush();
+
+    expect(searchBox()).toBeInTheDocument();
+    expect(mainText()).not.toBe("");
+    expect(within(mainElement()).queryByText(NOT_FOUND_TEXT)).toBeNull();
+  });
+
+  it("/search stays in the no-note-wall set: it renders the box and no wall, not even hidden — DoD-12", async () => {
+    expect(NO_SESSION_ROUTES).toContain(SEARCH_ROUTE);
+
+    stubWorkspace([CHAR_A], [SESSION_ONE]);
+    renderApp(SEARCH_ROUTE, pinnedStorage());
+    await flush();
+
+    expect(searchBox()).toBeInTheDocument();
+    expect(screen.queryAllByRole("complementary", { hidden: true })).toHaveLength(0);
+    expect(document.querySelector(`[aria-label="${WALL_NAME}"]`)).toBeNull();
+    expect(screen.queryByRole("button", { name: OPEN_NOTES_NAME, hidden: true })).toBeNull();
   });
 });

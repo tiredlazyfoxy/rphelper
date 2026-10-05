@@ -5,6 +5,8 @@
 // `Composer`. Mounted by `SessionScreen`'s ready render; keyed per session by `SessionRoute`.
 // Feature 023, step 005 (D13): it owns one `TranslationState` per mount the same way, hands it
 // to `StreamRecord`, and disposes it — aborting every pending translate request — on unmount.
+// Feature 029, step 006 (D8): it also forwards an optional `focusEntryId` straight through to
+// `StreamRecord`. It deliberately reads no router hook — `SessionScreen` owns the URL.
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
@@ -21,6 +23,13 @@ export type SessionStreamProps = {
   sessionId: string;
   /** 017 D17: passed unchanged to `Composer`. Defaults to null. */
   sendBlockedReason?: string | null;
+  /**
+   * 029 `006` (D8): the `?entry=` message id this arrival should anchor on, passed unchanged
+   * to `StreamRecord`. **Optional, defaults to none** — the stream reads no URL of its own
+   * (it uses no router hook at all), so the id can only come from `SessionScreen`. Without it
+   * nothing is scrolled to and nothing is highlighted, which is every other caller's case.
+   */
+  focusEntryId?: string | null;
 };
 
 /** The ruler's visible label and accessible name — the stream's only separator (D12). */
@@ -104,7 +113,12 @@ export const SessionStream = observer(function SessionStream(
             {COVERAGE_BANNER_TEXT}
           </Alert>
         ) : null}
-        <StreamRecord state={state} signal={signal} translations={translations} />
+        <StreamRecord
+          state={state}
+          signal={signal}
+          translations={translations}
+          focusEntryId={props.focusEntryId ?? null}
+        />
         <Divider label={RULER_LABEL} labelPosition="center" aria-label={RULER_LABEL} />
         <KindSwitch state={state} />
         <ZoneList state={state} signal={signal} />

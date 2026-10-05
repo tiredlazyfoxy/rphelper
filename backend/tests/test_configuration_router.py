@@ -1066,9 +1066,12 @@ def _ordered_api_routes(routes: Any, found: list[APIRoute], seen: set[int]) -> N
 #: Routers registered after the configuration router by features later than 017 — the only routes
 #: permitted to follow it. Feature 023 step 003 D12 appends the translation router last, so D13's
 #: "included last" means "last before later features" (approved mechanical knock-on, 023's
-#: `## Ultra phase` policy of 2026-10-03).
+#: `## Ultra phase` policy of 2026-10-03). Feature 029 step 003 (D1, decision 6) appends the
+#: search router after the translation router, so `GET /api/search` joins the set under the same
+#: policy (029's `## Ultra phase` decision 2 of 2026-10-05).
 LATER_FEATURE_ROUTES = {
     ("/api/messages/{message_id}/translation", "POST"),
+    ("/api/search", "GET"),
 }
 
 

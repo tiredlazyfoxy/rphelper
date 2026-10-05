@@ -14,6 +14,7 @@ import { WorkspaceShell } from "./WorkspaceShell";
 import { CharacterRoute, CharacterScreen } from "./CharacterScreen";
 import { SessionRoute } from "./SessionScreen";
 import { SettingsScreen } from "./SettingsScreen";
+import { SearchScreen } from "./SearchScreen";
 import { CharactersState } from "./charactersState";
 import { SessionsState } from "./sessionsState";
 
@@ -31,9 +32,11 @@ export type AppProps = {
  *
  * `/characters/new` is listed before `/characters/:id` for readability only; React Router
  * 7 ranks the static segment above the dynamic one regardless. Later features (013, 017,
- * 018, 029) fill the remaining centres; their elements are empty on purpose — no
- * placeholder pretends a feature exists. 009 fills the two character routes, and 011 step
- * 009 fills `/sessions/:id` with `SessionRoute`.
+ * 018) fill the remaining centres; their elements are empty on purpose — no
+ * placeholder pretends a feature exists. 009 fills the two character routes, 011 step
+ * 009 fills `/sessions/:id` with `SessionRoute`, and 029 step 005 fills `/search` with
+ * `SearchScreen` — which, unlike the other screens, receives no props at all: it owns the
+ * one page state it needs (029 decision 10).
  */
 export function App(props: AppProps): React.JSX.Element {
   const { user, storage } = props;
@@ -66,7 +69,7 @@ export function App(props: AppProps): React.JSX.Element {
           element={<CharacterRoute characters={characters} sessions={sessions} />}
         />
         <Route path="/settings" element={<SettingsScreen />} />
-        <Route path="/search" element={null} />
+        <Route path="/search" element={<SearchScreen />} />
         <Route path="*" element={<Text p="md">Page not found</Text>} />
       </Routes>
     </WorkspaceShell>

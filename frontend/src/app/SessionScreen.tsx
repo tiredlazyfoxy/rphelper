@@ -17,10 +17,15 @@
 // branch (016 D1), and any notification API import — the failure branch renders its one
 // fixed sentence inline with a Retry. The header's title-row button is 016's "Open notes";
 // 017's `SessionConfigBar` (model picker, tool badges, gear) follows the title row.
+//
+// Feature 029, step 006 (D8): the screen is also the chain's only reader of the URL's search
+// parameters — `?entry=<message id>`, handed down as the stream's focus entry, and
+// `?notes=open`, which opens the note wall on arrival. `SessionStream` and `StreamRecord`
+// deliberately use no router hook of their own (029 decision 9).
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMediaQuery } from "@mantine/hooks";
 import { IconNotes } from "@tabler/icons-react";
 import {
@@ -52,6 +57,16 @@ import { IconButton } from "../shared/IconButton";
 
 /** The link text when the workspace list does not hold this session's character (D17). */
 const UNKNOWN_CHARACTER = "Character";
+
+/**
+ * 029 `006`, D8 — the landing parameters this screen honours, and the only value that means
+ * anything. `ENTRY_PARAM` carries a message id, handed to the stream as its focus entry;
+ * `NOTES_PARAM` with exactly `NOTES_OPEN_VALUE` opens the note wall on arrival. Neither is
+ * removed from the URL after use, and any other value is the same as absence.
+ */
+const ENTRY_PARAM = "entry";
+const NOTES_PARAM = "notes";
+const NOTES_OPEN_VALUE = "open";
 
 export type SessionScreenProps = {
   /** The `:id` route parameter verbatim. A string, never parsed. */
@@ -90,6 +105,24 @@ export const SessionScreen = observer(function SessionScreen(
   const narrow =
     useMediaQuery(NARROW_VIEWPORT_QUERY, false, { getInitialValueInEffect: false }) ?? false;
   const controllerRef = useRef<AbortController | null>(null);
+
+  // 029 `006` (D8): the landing parameters. This screen is the chain's only reader of the URL
+  // — it has a router, while `SessionStream` and `StreamRecord` deliberately use no router
+  // hook (decision 9), so the focus entry travels down as a plain prop.
+  const [searchParams] = useSearchParams();
+  // The message id verbatim, or null when absent. Never parsed; an id naming no loaded entry
+  // simply matches nothing downstream.
+  const focusEntryId = searchParams.get(ENTRY_PARAM);
+  const notesParam = searchParams.get(NOTES_PARAM);
+
+  // 029 `006` (decision 11): OPEN-ONLY. `notes=open` opens the wall on arrival, in place of
+  // the closed-on-mount default; absence, any other value and every later in-entry navigation
+  // leave the wall exactly as it is — nothing here ever closes it, and the pin is untouched.
+  useEffect(() => {
+    if (notesParam === NOTES_OPEN_VALUE) {
+      openWall(wall);
+    }
+  }, [notesParam, wall]);
 
   // One read on mount; the controller aborts on unmount so a late response writes nothing.
   useEffect(() => {
@@ -196,6 +229,7 @@ export const SessionScreen = observer(function SessionScreen(
         <SessionStream
           sessionId={props.sessionId}
           sendBlockedReason={sendBlockedReason(configState)}
+          focusEntryId={focusEntryId}
         />
       </Stack>
     </Container>

@@ -9,7 +9,8 @@
 // session rows).
 //
 // Recognition conventions (from the spec's wording, for the verifier):
-// - The tree's names are the contract: the icon buttons "Search" and "New character", the
+// - The tree's names are the contract: the search box named "Search" (029 step 006; an icon
+//   button named "Search" until then), the icon button "New character", the
 //   switch "Show archived", the list's accessible name "Characters", the badge text exactly
 //   "Archived", the failure sentence "Could not load characters" and its button "Retry".
 // - The list: 008.context.md sanctions either a `ul` with `aria-label` (role `list`) or the
@@ -36,6 +37,23 @@
 // Start-time labels are asserted only by their fixed shape (never an exact local-time string,
 // never by calling the formatter), and session rows are identified by their `/sessions/<id>`
 // href and their setup label (011 context.md "Test conventions").
+//
+// Amended by feature 029, step 006 (DoD-1, DoD-2): the header's "Search" icon button is
+// **replaced** by a text input whose accessible name is still "Search" (029 context.md
+// literals, "tree input accessible name"), and Enter on it navigates in-entry to
+// `/search?q=<encodeURIComponent(text)>` — `/search` when the box is empty (029 U4, D8).
+// Four sites change, each marked `S029_006_DoD1` / `S029_006_DoD2` beside the amended line:
+//  - "Search moves the in-entry router to /search" (009 008 DoD-3) is replaced by the three
+//    029 DoD-1 clauses in the same describe block, which drive the **textbox** instead of a
+//    button; the sibling "New character" clause is untouched;
+//  - "the ready tree's only buttons are Search and New character" (009 008 DoD-6) and
+//    "no chevron, no session row, …" (011 006 DoD-13) each carry a button-name-set
+//    assertion, which becomes `["New character"]`;
+//  - "the switch is the tree's only other control …" (009 008 DoD-6) asserted the tree held
+//    **no** textbox; it now asserts exactly one, the search field.
+// The location probe also renders `location.search`, so a clause can read the submitted `q`
+// back **decoded** (`URLSearchParams.get`), never as a pinned `%`-encoding. No other
+// assertion is dropped or weakened.
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -344,7 +362,13 @@ function writtenKeys(store: StorageFake): string[] {
 // ---------------------------------------------------------------- render
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="probe-location">{location.pathname}</output>;
+  return (
+    <>
+      <output data-testid="probe-location">{location.pathname}</output>
+      {/* S029_006_DoD1: the query string, so a clause can read the submitted `q` back. */}
+      <output data-testid="probe-search">{location.search}</output>
+    </>
+  );
 }
 
 const TREE_HOST = "tree-host";
@@ -384,6 +408,15 @@ function currentPath(): string {
   return screen.getByTestId("probe-location").textContent ?? "";
 }
 
+// S029_006_DoD1: the location's query string, and the `q` it carries read back **decoded**.
+function currentSearch(): string {
+  return screen.getByTestId("probe-search").textContent ?? "";
+}
+
+function currentQuery(): string | null {
+  return new URLSearchParams(currentSearch()).get("q");
+}
+
 /** The character level, by its accessible name (a list or the equivalent landmark). */
 function charactersList(): HTMLElement {
   const asList = within(tree()).queryByRole("list", { name: CHARACTERS_LIST_NAME });
@@ -421,6 +454,11 @@ function rowBlock(name: string): HTMLElement {
 
 function treeButton(name: RegExp): HTMLElement {
   return within(tree()).getByRole("button", { name });
+}
+
+/** S029_006_DoD1: the header's search field, by its accessible name "Search". */
+function searchBox(): HTMLElement {
+  return within(tree()).getByRole("textbox", { name: SEARCH_NAME });
 }
 
 function showArchivedSwitch(): HTMLElement {
@@ -590,17 +628,51 @@ describe("a row is an in-entry link that marks its own route", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("the header's two actions navigate in-entry (D13)", () => {
-  it("Search moves the in-entry router to /search — DoD-3", async () => {
+describe("the header's two actions navigate in-entry (D13; 029 U4, US-118.AC-1)", () => {
+  // S029_006_DoD1: this clause replaces 009 008 DoD-3's "Search moves the in-entry router to
+  // /search", which clicked a button. The header now holds a textbox named "Search", and
+  // Enter submits it to `/search?q=<text>`; the three cases below are 029 step 006 DoD-1.
+  it("(009 008 DoD-3, amended: Search was an icon button) typing mira and pressing Enter moves the in-entry router to /search with q decoding to mira — DoD-1", async () => {
     const user = newUser();
     serveListing(PAYLOAD);
     renderTree();
     await flush();
 
-    await user.click(treeButton(SEARCH_NAME));
+    await user.type(searchBox(), "mira{Enter}");
     await flush();
 
     expect(currentPath()).toBe(SEARCH_PATH);
+    expect(currentQuery()).toBe("mira");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("a query holding an ampersand and a space submits a q that decodes to it unchanged — DoD-1", async () => {
+    const user = newUser();
+    serveListing(PAYLOAD);
+    renderTree();
+    await flush();
+
+    await user.type(searchBox(), "a&b c{Enter}");
+    await flush();
+
+    expect(currentPath()).toBe(SEARCH_PATH);
+    expect(currentQuery()).toBe("a&b c");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("Enter on an empty box moves the in-entry router to /search — DoD-1", async () => {
+    const user = newUser();
+    serveListing(PAYLOAD);
+    renderTree();
+    await flush();
+
+    const box = searchBox();
+    expect(box).toHaveValue("");
+    await user.type(box, "{Enter}");
+    await flush();
+
+    expect(currentPath()).toBe(SEARCH_PATH);
+    expect(currentSearch()).toBe("");
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -741,7 +813,7 @@ describe("a failed load reports inside the tree (D12)", () => {
 // (011 D7, D16). The sessions-present behaviour they would otherwise contradict is covered by
 // 011's DoD-5, DoD-6 and DoD-2 blocks below. Nothing here was deleted.
 describe("no chevron and no session rows in 009 (D13)", () => {
-  it("the ready tree's only buttons are Search and New character — DoD-6", async () => {
+  it("the ready tree's only button is New character — DoD-6", async () => {
     serveListing([CORVIN], [ARCHIVED_ARIA]);
     renderTree();
     await flush();
@@ -750,17 +822,22 @@ describe("no chevron and no session rows in 009 (D13)", () => {
     const names = within(tree())
       .getAllByRole("button")
       .map((button) => (button.getAttribute("aria-label") ?? button.textContent ?? "").trim());
-    expect([...names].sort()).toEqual(["New character", "Search"]);
+    // S029_006_DoD2: "Search" has left the button set — it is the header's textbox now.
+    expect([...names].sort()).toEqual(["New character"]);
   });
 
-  it("the switch is the tree's only other control and the rows are links — DoD-6", async () => {
+  it("the switch and the search field are the tree's only other controls and the rows are links — DoD-6", async () => {
     serveListing(PAYLOAD);
     renderTree();
     await flush();
 
     expect(switchCount()).toBe(1);
     expect(showArchivedSwitch()).toBeInTheDocument();
-    expect(within(tree()).queryAllByRole("textbox")).toEqual([]);
+    // S029_006_DoD2: the tree held no textbox before 029; it now holds exactly one, the
+    // header's search field, found by its accessible name "Search".
+    const textboxes = within(tree()).queryAllByRole("textbox");
+    expect(textboxes).toHaveLength(1);
+    expect(textboxes[0]).toBe(searchBox());
     expect(rowLinks()).toHaveLength(PAYLOAD.length);
     expect(within(tree()).getAllByRole("link")).toHaveLength(PAYLOAD.length);
   });
@@ -795,7 +872,8 @@ describe("the 009-era clauses hold unchanged with an empty sessions payload (011
     const names = within(tree())
       .getAllByRole("button")
       .map((button) => (button.getAttribute("aria-label") ?? button.textContent ?? "").trim());
-    expect([...names].sort()).toEqual(["New character", "Search"]);
+    // S029_006_DoD2: same amendment as the 009-era census — "Search" is a textbox now.
+    expect([...names].sort()).toEqual(["New character"]);
   });
 });
 
