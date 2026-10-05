@@ -31,6 +31,7 @@ from app.services.tools.definitions import (
 )
 from app.services.tools.memo_search import MemoSearchTool
 from app.services.tools.session_search import SessionSearchTool
+from app.services.tools.web_search import configured_web_search_tool
 
 TOOL_FAILED_CONTENT: Final = "The tool failed. Continue without its result."
 """The tool message content sent to the model for a failed call."""
@@ -75,6 +76,32 @@ PRODUCTION_TOOL_REGISTRY: Final[ToolRegistry] = MappingProxyType(
     {MEMO_SEARCH_NAME: MemoSearchTool(), SESSION_SEARCH_NAME: SessionSearchTool()}
 )
 """The production registry: read-only; holds `memo_search` (`026`) and `session_search` (`027`)."""
+
+
+def build_tool_registry(api_key: str | None, engine_id: str | None) -> ToolRegistry:
+    """The registry for one request: `PRODUCTION_TOOL_REGISTRY` plus `web_search` if configured (028 D3).
+
+    A **new** read-only mapping every call: every entry of the constant above, the same instances,
+    and `web_search` on top of them when `configured_web_search_tool` returns an adapter for these
+    two credentials. The constant itself is never written to - it stays exactly `memo_search` and
+    `session_search`, which is what lets 021 `004` DoD-2, 021 `006` DoD-10, 026 `002` DoD-11 and
+    027 `003` DoD-11 keep holding - and the result is read-only too, so a caller cannot register a
+    tool by assigning into it.
+
+    Takes the two credential values plain and in that order (the API key, then the engine id), each
+    `None` or any string: whether they are usable is `tools/web_search.py`'s rule, not the seam's,
+    and the seam neither reads `Settings` nor imports `fastapi` (`backend-structure.md` "Routers
+    versus services"). `routers/stream.py`'s registry dependency is the production caller, and it
+    calls this per request so the credentials are read live and never captured at import (D3).
+    """
+    # A fresh dict built *from* the constant, never the constant itself: the copy is shallow, so
+    # each value is the very instance the constant holds, and nothing below can reach the
+    # constant to write to it (it is a read-only proxy besides).
+    tools: dict[str, Tool] = dict(PRODUCTION_TOOL_REGISTRY)
+    web_search = configured_web_search_tool(api_key, engine_id)
+    if web_search is not None:
+        tools[WEB_SEARCH_NAME] = web_search
+    return MappingProxyType(tools)
 
 
 @dataclass(frozen=True)

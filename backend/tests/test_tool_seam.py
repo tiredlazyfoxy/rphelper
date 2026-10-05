@@ -806,6 +806,10 @@ ALLOWED_SERVICE_MODULES = {
     "app.services.tools.memo_search",
     # Added by 027 step 003 (S027_003_DoD15): the second registered adapter, same reason.
     "app.services.tools.session_search",
+    # Added by 028 step 002 (S028_002_DoD14): the seam's registry builder imports the
+    # `web_search` adapter's factory. Only this module is added — the seam does not import
+    # `app.services.web_search` itself.
+    "app.services.tools.web_search",
 }
 
 

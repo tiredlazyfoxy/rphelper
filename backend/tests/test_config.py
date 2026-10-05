@@ -7,17 +7,22 @@ Every expected value in this module comes from the field table in
 
 import ast
 import importlib
+import json
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
+from pydantic import SecretStr
 
 from app.config import Settings, get_settings
 
 # The ten fields, verbatim from 001.context.md: name -> (default, validation alias).
 # 006/001 DoD-10 (feature 006 context.md D13) deliberately adds an eleventh field, the
 # outbound-call timeout; the ten original entries are unchanged.
+# 028/001 (feature 028 context.md D2) adds a twelfth and thirteenth, the two search
+# credentials. Their aliases deliberately carry **no** `RPHELPER_` prefix: they are the
+# names the operator's environment already uses, and `RPHELPER_SEARCH_CSE_*` is not read.
 EXPECTED_FIELDS: dict[str, tuple[Any, str]] = {
     "data_dir": (Path("data"), "RPHELPER_DATA_DIR"),
     "db_filename": ("rphelper.sqlite", "RPHELPER_DB_FILENAME"),
@@ -30,11 +35,23 @@ EXPECTED_FIELDS: dict[str, tuple[Any, str]] = {
     "log_file_rotation": ("10 MB", "RPHELPER_LOG_FILE_ROTATION"),
     "log_file_retention": (5, "RPHELPER_LOG_FILE_RETENTION"),
     "llm_request_timeout_seconds": (30.0, "RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS"),
+    "search_cse_key": (None, "SEARCH_CSE_KEY"),
+    "search_cse_id": (None, "SEARCH_CSE_ID"),
 }
 
 # The ten fields as 001.context.md recorded them, before feature 006 added the eleventh.
 ORIGINAL_TEN_FIELDS: dict[str, tuple[Any, str]] = {
-    name: value for name, value in EXPECTED_FIELDS.items() if name != "llm_request_timeout_seconds"
+    name: value
+    for name, value in EXPECTED_FIELDS.items()
+    if name not in {"llm_request_timeout_seconds", "search_cse_key", "search_cse_id"}
+}
+
+# 028/001: the two search credentials, excluded from the parametrisations below that would
+# break by construction on them (each exclusion carries its reason at the test).
+UNPREFIXED_SEARCH_FIELDS = ("search_cse_key", "search_cse_id")
+
+PREFIXED_FIELDS: dict[str, tuple[Any, str]] = {
+    name: value for name, value in EXPECTED_FIELDS.items() if name not in UNPREFIXED_SEARCH_FIELDS
 }
 
 # Per-field override probes: field -> (raw environment string, expected parsed value).
@@ -51,6 +68,8 @@ OVERRIDES: dict[str, tuple[str, Any]] = {
     "log_file_rotation": ("50 MB", "50 MB"),
     "log_file_retention": ("9", 9),
     "llm_request_timeout_seconds": ("2.5", 2.5),
+    "search_cse_key": ("k-123", SecretStr("k-123")),
+    "search_cse_id": ("cx-456", "cx-456"),
 }
 
 
@@ -71,14 +90,24 @@ def test_settings_declares_exactly_the_named_fields__DoD1() -> None:
     """DoD-1: exactly the named fields, and nothing else.
 
     006/001 DoD-10: updated deliberately from ten to eleven — the outbound-call timeout joins.
+    028/001 (S028_001_DoD1): updated deliberately from eleven to thirteen — the two search
+    credentials join.
     """
     assert set(Settings.model_fields) == set(EXPECTED_FIELDS)
-    assert len(Settings.model_fields) == 11
+    assert len(Settings.model_fields) == 13
 
 
-@pytest.mark.parametrize("field_name", sorted(EXPECTED_FIELDS))
+@pytest.mark.parametrize("field_name", sorted(PREFIXED_FIELDS))
 def test_each_field_carries_its_recorded_default__DoD1(field_name: str) -> None:
-    """DoD-1: each field carries the default recorded in the field table."""
+    """DoD-1: each field carries the default recorded in the field table.
+
+    028/001 (S028_001_DoD1): the two search credentials are excluded. Their variables are
+    unprefixed, so the shared autouse isolation blanks them (028 D12) instead of deleting
+    them, and `_env_file=None` neutralises only the env file — a `Settings` built here
+    therefore sees a present-but-blank value rather than the declared default. The
+    declared default with both variables genuinely absent is asserted in
+    `tests/test_search_settings.py` (028/001 DoD-2).
+    """
     expected_default = EXPECTED_FIELDS[field_name][0]
     settings = _hermetic_settings()
     assert getattr(settings, field_name) == expected_default
@@ -92,7 +121,13 @@ def test_field_is_populated_from_its_prefixed_environment_variable__DoD2(
     field_name: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """DoD-2: setting ``RPHELPER_<FIELD>`` changes the field."""
+    """DoD-2: setting the field's declared variable changes the field.
+
+    028/001 (S028_001_DoD1): the test's name says "prefixed", and that is still true of
+    eleven of the thirteen fields. The two search credentials are covered here as well,
+    through their own unprefixed aliases (`SEARCH_CSE_KEY` / `SEARCH_CSE_ID`, 028 D2) —
+    the assertion is driven by `EXPECTED_FIELDS[field_name][1]`, not by the prefix.
+    """
     env_var = EXPECTED_FIELDS[field_name][1]
     raw_value, expected = OVERRIDES[field_name]
     assert expected != EXPECTED_FIELDS[field_name][0]
@@ -105,7 +140,7 @@ def test_field_is_populated_from_its_prefixed_environment_variable__DoD2(
 # --------------------------------------------------------------------------- DoD-3
 
 
-@pytest.mark.parametrize("field_name", sorted(EXPECTED_FIELDS))
+@pytest.mark.parametrize("field_name", sorted(PREFIXED_FIELDS))
 def test_unprefixed_variable_does_not_populate_the_field__DoD3(
     field_name: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -114,6 +149,12 @@ def test_unprefixed_variable_does_not_populate_the_field__DoD3(
 
     The validation alias replaces the field name as the environment key entirely, so the
     bare name has no effect and the default survives.
+
+    028/001 (S028_001_DoD1): the two search credentials are excluded. Feature 028's D2
+    deliberately drops the `RPHELPER_` prefix for them, so `field_name.upper()` **is**
+    their real alias and the bare name is supposed to populate them — asserted as such in
+    `tests/test_search_settings.py` (028/001 DoD-1). The convention this test guards still
+    holds for the other eleven fields, which is why they are not weakened.
     """
     default_value = EXPECTED_FIELDS[field_name][0]
     raw_value = OVERRIDES[field_name][0]
@@ -129,13 +170,17 @@ def test_unprefixed_variable_does_not_populate_the_field__DoD3(
 def test_unrelated_environment_variables_do_not_break_construction__DoD4(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """DoD-4: extra keys are ignored — construction still succeeds and defaults hold."""
+    """DoD-4: extra keys are ignored — construction still succeeds and defaults hold.
+
+    028/001 (S028_001_DoD1): the two search credentials are excluded for the same reason as
+    in the DoD-1 defaults test — the autouse isolation leaves them present but blank.
+    """
     monkeypatch.setenv("SOME_UNRELATED_VARIABLE", "whatever")
     monkeypatch.setenv("RPHELPER_NOT_A_REAL_SETTING", "whatever")
 
     settings = _hermetic_settings()
 
-    for field_name, (default_value, _alias) in EXPECTED_FIELDS.items():
+    for field_name, (default_value, _alias) in PREFIXED_FIELDS.items():
         assert getattr(settings, field_name) == default_value
 
 
@@ -321,3 +366,46 @@ def test_setting_the_timeout_changes_no_other_field__S006_001_DoD10(monkeypatch:
     settings = _hermetic_settings()
     for field_name, (default_value, _alias) in ORIGINAL_TEN_FIELDS.items():
         assert getattr(settings, field_name) == default_value
+
+
+# ============================================================================
+# Feature 028, step 001 (``001.search-settings-and-google-provider.md``) — DoD-1 .. DoD-3:
+# ``Settings`` gains the two search credentials (feature 028 ``context.md`` D2), read from
+# the **unprefixed** names ``SEARCH_CSE_KEY`` and ``SEARCH_CSE_ID``, both optional and both
+# defaulting to none; the key's type masks its value in ``repr`` / ``str``. The behavioural
+# body of 028/001 DoD-1 .. DoD-4 lives in ``tests/test_search_settings.py``; what follows
+# pins the two aliases and the masking next to the other field-table assertions.
+# ============================================================================
+
+SEARCH_KEY_FIELD = "search_cse_key"
+SEARCH_KEY_ALIAS = "SEARCH_CSE_KEY"
+SEARCH_ID_FIELD = "search_cse_id"
+SEARCH_ID_ALIAS = "SEARCH_CSE_ID"
+
+SEARCH_KEY_MARKER = "k-123"
+
+
+def test_search_key_declares_its_unprefixed_validation_alias__S028_001_DoD1() -> None:
+    """028/001 DoD-1 (D2): the key's explicit validation alias is exactly ``SEARCH_CSE_KEY``."""
+    assert Settings.model_fields[SEARCH_KEY_FIELD].validation_alias == SEARCH_KEY_ALIAS
+
+
+def test_search_engine_id_declares_its_unprefixed_validation_alias__S028_001_DoD1() -> None:
+    """028/001 DoD-1 (D2): the engine id's explicit validation alias is exactly ``SEARCH_CSE_ID``."""
+    assert Settings.model_fields[SEARCH_ID_FIELD].validation_alias == SEARCH_ID_ALIAS
+
+
+def test_the_search_key_value_renders_nowhere_on_a_settings__S028_001_DoD3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """028/001 DoD-3 (D2, deployment.md redaction rule): the key is masked wherever a ``Settings`` renders."""
+    monkeypatch.setenv(SEARCH_KEY_ALIAS, SEARCH_KEY_MARKER)
+    settings = _hermetic_settings()
+
+    key = getattr(settings, SEARCH_KEY_FIELD)
+    assert key is not None
+    assert key.get_secret_value() == SEARCH_KEY_MARKER
+
+    assert SEARCH_KEY_MARKER not in repr(settings)
+    assert SEARCH_KEY_MARKER not in str(settings)
+    assert SEARCH_KEY_MARKER not in json.dumps(settings.model_dump(mode="json"))

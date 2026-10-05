@@ -9,7 +9,7 @@ deliberately not settings — they are topology, hardcoded elsewhere.
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     log_file_path: Path     = Field(default=Path("data/logs/rphelper.log"), validation_alias="RPHELPER_LOG_FILE_PATH")
     log_file_rotation: str  = Field(default="10 MB",   validation_alias="RPHELPER_LOG_FILE_ROTATION")
     log_file_retention: int = Field(default=5,         validation_alias="RPHELPER_LOG_FILE_RETENTION")
+
+    # web search credentials — deliberately *without* the RPHELPER_ prefix: these are the names the
+    # operator's environment already uses (028 D2). Explicit aliases still, so both stay greppable.
+    # The key is a `SecretStr` so no `repr`/`str` of a `Settings` can leak it; read it with
+    # `.get_secret_value()`. Neither is a `$ENV_VAR` secret pointer, and neither is ever exported.
+    search_cse_key: SecretStr | None = Field(default=None, validation_alias="SEARCH_CSE_KEY")
+    search_cse_id: str | None = Field(default=None, validation_alias="SEARCH_CSE_ID")
 
 
 @lru_cache

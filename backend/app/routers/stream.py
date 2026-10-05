@@ -66,7 +66,8 @@ from app.services.messages import (
     list_zone,
 )
 from app.services.settle import ReopenResult, SettleResult, reopen, settle
-from app.services.tools import PRODUCTION_TOOL_REGISTRY, ToolRegistry
+from app.services.tools import ToolRegistry
+from app.services.tools.seam import build_tool_registry
 
 router = APIRouter(
     tags=["stream"],
@@ -165,9 +166,21 @@ def get_chat_client_factory() -> ChatClientFactory:
     return LlmClient
 
 
-def get_tool_registry() -> ToolRegistry:
-    """The tool-registry dependency: `PRODUCTION_TOOL_REGISTRY` (004, D14). Tests override it."""
-    return PRODUCTION_TOOL_REGISTRY
+def get_tool_registry(settings: Annotated[Settings, Depends(get_settings)]) -> ToolRegistry:
+    """The tool-registry dependency: the request's registry (004, D14; 028 D3). Tests override it.
+
+    Still the one overridable dependency `compose_zone` passes to the compose source, and still
+    unchanged in that role - only its value is now built rather than constant. It returns
+    `build_tool_registry` for the two search credentials: the API key's plain value, unwrapped
+    with `get_secret_value()` when the field is set and `None` when it is not, and the engine id
+    as it stands. Neither is trimmed or tested here; "configured" is `tools/web_search.py`'s rule
+    (028 D3), and this is the only place in the chain that reads `Settings` at all.
+
+    Not cached, and that is the point: building per request is what makes the credentials live, so
+    a `get_settings` override or a cache clear takes effect on the next call rather than at import.
+    """
+    key = settings.search_cse_key
+    return build_tool_registry(None if key is None else key.get_secret_value(), settings.search_cse_id)
 
 
 @router.post("/api/sessions/{session_id}/zone/compose", status_code=200)

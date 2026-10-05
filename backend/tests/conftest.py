@@ -16,6 +16,9 @@ from app.db.engine import dispose_engines, get_engine
 
 ENV_PREFIX = "RPHELPER_"
 
+# Feature 028 D2 reads these two from the environment without the ``RPHELPER_`` prefix.
+SEARCH_CREDENTIAL_VARIABLES = ("SEARCH_CSE_KEY", "SEARCH_CSE_ID")
+
 
 @pytest.fixture(autouse=True)
 def isolated_settings_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
@@ -24,10 +27,21 @@ def isolated_settings_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[N
     No test may observe another test's configuration. Settings are overridden through
     the accessor's cache or through ``dependency_overrides``, never by monkey-patching a
     module global.
+
+    Feature 028 step 001 (D12) adds the two **unprefixed** search credentials, which the
+    ``RPHELPER_`` sweep above cannot reach. They are set to ``""`` rather than deleted:
+    pydantic-settings reads the environment above ``env_file``, so a present-but-blank
+    value is what stops a developer's ``backend/.env`` from supplying a live credential.
+    Every test therefore sees an **unconfigured** instance unless it supplies values
+    itself (its own ``monkeypatch.setenv``, init arguments, or a ``get_settings``
+    override), and no test can reach Google by accident. ``monkeypatch`` restores the
+    original values afterwards.
     """
     for key in list(os.environ):
         if key.upper().startswith(ENV_PREFIX):
             monkeypatch.delenv(key, raising=False)
+    for name in SEARCH_CREDENTIAL_VARIABLES:
+        monkeypatch.setenv(name, "")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
