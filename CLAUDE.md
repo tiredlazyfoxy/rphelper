@@ -14,11 +14,20 @@ clipboard.
 
 ## Build & Test Commands
 
+`<py>` is the backend venv's interpreter, which depends on the OS you are running on:
+
+- **If you are running on Windows:** `<py>` = `.venv/Scripts/python`
+- **If you are running on Linux (incl. WSL):** `<py>` = `.venv/bin/python`
+
+The venv and `node_modules` hold OS-native binaries — they are not portable
+between Windows and Linux. If they were installed on the other OS, recreate
+them (`uv sync` in `backend/`, `npm ci` in `frontend/`).
+
 ```
 Backend  (run from backend/)
-  test       .venv/Scripts/python -m pytest
-  typecheck  .venv/Scripts/python -m mypy app
-  lint       .venv/Scripts/python -m ruff check .
+  test       <py> -m pytest
+  typecheck  <py> -m mypy app
+  lint       <py> -m ruff check .
 Frontend (run from frontend/)
   build      npm run build
   test       npm test
@@ -91,7 +100,10 @@ frontend never receives a backend base URL; it always calls same-origin
 - Wrap full paths in quotes or backticks: `"D:/Folder"`, not bare `D:/Folder`.
 - Use **relative** paths when running Python or TypeScript inside the project.
 - Use **absolute** paths with `-C` for git commands.
-- Python is invoked as `.venv/Scripts/python <args>` from the package root.
+- Python is invoked from the package root as `.venv/Scripts/python <args>` if you
+  are running on Windows, or `.venv/bin/python <args>` if you are running on Linux.
+- Windows-only path rules (drive letters) do not apply on Linux; there, use the
+  plain absolute path (e.g. `"/home/<user>/projects/RPHelper"`).
 
 ## Where to look
 
