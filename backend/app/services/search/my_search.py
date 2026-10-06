@@ -37,8 +37,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Final
 
-from sqlalchemy import Connection, and_, or_, select
+from sqlalchemy import ColumnElement, Connection, String, and_, func, or_, select
 
+from app.db.engine import CASEFOLD_FUNCTION_NAME
 from app.db.schema import characters, memos, sessions, settled_entries, setups
 from app.models.memos import MemoScope
 from app.services.embedding import DEFAULT_EMBED_TIMEOUT_SECONDS
@@ -61,6 +62,16 @@ def _reading(connection: Connection) -> Iterator[None]:
     finally:
         if opened_here and connection.in_transaction():
             connection.rollback()
+
+
+def _folded_contains(column: ColumnElement[str], needle: str) -> ColumnElement[bool]:
+    """True when the SQL casefold of `column` contains the Python casefold of `needle`.
+
+    `needle` is already stripped. Keeps `contains(..., autoescape=True)` semantics: `%`, `_` and
+    the escape character are escaped and the `ESCAPE` clause is emitted (029 D3).
+    """
+    folded_column: ColumnElement[str] = getattr(func, CASEFOLD_FUNCTION_NAME)(column, type_=String)
+    return folded_column.contains(needle.casefold(), autoescape=True)
 
 
 @dataclass(frozen=True)
@@ -115,7 +126,8 @@ def search_characters(
     statement is a single table read with no join, so no de-duplication is needed. `%`, `_` and the
     escape character in the needle are escaped and the escape character is declared on the `LIKE`,
     so typed input can never act as a wildcard; the needle reaches SQL as a bound parameter.
-    Case-insensitivity is SQLite `LIKE`'s own, i.e. ASCII letters only (D3, a known limitation).
+    The match is case-insensitive in any script (Unicode case folding; no accent folding): both
+    sides go through `str.casefold`, the column via the `rp_casefold` SQL function (fast/006).
 
     Ordered by `name` then `id` ascending and cut to `limit` rows (`characters` has no
     `updated_at`, hence name order — D2). Archived characters are included and come back with
@@ -129,17 +141,17 @@ def search_characters(
     needle = query_text.strip()
     if not needle:
         return []
-    # `contains(..., autoescape=True)` escapes `%`, `_` and the escape character inside the bound
-    # needle and declares that escape character on the `LIKE`, so typed input can never act as a
-    # wildcard (D3). The case-insensitivity is SQLite's own `LIKE`, left at its default pragma -
-    # ASCII letters only, a known limitation. No `archived_at` term: archived rows are returned (U3).
+    # `_folded_contains` escapes `%`, `_` and the escape character inside the bound needle and
+    # declares that escape character on the `LIKE`, so typed input can never act as a wildcard (D3).
+    # Both sides are case-folded, so the match is case-insensitive in any script (Unicode case
+    # folding; no accent folding - fast/006). No `archived_at` term: archived rows are returned (U3).
     statement = (
         select(characters.c.id, characters.c.name, characters.c.archived_at)
         .where(
             characters.c.user_id == user_id,
             or_(
-                characters.c.name.contains(needle, autoescape=True),
-                characters.c.sheet.contains(needle, autoescape=True),
+                _folded_contains(characters.c.name, needle),
+                _folded_contains(characters.c.sheet, needle),
             ),
         )
         .order_by(characters.c.name.asc(), characters.c.id.asc())
@@ -163,7 +175,8 @@ def search_setups(
 
     `search_characters`'s contract over `setups`, matching `name` **or** `description`: same
     stripping, same blank-query `[]` with no SQL, same escaped single-substring `LIKE` with the
-    escape character declared, same `name` then `id` ordering and same `limit`.
+    escape character declared, case-insensitive in any script (Unicode case folding; no accent
+    folding), same `name` then `id` ordering and same `limit`.
 
     The owning character's name is hydrated by the same statement, through a join that carries its
     **own** `user_id` predicate as well, so every base table the read names is owner-scoped (R5).
@@ -191,8 +204,8 @@ def search_setups(
         .where(
             setups.c.user_id == user_id,
             or_(
-                setups.c.name.contains(needle, autoescape=True),
-                setups.c.description.contains(needle, autoescape=True),
+                _folded_contains(setups.c.name, needle),
+                _folded_contains(setups.c.description, needle),
             ),
         )
         .order_by(setups.c.name.asc(), setups.c.id.asc())

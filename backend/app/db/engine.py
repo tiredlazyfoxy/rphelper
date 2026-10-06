@@ -1,11 +1,11 @@
 """The SQLite connection factory — SQLAlchemy **Core**, never the ORM.
 
 `docs/architecture/backend-structure.md` § Database access: one connection factory,
-which **on every connection** loads the `sqlite-vec` extension, sets
-`PRAGMA foreign_keys = ON` and sets `PRAGMA journal_mode = WAL`. One `connect` event
-listener does all three, in that order — the extension first, so that a load that is
-going to fail fails before anything has been asserted on a connection about to be
-discarded (`005.context.md`).
+which **on every connection** loads the `sqlite-vec` extension, registers the
+`rp_casefold` scalar function (fast/006), sets `PRAGMA foreign_keys = ON` and sets
+`PRAGMA journal_mode = WAL`. One `connect` event listener does all four, in that order —
+the extension first, so that a load that is going to fail fails before anything has been
+asserted on a connection about to be discarded (`005.context.md`).
 
 Why one listener rather than two mechanisms: `foreign_keys` genuinely is per-connection
 and must be re-set every time; `journal_mode` is a persistent file-level property, so
@@ -55,7 +55,7 @@ caller's `rollback()`/`commit()`, or by the pool's reset-on-return.
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Final
 
 import sqlite_vec  # type: ignore[import-untyped]
 from fastapi import Depends
@@ -86,6 +86,25 @@ def resolve_db_path(settings: Settings) -> Path:
     return settings.data_dir / settings.db_filename
 
 
+#: A value SQLite hands a Python scalar function, and what one may hand back.
+SqliteValue = str | bytes | int | float | None
+
+#: The SQL name the casefold function is registered under on every connection (fast/006).
+#: The search code references this constant rather than repeating the literal.
+CASEFOLD_FUNCTION_NAME: Final[str] = "rp_casefold"
+
+
+def casefold_sqlite_value(value: SqliteValue) -> SqliteValue:
+    """The Python callable registered as `rp_casefold` on every engine connection.
+
+    `None` maps to `None`, a `str` maps to `value.casefold()`, and any other value comes back
+    unchanged. It never raises.
+    """
+    if isinstance(value, str):
+        return value.casefold()
+    return value
+
+
 def load_sqlite_vec(dbapi_connection: sqlite3.Connection) -> None:
     """Load the `sqlite-vec` extension into a raw DBAPI connection.
 
@@ -111,7 +130,9 @@ def get_engine(settings: Settings) -> Engine:
     Built once per resolved path and cached. Uses the pysqlite dialect's default pool
     for a file database with `check_same_thread=False`, and registers the single
     `connect` listener that — on every new connection, in this order — loads
-    `sqlite-vec`, sets `PRAGMA foreign_keys = ON` and sets `PRAGMA journal_mode = WAL`.
+    `sqlite-vec`, registers the deterministic one-argument `rp_casefold` function
+    (`casefold_sqlite_value`), sets `PRAGMA foreign_keys = ON` and sets
+    `PRAGMA journal_mode = WAL`.
     The driver's implicit transactions are off and a `begin` listener sends the real
     `BEGIN`, so DDL inside a `with conn.begin():` block is transactional.
 
@@ -142,6 +163,7 @@ def get_engine(settings: Settings) -> Engine:
 
     @event.listens_for(engine, "connect")
     def _on_connect(dbapi_connection: sqlite3.Connection, connection_record: Any) -> None:
+        """Per connection, in order: vec load, casefold registration, `foreign_keys`, WAL."""
         # Extension first: a load that is going to fail should fail before anything has
         # been asserted on a connection that is about to be discarded.
         try:
@@ -150,6 +172,11 @@ def get_engine(settings: Settings) -> Engine:
             raise
         except Exception as exc:
             raise ExtensionLoadError("could not load the sqlite-vec extension") from exc
+
+        # Then capability registration, outside the extension's error wrapping (fast/006).
+        dbapi_connection.create_function(
+            CASEFOLD_FUNCTION_NAME, 1, casefold_sqlite_value, deterministic=True
+        )
 
         cursor = dbapi_connection.cursor()
         try:
