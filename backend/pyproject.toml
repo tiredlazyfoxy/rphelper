@@ -60,5 +60,5 @@ addopts = "-q -n auto -m 'not live'"
 # A hung test fails here instead of stalling the whole run.
 timeout = 60
 markers = [
-    "live: talks to the real LLM server named by RPHELPER_LIVE_LLM_URL; deselected by default, run with `-m live`",
+    "live: talks to the real llama-swap server at $LLAMA_SWITCH_URL; deselected by default, run with `-m live`",
 ]

@@ -5,8 +5,8 @@ normal and verifier runs never depend on a network service. Run with::
 
     <py> -m pytest -m live
 
-The server and model come from ``RPHELPER_LIVE_LLM_URL`` / ``RPHELPER_LIVE_EMBED_MODEL``,
-defaulting to the developer's llama-swap host. Every call uses a short timeout, so an
+The server URL comes from ``LLAMA_SWITCH_URL`` (the llama-swap base, with or without
+``/v1``); the suite skips when it is unset. Every call uses a bounded timeout, so an
 unreachable server fails within seconds.
 """
 
@@ -18,10 +18,13 @@ import pytest
 from app.errors import LlmUnreachableError
 from app.services.llm.client import LlmClient, ProbeOutcome
 
-pytestmark = pytest.mark.live
+LIVE_URL = os.environ.get("LLAMA_SWITCH_URL", "")
+LIVE_EMBED_MODEL = "bge-large-en-v1.5.i1-Q6_K"
 
-LIVE_URL = os.environ.get("RPHELPER_LIVE_LLM_URL", "http://india.loc:9292/")
-LIVE_EMBED_MODEL = os.environ.get("RPHELPER_LIVE_EMBED_MODEL", "bge-large-en-v1.5.i1-Q6_K")
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(not LIVE_URL, reason="LLAMA_SWITCH_URL is not set"),
+]
 #: Embedding a couple of short strings; generous for a cold model load, still bounded.
 LIVE_TIMEOUT_SECONDS = 60.0
 #: An unreachable or disabled server must fail fast, not after the production timeout.
