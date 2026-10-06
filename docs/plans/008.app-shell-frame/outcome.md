@@ -69,3 +69,9 @@ folder's `context.md`.
   `bg="var(--mantine-color-body)"`, which is what makes the `1px` gap read as a divider.
   Possible impact: name that token beside `var(--mantine-color-default-border)` in "The
   three columns", so the gap-as-divider rule states both halves of the pair.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: Three `## Observations` were applied as conventions — the two colour tokens behind the gap-as-divider rule, and `useNavigate` as the accepted form when navigation follows from choosing a control. The collapse-tree glyph `_TBD:` is closed on `IconChevronLeft` as built, with `IconLayoutSidebarLeftCollapse` recorded as the rejected alternative, and the case-collision convention (no two module paths differing only in letter case) is recorded where a planner reads it.

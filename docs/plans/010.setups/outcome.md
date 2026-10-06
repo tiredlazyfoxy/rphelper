@@ -88,3 +88,9 @@ folder's `context.md`; "009 Dn" are in `docs/plans/009.characters/context.md`.
   (one data column plus the `w={60}` action cell, so a header row would only add noise and an
   extra `row`). Possible impact: record both under `ui-conventions.md` "Tables", so later
   list sections do not re-decide them.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: Both `## Observations` applied. The Setups section is folded into 018's as-built page order rather than written as a delivery stage.

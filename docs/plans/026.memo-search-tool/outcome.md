@@ -50,3 +50,9 @@ file. "Dn" refers to decisions in this folder's `context.md`.
   and 021 `006` DoD-10 in `test_compose_route.py` (`002.context.md`).
 
 ## Observations
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`).
+Rejected items: none
+Notes: Its `backend-structure.md` and `domain-rules.md` R2 items were orphaned by the orchestrator's batching and applied in B2. The registry's final three-tool state is written once rather than as its intermediate one-tool state.

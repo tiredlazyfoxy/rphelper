@@ -78,3 +78,9 @@ folder's `context.md`; "012 Dn" are in `docs/plans/012.messages-and-settle/conte
   `SessionStream`.
 - **`017` (model picker):** belongs in 011's session header, above the stream; nothing in
   013 occupies that slot.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`), plus two `domain-rules.md` items — R11's abandoning bullet and R12's layer-table "Client" row — orphaned out of B1 by the orchestrator's batching and applied in B3.
+Rejected items: none
+Notes: The Discard correction is applied in full — the control is present only while the zone has no rows and the composer holds nothing but whitespace, and it never discards typed text (UC-086's postcondition, `US-134.AC-2`). R11's abandoning bullet, which had stated the opposite, is corrected.

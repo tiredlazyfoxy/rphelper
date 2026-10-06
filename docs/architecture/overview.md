@@ -1,7 +1,8 @@
 # System overview
 
 **Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-009,
-FEAT-010, FEAT-017, FEAT-019, UC-086, US-134, US-135, US-137,
+FEAT-010, FEAT-016, FEAT-017, FEAT-018, FEAT-019, UC-086, US-134, US-135,
+US-137, US-145,
 ACT-001, ACT-002, ACT-003, ACT-004
 
 The system context, who reaches which surface, how it runs in dev and prod, every
@@ -11,9 +12,9 @@ stack decision with its reason, and what is deliberately not being built.
 
 A single-instance, self-hosted web application with one database file. One
 FastAPI process serves a JSON + SSE API under `/api`; a React SPA — built as four
-separate Vite entries — is the only client. There is no external integration of
-any kind: per `vision.md`, the boundary is the clipboard. Nothing crosses it but
-text the roleplayer pastes in and text they copy out.
+separate Vite entries — is the only client. There is **no platform
+integration**: per `vision.md`, the boundary is the clipboard, and nothing
+crosses it but text the roleplayer pastes in and text they copy out.
 
 The product's value is the persistent context layer, not the generation
 (`vision.md`). That shapes the architecture directly: the durable store is the
@@ -50,6 +51,30 @@ except through the tool implementations, which is what makes FEAT-019's
 isolation enforceable — see `domain-rules.md`. It also has no path into the
 *record*: it writes only into a session's current zone, and only the roleplayer's
 settle files anything (R11).
+
+### The outbound surface, in full
+
+The diagram shows two outbound destinations and there is a third, which the
+"no platform integration" sentence above would otherwise hide. "No external
+integration" is about **platforms** — Discord, the roleplay sites — not about
+network calls:
+
+| Destination | What leaves the instance |
+|---|---|
+| **LLM servers** (llamaswap / OpenAI) | the assembled system prompt, the message list, and the text to translate or embed — the roleplayer's material (`llm-and-streaming.md`) |
+| **the web-search provider** (Google Custom Search) | **the query only**, plus the engine id, the result count and the key |
+
+**The search provider is the one outbound call that carries roleplayer-derived
+text to something that is not an LLM server** (028 D6), and the bound on it is
+narrow and deliberate: `web_search` receives **no scope ids**, reads **nothing**
+from the database, and sends nothing but the query the model composed. It is also
+the one tool that is not a scoped read of the user's data (R9,
+`llm-and-streaming.md`), and neither the provider nor its adapter logs anything
+(`deployment.md`'s redaction rule, which names web-search queries and results as
+forbidden). Stated at this level rather than left to the tool's own section,
+because "the boundary is the clipboard" otherwise reads as a claim that nothing
+but a prompt ever leaves the machine — and a query string is message-derived text
+reaching a third party.
 
 ## Actor → surface map
 
@@ -411,10 +436,20 @@ while the console still looks right. Two sinks (console `DEBUG`, rotating file
 redaction rule that FEAT-019 imposes at **every** level: full statement, flip
 condition and the forbidden/allowed lists in `deployment.md`.
 
-**`web_search`: seam now, adapter later.** FEAT-016 is last in the dependency
-graph (`features.md`). The tool seam, its switch in the configuration chain
-(FEAT-013/UC-048), and its failure behaviour are specified in
-`llm-and-streaming.md`; the provider adapter is not.
+**`web_search`: Google Custom Search behind a provider seam** (plan 028). The
+deferral this entry used to record is **closed**. A provider protocol in
+`services/web_search/` with **one** implementation — the Google Custom Search
+JSON API — keeps the choice to one class plus a factory, which is the whole
+reason the seam exists. **Credentials are read from the environment**
+(`SEARCH_CSE_KEY`, `SEARCH_CSE_ID`, deliberately without the `RPHELPER_` prefix —
+`deployment.md`), and **an unconfigured instance simply does not offer the tool**:
+no error, no startup failure, no degraded mode. Reason: the key never goes near
+the database, so there is nothing to export and no pointer to resolve; and a tool
+the model cannot see cannot be attempted. **Flip condition, with a date:** Google
+has closed this API to new customers and existing customers must transition by
+**2027-01-01**, so either that date or the API ceasing to answer makes a new
+provider a plan. Full mechanism and the operational watch item are in
+`llm-and-streaming.md` and `deployment.md`.
 
 ### Six decisions taken after the first pass
 
@@ -423,15 +458,20 @@ recorded in full in the doc named beside it; the reasoning is repeated here
 because a decision list that omits the *why* gets re-litigated.
 
 **1. `session_search` runs the vector arm only — no BM25.**
-(`search-and-retrieval.md`.) Enabling the lexical arm over `session_fts` would
+(`search-and-retrieval.md`.) A lexical arm over session-level text would
 reintroduce the structured partner-and-setup matching FEAT-015 deliberately
-rejects (challenge C5): that index's columns are `title` and `partner_label`, so a
-BM25 arm is in practice a partner-name matcher — precisely the signal that is
-*absent* in the cases the feature exists to serve. `session_fts` is kept, because
-FEAT-017's my-search is a different surface with a different rule. **Flip
-condition:** reversible at low cost — nothing in the schema moves — if the promise
-of finding "the same person or situation" **when neither is recorded** is found in
-real use to need lexical recall.
+rejects (challenge C5) — a name match is precisely the signal that is *absent* in
+the cases the feature exists to serve. **The engineering half of this entry's
+old wording is corrected:** it used to add that `session_fts`'s columns are
+`title` and `partner_label`, but **`sessions` has neither column** (a session is
+identified by its start time, `US-145`) and **`session_fts` was declared and
+never created** (024 U7). FEAT-017's my-search is still a different surface with a
+different rule, but its session corpus is the **vector** arm, not a lexical index.
+**Flip condition:** it is no longer one switch — turning a lexical arm on now
+requires first giving a session text columns and an index to put them in. The
+relevance condition that would justify starting is unchanged: the promise of
+finding "the same person or situation" **when neither is recorded** proving, in
+real use, to need lexical recall.
 
 **2. Persistence access is SQLAlchemy Core, not the ORM.**
 (`backend-structure.md`.) Three reasons: (a) **explicit transaction scoping**,
@@ -461,8 +501,10 @@ requirements gap resolved at the architecture layer with a note that
 `/product-spec` should ratify it; it has — **US-137.AC-1** states that note state
 never filters a result out, and **US-137.AC-2** that a disabled hit is shown as
 disabled. The decision is now a read of the product rather than an architectural
-judgement standing in for one. Only the *presentation* of a disabled hit stays
-open (`search-and-retrieval.md`).
+judgement standing in for one. **The presentation is settled too** (029 D7): a
+disabled hit's snippet is dimmed and struck through with a gray "Disabled" badge,
+reusing the note wall's idiom (`search-and-retrieval.md`). Nothing about this
+decision is open.
 
 **4. Destructive admin actions get a confirm step.**
 (`ui-conventions.md`.) A **deliberate addition** — the sibling project has no
@@ -508,12 +550,14 @@ quietly mitigate; the last two are unspecified postures. **There is no longer a
 product-gap entry here** — the one that used to sit at the bottom, abandoning a
 current zone without settling, is **resolved** and is decision 6 above.
 
-- **FEAT-018's four export granularities in full detail.** The contract is
-  *sketched* in `data-model.md` — envelope shape, granularity boundaries, the
-  known consequence recorded at FEAT-018's `_TBD:` — because the data model has
-  to be shaped compatibly with it. Full field-level detail is written when the
-  feature is planned. FEAT-018 is last but one in the dependency graph.
-- **FEAT-016's search-provider adapter.** Seam only, per above.
+- ~~**FEAT-018's four export granularities in full detail.**~~ **No longer
+  deferred** (plans 030, 031). The contract was sketched in `data-model.md` while
+  the data model had to be shaped compatibly with it; it is now written in full in
+  **`transfer.md`** — the envelope, the two version constants, the granularity
+  table, the id-serialization rules, "what is never exported", the import policy
+  and the whole-database replace.
+- ~~**FEAT-016's search-provider adapter.**~~ **No longer deferred** (plan 028) —
+  see the stack entry above.
 - **Frontend dependencies the foundation deliberately does not install** (plan
   002), each owned by the feature that first needs it: TipTap, `tiptap-markdown`
   and `@mantine/tiptap` (the markdown editor, plan `015`); `react-markdown` (plan

@@ -81,3 +81,9 @@ file. "Un" / "Dn" refer to decisions in this folder's `context.md`.
   "only the screen reads the URL, children get props" rule in `frontend-structure.md` under
   "Routing inside the `app` entry", so a later feature does not reach for a router hook deeper in
   the chain.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: Its `_TBD:` asking whether non-ASCII case-insensitive matching is required is answered, not carried — `US-147` requires any script, so the ASCII-only `LIKE` folding is recorded as defect D-05. Both `## Observations` applied in B3, and the "five corpora, five variants" sentence becomes three port variants plus two LIKE corpora, with the product's count of five corpora unchanged.

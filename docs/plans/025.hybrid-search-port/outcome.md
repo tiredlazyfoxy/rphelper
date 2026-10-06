@@ -45,3 +45,9 @@ file. "Un" / "Dn" refer to decisions in this folder's `context.md`.
   text; highlighting, if wanted, is `029`'s change to the snippet markers.
 
 ## Observations
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`).
+Rejected items: none
+Notes: Its instruction not to duplicate 024's forbidden-KNN row is honoured — the pushed-down form is recorded once, in `search-and-retrieval.md`, and the "Query shape" example's step 2a, which was exactly that form, is rewritten. Its `backend-structure.md` items were orphaned by the orchestrator's batching and applied in B2.

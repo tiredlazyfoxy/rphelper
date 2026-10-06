@@ -1,15 +1,25 @@
 # Backend structure
 
-**Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-008,
-FEAT-009, FEAT-010, FEAT-013, FEAT-018, FEAT-019, FEAT-020, UC-003,
-UC-006..UC-015, UC-027, UC-035, UC-037, UC-050, UC-065, UC-066, UC-071, UC-078, UC-080,
-UC-083, UC-084, UC-085, UC-086, UC-087, US-006.AC-3, US-018.AC-6, US-018.AC-7,
-US-132, US-134, US-135, US-140
+**Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-006,
+FEAT-007, FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-014,
+FEAT-015, FEAT-016, FEAT-017,
+FEAT-018, FEAT-019, FEAT-020, UC-003, UC-006, UC-007, UC-008, UC-009, UC-010,
+UC-011, UC-012, UC-013, UC-014, UC-015, UC-017, UC-018, UC-019, UC-020,
+UC-023, UC-024, UC-025, UC-039, UC-042, UC-043, UC-044, UC-047, UC-048,
+UC-049, UC-050, UC-065, UC-066, UC-067, UC-068, UC-071, UC-075, UC-076,
+UC-077, UC-087, US-006.AC-3, US-018.AC-6, US-018.AC-7, US-107, US-112,
+US-140, US-143
 
 FastAPI application layout, the routers/services split, the id and JSON
-boundaries, configuration and secrets, and the error model that carries typed
-failures to the SPA. Commands (`pytest`, `mypy app`, `ruff check .`) are in the
-root `CLAUDE.md`.
+boundaries, the roleplayer and admin route surfaces, configuration and secrets,
+persistence access, and the error model that carries typed failures to the SPA.
+Commands (`pytest`, `mypy app`, `ruff check .`) are in the root `CLAUDE.md`.
+
+Two subjects were split out of this doc at the finalization of plans 008..032:
+**`session-stream.md`** holds the stream routes, settle and re-open, the `(( ))`
+seam, the compose route and its harness, the tool seam and the discussion read;
+**`transfer.md`** holds the export/import contract and its route surfaces. Both
+are cross-referenced below rather than restated.
 
 ## Layout
 
@@ -19,7 +29,9 @@ backend/
   app/
     main.py              # app factory, router registration, lifespan
     config.py            # pydantic-settings Settings + lru_cache accessor
-    logging.py           # loguru sink configuration + the InterceptHandler;
+    logging.py           # loguru sink configuration, the InterceptHandler, and
+                         #   third-party logger suppression (_SILENCED_LOGGERS
+                         #   beside _PROPAGATING_LOGGERS, plan 028);
                          #   called ONCE from main.py (deployment.md)
     ids.py               # the snowflake generator — see below
     secrets.py           # "$ENV_VAR" pointer resolution
@@ -30,7 +42,10 @@ backend/
                          #   and the session-cookie set/clear writers (plan 004)
     db/
       engine.py          # connection, PRAGMAs, sqlite-vec extension load
-      schema.py          # the table-definition registry (data-model.md)
+      schema.py          # the table-definition registry + the four named
+                         #   Core selectables over `messages` (data-model.md)
+      search_tables.py   # the vec0 and FTS5 tables: ensure-on-write DDL and
+                         #   the FTS triggers — OUTSIDE `metadata` (plan 024)
       drift.py           # PRAGMA introspection vs the registry (FEAT-005)
       sync.py            # the DDL executor: Alembic batch ops, admin-triggered
                          #   only; resolves the table name itself and may
@@ -43,45 +58,107 @@ backend/
       admin_users.py     # FEAT-003 — /api/admin/users (plan 005)
       admin_llm.py       # FEAT-004 — /api/admin/llm-servers (plan 006)
       admin_db.py        # FEAT-005 — /api/admin/database (plan 007)
-      characters.py      # FEAT-006
-      setups.py          # FEAT-007
-      sessions.py        # FEAT-008, FEAT-013
+      characters.py      # FEAT-006 (plan 009)
+      setups.py          # FEAT-007 (plan 010)
+      sessions.py        # FEAT-008 (plan 011); owns the character-addressed
+                         #   create-and-seed route (plan 018)
       stream.py          # FEAT-009 + FEAT-010: the record, the zone, settle,
-                         #   re-open, and the one SSE route
-      memos.py           # FEAT-012
-      search.py          # FEAT-017
-      transfer.py        # FEAT-018
+                         #   re-open, the one SSE route, the discussion read,
+                         #   and the chat-client / tool-registry dependencies
+                         #   (session-stream.md)
+      configuration.py   # FEAT-013 (plan 017) — seven routes incl. /api/models
+                         #   and /api/me/settings
+      translation.py     # FEAT-011 (plan 023) — the one translate route
+      memos.py           # FEAT-012 (plans 015, 016)
+      search.py          # FEAT-017 (plan 029) — the one my-search route
+      transfer.py        # FEAT-018 — export (plan 030) and import (plan 031);
+                         #   contract in transfer.md
     services/
       health.py                  # /api/health's probe SQL — NOT a domain service; see
                                  #   "Routers versus services" (decided in plan 001)
       bootstrap.py  auth.py  users.py
       passwords.py               # the password-hashing seam: hash + verify (plan 003)
       llm_registry.py            # servers, models, the probe primitive, designation,
-                                 #   and BOTH use-time validators (plan 006)
-      config_resolver.py         # R1's two chains
-      memo_chain.py              # R2
+                                 #   the enabled set and first-enabled order, and
+                                 #   BOTH use-time validators (plan 006). The
+                                 #   embedding validator has callers since plan 024;
+                                 #   the chat validator since plan 017/021
+      configuration.py           # FEAT-013 (plan 017): R1's two chains, the
+                                 #   configuration reads/writes, resolve_model_for_use
+      memo_chain.py              # R2 — resolve_chain + memo_reach (plan 015), and
+                                 #   the public chain CLAUSE BUILDER beside them
+                                 #   (plan 026): the single home of the chain
+                                 #   predicate (domain-rules.md R2)
       characters.py  setups.py
       sessions.py                # incl. start-a-session-by-writing (UC-080):
-                                 #   create + seed the zone in ONE transaction
-      messages.py                # append to the zone, edit text, file a partner block
-      settle.py                  # settle + re-open — the ONLY writers of raw messages
+                                 #   create + capture the model + seed the zone in
+                                 #   ONE transaction (session-stream.md)
+      messages.py                # append to the zone, append an assistant row
+                                 #   (append_assistant_message), edit text, file a
+                                 #   partner block, read a settled entry's buried
+                                 #   group (list_discussion), derive the tool view
+      settle.py                  # settle + re-open — the ONLY writers of the burial
+                                 #   and settle columns
       parens.py                  # the (( )) parser: classify + strip. Pure, no I/O
-      compose.py                 # the compose loop, orchestrates llm + tools
-      translation.py             # FEAT-011
-      search/
-        ports.py                 # the narrow search port (search-and-retrieval.md)
-        hybrid.py                # vec + FTS + RRF
-        memo_search.py  session_search.py  my_search.py
+      memos.py                   # FEAT-012 (plan 015) + the reorder (plan 016)
+      context.py                 # context assembly (plan 020): the system-prompt
+                                 #   renderer, the message mapper and
+                                 #   assemble_context. NO router; its only caller
+                                 #   is compose.py (llm-and-streaming.md)
+      compose.py                 # the compose source (compose_stream) and the
+                                 #   handler-side begin_compose (plan 021)
+      translation.py             # FEAT-011 (plan 023)
+      embedding.py               # the embed call + vector upsert/delete (plan 024)
+      session_index.py           # session_vec composition + the fan-out (plan 024)
+      tools/                     # the tool seam (plan 021 — session-stream.md)
+        definitions.py           # the three tool declarations
+        seam.py                  # ToolScope, ToolOutcome, the Tool protocol, the
+                                 #   registry, offered_tools, dispatch
+        memo_search.py           # the memo_search Tool adapter + its formatter
+                                 #   (plan 026)
+        session_search.py        # the session_search adapter + formatter (plan 027)
+        web_search.py            # the web_search adapter, its formatter, and the
+                                 #   factory that decides "configured" (plan 028)
+      web_search/                # the web-search provider seam (plan 028)
+        provider.py              # the web-result value + the provider protocol
+        google.py                # the Google Custom Search provider
+      search/                    # the hybrid search port (plan 025) and its callers
+        ports.py                 # the contract: SearchScope variants, SearchHit,
+                                 #   and the pure helpers (search-and-retrieval.md)
+        candidates.py            # the filters-first candidate selects
+        lexical.py               # the FTS5 arm
+        vector.py                # the vec0 arm (embeds the query)
+        hybrid.py                # `search` — the arms plus RRF
+        memo_search.py           # the result-count constant, the memo extra
+                                 #   predicate and the sync search_memos (plan 026)
+        session_search.py        # the cap and excerpt-length constants, the session
+                                 #   predicate factory, the sync search_sessions, and
+                                 #   the sync owner-scoped excerpt read (plan 027)
+        my_search.py             # the two LIKE corpora, hydration, run_my_search
+                                 #   (plan 029)
       llm/
         client.py                # one OpenAI-compatible client, httpx.AsyncClient;
-                                 #   also declares the probe-outcome value set
-                                 #   (plan 006 — see "The first async code")
-        frames.py                # SSE frame emission
-        tools.py                 # the three tool definitions + dispatch
-      transfer.py                # export/import
+                                 #   chat_stream, embed, the delta values, and the
+                                 #   probe-outcome value set (plans 006, 021, 024)
+        chat.py                  # ChatMessage (four roles), ToolCall,
+                                 #   to_wire_message, the <think> literals and
+                                 #   strip_think (plans 020, 021). Deliberately
+                                 #   NEUTRAL: the chat-message value type and the
+                                 #   role literal live here, not in context.py,
+                                 #   so client.py imports them without importing
+                                 #   the assembler (020 D9)
+        frames.py                # SSE frame types + encoder, the streaming harness
+                                 #   (frame_stream, sse_response) and
+                                 #   own_connection_persister (plans 019, 021)
+      transfer.py                # export only — read-only by design (plan 030)
+      transfer_import.py         # validation, deserialization, the remap engine,
+                                 #   the three roleplayer imports, the database
+                                 #   replace (plan 031 — transfer.md)
     models/                      # pydantic request/response models; ids.py holds
                                  #   the id aliases, secret_ref.py the "$"-pointer
-                                 #   field type (plan 006)
+                                 #   field type (plan 006); memos.py,
+                                 #   configuration.py, translation.py, transfer.py,
+                                 #   search.py (my-search's response models, 029)
   tests/
 ```
 
@@ -91,6 +168,15 @@ backend/
 `frames.py` so that `routers/stream.py` is the only `stream` module in the
 backend — two modules with one name across two packages is an import ambiguity
 nobody needs.
+
+Two placements are worth stating because the obvious alternative was taken and
+rejected. **The streaming harness lives in `services/llm/frames.py`, beside the
+frame types, rather than in a module of its own** (019 D1): its whole job is to
+drive a stream of frame values and the two belong together. And **the tool seam
+is the package `services/tools/`, not the single `services/llm/tools.py` this
+doc first sketched** (021 D6): the declarations, the protocol and the registry
+are three separable things, and the declarations in particular must be editable
+without touching an implementation.
 
 ## The id generator — `app/ids.py`
 
@@ -181,6 +267,47 @@ SnowflakeIn  = Annotated[int, BeforeValidator(lambda v: int(v))]
 - The frontend half — **a TypeScript `id: number` anywhere is a defect** — is in
   `data-model.md` and `frontend-structure.md`.
 
+### The two named exceptions to "routes return and take pydantic models"
+
+Both belong to FEAT-018 and both are named so nobody "fixes" them into a model
+that cannot exist (`transfer.md` has the full contract):
+
+- **The export routes return a raw `Response`** (plan 030), because the envelope
+  is column-agnostic: its payload keys are whatever `metadata` currently
+  declares, and no static model can describe that. The id boundary still holds,
+  because `services/transfer.py`'s serializer stringifies every id **before the
+  router sees the body** — which is also why the serializer carries its own
+  id-column predicate (primary key, or a foreign key, or a name matching `id` /
+  `*_id`) rather than relying on `models/`.
+- **The import routes take a raw JSON object body** (plan 031), for the same
+  reason read backwards. The service's deserializer parses the ids inside it and
+  accepts **decimal strings only**; the responses are ordinary pydantic models
+  using `SnowflakeOut`.
+
+Plan 030 recorded a flip condition — "if a second raw-dict route appears, extract
+the serializer into `models/` as the shared mechanism" — and plan 031
+**discharged it**: the deserializer reuses 030's id-column predicate, so the
+shared mechanism turned out to be the predicate, not a module move. No third raw
+route exists, and a third would be the point to revisit this.
+
+### Request validation that is not a domain error
+
+Set by plan 009 as the precedent every later roleplayer form follows (009 D8):
+
+- **A blank or whitespace-only required text field is stripped and refused by
+  pydantic — FastAPI's own 422, with no domain error code.** `characters.name`
+  was the first; `messages.text`, a memo `body` and `opening_message` all follow
+  it. A domain code would be a second vocabulary for something the framework
+  already answers precisely.
+- **Unknown body keys are ignored**, not refused. A client sending a field the
+  server has not grown yet is a version skew, not an error.
+- **A query parameter is a plain typed parameter with a default, placed last, and
+  carries no `Query(...)` wrapper.** `include_archived` on `GET /api/characters`
+  was the first query parameter in any router (before it every admin router
+  asserted there was none), and its position is forced: the only defaulted
+  parameter must come after the `Annotated[..., Depends(...)]` ones. Recorded so
+  the next router does not re-derive it.
+
 ## Routers versus services — the split, and why it is strict
 
 **Routers** own HTTP and nothing else: path and method, request/response pydantic
@@ -213,6 +340,150 @@ and the split forbids a router from doing so: the router calls the probe with a
 connection and the registry, and the probe returns a plain result. A reader
 finding it in `services/` should read it as the split applied to its first
 router, not as a domain-shaped carve-out.
+
+### Two service-module idioms, copied deliberately rather than shared
+
+Named here because the duplication **is** the convention today and a reader will
+otherwise read it as an accident, or "fix" it into a shared module that every
+service then imports — which is the hub this layer exists to avoid:
+
+- **`_now_text()`** — the one-instant-per-operation timestamp helper, in the
+  fixed-width form `data-model.md` requires. Each service carries its own private
+  copy.
+- **`_reading`** — the read-rollback context manager, which ends an autobegun
+  read's implicit transaction so a later `begin()` on the same connection does
+  not raise ("Transactional DDL", below, has the mechanism). First in
+  `llm_registry.py`, then `characters.py`.
+
+Each new service copies both rather than importing them, so that a service module
+remains a leaf that imports no sibling. If that ever stops being worth it, the
+destination is a top-level leaf beside `ids.py` — not another service.
+
+### A service verifies its own parent, in its own transaction
+
+Set by plan 010 (D6) and held by plans 011, 012, 015 and 018: **a service
+verifies a parent — and a chosen child of that parent — with its own
+owner-scoped `select` inside its own transaction, and never calls another
+service's operation to do it.** `services/setups.py` checks the character,
+`services/sessions.py` checks the character and the setup, `services/memos.py`
+checks the target level.
+
+The reason is transaction ownership, not tidiness. A service owns its
+`with conn.begin():` block; calling a sibling's *operation* would either nest a
+`begin()` or split one decision across two transactions, and both break the
+"these writes commit together or not at all" claims the Core decision was taken
+for. `services/messages.py` and `services/settle.py` are the sharpest case — two
+services over **one table** that never import each other, each with its own
+owner-scoped session check and its own `last_used_at` bump (012 D11).
+
+**The naming rule that goes with it:** RP-session vocabulary never collides with
+`services/auth.py`'s login-session vocabulary (`RpSession`, `start_session`, …).
+`data-model.md` keeps the tables apart (`sessions` versus `auth_sessions`) for
+the same reason; the collision risk is permanent, and the next contributor will
+meet both modules.
+
+### The one narrow service-to-service import exception, named as a pattern
+
+Stated as a **pattern** rather than a list of cases, because the list grows with
+almost every feature and a reader meeting the next instance should recognise it
+from the rule rather than from the table:
+
+> A service may import another service's **transaction-neutral** parts — a value
+> type, a row mapper, a read that opens no transaction of its own, or an insert
+> helper that checks nothing and bumps nothing. It may never import an
+> *operation*, because an operation owns a transaction.
+
+The rule protects transaction ownership, and nothing in that list touches it.
+The instances, so each is visibly deliberate rather than a leak:
+
+| Importer | Imports | Plan |
+|---|---|---|
+| `memo_chain.py` | `memos.py`'s `Memo` value type and its row mapper only | 015 D11 |
+| `configuration.py`, `sessions.py` | `llm_registry.py`'s transaction-neutral reads, `ModelRefLevel`, `EnabledChatModel`, `UNSET` | 017 D12 |
+| `sessions.py` | `messages.py`'s zone-insert helper and message value type — the same helper `append_message` uses, so the zone insert exists once | 018 D3 |
+| `context.py` | read operations from `sessions`, `characters`, `configuration`, `memo_chain` and `messages` | 020 D9 |
+| `compose.py` | `configuration`, `context.py` (the assembler), `messages`, `llm_registry`, `tools`, `llm.*` | 021 D15 |
+| `tools/seam.py` | `sessions`, `messages`, `configuration` types | 021 D15 |
+| `translation.py` | `configuration`, `llm_registry`, `llm.chat`, `llm.client` | 023 |
+| `memos`, `settle`, `messages`, `characters`, `setups` | `embedding.py` / `session_index.py` | 024 D9 |
+| `search/vector.py` | `embedding.py` — the vector arm embeds the query | 025 |
+| `search/memo_search.py` | `memo_chain.py`'s chain clause builder, and the port | 026 D2 |
+| `tools/memo_search.py` | `search/memo_search.py` | 026 D3 |
+| `tools/seam.py` | `tools/memo_search.py`, `tools/session_search.py` — for registration | 026, 027 |
+| `search/session_search.py` | the port, and `settled_entries` from `db/schema.py` | 027 D6 |
+| `tools/session_search.py` | `search/session_search.py` | 027 D6 |
+
+**None of the search or tool importers opens a transaction of its own**, which is
+why each is inside the pattern rather than an exception to it: the port and the
+tools take a connection and run reads on it, and the seam owns the short-lived
+connection they run on (`session-stream.md`).
+
+**`services/context.py` is the widest of these rows and is inside the pattern for
+the same reason** (020 D9). It imports **read operations** from five services,
+which reads like the thing the rule forbids — and the rule's reason is what
+settles it: the no-import rule protects **transaction ownership**, and
+`context.py` **opens no transaction of its own and calls only reads that leave
+none open**. So there is no transaction for a caller to nest into or split across,
+and nothing the rule is protecting is at risk. It is a **read composition**,
+exactly like `compose.py` — which is also its only caller. Spelled out because the
+table above otherwise claims to list every instance of the pattern while showing
+one that looks like a breach of it.
+
+**One of these imports goes the other way at runtime and is deliberately
+type-checking-only** (026 D3, 027 D6). The two tool adapters import the seam's
+types **under `TYPE_CHECKING`** rather than at runtime, because `tools/seam.py`
+imports the adapters in order to **register** them — a runtime import back would
+be a cycle. Named so it is not "tidied" into an ordinary import: the cycle is
+real, and the registry's direction (seam knows its tools, tools do not know the
+registry) is the direction that keeps the registry the single place a tool becomes
+available.
+
+**`app/errors.py` is the framework-coupled leaf every service may import**, and
+that is the one deliberate hole in "a service never imports `fastapi`".
+`errors.py` imports `fastapi` at module level, so importing any service that
+raises a typed error puts `fastapi` in `sys.modules`. The consequence is a
+testing rule, not a design change: **framework-freedom here is a source-level
+property — a "no web framework in `services/`" check must read the module's own
+imports and never `sys.modules`** (observed in plan 027, true of plan 026's
+`memo_search.py` since it shipped).
+
+**No service module touches a third-party logger.** `app/logging.py` owns
+third-party logger suppression — the constant `_SILENCED_LOGGERS` beside
+`_PROPAGATING_LOGGERS` — and it is the only place either list may grow
+(plan 028). The reason is the stdlib bridge: `configure_logging` routes every
+stdlib record into loguru, so a library that logs a request URL logs it into both
+sinks. Plan 028 was the first feature to put message text in a query string and
+found `httpx`'s own request record carrying it at `DEBUG`. A service that
+silenced its own dependency's logger would make the redaction surface depend on
+import order (`deployment.md`'s redaction rule).
+
+### Every route is classified, at build time
+
+**A new API route must be added to the privacy guard's classification table —
+`public` / `self` / `registry` / `owner` / `admin` — or the build fails**
+(plan 032, `backend/tests/test_privacy_audit_routes.py`). This is a build-time
+contract, not a review convention: an unclassified route is a failing test, and
+the route enumeration it checks against lives in
+`docs/plans/032.privacy-isolation-audit/context.md`.
+
+It exists because R5 is a *query-level* property and therefore invisible to any
+single reviewer's reading. The companion rule the guard also pins is **refusal
+identity: a foreign id produces a response identical to an unknown id** — same
+code, same status, same body. Every `*_not_found` code in the error model below
+depends on that, and it is the property that keeps a guessable snowflake
+(`data-model.md`) from leaking existence.
+
+### The two service reads that take no `user_id`
+
+`require_user` yields the `user_id` that every service call is scoped by, and a
+service touching user-owned data takes it as a **required positional argument**.
+**`export_database` and `import_database` are the only exceptions** — the
+read-side and write-side twins of one deliberate hole (plans 030, 031). They are
+reachable only from an admin route, and they stay R5-compatible through
+**opacity** rather than scoping: no viewer, no preview, no search, no diff, no
+count. `import_database`'s single-admin guard lives in the service, not the
+router. Recorded here so a reviewer auditing "every read takes `user_id`" finds
+the exception stated rather than discovering it; `transfer.md` has the reasoning.
 
 ### Authorization as router dependencies
 
@@ -257,6 +528,13 @@ same module). Written down so the two features' proposals are not re-mixed:
 - **`app/dependencies.py` holds `CurrentUser`, `require_user`,
   `require_role(min_role)` and the two session-cookie writers (set and clear).**
   A top-level leaf beside `config.py`, `ids.py`, `errors.py` and `roles.py`.
+  **Since plan 024 it also holds `get_llm_client_factory`**, which
+  `routers/admin_llm.py` re-imports rather than declaring its own: a second
+  declaration would be a second override point, and a test overriding one would
+  silently miss the other. Every route that embeds depends on it plus
+  `get_settings`; the services underneath take the factory and the timeout as
+  **keyword-only parameters with defaults**, so they stay callable with no
+  FastAPI in sight.
 
 Why not "in the same module" as the enum: **`db/schema.py` imports
 `app/roles.py`** for the `role` column's value domain, so a FastAPI dependency
@@ -295,7 +573,18 @@ returns no user content and no count derived from it.
 `require_user` yields the `user_id` that every service call is scoped by. A
 service that touches user-owned data takes `user_id` as a **required positional
 argument** — not an optional filter, not a keyword with a default. A forgotten
-scope becomes a type error rather than a privacy incident.
+scope becomes a type error rather than a privacy incident. The two named
+exceptions are above.
+
+**`routers/characters.py` was `require_user`'s first router-level consumer**
+(plan 009) — before it the dependency existed with no caller, exactly as
+`require_role` did before plan 005 — and every roleplayer router since attaches
+it the same way, at router level rather than per handler, so adding a route
+cannot forget it. One consequence is worth stating because it reads as a gap:
+**an administrator owns characters, setups, sessions and memos like any other
+account**, scoped by their own `user_id`. The ladder grants nothing here. An
+admin calling a user-content route is an **ordinary owner and never a
+super-reader** (asserted by plan 032's audit; previously implicit).
 
 `require_unconfigured` implements UC-003 directly: once the instance is
 configured, every bootstrap route refuses (create-new and import alike). The
@@ -375,14 +664,21 @@ Four decisions embedded in it:
 - **The clear-designation path is server-scoped**, so it cannot collide with
   `{server_id}` in the route table.
 
-**`/api/admin/database` — `routers/admin_db.py` (plan 007).** Three routes, all
-answering **200**, all taking **no body and no query parameter**:
+**`/api/admin/database` — `routers/admin_db.py` (plan 007), plus the two
+transfer routes (plans 030, 031).** Five routes:
 
 | Route | Answers |
 |---|---|
-| `GET /api/admin/database/tables` | the whole drift report |
-| `POST /api/admin/database/tables/{table_name}/create` | the per-table report **re-derived after the apply** |
+| `GET /api/admin/database/tables` | **200**, the whole drift report |
+| `POST /api/admin/database/tables/{table_name}/create` | **200**, the per-table report **re-derived after the apply** |
 | `POST /api/admin/database/tables/{table_name}/sync` | the same |
+| `GET /api/admin/database/export` | **200**, the whole-database export as a JSON file attachment (plan 030, `transfer.md`) |
+| `POST /api/admin/database/import` | **204**, and the session cookie cleared (plan 031, `transfer.md`) |
+
+The first three take no body and no query parameter. The import is **the first
+admin-database route that takes a body**, and it is a raw JSON object rather
+than a pydantic model — one of the two named exceptions above. Neither transfer
+route needs a per-handler guard: `require_role(Role.admin)` is on the router.
 
 - **Each apply answers with the re-derived row**, giving US-018.AC-2 a
   server-side witness beside the page's re-load.
@@ -393,8 +689,131 @@ answering **200**, all taking **no body and no query parameter**:
   undo by "simplifying" the lookup into the handler.
 - **Two routes rather than one `apply`**, because the UI offers them under
   different conditions and only one of the two can lose data.
-- **The one admin route family not keyed on a snowflake** — its wire carries no
-  id at all, so the JSON id boundary has no call site here.
+- **The one admin route family not keyed on a snowflake** — its drift wire
+  carries no id at all, so the JSON id boundary has no call site on the three
+  drift routes.
+
+#### The roleplayer route surfaces
+
+**Realizes:** FEAT-006, FEAT-007, FEAT-008, FEAT-011, FEAT-012, FEAT-013,
+FEAT-017, UC-017, UC-018, UC-019, UC-020, UC-023, UC-024, UC-025, UC-039,
+UC-042, UC-043, UC-044, UC-047, UC-048, UC-049, UC-058, UC-059, UC-060, UC-067,
+UC-068, UC-075, UC-076, UC-077
+
+Every router below carries **router-level `require_user`** and groups **by
+feature, not by path prefix** — which is why `routers/memos.py` owns a route
+whose path starts `/api/sessions/`, and `routers/sessions.py` owns one whose
+path starts `/api/characters/`. Three shapes repeat across all of them and are
+stated once: **lists are wrapped** (`{ characters: [...] }`, `{ setups: [...] }`,
+`{ sessions: [...] }`, `{ memos: [...] }`) so a list response can grow a sibling
+key without becoming a breaking change; **no entity has a `DELETE`** except a
+memo, so an attempted delete is FastAPI's own 405; and **archive and restore are
+named action routes**, never a `PATCH` of a status field, so that each hangs off
+its own rule.
+
+**`/api/characters` — `routers/characters.py` (plan 009).** The first
+roleplayer-owned family, and the shape plans 010 and 011 copied.
+
+| Route | Notes |
+|---|---|
+| `GET /api/characters` | takes `include_archived`; order `created_at DESC, id DESC` |
+| `POST /api/characters` | **201** |
+| `GET` / `PATCH /api/characters/{character_id}` | `PATCH` treats a null key as absent, and an empty `PATCH` is a no-op |
+| `POST /api/characters/{character_id}/archive` · `/restore` | idempotent (R6) |
+| `GET` / `PATCH /api/characters/{character_id}/configuration` | plan 017; `model: null` clears |
+| `GET /api/characters/{character_id}/export` | plan 030, `transfer.md` |
+| `POST /api/characters/{character_id}/import` | plan 031, `transfer.md` |
+| `POST /api/characters/{character_id}/sessions` | owned by `routers/sessions.py` — `session-stream.md` |
+
+**An administrator owns characters like any other account**, scoped by their own
+id (009 D6). The role ladder governs the admin routers; it grants nothing on a
+roleplayer route, and an admin calling one is an ordinary owner.
+
+**`/api/characters/{id}/setups` and `/api/setups/{id}` —
+`routers/setups.py` (plan 010).** `GET` / `POST` on the nested collection (with
+`include_archived`), `GET` / `PATCH` on the flat single resource, plus
+`…/archive` and `…/restore`. **Nested collection, flat single resource** is the
+deliberate shape: a setup is always created *under* a character, and a setup's
+`character_id` is **fixed for its life** — no route moves one between characters
+— so addressing an existing setup through its parent would be a second way to
+say something immutable. A missing or foreign parent answers
+`character_not_found`; `character_id` is not patchable; listing and creating
+under an **archived** character are allowed (R6 does not cascade).
+
+**`/api/sessions` — `routers/sessions.py` (plan 011).**
+`GET /api/sessions`, `GET` / `POST /api/characters/{character_id}/sessions`,
+`GET /api/sessions/{session_id}`, `…/archive`, `…/restore`,
+`GET /api/sessions/{session_id}/export`. **No `PATCH` and no `DELETE`**:
+configuration is written through `…/configuration`, not through the session
+resource, so there is deliberately no general session patch (017 D9). Lists order
+`last_used_at DESC, id DESC`, and every session carries `setup_name` — the
+referenced setup's **current** name by an owner-scoped LEFT JOIN, shown even when
+the setup is archived, so a rename relabels every session with no fan-out write
+(011 D10).
+
+**`/api/memos` — `routers/memos.py` (plans 015, 016).**
+
+| Route | Notes |
+|---|---|
+| `GET /api/memos?scope&scope_id` | one level |
+| `POST /api/memos` | **201**; flags on the body are ignored — a memo is created enabled and not forced (R3, US-053) |
+| `PATCH /api/memos/{memo_id}` | any subset of `body`, `is_enabled`, `is_forced`; a `null` key is "not supplied" |
+| `DELETE /api/memos/{memo_id}` | **204** — the only delete path in the product (R6's contrast) |
+| `PUT /api/memos/order` | body `{ scope, scope_id?, memo_ids: [string] }`; **200** `{ memos: [...] }` in the given order with `sort_key` 0..n-1 |
+| `GET /api/sessions/{session_id}/memo-chain` | three or four levels in fixed order (R2) |
+
+The nine-key `Memo` carries `scope_id` null for the user level and **never
+`user_id`**. **One reorder request is one level**, which is what makes a
+cross-level move inexpressible rather than merely refused (`US-103.AC-2`) — the
+body names a scope, so there is no second level for a note to land in. It is
+declared **before** the `{memo_id}` handlers so `order` is not read as an id.
+
+**`/api/me/settings`, `/api/models` and the configuration routes —
+`routers/configuration.py` (plan 017).** Seven routes. `GET /api/me` is
+**unchanged** and still returns identity alone; user settings are their own pair
+at `GET` / `PATCH /api/me/settings` (017 D14), because identity is read on every
+mount and settings are not.
+
+**`POST /api/messages/{message_id}/translation` — `routers/translation.py`
+(plan 023).** An `async def` handler with its own overridable chat-client factory
+dependency, **no request body** — the target language is resolved server-side
+from the session's chain — and a 200 `{ message_id, target_language, text,
+cached }`.
+
+**`GET /api/search` — `routers/search.py` (plan 029).** One route, my-search's
+(FEAT-017, UC-058..UC-060):
+
+| | |
+|---|---|
+| Request | `GET /api/search?q=<text>` — a **sync `def`** handler behind router-level `require_user`, taking the shared client factory and the configured timeout |
+| 200 | `{ characters, setups, sessions, entries, memos }` — five lists, **ids as strings** (the JSON id boundary) |
+| Blank `q` | **five empty lists, and no embedding call at all** |
+| Errors | **401**; **409** `no_embedding_model`; **502** `llm_unreachable` and `secret_ref_missing` |
+
+Three things in that table are decisions rather than mechanics:
+
+- **A blank `q` performs no provider call.** It is not "a search for nothing"
+  answered from an index; the handler returns the empty shape before any arm
+  opens the model. A page that mounts with an empty box would otherwise embed the
+  empty string and bill for it (`frontend-structure.md` keeps the matching
+  client-side rule, so neither side relies on the other).
+- **The error set is the port's, propagated** — my-search adds no code of its own.
+  It **fails whole** rather than returning the groups it could answer
+  (`search-and-retrieval.md` has the reasoning), which is why a 409 or a 502 here
+  means *no* results rather than *fewer*.
+- **It is a sync `def`**, like every other roleplayer route, which is what lets
+  the port's `asyncio.run` embed bridge work underneath it (the first-async-code
+  rule below: these routes must stay sync).
+
+**Router registration order is positional, and it is recorded** (plan 029): the
+search router is included **after** the routers that preceded it at build time,
+and `main.py`'s docstrings name it. There is no prefix collision to manage —
+`/api/search` is its own segment — so the order carries no behaviour; it is
+recorded only so that a reader comparing `main.py` to this layout finds the list
+in the order they expect.
+
+**Export and import** are `routers/transfer.py`'s; the routes and their contract
+are in `transfer.md`.
 
 ## The authentication surface — FEAT-002
 
@@ -479,235 +898,20 @@ The cookie's lifetime is a **hint**; `expires_at` in the row is the
 application makes `Secure` mandatory — the change surface is the one setter
 (`deployment.md`'s TLS `_TBD:`).
 
-## The stream routes — FEAT-009 and FEAT-010 in one router
+## The session stream — moved to its own doc
 
-**Realizes:** FEAT-008, FEAT-009, FEAT-010, UC-027, UC-028, UC-032, UC-035,
-UC-036, UC-037, UC-078, UC-080, UC-083
+**The stream routes, settle and re-open, the `(( ))` seam, the compose route and
+its streaming harness, the tool seam and the buried-discussion read now live in
+`session-stream.md`.** They were split out at the finalization of plans 008..032,
+because this doc had come to carry two subjects: the FastAPI application's shape
+and the session stream's behaviour.
 
-One table, two views, one router (`routers/stream.py`). The merge in
-`data-model.md` removed the surface the old two routers were named after: **the
-`discussions` table is gone, so there is no discussion id to address**, and the
-current zone has no id of its own either — it is the *set* of a session's
-messages matching `related_to IS NULL AND settled_at IS NULL` (R11), and a set is
-not addressable. Every zone operation is therefore addressed **through its
-session**, and the route shape follows the two views exactly:
-
-| Route | Does | Touches |
-|---|---|---|
-| `GET /api/sessions/{id}/entries` | the record above the ruler | `settled_entries`, `ORDER BY id` |
-| `POST /api/sessions/{id}/entries` | file a pasted partner block, born settled (US-121) | one insert, `settled_at` set at insert |
-| `GET /api/sessions/{id}/zone` | the live zone below the ruler | `current_zone`, `ORDER BY id` |
-| `POST /api/sessions/{id}/zone/messages` | append one message; **no model call** | one insert |
-| `POST /api/sessions/{id}/zone/compose` | append the roleplayer's message, then **stream** the assistant's reply | SSE; see below |
-| `POST /api/sessions/{id}/settle` | settle the zone (R11, R12) | `services/settle.py` |
-| `POST /api/sessions/{id}/reopen` | settle's exact inverse (R11) | `services/settle.py` |
-| `PATCH /api/messages/{message_id}` | edit one message's text in place | one update |
-| `POST /api/characters/{character_id}/sessions` | create a session under the character **and** seed its zone with the opening message, in one transaction (UC-080, US-117) | `services/sessions.py`; owned by `routers/sessions.py` |
-
-The decisions behind that shape, each of which could have gone another way:
-
-- **Settle and re-open take no target id.** R11 defines both structurally:
-  settle takes *the last message in the zone* (US-126) and re-open applies to
-  *the last settled row* — anything earlier has entries after it and is refused
-  by definition (UC-037). The rejected alternative was
-  `POST /api/entries/{message_id}/reopen`, matching where the control sits in the
-  UI (`workspace-shell.md`). It was rejected because it lets a client name a row
-  that is *not* the structural target, which turns an invariant the schema
-  guarantees into a condition the server has to re-check and a client can get
-  wrong. Session-addressed, the request cannot express an illegal target at all.
-  The response returns the ids the operation moved, so the client can reconcile.
-- **Two appends, not one route with a `reply: bool`.** UC-028/US-031 require text
-  to reach the record with no model call at all, and UC-032/UC-034 require the
-  streaming exchange. One route serving both would make the **response media
-  type depend on a request field** — and the client picks its SSE reader or its
-  JSON error renderer *before* the response arrives (`frontend-structure.md`).
-  Two routes, two contracts, one media type each. That the composer's Send may
-  map onto either is a UI decision, not a transport one; `docs/product/` does not
-  describe the composer's send semantics beyond UC-028, so the split is recorded
-  as a design inference rather than a read of a requirement.
-- **A pasted partner block never passes through the zone** (US-121). It is born
-  settled, and `POST /api/sessions/{id}/entries` is the only route that may
-  create a settled row without settling. It accepts `kind='partner'` and
-  **refuses every other kind**, which is R11's single exception enforced at the
-  router boundary rather than trusted to a caller. It runs no `(( ))` parsing
-  (R12) and returns JSON — there is nothing to stream for text the roleplayer
-  did not compose.
-- **`PATCH /api/messages/{message_id}` spans both views on purpose.** A settled
-  row is editable forever (UC-078, US-110) and a zone message is editable in
-  place including the assistant's (US-115); it is the same operation on the same
-  column. A **buried** row is not editable (US-116), so the service refuses it
-  with `message_not_editable`. The edit is also the write with the degraded
-  embedding path — see the transaction rules at the end of this doc.
-- **Starting a session by writing is one route and one transaction.** It is the
-  only row in the table not addressed through a session, because when the request
-  is made there is **no session to address**: UC-080 puts a composer on the
-  character's page (`workspace-shell.md`), and the first message written there
-  creates the session and becomes the opening message of the turn being drafted.
-  **US-117.AC-1 makes creating the session and seeding its zone a single
-  outcome**, so they are a single `with conn.begin():` in
-  `services/sessions.py` — mint the session id, **resolve and capture
-  `model_ref`** (R4: the model is captured at creation, not on first compose),
-  insert the `sessions` row, insert the opening message as a current-zone row,
-  commit together. The capture belongs inside this transaction like everything
-  else in it; what creation does when **no model is enabled at all** is R4's open
-  `_TBD:`, and this route is one of the two places that will have to answer it. The rejected
-  alternative was leaving the client to call a create route and then
-  `POST /api/sessions/{id}/zone/messages`: two round trips that can fail between,
-  stranding an empty session under the character that the roleplayer never asked
-  for and now has to archive by hand. A partial failure the *user* has to clean up
-  is worse than a request that failed.
-- **It is character-addressed, and it creates nothing settled.** The path is
-  `/api/characters/{character_id}/sessions` because the character is the only
-  entity that exists at request time. It is owned by `routers/sessions.py`
-  (FEAT-008) rather than `characters.py` — routers here group by feature, not by
-  path prefix, which is the same reason `stream.py` owns
-  `PATCH /api/messages/{message_id}`. The response returns the new session, its
-  `id` a decimal string per the JSON id boundary above, together with the seeded
-  zone message, so the client can navigate and render without a second read
-  (`frontend-structure.md`). The seeded message lands in the **current zone** and
-  is never settled: UC-080's "opening message of that turn's discussion" *is* a
-  zone row, so R11's "settle is the only door into the record" is untouched and
-  this route is not a second exception beside the pasted partner block. The
-  session is created with `setup_id` NULL — UC-080 names no setup, and R2 makes
-  that the first-class case rather than a degraded one.
-  `_TBD: docs/product/ does not state whether that first message should also draw
-  an assistant reply. This route is JSON and makes no model call, matching the
-  non-streaming append it is a variant of, and a compose can follow on the session
-  route once the session exists. If UC-080 is meant to open the exchange as well,
-  the response media type changes — so FEAT-008's plan must settle it rather than
-  discover it._
-- **The table has no discard operation, and that is now a decision rather than a
-  gap.** It used to be recorded as a carried-forward product gap ("nothing says
-  how a roleplayer walks away from the zone without settling"). UC-086, US-134
-  and US-135 close it, and the answer leaves this table exactly as it is: an
-  **empty** current zone has no rows, so abandoning it is a **frontend-only**
-  clearing of the composer draft and the kind switch — no route, no backend
-  surface (`workspace-shell.md`, R11). A zone that *holds* text is never
-  discardable; it is settled instead, and US-135 guarantees settling never
-  requires an assistant answer. **A discard route must not be added**: it would
-  make raw `messages` writable from a third operation, weakening R11's
-  two-operation invariant, in exchange for deleting rows that by definition do
-  not exist.
-
-### The streaming route
-
-`POST /api/sessions/{id}/zone/compose` is the one streaming route. It returns a
-`StreamingResponse(media_type="text/event-stream")` and sets **`X-Accel-Buffering:
-no`** on that response (see `deployment.md` — the header is emitted by the
-application, deliberately, rather than relying only on nginx's
-`proxy_buffering off`). The request is a **POST with a JSON body**, which is why
-the client is `fetch()` + `body.getReader()` rather than `EventSource`
-(`overview.md`, `frontend-structure.md`).
-
-The frame protocol and the tool loop are in `llm-and-streaming.md`. Two ordering
-rules belong here because they are route-level:
-
-1. **The roleplayer's message is committed before the stream opens** (R10). The
-   handler inserts the zone row, commits, and only then begins generation — so
-   `llm_unreachable` cannot lose typed text.
-2. **A domain error mid-stream becomes an `error` frame, not an HTTP status.**
-   The status was already sent. The frame carries the same `{code, message,
-   detail}` shape as the JSON error body so the SPA has one error renderer.
-3. **A client disconnect persists the partial assistant text and unwinds**
-   (UC-085, US-132). The streaming generator detects the disconnect, writes
-   whatever assistant text has accumulated as an **ordinary current-zone row**,
-   and returns. It emits no terminal frame — there is nobody left to read one.
-
-**The stop is a client disconnect and nothing else** (`llm-and-streaming.md`
-owns the mechanism and its consequences). Three route-level facts follow, each
-stated because the absent thing is what a reader will look for:
-
-- **There is no stop route.** No `POST /api/sessions/{id}/stop`, and none may be
-  added — the table above is complete.
-- **There is no registry of in-flight work.** Nothing on application state maps a
-  session, a user or a request to a running generator. The current zone has no id
-  (R11), so there is nothing to key such a registry on, and adding one would put
-  server state beside a request that may already be gone.
-- **The partial-row write is the same write the success path performs**, not a
-  special one: the assistant's row is a current-zone row either way, and the only
-  difference is that no `done` frame reports its id. The client re-reads
-  `GET /api/sessions/{id}/zone` to pick it up, which is
-  `ui-conventions.md`'s never-optimistic re-load rule applying normally.
-
-Because a stop, a network drop and a closed tab are the same event at this
-layer, **the handler makes no attempt to distinguish them** — there is one
-disconnect path, and a flaky connection gets the same partial-text preservation a
-deliberate stop does.
-
-## Settle and re-open — one transaction each, one module
-
-**Realizes:** FEAT-010, UC-035, UC-036, UC-037, UC-081, UC-084
-
-`services/settle.py` holds **both** operations and nothing else. R11 states that
-raw `messages` is touched by exactly two operations; keeping those two in one
-module turns that rule into a grep — any other module naming the `messages` table
-is a review finding, and every other reader goes through a view.
-
-**Settle**, entirely inside one `with conn.begin():`
-
-1. Read the zone through `current_zone`; take the last row by id (US-126). An
-   empty zone raises `zone_empty`. **That is the only precondition.** In
-   particular there is **no requirement that the assistant has answered**: a zone
-   holding only the roleplayer's own message settles that text as-is (US-135,
-   UC-083 step 5 — "the last message in the current zone, **whoever wrote it**").
-   Confirmed rather than newly stated, because the rule already read correctly;
-   a check for an assistant row here would be a defect, and it is the kind of
-   check that arrives disguised as validation.
-2. Classify and strip through `services/parens.py` (R12): wholly parenthesised →
-   `kind='decision'`, otherwise `kind='turn'` with any `(( ))` fragment removed
-   from the head row's text.
-3. `UPDATE messages SET related_to = <head id>` for every other zone row — bury
-   the group.
-4. `UPDATE messages SET settled_at, kind, text` on the head row.
-5. Refresh `session_vec` (`search-and-retrieval.md`).
-
-**Step 3 precedes step 4 and the order is load-bearing.** The burial predicate is
-zone membership; once the head carries `settled_at` it is no longer in the zone,
-and the set the burial is supposed to sweep no longer identifies itself. Two
-UPDATEs and no INSERT — the settled text is the text already in the row
-(`data-model.md`).
-
-**Re-open** is the mirror, also one transaction: `related_to` back to NULL for the
-group, `settled_at` and `kind` back to NULL on the head. It is gated on an **empty
-current zone** (R11, US-128) and raises `zone_not_empty` otherwise; a head with no
-buried group — a pasted partner block, which has nothing behind it — raises
-`nothing_to_reopen`. That second refusal is **R11's own rule, not a guard this
-module invented**: re-open applies only to a settled head that has a buried group,
-because UC-037 re-opens a collapsed discussion and a partner block never had one. Ids never move, so a settle/re-open round trip leaves the
-stream exactly as it started, which is what makes it safe as an undo.
-
-Neither operation may commit partially: a buried group whose head was never
-flagged is a session with no record and no zone. This is one of the reasons the
-persistence layer is SQLAlchemy Core (below) — the transaction boundary is a
-block in this module, not a flush the ORM schedules.
-
-## The `(( ))` seam — one parser, server-side, at settle only
-
-**Realizes:** FEAT-009, FEAT-010, UC-081, UC-084
-
-`services/parens.py`. Two pure functions, no I/O, no `user_id`, no connection:
-
-```
-classify(text)        -> "decision" | "turn"
-strip_fragments(text) -> str
-```
-
-It is called from **exactly one place: step 2 of settle.** R12 splits the
-responsibility three ways — the server decides, the system prompt tells the model
-how to read the convention, the client previews — and only the server's half is
-code in this backend. The rule is cited, not restated.
-
-The invariant this doc owns: **stored text is never re-parsed.** `PATCH
-/api/messages/{message_id}` takes the new text literally and does **not** call
-this module, on a settled row or a zone row; re-parsing a later edit would
-silently delete prose a roleplayer deliberately parenthesised. Nor does
-`POST /api/sessions/{id}/entries` call it — partner text gets no special
-treatment (US-121). The pre-strip text is not preserved anywhere; there is no
-revision table (`data-model.md`).
-
-A pure module rather than a method on the settle service so the classification
-and stripping cases are testable from the spec with no database at all, which is
-what the pipeline's test-coder needs.
+What stays here is the application shape those routes sit in — the layout, the
+routers/services split and its named exceptions, the JSON id boundary, the error
+model and the per-code status record for every code the stream raises
+(`zone_empty`, `zone_not_empty`, `nothing_to_reopen`, `message_not_editable`,
+`message_not_found`, `tool_failed`, `no_model_enabled`, `model_not_chosen`), and
+the transaction rules the degraded embedding path depends on.
 
 ## Configuration — `pydantic-settings`
 
@@ -731,7 +935,12 @@ class Settings(BaseSettings):
     log_file_path: Path     = Field(default=Path("data/logs/rphelper.log"), validation_alias="RPHELPER_LOG_FILE_PATH")
     log_file_rotation: str  = Field(default="10 MB",   validation_alias="RPHELPER_LOG_FILE_ROTATION")
     log_file_retention: int = Field(default=5,         validation_alias="RPHELPER_LOG_FILE_RETENTION")
-    # ... one field per setting, each with an explicit RPHELPER_ alias
+
+    # web search (plan 028) — NOTE the aliases carry NO RPHELPER_ prefix,
+    #   deliberately; see the named exception below
+    search_cse_key: SecretStr | None = Field(default=None, validation_alias="SEARCH_CSE_KEY")
+    search_cse_id:  str | None       = Field(default=None, validation_alias="SEARCH_CSE_ID")
+    # ... one field per setting, each with an explicit alias
 
 @lru_cache
 def get_settings() -> Settings:
@@ -763,6 +972,36 @@ def get_settings() -> Settings:
 - **The five `log_*` fields** are the only configuration the logging module
   reads. `log_file_path` defaults under `data/` because that is the one writable
   volume in prod; `deployment.md` owns that reasoning and the redaction rule.
+
+### The two web-search fields — a named exception to the `RPHELPER_` prefix
+
+**`SEARCH_CSE_KEY` and `SEARCH_CSE_ID` are the only two settings whose aliases do
+not start with `RPHELPER_`, and the exception is deliberate and user-confirmed**
+(028 D2, U2). They are **the user's existing environment variable names**, already
+set on the machines this project runs on, and renaming them would mean editing
+every environment that works today.
+
+**The explicit-alias rule itself still holds** — each field names its variable, so
+the environment contract stays greppable and a field rename cannot silently rename
+an operator-facing variable. **Only the prefix differs.**
+
+**Written down because the "fix" is silent.** Changing these to
+`RPHELPER_SEARCH_CSE_KEY` / `RPHELPER_SEARCH_CSE_ID` breaks nothing loudly: the
+fields are optional, so the application starts, and the only symptom is that
+`web_search` stops being offered — on every instance that was working. There is no
+error to search for.
+
+Two further properties:
+
+- **The key is a secret-string type and is masked in `repr`**, so a settings dump
+  or an exception that renders the model cannot print it (`deployment.md`'s
+  redaction rule forbids API keys in logs; this is the mechanism that makes it
+  hard to do by accident).
+- **`routers/stream.py`'s registry dependency is the only reader of either
+  field** (028 D3). The registry builder in `tools/seam.py` and the adapter's
+  factory take **plain strings**, so no service module reads `Settings` — which is
+  the convention this doc states for every service, held here rather than quietly
+  excepted for a credential.
 
 ### The logging call site — once, in the app factory
 
@@ -826,6 +1065,25 @@ holding credentials would turn every export into a secret-bearing artifact and
 every drift report into something needing redaction. With pointers, the export
 moves configuration and the environment supplies credentials.
 
+### The web-search credential deliberately is NOT a pointer
+
+**`SEARCH_CSE_KEY` is a secret, and it does not use this pattern** (028 D2). It
+is a plain `Settings` field read straight from the environment.
+
+That is consistent rather than inconsistent, once the reason for pointers is read
+precisely: **pointers exist because the rows that would otherwise hold the secret
+are exported.** `llm_servers` travels in a whole-database export, so its
+credential must not be a value. **A `Settings` field is never stored and never
+exported** — it has no row, no drift report entry and no place in an envelope —
+so there is nothing for a pointer to protect it from. Adding one would mean a
+pointer resolving an environment variable from a value that itself came from the
+environment.
+
+**Rotation is identical either way**: an environment change plus a restart. No
+database write, no re-registration. So the two mechanisms differ in storage and
+agree in operation, which is why the difference is recorded here rather than
+treated as a gap to close in one direction or the other.
+
 ## The error model
 
 **Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-009,
@@ -877,8 +1135,10 @@ The named errors the design requires:
 
 | `code` | Raised when | `detail` carries | Realizes |
 |---|---|---|---|
-| `model_not_enabled` | Use-time validation of a resolved model reference fails (R4) | the model reference — **the server id as a decimal string and the model name** — and **which level set it**, constrained to `character` or `session`, **never `user`**: there is no user-level model default (UC-050, R1's correction) | FEAT-004, UC-012 |
-| `no_embedding_model` | An embedding is attempted with no designated embedding model, or the designation is gone, or the designated model is not also enabled (R4) | nothing user-scoped | FEAT-004, UC-013 |
+| `model_not_enabled` | Use-time validation of a resolved model reference fails (R4), **and** set-time validation of a character- or session-level model override (plan 017) | the model reference — **the server id as a decimal string and the model name** — and **which level set it**, constrained to `character` or `session`, **never `user`**: there is no user-level model default (UC-050, R1's correction) | FEAT-004, FEAT-013, UC-012, UC-077 |
+| `no_model_enabled` | Use time: **no model is enabled on the instance at all** | nothing | FEAT-013, US-107 |
+| `model_not_chosen` | Use time: the session holds **no captured model** (both columns NULL) | nothing | FEAT-013, UC-077, US-144 |
+| `no_embedding_model` | An embedding is attempted with no designated embedding model, or the designation is gone, or the designated model is not also enabled (R4); **since plan 024 also when the live `vec0` table's declared dimension does not match the designation's** | nothing user-scoped — and, for the dimension case, `{"reason": "dimension_mismatch"}`, which is instance-level rather than user-scoped | FEAT-004, UC-013 |
 | `secret_ref_missing` | `"$ENV_VAR"` names an absent variable | the variable name | FEAT-004 |
 | `username_taken` | An account is created with a username that already exists | nothing | FEAT-003, UC-006 |
 | `user_not_found` | An admin route addresses an account id that does not exist | nothing | FEAT-003, UC-007, UC-008, UC-009, UC-087 |
@@ -887,12 +1147,21 @@ The named errors the design requires:
 | `unknown_table` | A drift-page apply route names a table the registry does not declare | the table name | FEAT-005, UC-015 |
 | `schema_apply_failed` | A `Create` or a `Sync` could not be applied — a driver error, a failed cast, or a `PRAGMA foreign_key_check` violation | the table name and the operation (`create` \| `sync`); **never the driver's message** (below) | FEAT-005, UC-015, US-018.AC-6, US-018.AC-7 |
 | `llm_unreachable` | Provider call fails or times out | provider-side message, no request body | FEAT-010, UC-032 |
-| `tool_failed` | A tool invocation fails — **not surfaced as a stream error** (R9) | tool name | FEAT-014, FEAT-015, FEAT-016 |
+| `tool_failed` | A tool invocation fails — the tool is not offered, the name is unknown, the arguments are not an object, or `run` raises. **Since plan 028 the web-search provider and its adapter raise it directly too**, for every provider failure. **Not surfaced as a stream error** (R9): it becomes a `tool_fail` frame and the loop continues | the tool name — for web search exactly `{"tool": "web_search"}`, and **never chained to the transport exception** (below) | FEAT-014, FEAT-015, FEAT-016, UC-051, UC-053 |
 | `translation_failed` | UC-039's exception flow; nothing is cached | the message id, as a string | FEAT-011 |
-| `zone_empty` | Settle is attempted with nothing in the current zone (R11) | nothing | FEAT-010, UC-083 |
+| `zone_empty` | Settle is attempted with nothing in the current zone — **or with a zone holding only `role='tool'` rows** (R11); also the textless retry compose when no non-tool zone row exists | nothing | FEAT-010, UC-083 |
 | `zone_not_empty` | Re-open is attempted while the session's current zone is not empty (R11, US-128) | nothing | FEAT-010, UC-037 |
-| `nothing_to_reopen` | Re-open is attempted where the last settled row has no buried group — a pasted partner block (US-121) | nothing | FEAT-010, UC-037 |
-| `message_not_editable` | An edit targets a **buried** row (US-116) | nothing | FEAT-010, UC-036 |
+| `nothing_to_reopen` | Re-open finds **no settled row at all**, or a last settled row with **no buried group** — a pasted partner block, a lone directly-settled turn, or a lone decision (R11) | nothing | FEAT-010, UC-037 |
+| `message_not_editable` | An edit targets a **buried** row (US-116) **or a `role='tool'` row** (`US-115.AC-1`'s `Constraint:`). Those are the only two meanings | nothing | FEAT-010, UC-036 |
+| `message_not_found` | A message route addresses an id that does not exist or belongs to another user; also the discussion read on a zone row, a buried row or a non-settled id | nothing | FEAT-009, FEAT-010, UC-036, UC-078, UC-083 |
+| `character_not_found` | A character route (or a child route's parent check) addresses an id that does not exist **or belongs to another user** | nothing | FEAT-006, UC-018, UC-067 |
+| `setup_not_found` | As above, for a setup | nothing | FEAT-007, UC-020, UC-068 |
+| `setup_archived` | A session start names the caller's **archived** setup (R6 does not cascade, but a new session may not adopt one) | nothing | FEAT-007, UC-021 |
+| `session_not_found` | As above, for a session | nothing | FEAT-008, UC-024, UC-025 |
+| `memo_not_found` | A memo `PATCH` or `DELETE` addresses an id that does not exist **or belongs to another user** | nothing | FEAT-012, UC-044 |
+| `memo_order_mismatch` | A reorder's `memo_ids` is not **exactly** the caller's notes at that level — missing, extra, foreign, nobody's, or duplicated: the client's view is stale | nothing — **it never lists the mismatched ids** (R5) | FEAT-012, UC-076 |
+| `export_invalid` | An import body is malformed or incompatible | exactly `{"reason": …}`, one of `not_an_export`, `unsupported_version`, `schema_mismatch`, `wrong_granularity`, `malformed_payload`; **never a table name, a column name or row content** (R5), and never the driver's message | FEAT-018, UC-061..UC-064 |
+| `database_not_empty` | A whole-database import reaches an instance holding content (`US-077.AC-3`) | nothing | FEAT-018, UC-061 |
 | `already_configured` | A bootstrap route is reached on a configured instance (UC-003) | nothing | FEAT-001 |
 | `invalid_credentials` | A login attempt fails for **any** reason — unknown username, wrong password, or a disabled account | nothing | FEAT-002, US-006.AC-3 |
 | `not_authenticated` | A guarded route is reached with no session cookie, or one that does not resolve to a live session | nothing | FEAT-002 |
@@ -920,7 +1189,7 @@ not cosmetic.** The old code named a table that no longer exists and a condition
 that has changed: it fired when "an entry follows the answer", which was a
 property of the settled record. The condition now is that **the session's current
 zone is not empty** (US-128, R11) — a property of the zone, checked against the
-`current_zone` view. Same product guarantee, different predicate, so the same
+`current_zone` selectable. Same product guarantee, different predicate, so the same
 name would have been actively misleading. Its two sibling failures,
 `zone_empty` and `nothing_to_reopen`, exist because settle and re-open are
 distinct operations that fail for distinct reasons and the SPA renders them
@@ -935,6 +1204,13 @@ preferences:
 - **`detail` never contains memo body text for a note where `is_enabled` is
   false** — R3's "no path" includes error payloads.
 - **Any id in `detail` is a decimal string**, per the JSON id boundary above.
+- **A `tool_failed` raised for web search is never chained to the transport
+  exception** that caused it (plan 028, D5), and carries **no query, no key, no
+  URL and no response body**. The chaining is the point: a chained cause puts the
+  request URL into any traceback that is ever formatted, and for this one tool the
+  URL contains the query — which is message-derived text (`deployment.md`'s
+  redaction rule names web-search queries explicitly). So the raise is
+  deliberately lossy, and the loss is the feature.
 
 `model_not_enabled` carrying *which level set the reference* is the one place the
 error model does real product work: UC-012 says the roleplayer resolves the
@@ -965,6 +1241,28 @@ introduced yet.
 | `model_not_enabled` | **409** | as `no_embedding_model` | plan 006 |
 | `unknown_table` | **404** | the path's table name addresses no registry entry | plan 007 |
 | `schema_apply_failed` | **500** | the **500 posture** below — the instance failed to do what it offered | plan 007 |
+| `character_not_found` | **404** | the path's id addresses no row **for this caller**; another user's row answers identically to a nonexistent one, so existence never leaks (R5, refusal identity) | plan 009 |
+| `setup_not_found` | **404** | as `character_not_found`, indistinguishable for "nobody's" and "another user's" | plan 010 |
+| `session_not_found` | **404** | the same | plan 011 |
+| `setup_archived` | **409** | well formed, the caller owns the setup, and the setup's state conflicts with the operation — the shape of `username_taken`. **Not 404:** the setup exists for the caller, and saying otherwise would make "restore it and try again" undiagnosable. **Not 422:** no field is malformed | plan 011 |
+| `zone_empty` | **409** | well formed, the caller owns the session, the **stream's state** conflicts. Not 404 (the target exists), not 422 (nothing malformed) | plan 012 |
+| `zone_not_empty` | **409** | as `zone_empty` | plan 012 |
+| `nothing_to_reopen` | **409** | as `zone_empty` | plan 012 |
+| `message_not_editable` | **409** | as `zone_empty` | plan 012 |
+| `message_not_found` | **404** | the sibling of `session_not_found`: the path's id addresses no row of the caller's | plan 012 |
+| `memo_not_found` | **404** | the same sibling | plan 015 |
+| `memo_order_mismatch` | **409** | well formed and owned; the submitted order conflicts with the level's actual membership | plan 016 |
+| `no_model_enabled` | **409** | as `model_not_enabled`: a well-formed request against conflicting **registry** state | plan 017 |
+| `model_not_chosen` | **409** | as above, against conflicting **session** state | plan 017 |
+| `tool_failed` | **502** | a dependency's failure, like `llm_unreachable`. **Never an HTTP response as built** — it is the `tool_fail` frame's code — but the status is recorded where the code is born, so the first route that does raise it answers consistently | plan 021 |
+| `translation_failed` | **502** | a dependency's failure, like `llm_unreachable` | plan 023 |
+| `export_invalid` | **400** | the body is malformed or incompatible. The codebase's **first typed 400**: everything else malformed is FastAPI's own 422, but the SPA must tell "not an export" from "too old" without parsing prose, and a 422's shape is the framework's, not this error model's | plan 031 |
+| `database_not_empty` | **409** | a well-formed request that conflicts with instance state — the same shape as `already_configured` | plan 031 |
+
+**The five stream codes each carry a fixed default `message`**, following
+`already_configured`'s pattern (012 D13), so that a code raised with no arguments
+still renders a non-empty `message` on the wire. Whether a later code adopts the
+pattern stays a per-code decision by the feature that introduces it.
 
 #### The 500 posture — `secret_ref_missing` and `schema_apply_failed`
 
@@ -1102,6 +1400,13 @@ session's account no longer resolves — deleted, or disabled (FEAT-003). It
 carries no counts, no other accounts and no content. It is a read path scoped to
 `require_user`'s `user_id`, which is the whole of its scope.
 
+**It is unchanged by FEAT-013, deliberately.** The user's two language settings
+live at their own `GET` / `PATCH /api/me/settings` pair (017 D14) rather than on
+this route, because identity is read on every mount of two entries and the
+settings are read on one screen; widening this payload would make every mount pay
+for a screen most of them never show. The settings write stamps `users.updated_at`
+in the fixed-width timestamp form (`data-model.md`).
+
 Three consumers, and the first is why it exists:
 
 - **The `admin` entry awaits it before mounting** (`admin-surfaces.md`). RPHelper
@@ -1188,6 +1493,26 @@ that everything is sync; this is the first exception.
 transaction around an awaited call, the mix has to be resolved rather than
 extended — either by moving the database work off the loop or by adopting an
 async driver.
+
+**The second async consumer goes the other way** (plan 024). The embedding
+writes are **sync services that call `LlmClient.embed` through
+`asyncio.run`** — a sync→async bridge inside a synchronous transaction, rather
+than an async route holding a sync connection. That is legal only because the
+routes those services sit behind are sync `def` and therefore run on threadpool
+threads, **and they must stay so**: making one of them `async def` would run
+`asyncio.run` on a thread that already has a running loop, which raises. There is
+one client and one `embed` call per write operation.
+
+The cost is recorded in `search-and-retrieval.md` and it is real: **the SQLite
+write lock is held across the provider round trip**, so concurrent writers wait.
+**Flip condition:** if that wait becomes visible, the shape changes to
+mark-stale-plus-rebuild, which was already the recorded runner-up.
+
+Plan 006 shipped `llm_registry.py`'s two use-time validators with no call site at
+all. **Both have callers now** — the chat validator through
+`resolve_model_for_use` (plans 017, 021) and the embedding validator through the
+embedding writes (plan 024) — so the "ships with no call site" note that stood
+here is spent.
 
 ## Database access
 
@@ -1342,9 +1667,39 @@ zero tables; each later feature adds its `Table` literals there.
 
 The registry in `db/schema.py` remains authoritative for both the creation path
 and the drift report, and all SQL stays in `services`/`db` so R5's query-level
-scoping is auditable in one layer. The two SQL views (`data-model.md`) are
-declared there too, and are what every reader but `services/settle.py` selects
-from.
+scoping is auditable in one layer.
+
+**The four named selectables over `messages` are declared in the same module, and
+they are Core expressions rather than SQL views** (`data-model.md`):
+`settled_entries`, `current_zone`, `message_states` and `buried_messages`. They
+execute no DDL, which is the point — bootstrap's `create_all` and the drift
+page's `Create` / `Sync` handle tables only, drift and `/api/health` walk
+`metadata.tables`, a Sync batch-recreate of `messages` would break a real view at
+the rename step, and nothing in the product creates a view on an already-running
+instance. **There are no SQL views anywhere in this schema**, and the phrase "the
+two views" that this doc used to carry describes objects plan 012 deliberately
+did not build. Every reader goes through a selectable; `services/settle.py` is
+the only writer of the burial and settle columns.
+
+### The connection, the engine factory, and the two write paths that deviate
+
+Two paths deviate from "the request's own connection, one transaction per
+service operation", and both are named so neither is read as a pattern:
+
+- **The streaming harness writes a partial assistant row on its own short-lived
+  connection** from `get_engine(settings)`, never the request-scoped
+  `get_connection`, because `get_connection`'s teardown relative to body
+  iteration is unverified for the installed FastAPI (019 D7, `session-stream.md`).
+- **The tool seam dispatches on its own short-lived connection** and leaves no
+  transaction open (021 D6, `session-stream.md`).
+
+Two further deviations are in the persistence layer itself and are recorded
+below: a FEAT-005 Sync rebuild is the **one** path that suspends
+`PRAGMA foreign_keys`, and the whole-database import is the **one** path that
+drops the `vec0` tables (`transfer.md`). The import's own self-reference problem
+is solved by **insert-then-`UPDATE`**, deliberately **not** by deferring foreign
+keys or toggling the pragma — widening that suspension to a second path would
+make it look routine, which is exactly how it stops being checked.
 
 ### Schema evolution — the registry is the truth, the administrator applies
 
@@ -1444,33 +1799,93 @@ transaction back, leaves the table as it was, leaves no `_alembic_tmp_*` table
 behind, and raises `schema_apply_failed` (US-018.AC-6, US-018.AC-7). What the
 administrator sees and agrees to is `admin-surfaces.md`'s.
 
+**The derived tables live outside the registry, and that is a sixth fact**
+(plan 024). The `vec0` and FTS5 virtual tables are declared in
+`db/search_tables.py`, **not** in `metadata`, and are **ensured on write** —
+created, if absent, inside the transaction of the write that needs them, at the
+designated model's `embedding_dim`. They are outside `metadata` because their
+dimension is not a static property of the schema: it is measured when an
+administrator designates an embedding model (`data-model.md`), so a `Table`
+literal could not declare it. **This is not startup DDL**, so fact 2's "no DDL at
+startup" is untouched — `main.py`'s lifespan still runs none.
+
+**A risk that follows, and it has no owner in the code today.** A Sync rebuild of
+`memos` or `messages` is a create-copy-drop-rename, and the drop takes that
+table's **FTS triggers** with it. The next ensure-on-write restores the triggers,
+but it does **not** back-fill an already-existing FTS table — so between the Sync
+and the next full rebuild, that lexical index is **stale** for every row written
+in between. `fast/002.vector-index-rebuild` rebuilding both FTS tables is the
+only repair, which makes rebuild-after-Sync an operational step rather than an
+optional tidy-up (`admin-surfaces.md`).
+
 The flip condition is recorded in `overview.md`.
 
 ### The two transaction rules, and the asymmetry between them
 
-**A memo write and its embedding write are one transaction**, and **a failed
-embedding fails the whole transaction** for memo writes. That is the property the
-`sqlite-vec` choice was made for: a service that commits the row and then embeds
-in a follow-up transaction reintroduces exactly the drift the choice avoided, and
-FEAT-005's check stays meaningful only while a memo with no vector is genuinely
-an anomaly.
+**The relational write, the composition read, the embed call and the vector write
+all happen inside one transaction** (plan 024). The embed goes out through the
+`asyncio.run` bridge above, from inside that block — which is what holds the
+SQLite write lock across a provider round trip, the cost recorded under "The
+first async code".
+
+**A memo write and its embedding write are one transaction, and a failed
+embedding fails the whole transaction.** That is the property the `sqlite-vec`
+choice was made for: a service that commits the row and then embeds in a
+follow-up transaction reintroduces exactly the drift the choice avoided.
 
 **Message and session writes do the opposite, deliberately.** US-112 is explicit:
-with no embedding model configured, an edit to a settled entry **still saves**,
-and the roleplayer is told search coverage is incomplete (UC-078's exception
-flow). So:
+whatever stops an embedding being produced, an edit to a settled entry **still
+saves**, and the roleplayer is told search coverage is incomplete (UC-078's
+exception flow). The two postures, as built:
 
-| Write | Embedding unavailable (`no_embedding_model`) |
+| Write | Embedding unavailable |
 |---|---|
-| memo create / body edit | **fails the transaction** — nothing is stored |
-| message edit, settle, re-open (`session_vec`) | **succeeds, degraded** — the row is stored, the vector is left stale, the response says coverage is incomplete |
+| memo create / memo **body** edit | **fails the transaction** — nothing is stored |
+| memo body sent but **unchanged** | nothing — no model is needed |
+| memo body edited to **blank** | the vector row is removed; no model is needed |
+| memo **delete** | its `memo_vec` and `memo_fts` rows go in the same transaction; no model is needed |
+| character **persona** edit, setup **description** edit (the `session_vec` fan-out) | **fails the transaction** |
+| character / setup **create**, or a **name-only** edit | nothing — no session text changed, so no model is needed |
+| settled-entry edit, settle, re-open, **partner filing** (`session_vec`) | **succeeds, degraded** — the row is stored and the response carries `search_coverage_incomplete` |
+| zone append, zone-row edit | nothing — a zone row is not indexed; the coverage flag is false |
+
+**The caught set on the degraded path is `no_embedding_model` (including the
+dimension-mismatch form) and `llm_unreachable`** (024 U3, D8). The strict path
+catches neither and lets both propagate, at 409 and 502 respectively. So
+**`no_embedding_model` has two callers** — one that lets it out of the
+transaction, one that swallows it and reports degradation in the write's own
+response — and that split is the whole of the asymmetry's implementation.
 
 **This asymmetry is deliberate and is named here so nobody harmonises the two
 later.** In short: a memo exists *in order to be retrieved*, so an unembedded one
 is a note that silently does nothing; a settled entry is *the record of what
 happened*, and an instance-level omission must not block a roleplayer's own
 record-keeping. The full reasoning is in `search-and-retrieval.md`, which owns
-the embedding lifecycle and carries the same table. The structural consequence
-for this doc: **`no_embedding_model` has two callers** — one that lets it
-propagate out of the transaction, one that catches it and reports degradation in
-the write's own response.
+the embedding lifecycle and carries the same table; `session-stream.md` holds the
+route-level view of the degraded path.
+
+**One qualifier on the memo rule, added by the import** (plan 031). The strict
+transaction is what makes a memo with no vector an **anomaly** — but **no import
+embeds anything**, at any granularity, so after plan 031 a memo without a vector
+is also a perfectly **normal post-import state**, until
+`fast/002.vector-index-rebuild` runs. The transaction rule is unchanged for every
+write that goes through the API; what changed is that "no vector" is no longer
+diagnostic on its own (`transfer.md`).
+
+**Two defects live on the degraded path**, recorded here because this is the
+section a reader checks before changing it, and neither is behaviour this doc
+endorses:
+
+- **`secret_ref_missing` is not in the caught set — defect D-03.** An unset
+  `$ENV_VAR` key on the designated server therefore makes a settle or a settled
+  edit fail with a **500** and refuses the roleplayer's own text.
+  `US-112.AC-1` was widened at the 2026-10-06 product finalization to cover
+  "credentials the instance cannot use", so the build does not satisfy it. See
+  `docs/plans/defects.md` D-03.
+- **A failed degraded embed leaves any existing vector stale — defect D-04.**
+  There is no staleness marker and no staleness column (024 U5), and the recorded
+  remedy is the whole-index rebuild (UC-016). `US-112.AC-3`, new at the same
+  finalization, requires the material's existing vectors to be **cleared**
+  instead. See `docs/plans/defects.md` D-04, and note plan 032's finding that any
+  such delete must resolve its row ids through an owner-scoped query first —
+  the derived tables carry no user column.

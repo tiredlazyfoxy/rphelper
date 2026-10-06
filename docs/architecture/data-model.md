@@ -1,12 +1,15 @@
 # Data model
 
 **Realizes:** FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-006, FEAT-007,
-FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-015, FEAT-018,
-FEAT-019, US-136, US-138, US-139
+FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-014, FEAT-015,
+FEAT-017, FEAT-018, FEAT-019, UC-088, US-111, US-112, US-119, US-136, US-138,
+US-139, US-141, US-143, US-145
 
 One SQLite file under `data/`, holding relational rows, `sqlite-vec` vector
 tables and FTS5 full-text tables. Reasoning for one store is in `overview.md`;
-the retrieval mechanics are in `search-and-retrieval.md`.
+the retrieval mechanics are in `search-and-retrieval.md`; the **export/import
+contract moved to `transfer.md`** at the finalization of plans 008..032, while
+the tables and columns it reads stayed here.
 
 Conventions: **snowflake primary keys**, minted in application code (next
 section); every timestamp column named `*_at`; foreign keys declared and
@@ -79,21 +82,25 @@ Rules, each of which a plan must hold:
   different node ids, which makes ids minted on two instances non-colliding.
   **Its old justification is superseded and the setting survives it**: this
   bullet used to say the node id mattered "for FEAT-018 import", and US-136 has
-  since made import mint fresh ids unconditionally (Export/import contract,
-  below), so import no longer depends on it. It stays configurable as scheme
+  since made the roleplayer's imports mint fresh ids (`transfer.md`), so import
+  no longer depends on it — and the whole-database import, which does preserve
+  ids, is a replace onto an empty instance and so has nothing to collide with. It stays configurable as scheme
   hygiene — two instances writing to distinct databases should not be issuing the
   same id values — and because the flip condition below is stated in terms of it.
 - **Ordering is free.** A snowflake is k-sortable, so `ORDER BY id` is
   chronological. This is why the schema below carries **no `position` column** on
   messages.
-- **Import (FEAT-018) mints fresh ids** for every imported row and remaps the
-  payload's internal references — US-136.AC-2 requires imported material to
-  arrive under fresh identity, so this is a requirement rather than a mechanism
-  choice. See the Export/import contract below. **This reverses what this bullet
-  used to claim** (that import could *preserve* ids and reduce identity-on-import
-  to a collision check); the optimisation is ruled out by the product. The payoff
-  of the reversal is that the cross-instance node-id qualifier stops reaching
-  import at all — there is no collision to detect, because nothing is preserved.
+- **Import mints fresh ids at the roleplayer's three granularities, and preserves
+  them at the fourth.** `US-136.AC-2` requires imported material to arrive under
+  fresh identity, and `US-136`'s `Constraint:` now scopes that — and
+  merge-as-new — to **ACT-002's `user`, `character` and `session` granularities**.
+  The **whole-database import is a replace that preserves the export's own ids**
+  (`UC-061`, `US-077.AC-2`, `US-077.AC-3`), which is a deliberate deviation and
+  not an oversight. `transfer.md` has both halves and the reasoning. The relevant
+  fact for this section is that the three minting granularities use **the same
+  generator every other write uses**, so the single-generator guarantee already
+  covers them and there is no separate id space, no "imported" flag and no way for
+  an import to mint an id that collides with a live one.
 - **Ids are not secrets.** A snowflake leaks its creation time and is roughly
   sequential, so ids are guessable. That grants nothing: every read path is scoped
   by `user_id` at the query level (R5, FEAT-019), so a guessed id belonging to
@@ -106,12 +113,31 @@ worker, process or replica, or the deployment stops guaranteeing one generator p
 node id, both the layout and the string boundary need re-examination before that
 change ships.
 
-`_TBD: sqlite-vec's vec0 tables key on rowid, and it is not established here
-whether they handle sparse, very large rowids as efficiently as dense ones. The
-vector-store decision in overview.md rests on this. Verify before FEAT-014 and
-FEAT-015 are planned. The contained fallback, if sparse rowids prove costly: give
-memo_vec and session_vec a surrogate dense key of their own, mapped to the
-snowflake id, leaving the rest of the schema untouched._
+### Sparse snowflake rowids in the derived tables — verified, with one defect
+
+**The `_TBD:` that stood here is closed** (plan 024, U6). It asked whether
+`sqlite-vec`'s `vec0` tables handle sparse, very large rowids as efficiently as
+dense ones, because the vector-store decision in `overview.md` rests on it. They
+do. **Snowflake ids stay the `vec0` and FTS5 keys and there is no surrogate dense
+key**, so the contained fallback this `_TBD:` reserved is not taken.
+
+The measurement, recorded because the conclusion is only as good as it:
+sqlite-vec 0.1.9, SQLite 3.47.1, 5000 × 768-dimension vectors — insert time,
+on-disk size and **unfiltered** KNN are identical for dense ids and snowflakes,
+and FTS5 external content with conditional triggers passes `integrity-check` at
+rowids around 2^60.
+
+**One real defect came with that result, and it constrains the query layer rather
+than the schema.** `vec0` KNN with a **pushed-down id constraint** —
+`embedding MATCH ? AND k = ? AND <id> IN (...)` — silently drops true candidates
+for ids above roughly 2^50, as **false negatives only**, in 18–36% of queries.
+**That query form is forbidden.** The correct forms, and the "Query shape"
+example they replace, are in `search-and-retrieval.md`, which owns the query
+layer; they are recorded there **once** and deliberately not duplicated here.
+
+**Flip condition:** a `sqlite-vec` release that fixes pushdown at large rowids.
+At that point the forbidden form becomes available again and the workarounds in
+`search-and-retrieval.md` become optional rather than required.
 
 ## Entity map
 
@@ -178,6 +204,11 @@ account, not user content**, so R5 is untouched.
   is a cross-feature edit to code FEAT-002 owns.
 - **`updated_at` is deliberately NOT bumped by a login.** A column that moves on
   every sign-in stops meaning "the account record changed".
+
+**FEAT-013 added no column here** (plan 017). The two language defaults were
+already declared, and the user level carries nothing else (UC-047 step 2, R1), so
+the settings screen writes `rp_language`, `preferred_language` and `updated_at`
+— the last in the fixed-width timestamp form above — and touches nothing new.
 
 **`password_hash` stores a self-describing encoded string**
 (`$argon2id$v=19$m=...`): the algorithm, version and parameters live **in the
@@ -358,28 +389,90 @@ to be scoped by owning user **at the query level**, and a direct column makes th
 scope predicate impossible to forget and cheap to index. It also makes the
 per-user export (UC-062) a set of single-predicate selects.
 
+**What the ownership columns do not guarantee** (observed by plan 032's audit;
+**recorded, not changed**). `messages.user_id` is **not** constrained to equal
+its parent `sessions.user_id`, and `memos.scope_id` has **no foreign key** at
+all. So the schema cannot by itself rule out a row whose owner column disagrees
+with its parent's. Isolation therefore rests entirely on **the owner predicate
+being present in every query** — which is R5's own formulation, and which plan
+032's route-classification guard (`backend-structure.md`) is the build-time check
+for. No API path writes an inconsistent row, and the audit deliberately did not
+seed one: a test that proves the system behaves correctly on rows it cannot
+create proves nothing about the system. Stated here so that "the column is right
+there" is not mistaken for a constraint.
+
 ### `characters`
 
 **Realizes:** FEAT-006, FEAT-013, UC-017..UC-019, UC-048, UC-067
 
-`id`, `user_id`, `name`, `sheet` (the persona/character-sheet body, markdown),
-`model_ref`, `system_prompt`, `tools` (the three character-level overrides of
-R1), `archived_at` (nullable — R6), `created_at`, `updated_at`.
+| Column | Notes |
+|---|---|
+| `id` | PK |
+| `user_id` | FK → `users.id`, NOT NULL, **no `ON DELETE`**; one index on it |
+| `name` | |
+| `sheet` | the persona, **one markdown body** — see below. Text NOT NULL, no server default; `""` when omitted |
+| `model_server_id` | id type, **nullable, no FK** (plan 017) |
+| `model_name` | Text; named **both-or-neither CHECK** with `model_server_id` |
+| `system_prompt` | Text, stored verbatim; **blank is stored as NULL** |
+| `tool_memo_search`, `tool_session_search`, `tool_web_search` | Boolean, **nullable, no default** — three independent switches (R1) |
+| `archived_at` | nullable (R6) |
+| `created_at`, `updated_at` | |
+
+**`sheet` is one markdown body, not a set of fields** (009 D2). FEAT-006 asks for
+a persona; splitting it into name/appearance/voice fields would make the product
+decide what a persona consists of, which it deliberately does not.
 
 **No `rp_language` column and no `preferred_language` column.** This absence is
 the schema-level enforcement of R1's asymmetry (UC-048, UC-050). It is not an
 oversight and must not be added.
+
+**Delivered in two parts, and the gap is not drift.** Plan 009 declared `id`,
+`user_id`, `name`, `sheet`, `archived_at`, `created_at`, `updated_at` and the
+`user_id` index; **plan 017 added the six configuration columns**, whose
+encodings it fixed. A database created between the two picks up plan 017's
+columns through the drift page's **Sync**, and the table itself through
+**Create** (009 D5). Recorded because a reader of the plan-009 registry would
+otherwise read three or six missing columns as a defect.
+
+**The model reference is two columns with no foreign key, and `model_ref` as a
+literal column name is deliberately absent** (017 D4). A bare model name is
+ambiguous across two registered servers offering the same name — `models` is
+unique on `(server_id, model_name)` — so the reference is the pair. **No FK**,
+because a deleted server must neither cascade into a character nor null its
+reference: the dead reference has to survive in order to raise
+`model_not_enabled` at use time (R4). The CHECK makes the pair both-or-neither,
+so "half a reference" is not a state.
+
+**Configuration is written only through the configuration routes**
+(`…/configuration`), and a character configuration write **never touches a
+session row** and **never triggers the persona fan-out** (017 D9). The first half
+is `US-139.AC-1` — configuring a character's model does not reach existing
+sessions. The second is a cost fact: only `sheet` feeds `session_vec`, so a model
+or prompt change has nothing to re-embed.
 
 ### `setups`
 
 **Realizes:** FEAT-007, UC-020..UC-022, UC-068
 
 `id`, `user_id`, `character_id`, `name`, `description`, `archived_at`,
-`created_at`, `updated_at`.
+`created_at`, `updated_at` — eight columns, delivered whole by plan 010.
 
 A setup carries no configuration overrides — FEAT-007 describes it as a reusable
 object carrying its own memos and acting as a search anchor. Configuration
 inheritance has three levels (R1); the setup is not one of them.
+
+**As built by FEAT-007 (plan 010).** `user_id` → `users.id` and `character_id` →
+`characters.id`, both NOT NULL and with **no `ON DELETE`**; `description` is Text
+NOT NULL with no server default (`""` when omitted, and **never stripped** — a
+description's leading or trailing whitespace is the author's); one **non-unique
+index on `(user_id, character_id)`**, which is the shape every read of this table
+uses. An existing database picks the table up through **Create** (010 D7).
+
+**`character_id` is fixed for a setup's life.** No route moves a setup between
+characters (010 D5), which is why the single-resource path is flat
+(`/api/setups/{id}`) rather than nested — addressing it through its parent would
+be a second way to state something immutable. Plan 015's memo scope check relies
+on it: a setup-level note's chain position cannot change under it.
 
 ### `sessions`
 
@@ -387,39 +480,91 @@ inheritance has three levels (R1); the setup is not one of them.
 
 | Column | Notes |
 |---|---|
+| Column | Notes |
+|---|---|
 | `id` | PK |
-| `user_id` | direct scope column |
-| `character_id` | required |
-| `setup_id` | **nullable, no default, no sentinel** (R2, UC-021) |
-| `title` | roleplayer-facing label |
-| `partner_label` | free text; the partner is never a first-class entity (`glossary.md`) |
-| `rp_language` | session override (R1, two-level chain) |
-| `preferred_language` | session override (R1, two-level chain) |
-| `model_ref` | session override, unvalidated reference (R4) |
-| `system_prompt` | session override |
-| `tools` | session override |
+| `user_id` | direct scope column; FK → `users.id` |
+| `character_id` | required; FK → `characters.id` |
+| `setup_id` | FK → `setups.id`, **nullable, no server default, no sentinel** (R2, UC-021) |
+| `rp_language` | session override (R1, two-level chain); trimmed free text, blank = NULL, **no language list** |
+| `preferred_language` | the same |
+| `model_server_id` | the captured model's server id; **nullable, no FK** (plan 017) |
+| `model_name` | Text; named **both-or-neither CHECK** with `model_server_id` |
+| `system_prompt` | session override, verbatim; blank stored as NULL |
+| `tool_memo_search`, `tool_session_search`, `tool_web_search` | Boolean, nullable, no default |
 | `last_used_at` | drives the working-list order, most recent first (UC-026) |
 | `archived_at` | nullable (R6) |
 | `created_at`, `updated_at` | |
+
+No FK carries `ON DELETE`; one **non-unique index on `(user_id, character_id)`**
+and **none on `setup_id`** — nothing reads sessions by setup.
+
+**Delivered in two parts.** Plan 011 declared `id`, `user_id`, `character_id`,
+`setup_id`, `last_used_at`, `archived_at`, `created_at`, `updated_at` and the
+index; **plan 017 added the two languages, the model pair and the four
+configuration columns.** An existing database picks the table up through the
+drift page's **Create** and the later columns through **Sync** (011 D8). As with
+`characters`, the staging is recorded so the plan-011 registry does not read as
+six columns of drift.
 
 There is **no status or state column**: FEAT-008 and UC-025 state there is no
 "finished" state, and `archived_at` is the only lifecycle change. A `status`
 column would invite one.
 
+**There is no `title` and no `partner_label` column, and that is now a product
+rule rather than a deferral.** Plan 011 declared neither, because no requirement
+set them (011 D4); `US-145` has since made it explicit — **a session is
+identified by its start time, not a title** — so the UI labels a session with
+`created_at` rendered `YYYY-MM-DD HH:MM` local. The consequence for the lexical
+index is in the FTS5 section below: `session_fts` is declared over two columns
+that do not exist.
+
 `last_used_at` is a separate column from `updated_at` because "last use" is a
 reading-and-working signal (UC-026) while `updated_at` moves on any write; using
 one for the other makes list order jump for reasons the roleplayer did not cause.
 
-**`model_ref` is captured at session CREATION, and it is the only thing that is
+**What moves `last_used_at`, as built** (011 D3, 012 D3). It is set at creation,
+equal to `created_at`, and is afterwards bumped **only by content writes** — the
+zone append, a partner filing, a zone or settled-entry edit, settle, re-open and
+compose — each in its own transaction, to the operation's one instant, together
+with `updated_at`. It is **never** moved by opening or reading a session, by
+archive, or by restore, and a **refused** operation writes nothing. There is no
+resume or touch route: resuming is a read (011 D3). Before plan 012 shipped the
+content writes, last-use order was therefore identical to creation order.
+
+**Every session read carries `setup_name`** — the referenced setup's **current**
+name, by an owner-scoped LEFT JOIN, shown **even when the setup is archived**
+(011 D10, 010 D3). It is on the read rather than denormalized onto the row so
+that renaming a setup relabels every session referencing it with **no fan-out
+write**, and so that `US-088`'s label costs no second request.
+
+**The model is captured at session CREATION, and it is the only thing that is
 captured.** R1 resolves a model reference through `character → session`, and
 US-106 adds a floor: a character with no model configured resolves to "the first
 enabled model". Re-resolved dynamically on every request, that floor is
 **unstable** — an administrator enabling a model that sorts earlier would
 silently change the model a never-configured session has been using, which is
 precisely the silent substitution R4 forbids. So the resolved reference is
-**written onto `sessions.model_ref` when the row is inserted**, in the same
-transaction as the rest of session creation, and the session keeps it. After that
-the session's model changes only when the roleplayer changes it (UC-077, US-105).
+**written onto `sessions.model_server_id` / `model_name` when the row is
+inserted**, in the same transaction as the rest of session creation, and the
+session keeps it. After that the session's model changes only when the roleplayer
+changes it (UC-077, US-105).
+
+**As built (017 D1, D7; 018 D3).** The capture runs **inside `start_session`'s
+one transaction, after the character and setup checks**, in this precedence:
+
+1. the character's `(model_server_id, model_name)` pair, **captured as-is and
+   unvalidated** — even when nothing on the instance is currently enabled, which
+   is what `US-139.AC-2` requires;
+2. otherwise the **first enabled model** in the instance's order (`llm_servers.id`
+   then `models.id`, ascending — the LLM Servers page's own order);
+3. otherwise **both columns NULL**.
+
+The system prompt, the tool switches and the two languages are **never copied**
+at creation; they stay overrides resolved live. **Sessions created before plan
+017 hold NULL, and there is no backfill** (017 D1) — a backfill would be the
+system choosing a model for a session the roleplayer never configured, which is
+the substitution R4 forbids wearing a different hat.
 
 **Two corrections in one paragraph, both marked:** the chain is
 `character → session`, not `user → character → session` (see the `users`
@@ -449,19 +594,23 @@ materialised value when the character is configured with a model afterwards.
 only sessions created from that point on capture the new one. R4 carried the same
 question and it is closed there too.
 
-What creation does when **no model is enabled at all** is a new and genuinely
-open question, raised and not answered in R4 (`domain-rules.md`) — whether
-creation is refused or the row is inserted with `model_ref` NULL and filled on
-the first successful resolution. The column is nullable either way, so the schema
-does not pre-empt the answer.
+**What creation does when no model is enabled at all is settled, and the `_TBD:`
+is closed.** `US-143` answers it: **a session is created even when no model is
+enabled**, and it captures none until the roleplayer picks one. The row is
+inserted with **both columns NULL**, and **nothing fills them later on its own** —
+the only writer after creation is the roleplayer's choice in the stream header
+(UC-077, US-105). Creation is therefore never refused for want of a model, which
+is what keeps UC-080's start-a-session-by-writing reachable on a fresh instance.
+The refusal the roleplayer meets instead is at **send** time, and it is a
+distinct one: `model_not_chosen` (`US-144`), not US-107's `no_model_enabled`.
+R4 carries the same closure.
 
-`_TBD: the ENCODING of model_ref is not fixed anywhere. A bare model name is
-ambiguous across two registered servers that offer the same name, since models is
-unique on the (server_id, model_name) pair. FEAT-004's use-time validator
-deliberately takes the server id and the model name as two plain arguments (plan
-006), so the encoding decision stays with the feature that writes this column —
-FEAT-008's / FEAT-013's plans. The gap is invisible while nothing reads the
-column and becomes a silent ambiguity the moment two servers are registered._`
+**The encoding `_TBD:` is closed too** (017 D4). It asked how `model_ref` encodes
+a model, given that a bare name is ambiguous across two servers offering the same
+one. The answer is the two-column pair with no FK and a both-or-neither CHECK,
+described under `characters` above; `model_ref` and `tools` as literal column
+names are deliberately absent from this schema, so a reader looking for them is
+reading a superseded draft.
 
 ### `messages`
 
@@ -513,6 +662,12 @@ What follows from the shape:
   stream. Nothing in `docs/product/` permits reordering entries. If that ever
   changes, an explicit order key comes back and `ORDER BY id` stops being the
   stream order.
+  **One accepted consequence of `ORDER BY id`** (012 D14, user decision): a
+  partner block may be filed while the zone holds a draft, and if that draft is
+  settled afterwards it sorts **above** the partner block — it was begun first —
+  and is not re-openable, because the partner block is then the last settled row.
+  This is chronologically true and harmless, so there is **no backend refusal and
+  no UI guard**. Recorded because it looks like a bug the first time it is seen.
 - **"Exactly one current zone" (US-125) needs no constraint at all.** The zone is
   not a row; it is the set of rows in a session matching
   `related_to IS NULL AND settled_at IS NULL`. A set cannot be duplicated, so
@@ -550,6 +705,39 @@ this table.
 **Indexes** the three states need: `(session_id, settled_at)` for the record read
 (the common path), and `(related_to)` for burial and re-open.
 
+### As built by plan 012, with the tool columns filled by plan 021
+
+The twelve columns exactly as listed. **`role` and `kind` are plain text with no
+database CHECK** — their value sets are constrained at the pydantic boundary, the
+same choice `llm_servers.kind` makes and for the same reason: a fourth role or a
+fourth kind must not be a schema change. The **one** named CHECK is the state
+constraint above, `related_to IS NULL OR settled_at IS NULL`. No foreign key
+carries `ON DELETE`. An existing instance picks the table up through **Create**.
+
+**`tool_name` and `tool_payload` were declared by plan 012 and unwritten until
+plan 021**, which is the writer. As built (021 D7):
+
+- **One `role='tool'` current-zone row per completed call.**
+- `text` is the tool's **summary**, or the literal `The tool failed.`
+- `tool_payload` is JSON:
+  `{call_id, arguments (the raw string), status: ok|failed, content | code}`.
+- **A call stopped mid-run writes no row at all** — a cancellation propagates and
+  the exchange ends (`US-133.AC-1`).
+- The **wire** carries a *derived view* of the payload, never the payload:
+  `tool_name`, `tool_status` and `tool_args` on `MessageResponse`, derived in
+  `services/messages.py` (022 D3). `tool_payload` itself, the provider's
+  `call_id` and the raw tool content stay server-side.
+
+**A current-zone assistant row may contain `<think>` … `</think>` blocks** —
+persisted reasoning, stored exactly as it streamed (021 D4). They are stripped
+from an assistant head **at settle** (`session-stream.md`), never at edit, so the
+column holds reasoning while the row is a candidate and never once it is record
+(`US-146`).
+
+**Every write in one operation uses one instant**, and burial and re-open bump
+the moved rows' `updated_at` to it (012 D3) — a row that changed state did change,
+even though its text did not.
+
 #### The cost of the merge, named as a deliberate reversal
 
 The three-table design bought a structural guarantee that this one does not:
@@ -559,31 +747,76 @@ clause, which is weaker — a forgotten predicate now returns buried scaffolding
 into the prompt instead of failing to compile. That is a real loss and it is
 recorded rather than quietly dropped.
 
-**Mitigation — two SQL views, so the predicate exists in exactly one place:**
+**Mitigation — four named Core selectables, so each predicate exists in exactly
+one place.** They are **module-level SQLAlchemy Core selectables declared in
+`db/schema.py`**, not SQL views:
 
-```sql
-CREATE VIEW settled_entries AS
-  SELECT * FROM messages WHERE settled_at IS NOT NULL;
+| Selectable | Predicate | Carries | Readers |
+|---|---|---|---|
+| `settled_entries` | `settled_at IS NOT NULL` | every column | the record read, context assembly, `session_vec` composition, my-search, `session_search`'s excerpt |
+| `current_zone` | `related_to IS NULL AND settled_at IS NULL` | every column | the zone read, context assembly, settle's head and burial set |
+| `message_states` | none of its own | **`id`, `user_id`, `session_id`, `related_to`, `settled_at` only — no text** | the edit route, to tell a buried row from a missing one |
+| `buried_messages` | `related_to IS NOT NULL` | every column | **the discussion read, and nothing else. Read-only** |
 
-CREATE VIEW current_zone AS
-  SELECT * FROM messages WHERE related_to IS NULL AND settled_at IS NULL;
-```
+None of them carries a session filter or an ordering — callers narrow and order,
+because the predicate they exist to hold is the *state* predicate and adding a
+second concern would make them the only query shape anyone could express.
 
-- Context assembly unions the two views (`llm-and-streaming.md`).
-- `session_vec` composes its text from `settled_entries`.
-- My-search (FEAT-017) reads `settled_entries`.
-- **Raw `messages` is touched by exactly two operations: settle and re-open.**
+**There are no SQL views anywhere in this schema, and that is a decision**
+(012 D1, user decision), not an abbreviation of one. The four reasons:
+bootstrap's `create_all` and the drift page's `Create` / `Sync` handle **tables
+only**; the drift walk and `/api/health` walk `metadata.tables`; a Sync
+batch-recreate of `messages` would **break a real view at the rename step**; and
+**no path creates a view on an already-running instance**, so a view declared now
+would exist only on databases bootstrapped later. The phrase "two SQL views" in
+earlier drafts of this doc described objects that were deliberately never built.
 
-Buried rows are therefore invisible to every reader that goes through a view: the
-absence is restored one level down, at the view boundary instead of at the table
-boundary. A query that names `messages` directly and is not settle or re-open is a
-defect, and is the thing to look for in review.
+`message_states` is the one addition the design needed rather than inherited
+(012 D7, planner decision accepted by the user): the edit route must distinguish
+a buried row from a nonexistent one, and doing that through `settled_entries` or
+`current_zone` is impossible by construction while doing it with a raw `select()`
+on `messages` would breach R11. **It cannot carry content**, so R11's purpose —
+buried text never reaches a reader by accident — holds even though a fourth
+reader of the table now exists. `buried_messages` (022 D2) is the fourth
+predicate and is **read-only**: the discussion read is its only consumer, and no
+write path goes through it.
+
+**What is written where, stated precisely** (012 D16), because the older wording
+("raw `messages` is touched by exactly two operations") contradicted the route
+table:
+
+- **Reads** outside settle and re-open go through a selectable. A `select()`
+  naming `messages` directly anywhere else is a defect and is the thing to look
+  for in review.
+- **The burial and settle columns** — `related_to`, `kind` and `settled_at` on an
+  existing row — are written **only by settle and re-open**.
+- **Inserts** are the zone append, the partner filing, the assistant row and the
+  character page's opening message.
+- **`text` and `updated_at`** are written by the edit route, on a zone row and on
+  a settled row alike (plan 014).
+
+Buried rows remain invisible to every reader that goes through a selectable other
+than `buried_messages`: the absence the three-table design got for free is
+restored one level down, at the selectable boundary instead of at the table
+boundary.
 
 ### `translations`
 
 **Realizes:** FEAT-011, UC-039, UC-040, UC-041
 
-`id`, `message_id`, `target_language`, `text`, `created_at`.
+| Column | Notes |
+|---|---|
+| `id` | PK |
+| `user_id` | FK → `users.id`, NOT NULL — the owner column this list used to omit (plan 023) |
+| `message_id` | FK → `messages.id`, **no cascade** |
+| `target_language` | the session's resolved preferred language at write time |
+| `text` | |
+| `created_at` | Text, the fixed-width form |
+
+**There is no `updated_at`**, deliberately: a row here is only ever inserted or
+deleted, never edited, so a column recording its last change would always equal
+`created_at`. The unique constraint is named
+`uq_translations_message_id_target_language`.
 
 `message_id` points **only at settled rows** — a translation of a current-zone
 message would be a translation of something that is not yet record. Unique on
@@ -598,12 +831,23 @@ nothing is cached). There is no `failed` or `pending` state — absence of a row
 means "not translated yet", which is also exactly what "translation failed" should
 leave behind.
 
-A row is invalidated when `messages.text` changes (US-111). `_TBD: docs/product/
-does not state whether editing a non-partner settled message should discard a
-cached translation (UC-029 vs UC-041); US-111 settles only the partner case. The
-design deletes the cached rows on any text change, because serving a translation
-of text that no longer exists would show the roleplayer something false; this is a
-design inference beyond US-111, not a stated requirement._`
+**The write is insert-or-ignore on the unique pair, and only if the message's
+current text still equals the text that was translated** (023 D8, D9). The second
+condition is the one a reader would omit: the provider round trip is not inside
+the message's transaction, so a concurrent edit can land while the translation is
+in flight, and writing anyway would cache a translation of text that no longer
+exists. Insert-or-ignore rather than upsert because a row that already exists is
+already correct for that pair.
+
+**Invalidation: the `_TBD:` that stood here is closed.** It asked whether editing
+a **non-partner** settled message should discard a cached translation (UC-029
+versus UC-041), noting that US-111 settled only the partner case. **`US-111.AC-3`
+now requires exactly what the build does**: editing **any** settled entry
+discards its cached translation. So `edit_message_text` deletes the message's
+rows on **any** text change, inside the edit transaction, and what was a design
+inference is now the requirement it inferred. The reason it was inferred that way
+is unchanged and worth keeping: serving a translation of text that no longer
+exists would show the roleplayer something false.
 
 ### `memos`
 
@@ -621,6 +865,19 @@ design inference beyond US-111, not a stated requirement._`
 | `sort_key` | mutable order **within `(scope, scope_id)`** (UC-076, US-102) |
 | `created_at`, `updated_at` | |
 
+**As built by FEAT-012 (plan 015, D10).** Ten columns exactly as listed — **no
+`title`, no `archived_at`, no `state`**. `scope` is constrained by a **CHECK over
+the four values**, in the same non-native-Enum form `users.role` uses, and the
+reasoning is stronger here than there: **the four scopes *are* R2's chain**, so a
+fifth is an architecture change by definition, not a configuration change.
+`scope_id` carries **no foreign key** (the polymorphic pair cannot express one —
+below). One **non-unique index on `(user_id, scope, scope_id, sort_key)`**, which
+is exactly the shape every list and the chain resolution reads. **A user-level
+note stores `scope_id` = its owner's own id** rather than NULL, so the chain
+predicate has one form at all four levels; the wire sends `scope_id` as null for
+the user level, which is the API's choice and not the column's
+(`backend-structure.md`).
+
 **There is no `title` column.** US-119 states a note is one body of text with no
 title, name or header field. A memo in a result list is identified by a snippet of
 its body plus its chain level, which is what FEAT-012 already specifies — so the
@@ -636,6 +893,26 @@ US-103 forbids a note moving between levels by dragging and the level order itse
 is fixed — an order key that spanned levels would make an illegal move
 expressible.
 
+**Allocation, as built** (016 D5, D6; user decision U3 — this **supersedes** plan
+015's `COALESCE(MAX(sort_key), -1) + 1` and the earlier rule must not be
+reinstated):
+
+- **A new note gets `COALESCE(MIN(sort_key), 1) - 1`** over the owner's notes at
+  the same `(user_id, scope, scope_id)`, inside the create transaction, **so a
+  new note lists first**. `US-102.AC-2` now requires exactly that: a newly
+  created note holds the first position in its level until reordered.
+- **`sort_key` is a signed integer** and runs downwards from the first note —
+  0, then −1, −2, … That is the direct consequence of allocating at the minimum,
+  and it is why the column may not be made unsigned.
+- **A reorder rewrites one whole level to `0..n-1`** in one transaction.
+- Lists and the chain order by **`sort_key, id`**. Gaps left by deletes are
+  harmless.
+- **No unique constraint**, because the rewrite passes through duplicate keys
+  mid-transaction and a unique index would collide there. This is the one place
+  the absence of a constraint is load-bearing rather than merely untidy.
+- **A reorder does not move `updated_at`.** Order is arrangement, not content,
+  and a note whose text nobody touched has not changed.
+
 **Two booleans, not one three-valued state column.** The reasoning is R3's and is
 written there; the schema consequence is that a disabled note keeps its `is_forced`
 value, so re-enabling restores the mode it had (US-101).
@@ -650,26 +927,52 @@ rather than four separate tables. Reasons, in order of weight:
    whole chain in one pass, and joins to one vector table and one FTS table
    instead of four.
 3. FEAT-018's per-character and per-session exports select memos by
-   `(scope, scope_id)` directly.
+   `(scope, scope_id)` directly. **As built** (plan 030): the character
+   granularity selects memos scoped to the character, its setups and its
+   sessions; the session granularity selects that one session's memos only
+   (`transfer.md`).
 
 The cost is that referential integrity for `scope_id` is not expressible as a
 single foreign key. That is accepted, and the mitigation is explicit: memo
 creation goes through a service that validates the target level exists and belongs
-to the same user, plus an orphan-scope check over `(scope, scope_id)`.
-Recorded as a trade rather than hidden.
+to the same user. Recorded as a trade rather than hidden.
 
-**The orphan-scope check is NOT part of FEAT-005's drift report, and is not
-built yet.** This paragraph used to say the drift report included it. FEAT-005's
-feature (plan 007) shipped without it, for two reasons: `memos` does not exist
-until FEAT-012's feature (`015`), so there was nothing to check; and the check is
-a **content** check over `(scope, scope_id)`, not a structural one, so it does not
-belong in the structural per-table report at all. **Owner: the feature that
-creates `memos`**, as its own admin-facing check or as a widening of the Database
-page, whichever that plan chooses.
+**The orphan-scope check is not built, and this doc deliberately names no owner
+for it.** It was never part of FEAT-005's drift report — plan 007 shipped without
+it, and it does not belong there anyway: it is a **content** check over
+`(scope, scope_id)`, not a structural one. Plan 015 then created `memos` without
+building it either (015 D3, user decision). The reason that is acceptable rather
+than a gap:
+
+- **An orphan cannot arise today.** Nothing a memo scopes to is ever deleted —
+  characters, setups and sessions archive instead (R6) — and create validates its
+  target. The one whole-instance delete that exists, plan 031's database replace,
+  wipes **both** sides of every scope (`transfer.md`).
+- **The earlier wording named "the feature that creates `memos`" as owner, and
+  that owner has shipped.** Re-assigning it to a named future plan would be
+  inventing work no requirement asks for, so none is named.
+- **Flip condition: the first per-entity delete path.** The moment any one
+  character, setup or session can be destroyed rather than archived, an orphaned
+  `(scope, scope_id)` becomes reachable and this check acquires a reason to
+  exist.
 
 There is **no archived state and no `archived_at`** on this table (R3, R6). Memos
 do not archive; the column must not appear here, and `is_enabled` is not a
 stand-in for one.
+
+**A memo's removal is an explicit, hard delete** —
+`DELETE /api/memos/{memo_id}` — and it is the **only** removal a memo has
+(015 D2). The roleplayer reaches it by **emptying a saved note**, which
+`UC-088` / `US-141` now require: a saved note is removed by emptying it, and a
+new note with no text is never persisted at all. Plan 015 shipped that as a
+plan-time decision with no story behind it; the product has since supplied one.
+
+The contrast with R6 is deliberate and stated on both pages: characters, setups
+and sessions **never** delete, because they archive; memos have **no** archive
+state, so delete is their removal. Applying either rule to the other side is a
+design error in either direction. The delete also removes the memo's `memo_vec`
+and `memo_fts` rows **in the same transaction** (plan 024) — a vector with no
+memo would be a hit that resolves to nothing.
 
 ### `translations`, `messages`, `memos` and the archive rule
 
@@ -680,6 +983,35 @@ with nothing lost (UC-024, UC-025).
 There is no `ON DELETE CASCADE` reachable from an archive operation, because
 archiving is not a delete.
 
+### The as-built archive semantics, one rule for all three entities
+
+Set by plan 009 for characters and matched by plans 010 and 011 (009 D9, 010 D5,
+010 D9, 011 D2, 011 D13). R6 fixes *what* archiving means; these are the
+postures it leaves open, and they are recorded so the three entities do not
+diverge:
+
+- **Archive is idempotent and keeps the original `archived_at`.** Archiving an
+  already-archived object does not re-stamp it — the timestamp answers "when was
+  this put away", and a second click must not rewrite the answer.
+- **Restore sets `archived_at` to NULL.**
+- **A no-op writes nothing**, including no `updated_at` bump. Archiving something
+  already archived is not a change.
+- **A real state change bumps `updated_at` and never `last_used_at`** — archiving
+  is not use (011 D2).
+- **Editing an archived object is allowed** and leaves `archived_at` unchanged.
+  R6 says a restored object comes back fully usable; refusing edits meanwhile
+  would make archiving a soft freeze, which it is not.
+- **An archived parent stays a valid parent.** An archived character still lists
+  and accepts **new setups**; an archived character, setup or session is a valid
+  target for a memo list, a memo create and the chain (015 D8). The one
+  exception is the only one the product states: a **new** session may not adopt
+  an archived setup (`setup_archived`, UC-021). Archiving a setup that sessions
+  already reference is **always silent and always succeeds** — existing sessions
+  keep their `setup_id` and keep working, and keeping a reference count out of
+  the UI also keeps R5's reverse-lookup pattern off that screen.
+- **Notes are untouched by any of it** (015 D8). Archiving a character, setup or
+  session changes nothing on its memos.
+
 ---
 
 ## Vector tables (`sqlite-vec`)
@@ -687,7 +1019,29 @@ archiving is not a delete.
 **Realizes:** FEAT-005, FEAT-014, FEAT-015, FEAT-017, UC-016, UC-051, UC-053
 
 Two `vec0` virtual tables, each declared with the designated embedding model's
-dimension (`models.embedding_dim`):
+dimension (`models.embedding_dim`). **They are not in `metadata` and not in
+`db/schema.py`** (plan 024): they live in `db/search_tables.py` and are
+**ensured on write** — created, if absent, inside the transaction of the write
+that needs them, at the designated model's `embedding_dim`, which is read back
+from the stored DDL when they already exist. The reason they cannot be `Table`
+literals is that their dimension is **measured** at designation time
+(`models.embedding_dim`, below) and is therefore not a static property of the
+schema. A dimension that no longer matches the designation raises
+`no_embedding_model` with `detail {"reason": "dimension_mismatch"}`, and **only
+the rebuild re-declares** them. **Upsert is delete-then-insert or `UPDATE`**,
+because `INSERT OR REPLACE` fails on `vec0` 0.1.9.
+
+Consequences of living outside `metadata`: they are outside FEAT-005's drift
+report (a recorded gap with a named owner, `admin-surfaces.md`), and ensuring
+them is **not** DDL at startup, so `backend-structure.md`'s "no DDL at startup"
+rule is untouched.
+
+**They may legitimately be absent.** The whole-database import **drops both
+tables inside its transaction** (plan 031, `transfer.md`), so that a restore
+whose designated model measures a different dimension cannot strand the instance
+in `dimension_mismatch`; the next qualifying write re-creates them at the right
+dimension. **Their absence after a restore is a legitimate state transition, not
+drift.**
 
 ```sql
 CREATE VIRTUAL TABLE memo_vec USING vec0(
@@ -714,9 +1068,9 @@ entire reason `sqlite-vec` was chosen over a separate store (`overview.md`): a
 memo's `is_enabled` / `is_forced` pair can change at any time (UC-044, UC-075) and
 must not require a second-store write.
 
-Both tables key on rowid, which here is a snowflake — see the `_TBD:` under
-Identifiers on sparse rowids, which must be verified before FEAT-014 and FEAT-015
-are planned.
+Both tables key on rowid, which here is a snowflake. That is **verified**, with
+one forbidden query form — see "Sparse snowflake rowids in the derived tables"
+under Identifiers, and `search-and-retrieval.md` for the query forms themselves.
 
 `session_vec` embeds a session-level summary text rather than per-entry vectors,
 because FEAT-015's unit of result is a past session. Per-entry embeddings remain
@@ -729,7 +1083,7 @@ session even when its entries do not describe the query (US-138.AC-2). The
 composition is therefore three sources:
 
 ```
-session_vec text  =  the session's settled entries          (settled_entries view,
+session_vec text  =  the session's settled entries          (settled_entries,
                                                              INCLUDING decisions —
                                                              US-122.AC-2, unchanged)
                   +  the character's persona                (characters.sheet)
@@ -738,8 +1092,16 @@ session_vec text  =  the session's settled entries          (settled_entries vie
 ```
 
 The two constraints that were already fixed are unchanged: it reads the
-**`settled_entries` view** and never raw `messages` (R11), and it **must include
-`kind='decision'` rows** (US-122.AC-2).
+**`settled_entries` selectable** and never raw `messages` (R11), and it **must
+include `kind='decision'` rows** (US-122.AC-2).
+
+**As built the order is persona, then setup text, then settled entries in id
+order** (024 D6) — not the order the formula above happens to list. Empty parts
+are dropped and the rest joined with a blank line. **Persona and setup lead so
+that model-side truncation of a long session cannot drop them**, which is exactly
+what `US-138.AC-2` depends on: a query describing a *person* must find the session
+even when its entries do not describe the query. An empty composed text means
+**no `session_vec` row at all**.
 
 **The invalidation edge this creates is a fan-out, and it is the first one in the
 system.** Until now every `session_vec` write was one session per relational
@@ -756,34 +1118,70 @@ to `session_vec`, so they are no longer purely relational columns.
 **Realizes:** FEAT-014, FEAT-017, UC-051, UC-058
 
 ```sql
-CREATE VIRTUAL TABLE memo_fts    USING fts5(body,  content='memos',    content_rowid='id');
-CREATE VIRTUAL TABLE message_fts USING fts5(text,  content='messages', content_rowid='id');
-CREATE VIRTUAL TABLE session_fts USING fts5(title, partner_label, content='sessions', content_rowid='id');
+CREATE VIRTUAL TABLE memo_fts    USING fts5(body, content='memos',    content_rowid='id');
+CREATE VIRTUAL TABLE message_fts USING fts5(text, content='messages', content_rowid='id');
 ```
 
-External-content (`content=`) tables so the text is not stored twice, kept in sync
-by triggers on the base tables. `message_fts` and `session_fts` exist for
-FEAT-017's my-search, which reaches characters, setups, sessions, entries and
-memos (UC-058) — a lexical index is what makes "find the session where I mentioned
-X" work. BM25 ranking, fused with vector results by reciprocal-rank fusion; see
+**Two tables exist. A third, `session_fts`, is declared in this doc's history and
+was never created** (plan 024, U7). Its declaration indexes `title` and
+`partner_label` — **columns `sessions` does not have** and, after `US-145`, is
+not going to have as a title (plan 011 D4). So it could not be created against
+the built registry at all. It waits on **the feature that gives a session text
+columns**, and until then there is no owner to name and nothing to create.
+Recorded because the earlier sentence here — that `message_fts` and `session_fts`
+"exist for FEAT-017's my-search" — was **stale**: `session_fts` does not exist,
+and FEAT-017's my-search was built (plan 029) without it. The same correction is
+made in `search-and-retrieval.md`.
+
+External-content (`content=`) tables so the text is not stored twice, kept in
+sync by triggers on the base tables. `message_fts` exists for FEAT-017's
+my-search, which reaches characters, setups, sessions, entries and memos (UC-058)
+— a lexical index is what makes "find the entry where I mentioned X" work. BM25
+ranking, fused with vector results by reciprocal-rank fusion; see
 `search-and-retrieval.md`.
 
 `memo_fts` indexes `body` alone because `memos` has no `title` column (US-119).
 
-**`message_fts` keeps its external content on the base table `messages`, not on
-the `settled_entries` view** — fts5 external content requires a real rowid table.
-The index is still restricted to settled rows, by the triggers rather than by the
-declaration: insert on the settle transition, delete on re-open, update on a text
-edit of a settled row. So a current-zone or buried message is never lexically
-findable (US-115), which is what my-search requires, and the view boundary above
-and the trigger condition here say the same thing in two places on purpose.
-FTS5 external content keys on the same snowflake rowids as the vector tables, so
-the sparse-rowid `_TBD:` under Identifiers covers it too.
+### The trigger conditions, exactly
 
-`characters` and `setups` are searched by their own columns via `LIKE`/FTS as the
-plan for FEAT-017 decides; they are small enough that an index is not obviously
-worth its sync cost. `_TBD: whether characters and setups get their own FTS tables
-is left to FEAT-017's plan._`
+Recorded to this level of detail because **an unconditional update trigger
+corrupts external-content FTS5** — the index keeps a row the base table no longer
+matches, and the corruption surfaces much later as a hit that resolves to nothing
+(plan 024, D2):
+
+- **`memo_fts`** — on insert, on delete, and on **`UPDATE OF body` only**. Scoping
+  the update trigger to one column is what keeps a flag toggle (UC-044) and a
+  reorder (UC-076) from churning the index; both are frequent and neither changes
+  text.
+- **`message_fts`** — insert **when the row is born a record row** (a pasted
+  partner block); delete **iff OLD was a record row**; and **one** update trigger
+  that first issues `'delete'` with the OLD values **iff OLD was a record row**,
+  then inserts NEW **iff NEW is a record row**. One trigger rather than two
+  because the settle and re-open transitions change the predicate and the text in
+  the same statement, and two triggers would each see half of it.
+- **Back-fill on creation** — `memo_fts` via `'rebuild'`; `message_fts` via an
+  `INSERT…SELECT` of record rows only, because `'rebuild'` would index every
+  current-zone and buried row.
+
+So the index is restricted to settled rows **by the triggers rather than by the
+declaration** — fts5 external content requires a real rowid table, which is why
+`message_fts` keeps its content on `messages` and not on the `settled_entries`
+selectable. A current-zone or buried message is therefore never lexically
+findable (US-115), which is what my-search requires, and the selectable boundary
+above and the trigger conditions here state the same rule in two places on
+purpose.
+
+FTS5 external content keys on the same snowflake rowids as the vector tables, and
+the verification under Identifiers covers it: `integrity-check` passes at rowids
+around 2^60.
+
+**`characters` and `setups` get no FTS table, and that `_TBD:` is closed.** It
+had left the question to FEAT-017's plan, and plan 029 answered it: both are
+matched by a SQLite **`LIKE` substring** over their own columns — `name` plus
+`sheet` for a character, `name` plus `description` for a setup — because the two
+tables are small enough that an index is not worth its sync cost. The as-built
+limitation that comes with `LIKE`, and **defect D-05** against `US-147`, are
+recorded **once**, in `search-and-retrieval.md`, which owns the query layer.
 
 ## Schema drift and rebuild
 
@@ -838,9 +1236,16 @@ expensive and an expensive one look routine.
   and a false `drifted` row invites a destructive rebuild that fixes nothing.
   The two normalisations, the type compiled through the SQLite dialect and the
   implicit `UNIQUE`/`PRIMARY KEY` indexes excluded, are in `admin-surfaces.md`.
-- **The walk covers `metadata.tables` only.** The two SQL views and the `vec0` /
-  FTS5 virtual tables are outside the report, a recorded gap with named owners
-  (`admin-surfaces.md`). None of them exists yet.
+- **The walk covers `metadata.tables` only.** The `vec0` / FTS5 virtual tables
+  are outside the report, a recorded gap with a named owner
+  (`admin-surfaces.md`). There is **no views half to that gap**: no SQL view
+  exists, so the drift report has nothing about one to describe (plan 012 D1).
+  **A second edge to the surviving gap, added by plan 024:** the virtual tables
+  live in `db/search_tables.py`, and a Sync **rebuild of `memos` or `messages`
+  drops that table's FTS triggers**. The next ensure-on-write restores the
+  triggers but does not back-fill an existing FTS table, so that index is stale
+  for everything written between the Sync and the next full rebuild
+  (`backend-structure.md`'s Schema evolution has the mechanism).
 - **A Sync rebuild preserves every surviving column's data**; only columns the
   registry no longer declares lose theirs, and a rebuild that cannot complete
   rolls back completely (`admin-surfaces.md`, `backend-structure.md`).
@@ -850,87 +1255,33 @@ expensive and an expensive one look routine.
   table and no column. This is what "the registry stays the truth" looks like in
   practice.
 
-## Export / import contract — sketch
+## Export / import — the contract moved to `transfer.md`
 
-**Realizes:** FEAT-018, UC-061..UC-064, UC-002, FEAT-019
+**Realizes:** FEAT-018, FEAT-019, UC-002, UC-061, UC-062, UC-063, UC-064
 
-Full detail is deferred to FEAT-018's plan (`overview.md`). What the data model
-commits to now, because the schema must be shaped compatibly:
+**The export/import contract now lives in `transfer.md`** — the envelope, the
+id-serialization rules, the two version constants, the granularity table, what is
+never exported, the import policy and the whole-database replace. It was split
+out at the finalization of plans 008..032, once it had grown from a sketch into
+the full as-built contract of two plans. **The tables and columns it reads stayed
+here**, which is the whole point of the split: "which table holds `related_to`?"
+must not become a two-file lookup.
 
-**Envelope.** A single file carrying a header and a body:
+Three facts belong on this page because they are properties of the **schema**
+rather than of the envelope:
 
-```
-{
-  "format": "rphelper-export",
-  "version": <int>,
-  "granularity": "database" | "user" | "character" | "session",
-  "created_at": "<UTC ISO-8601>",
-  "schema_version": <int>,
-  "payload": { "<table>": [ {row}, ... ], ... }
-}
-```
-
-**Granularity boundaries**, each carrying its own memos (FEAT-018's purpose line):
-
-| Granularity | Actor | Contains |
-|---|---|---|
-| `database` | ACT-001 (UC-061) | every table, every user; **opaque to the administrator** — no viewer, no search, no rendering (R5) |
-| `user` | ACT-002 (UC-062) | one `users` row, its characters, setups, sessions, messages, translations, and all memos at all four scopes |
-| `character` | ACT-002 (UC-063) | one character, its setups and sessions and their contents, plus memos scoped to the character and to anything under it |
-| `session` | ACT-002 (UC-064) | one session and its messages and translations, plus **only that session's own memos** |
-
-Messages export whole — settled, buried and current-zone rows together — because
-`related_to` is an internal self-reference and dropping buried rows would leave
-dangling pointers in the settled ones.
-
-**The per-session known consequence, carried forward not resolved.** FEAT-018's
-`_TBD:` records that a single-session export carries only that session's own
-memos, so an imported session arrives without the character persona and setup that
-gave it meaning (challenge C12). Accepted knowingly. The architecture does not
-paper over it by silently widening the session export — doing so would change a
-product decision.
-
-**What is never exported:** API keys. `llm_servers.api_key_ref` holds a
-`"$ENV_VAR"` pointer, so the whole-database export moves configuration without
-moving credentials, and a restored instance needs its environment supplied
-separately. Stated here because it is a visible operational consequence of the
-secret-pointer pattern.
-
-**Import policy — decided; the `_TBD:` that stood here is closed.** US-136
-settles both halves of it:
-
-- **An import merges as new material.** It arrives alongside what is already
-  there and **nothing existing is overwritten or replaced** (US-136.AC-1). There
-  is no empty-target requirement, no "replace" mode and no merge-into-existing-row
-  behaviour to design.
-- **Imported material carrying ids that already exist arrives under fresh
-  identity** (US-136.AC-2). No existing row is reused or replaced.
-
-**Mechanism: mint new snowflakes on import and remap internal references within
-the imported payload.** Every row in the payload gets a freshly minted id, and
-every reference *inside* the payload — `related_to`, `scope_id`, `session_id`,
-`character_id`, `setup_id`, `message_id` — is rewritten to the new id of the row
-it points at. The remap table is local to the one import and is discarded after
-it commits.
-
-The interaction with the identifier scheme is worth stating, because it is why
-this mechanism costs almost nothing: **ids are minted in application code before
-the INSERT** (Identifiers, above), so an import uses **the same generator every
-other write uses** and the single-generator guarantee already covers it. There is
-no separate id space for imported rows, no "imported" flag, and no way for an
-import to mint an id that collides with a live one.
-
-**This supersedes the earlier preserve-ids-and-detect-collisions design recorded
-here, and the supersession is deliberate.** Preserving ids was an optimisation
-available *because* snowflakes are globally meaningful; US-136.AC-2 makes fresh
-identity a requirement rather than a fallback, so the collision check is no
-longer a branch — minting is unconditional. The cross-instance qualifier in the
-Identifiers section (two instances left on node id `0` collide) stops being an
-import concern entirely, which is a simplification, not a loss. The visible
-consequence, which `docs/product/` records as accepted: **importing the same
-export twice yields duplicates, and nothing warns about it** (FEAT-018).
-
-**Vectors are not exported.** They are derived data, re-computable by FEAT-005's
-rebuild (UC-016), and they are only valid for the embedding model that produced
-them — which the importing instance may not have designated. Re-embedding on
-import is correct; shipping stale vectors is not.
+- **Messages export whole** — settled, buried and current-zone rows together —
+  because `related_to` is an internal self-reference and dropping buried rows
+  would leave dangling pointers in the settled ones. The same self-reference is
+  why an import writes `messages` in two passes (`transfer.md`): in id order a
+  buried row's head has a *higher* id, so the referent arrives after the
+  referrer, and foreign keys here are immediate.
+- **Two FK-less integer references must be serialized by name rather than by
+  metadata**: `memos.scope_id` (the polymorphic scope pair has no single foreign
+  key to declare) and `model_server_id` on `characters` and `sessions`
+  (deliberately no FK, R4). Both carry snowflakes, so both must cross as decimal
+  strings; `transfer.md`'s id-column predicate exists for exactly these two.
+- **Nothing derived is exported.** No `vec0` table, no FTS5 table, and no
+  `translations` row — each is re-creatable, and a vector is only valid for the
+  embedding model that produced it, which the importing instance may not have
+  designated. `auth_sessions` is excluded too, as live credentials.

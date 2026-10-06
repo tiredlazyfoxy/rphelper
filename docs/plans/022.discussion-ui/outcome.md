@@ -96,3 +96,9 @@ are the user-confirmed decisions it records.
 - **013 D4.** The re-open imprecision could now be closed client-side by fetching the last
   entry's discussion when the zone empties. It was not done, to keep `GET …/entries` and
   re-open untouched (brief Out).
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: Its "eleven-key `MessageResponse`" is superseded by 024's addition of `search_coverage_incomplete` — the recorded wire shape is twelve keys.
+Notes: The `buried_messages` fourth-predicate flag is accepted and recorded as read-only, and the discussion count is documented as "count once loaded", which satisfies `US-040.AC-2` and `US-040.AC-3`. Two narrowings of `US-115.AC-1` are split: the tool-row exclusion is settled by that criterion's `Constraint:` (no defect), while the live reply's missing edit control is defect D-02, recorded with its race reason and with the open alternative reading left unresolved. Its unreconciled `ComposerCore` / Send conflict with 018 and 019 is recorded as a one-file check for a follow-up, not resolved.

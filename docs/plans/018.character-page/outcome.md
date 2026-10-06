@@ -68,3 +68,9 @@ this folder's `context.md`.
   embedding at insert, consistent with "refresh at settle / re-open / edit".
 - **Product** (`/product-spec`): FEAT-008 is **partially delivered** by 018 until `021`
   lands US-117.AC-3. FEAT-020's UC-073 / UC-074 / US-096 / US-097 are delivered.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: Its "owed by `021`" framing for UC-080's first reply was not written — `021` never took it.
+Notes: The design question is closed (yes, and the route stays JSON), but delivery is recorded as defect D-01 against `US-117.AC-3`, pointing at `docs/plans/defects.md`.

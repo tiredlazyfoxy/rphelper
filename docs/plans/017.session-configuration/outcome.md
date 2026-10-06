@@ -91,3 +91,9 @@ file. "Dn" are `context.md` decisions in this folder.
   `model_not_chosen` / `model_not_enabled`.
 
 ## Observations
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: The flag asking `/product-spec` to confirm D1 against `US-139.AC-2` is discharged by `US-143`. The settings page's Languages form is recorded as a reading of the existing route-is-the-form exception, not as a third named exception.

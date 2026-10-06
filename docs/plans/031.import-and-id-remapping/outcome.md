@@ -221,3 +221,9 @@ grouped by target file. The architect applies them at finalization.
   persona does not come along". The imported session is placed under a character
   the roleplayer chooses (U1), so it has that character's persona. `/product-spec`
   may want to reword the criterion to match.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: Both `/product-spec` follow-ups it raised are discharged — `UC-061`, `US-077.AC-3` and `US-136`'s `Constraint:` now scope merge-as-new to the roleplayer's three granularities, and `US-082` with `UC-064`'s postcondition now states that an imported session takes the chosen character's persona. The "an unembedded memo is genuinely an anomaly" sentence is qualified: after 031 it is a normal post-import state.

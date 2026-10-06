@@ -67,3 +67,9 @@ apply at finalization. Grouped by target file. D-n refers to this folder's `cont
 - **023:** the translation stop is the best-effort `is_disconnected()` check before the
   cache write. Nothing in 019 is reused for it.
 - **017:** `sendBlockedReason` gates Send only, never Stop (`context.md` "Build state").
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: Its "Named divergences — no change" status note is rejected: both acceptance criteria were amended on 2026-10-06, so the divergence no longer exists.
+Notes: The widened persist rule (D4), flagged for review, is accepted as a strict improvement on R10's extension. Its token-handling divergence (D11, "re-decide in 022") is not written as open — 022 decided, and only 022's final shape is recorded.

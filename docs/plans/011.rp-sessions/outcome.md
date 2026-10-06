@@ -102,3 +102,9 @@ folder's `context.md`; "009 Dn" / "010 Dn" are in those plans' `context.md`.
   (UC-080 / US-117 remain, and US-027.AC-3's entries half). **FEAT-020** gains UC-069 /
   US-088 / US-089.
 
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: The session-creation named exception to the modal rule is recorded, and `workspace-shell.md`'s sentence saying the modal rule governs session creation is amended to match. `US-145` now carries the start-time label against the Geometry row's "session title" reasoning.
+

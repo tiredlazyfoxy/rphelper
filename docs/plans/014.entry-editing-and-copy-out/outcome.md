@@ -74,3 +74,9 @@ folder's `context.md`; "012 Dn" / "013 Dn" are in those plans' `context.md`.
   rendering is `022`'s.
 - **Product follow-up, if wanted:** US-124.AC-1 strips asterisk-marked RP actions (D8);
   keeping them would be a change to US-124, not to this plan.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`), and the `deployment.md` item in B4.
+Rejected items: The icon row "Copy as plain text (composer)" was removed outright rather than carried as a `_TBD:` — no plan built a composer copy and no brief contains one.
+Notes: The `deployment.md` clipboard consequence (`navigator.clipboard` is absent on a non-secure origin, so copy-out falls back to `execCommand`, dead code once TLS lands) was orphaned by the orchestrator's batching and applied in B4.

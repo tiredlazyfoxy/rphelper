@@ -89,3 +89,9 @@ target file.
   `docs/architecture/search-and-retrieval.md`, state alongside "the `vec0`/FTS
   tables have no user column" that every write to them must resolve its row ids
   through an owner-scoped query first.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`).
+Rejected items: none
+Notes: Its step 004 `## Observation` applied — every write to a `vec0` or FTS table must resolve its row ids through an owner-scoped query first, which is the one leak the audit found. Its `fast/002` count item is recorded as a requirement on that unbuilt plan rather than as an as-built fact, the residual question of whether UC-016's completion report may carry an aggregate over all users' material is surfaced rather than decided, and its new nginx access-log `_TBD:` is recorded as open and owned by `fast/001`.

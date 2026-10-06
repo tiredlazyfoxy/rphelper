@@ -153,3 +153,9 @@ finalization. Grouped by target file. Decision ids (Dn) refer to this feature's
   product layer wants it as a criterion, it has no id today.
 
 ## Observations
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: Its `sort_key` allocation rule (`COALESCE(MAX(sort_key), -1) + 1`) is superseded by 016 D5/D6 and was not written anywhere.
+Notes: The delete-a-note flag raised for `/product-spec` is discharged — `UC-088` and `US-141` now specify it, and the behaviour is recorded as realizing them rather than as a plan decision. The orphan-scope check is re-recorded as not built and unable to arise while no per-entity delete exists, with no owner assigned. On `sort_key`, 016 D5/D6 supersedes this plan's D4, so the rule of record is 016's and none of 015's is written.

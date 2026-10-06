@@ -136,3 +136,9 @@ folder's `context.md`.
   state both rules (status badges live beside the link, never in it; a named list is a
   `ul` + `aria-label`) so `011`'s session level and `010`'s setups list render the same
   shape.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: All seven `## Observations` were applied — steps 002 and 003 in B1 (the two service idioms, the query-parameter rule), steps 004–007 in B3 (the status-ladder convention, the `MarkdownEditor` `emitUpdate: false` rule, the submit-effect shape, the MobX binding rule), and step 008 in B3 as two accessible-naming rules in `ui-conventions.md`'s accessibility floor (a status badge lives beside the link and never inside it; a named list is a `ul` plus `aria-label`). The explicit-Save decision (D2) is recorded as a resolved asymmetry, retired by 018 D7, not as a live convention.

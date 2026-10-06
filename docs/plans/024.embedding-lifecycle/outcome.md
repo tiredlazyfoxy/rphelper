@@ -77,3 +77,9 @@ decision recorded there.
 - **`025` (querying).** It must not use the forbidden KNN `IN`-pushdown form (D3).
 
 ## Observations
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: Two of its answers are reversed by the product round and recorded as defects — the degraded path catches only `no_embedding_model` and `llm_unreachable`, so an unset `$ENV_VAR` key still fails the write (defect D-03 against `US-112.AC-1`'s widened form), and U5's leave-it-stale decision is defect D-04 against `US-112.AC-3`, which requires the vectors be cleared. "No marker and no column" still stands as the recording decision, and the banner-scope flag is not discharged: the as-built narrowness is recorded as deliberate with the absence kept visible.

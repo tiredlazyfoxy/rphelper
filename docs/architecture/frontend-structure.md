@@ -11,14 +11,31 @@ library, state library and icon set are fixed in `overview.md`.
 under `frontend/` — config included — and neither tsconfig enables `allowJs` or
 `checkJs`. Reason in `overview.md`; the rule itself is in the root `CLAUDE.md`.
 
+**No two module paths may differ only in letter case.** This is a second
+project-wide naming rule, and it is here because `npm run typecheck` **cannot
+enforce it** (008 D13). The development filesystem is case-insensitive while
+TypeScript's resolver is not, so from **one** extensionless specifier `tsc` picks
+the `.tsx` and Vite / Vitest pick the `.ts` — a green typecheck and an
+`undefined` import at runtime. The worked example is the near-miss that produced
+the rule: `src/app/appBoot.ts` beside `src/app/AppBoot.tsx`, which is why the boot
+state module ships as **`appBootState.ts`**. Two things make this worth a
+paragraph rather than a footnote: the symptom is **React reporting an `undefined`
+element type**, which points nowhere near the cause; and the escape hatch is not
+available — **`allowImportingTsExtensions` is set in neither tsconfig**, so a
+specifier cannot disambiguate itself. A single test guards one folder (plan 005's
+DoD-14, `src/app/`); the rule is the whole tree's.
+
 **The `app` entry's visual shell is in `workspace-shell.md`** — the three columns,
 all geometry, the note wall, layout persistence, and the anatomy of the stream and
-the current zone. It is not described here, and the pointer that used to send
-readers to `ui-conventions.md` for it is wrong: that file now holds only what is
-*not* the shell. **The "two resize behaviours" it also named no longer exist** —
-nothing in the workspace is user-resizable, and `workspace-shell.md`'s reversal
-record says why they were deleted rather than moved. This doc holds the build, the
-routing, the stores, the API client and the SSE consumer.
+the current zone. It is not described here. The conventions that are neither the
+shell nor this doc's subject are split across two files:
+**`ui-conventions.md`** (icons, the shared `IconButton`, the accessibility floor,
+async feedback) and **`forms-and-lists.md`** (tables, the modal rule, the MobX
+draft form, the confirm convention, the never-optimistic rule). **The "two resize
+behaviours" the old pointer also named no longer exist** — nothing in the
+workspace is user-resizable, and `workspace-shell.md`'s reversal record says why
+they were deleted rather than moved. This doc holds the build, the routing, the
+stores, the API client and the SSE consumer.
 
 ## The multi-entry build
 
@@ -32,9 +49,12 @@ frontend/
     global.css              # hand-written stylesheet 1 of 2: resets only
     shell.css               # hand-written stylesheet 2 of 2: workspace layout
                             #   only; imported by the app entry alone
-    shared/                 # api client, sse consumer, error rendering, IconButton,
-                            #   AppProviders, notifyFailure, notReady,
-                            #   ConfirmModal (plan 005)
+    shared/                 # api.ts (the client, apiPut/apiDownload, the two
+                            #   exported decode helpers), sse.ts, apiError,
+                            #   notReady, error rendering, IconButton,
+                            #   AppProviders, notifyFailure, notifyWarning,
+                            #   ConfirmModal, currentUser, MarkdownEditor,
+                            #   importFile, embeddingFailure
     bootstrap/  index.html  main.tsx  ...   # FEAT-001
     login/      index.html  main.tsx  ...   # FEAT-002
     admin/      index.html  main.tsx  ...   # FEAT-003, FEAT-004, FEAT-005
@@ -177,8 +197,8 @@ still the backend's `require_role` (`backend-structure.md`, R5).
 |---|---|---|
 | `bootstrap` | Create-new-database (with first admin), import-an-export, and the already-configured refusal | FEAT-001, UC-001, UC-002, UC-003 |
 | `login` | Sign in — one form; being signed out *is* arriving at it (see "The `login` entry" below) | FEAT-002, UC-004, UC-005 |
-| `admin` | Account list + lifecycle; LLM servers, connection test, enabled models, embedding designation; drift report + remediation + vector rebuild; whole-database export/import | FEAT-003, FEAT-004, FEAT-005, FEAT-018 (admin half), UC-006..UC-016, UC-061 |
-| `app` | The workspace — tree, stream and note wall (`workspace-shell.md`); the character page; settings; session configuration; my-search; user/character/session export | FEAT-006..FEAT-013, FEAT-017, FEAT-018 (user half), FEAT-020 |
+| `admin` | Account list + lifecycle; LLM servers, connection test, enabled models, embedding designation; drift report + remediation; whole-database export **and** import — both built (plans 030, 031); the vector rebuild remains unbuilt (`fast/002`) | FEAT-003, FEAT-004, FEAT-005, FEAT-018 (admin half), UC-006, UC-007, UC-008, UC-009, UC-010, UC-011, UC-012, UC-013, UC-014, UC-015, UC-061 |
+| `app` | The workspace — tree, stream and note wall (`workspace-shell.md`); the character page; settings; session configuration; my-search; user/character/session export **and** import — both built (plans 030, 031), the import effects in `app/importUploads.ts` | FEAT-006, FEAT-007, FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-017, FEAT-018 (user half), FEAT-020 |
 
 The `admin` entry contains **no** component that renders a character, setup,
 session, entry or memo (UC-066). Not a preview, not a count of them per user, and
@@ -267,7 +287,10 @@ so makes the same three decisions with no network call at all. RPHelper cannot:
 The **pure/impure split is kept**, now async: a pure `resolveAdminAccess(currentUser)`
 returning a decision, and an impure `enforceAdminAccess()` that fetches and
 navigates on deny. The pure half is unit-testable with no network, no router and
-no DOM.
+no DOM. **`adminAccess.ts` obtains the user through `shared/currentUser.ts`**
+(008 D1) — the `CurrentUser` type and the `/api/me` fetch moved to `shared/` once
+a second entry needed them. The gate's behaviour is unchanged; only where the
+fetch lives moved.
 
 **The gate is UX only.** The authorization boundary is the backend's
 `require_role(Role.admin)` on every admin route (`backend-structure.md`); removing
@@ -318,6 +341,46 @@ by plan 004):
   "disabled-account message"; it must not be built.
 - **"Sign out landing" is the sign-in form itself**, not a second screen. Nothing
   in `docs/product/` asks for a confirmation page.
+
+### The `app` entry
+
+**Realizes:** FEAT-020, ACT-001, ACT-002
+
+The fourth entry's own shape, recorded because the other three each have a
+subsection and this one has had a boot sequence since plan 008 (D2, D13):
+
+- **One `GET /api/me` before the shell mounts**, through `shared/currentUser.ts`.
+  **Five outcomes**, the same five the `admin` gate has, for the same reasons:
+
+```
+AppBoot (a component, mounted by main.tsx)
+  └─ await GET /api/me
+       ├─ nothing rendered while in flight   ──► not a spinner, not the shell
+       ├─ 401 (code not_authenticated)       ──► nothing of its own — the shared
+       │                                          client has already navigated to /login
+       ├─ not-ready (shared/notReady)        ──► not-ready screen; re-probe every
+       │                                          2000 ms + a manual retry; navigates nothing
+       ├─ anything else thrown               ──► failure panel + manual retry;
+       │                                          navigates nothing
+       └─ success, EITHER role               ──► the shell, with the user as a prop
+```
+
+- **There is no role branch.** An administrator gets the workspace like anyone
+  else and reaches `/admin` from the user menu (US-093), which is FEAT-020's
+  surface. This is the mirror of the `login` entry's no-branch rule.
+- **The 401 branch is keyed on the error *code* `not_authenticated`**, not on the
+  status number — the branch-on-code contract below, applied at the one place a
+  status would have been tempting.
+- **The gate is a component (`AppBoot`) mounted by `main.tsx`**, not a loop inside
+  `main.tsx`. The reason is testability rather than taste: a component can be
+  mounted in a test with a stubbed client, while a top-level `await` in an entry
+  module cannot be driven at all. It is also why the boot *state* lives in
+  `appBootState.ts` and not `appBoot.ts` — see the case-collision rule at the top
+  of this doc.
+- **All six routes are declared from the start, flat, with the shell rendered
+  above `<Routes>`** and a catch-all 404 **inside** the shell (008 D5). The 404 is
+  inside rather than instead of the shell because a mistyped URL should still
+  leave the roleplayer their tree.
 
 ## State — MobX 6, per-page stores, no context
 
@@ -380,6 +443,72 @@ constructing a value and calling a function, with no render and no network; and
 anything that can fail, await or navigate is visibly a call rather than a method
 reached through an object.
 
+### Five conventions the four rules leave open
+
+Each was decided once, in code, and is written down here so the next screen copies
+it rather than choosing again.
+
+- **A component writes a field inside `runInAction` at the input's `onChange`**
+  (plan 009, step 007): `runInAction(() => { state.name = value; })`. **State
+  modules export derivations and effects, not setters.** The alternative — a pair
+  of setter free functions per field — adds a function per field for exactly the
+  same effect, and makes the module's surface grow with the form.
+- **A new list store uses the four-value status ladder** (plan 009, step 004).
+  The repo has two shapes and they are not equivalent: `admin/usersPageState`
+  keeps `status: "idle" | "loading" | "ready"` plus an `errorMessage` string and
+  guards its loading write with `if (state.status !== "ready")`;
+  `charactersState` uses **`"idle" | "loading" | "ready" | "failed"`** with **no
+  message field** — because every failure has its own place in the UI
+  (`ui-conventions.md`) — and an **unconditional** `"loading"` write, so a retry
+  visibly shows loading. **Copy `charactersState`.** The explicit `"failed"` value
+  is what lets a page render a retry without inventing a fourth state out of
+  "ready with no rows".
+- **The submit effect has one shape** (plan 009, step 006), generalised from
+  `admin/createUserDraft.ts`: an in-flight guard → `runInAction` setting
+  `"submitting"` and clearing the error **before** the request → `try` / `catch`
+  with the two abort checks → `finally` returning to `"idle"` unless aborted →
+  **success handling after the `try`/`finally`**, so the server's returned row is
+  applied only once the state is back to idle. Four effects in one module already
+  repeat it. Where two effects write the same slice they share a private helper
+  (archive and restore do); where they write different slices they do not (create
+  adopts the draft, save preserves it).
+- **One sanctioned non-observable field per store**, and only for non-data
+  handles (019 D12): the compose **`AbortController`** and its wound-down
+  **promise** live on `StreamState` through a `makeAutoObservable` override of
+  `false`. They are not data — nothing renders them, and making a controller
+  observable would mean every token write touched an observable nobody reads.
+  `isStreaming` is **derived from the streaming-text field** instead, which is
+  data. Named as sanctioned because rule 1 says fields are observable, and an
+  unexplained `false` override reads as a mistake.
+- **View state stays component-local, with the lifetime of its mount.** Modal
+  open/target flags (`forms-and-lists.md`), and equally a tool block's or a
+  thinking block's expanded flag and **a settled entry's discussion group,
+  including the rows it has fetched** (022 D5, D11). The reasoning is the modal
+  rule's: it has no meaning outside the component that renders it. The payoff is
+  concrete in one place — because the flag is initialised once per mount, the
+  live-reply-to-persisted-row swap collapses the blocks by **remounting** rather
+  than by any code that closes them (`workspace-shell.md`).
+
+### Which store a list belongs to — scope, not size
+
+Three precedents, in the order they were set, because the choice recurs on every
+screen:
+
+| Shape | When | Example |
+|---|---|---|
+| **Workspace-level** — created in `App`, passed as props | two or more regions of the shell read the same rows | **`CharactersState`** (009 D11): the tree and the character screen. **`SessionsState`** (011 D15): the tree's session level |
+| **Section-owned** — created with `useState`, keyed by the parent id | nothing outside the section reads it | **`SessionsSectionState`** (011), the character page's Setups section (010 D11), `characterComposerState.ts` and `characterConfigState.ts` (018) |
+| **Page-owned** — one store per route | the page is the only reader | `app/streamState.ts` (013 D13), `app/searchState.ts` (029), `admin/usersPageState` |
+
+**A section mutation applies the returned row to both stores where both exist**
+(011 D15), and the rule that makes that safe is: **effects take the workspace
+state as a parameter, never hold it as a field.** A store holding another store is
+a hidden edge in the dependency graph and makes the section untestable on its own.
+
+**Mutations apply the server's returned row through one upsert rule rather than
+refetching the list** (009 D11) — which is the narrowed re-load
+`forms-and-lists.md` describes, not an exception to it.
+
 ### Where a store's file lives
 
 Precedent set by FEAT-001 (plan 003), extended by FEAT-002 (plan 004):
@@ -396,6 +525,44 @@ Precedent set by FEAT-001 (plan 003), extended by FEAT-002 (plan 004):
   store holding no field the draft does not already hold is a store somebody will
   later find a use for. The convention is "one subject, one module", not "one
   page, two modules" — do not add an empty page store for symmetry.
+
+The `app` entry's modules, as built, so a reader can find one without a search.
+Every one of them is a data class plus its own free functions, or a pure module
+with no class at all:
+
+| Module | Holds |
+|---|---|
+| `app/appBootState.ts` | the boot state above |
+| `app/shellState.ts`, `app/workspaceLayout.ts`, `app/treeCollapse.ts` | the shell's state and the two pure persistence modules (`workspace-shell.md`) |
+| `app/charactersState.ts`, `app/sessionsState.ts` | the two workspace-level list stores |
+| `app/sessionScreenState.ts`, `app/sessionsSectionState.ts` | the session screen and the character page's Sessions section |
+| `app/streamState.ts`, `app/streamApi.ts` | the stream's store (one per `SessionStream` mount) and its client — seven calls, ids as strings |
+| `app/parens.ts` | **pure** — the client port of the `(( ))` rules, used by the preview and the zone painting only (R12) |
+| `app/plainText.ts`, `app/pasteCost.ts`, `app/copyOut.ts` | **pure** stripper, **pure** paste estimate, and the one clipboard writer |
+| `app/thinking.ts` | **pure** — splits assistant text into think and answer segments (022 D4) |
+| `app/memoReach.ts`, `app/memoReorder.ts`, `app/memoDnd.ts` | the reach derivation (R3's twin), the pure drop decision plus its effect, and the shared sensors + announcements |
+| `app/noteWallState.ts` | the wall's data class and free functions |
+| `app/translationState.ts` | one `TranslationState` per `SessionStream` mount, with flick / cancel / invalidate / dispose as free functions (023 D13) |
+| `app/characterComposerState.ts`, `app/characterConfigState.ts` | two section-owned stores on the character page |
+| `app/searchState.ts`, `app/searchApi.ts` | my-search's page store and client |
+| `app/importUploads.ts` | the three roleplayer import effects (plan 031) |
+| `app/MessageBody.tsx`, `StreamRecord.tsx`, `ZoneList.tsx`, `KindSwitch.tsx`, `Composer.tsx`, `SessionStream.tsx`, `AssistantBody.tsx`, `ThinkingBlock.tsx`, `ToolBlock.tsx`, `LiveMessage.tsx`, `DiscussionGroup.tsx`, `SearchScreen.tsx` | the stream's components |
+
+**Two localStorage keys, two pure modules, and a written reason for not being
+one** (008 D8, 011 D7): `rphelper.workspace-layout` in `app/workspaceLayout.ts`
+and `rphelper.tree-collapsed` in `app/treeCollapse.ts`. The tree's collapsed set
+is **deliberately not a field of the layout record**, because that reader drops
+unknown keys on write. `workspace-shell.md` holds both records' shapes, the
+total-read rules and the storage-as-a-parameter mechanism that keeps the modules
+DOM-free.
+
+**`app/translationState.ts` carries an accepted limitation** (023 D13): the client
+translation cache is keyed by message id **for one mount**, so a preferred-language
+change mid-mount keeps showing the old-language translation until the stream
+remounts. The server's cache key is the full `(message, target language)` pair
+(`data-model.md`), so nothing is wrong in storage — the staleness is one
+component's, and it clears on navigation. Recorded rather than fixed because the
+alternative is a cache that watches the configuration chain.
 
 **This resolves a divergence, by user decision (plan 002).** This doc's example
 used to carry `// observables, computeds, actions`, while `ui-conventions.md`'s
@@ -444,17 +611,42 @@ measurement-shaped claim, and it is not replaced with an invented one.
 /                       the workspace with no session open — tree + empty stream,
                           and NO wall at all (US-095)
 /sessions/:id           the workspace with a session open — tree | stream | wall
+   ?entry=<messageId>     scroll that settled entry into view once + highlight 2000 ms
+   ?notes=open            open the note wall on arrival
 /characters/:id         the character page — two columns (UC-073, US-096); its
                           composer starts a session (UC-080, US-117)
 /characters/new         the character draft page (UC-074, US-097)
 /settings               the two languages and the user's own notes (US-092, UC-047)
-/search                 my-search results (FEAT-017)
+/search?q=<text>        my-search results (FEAT-017)
 ```
+
+All six are **declared flat and from the start**, with the shell above `<Routes>`
+and a catch-all 404 inside it (see "The `app` entry" above).
 
 **Every one of these routes renders the same shell.** The shell is not a property
 of a route — the tree is present on all of them, and what changes is the centre
 column and whether the wall exists. Geometry, collapse and the wall's two modes
 are `workspace-shell.md`'s and are not described here.
+
+**Only the screen component reads the URL; its children take props** (plan 029,
+step 006). `SessionScreen` is the one module in the session chain that may call a
+router hook: `SessionStream` and `StreamRecord` receive the focus entry id as a
+**plain prop**, because they are mounted **router-free** in seven delivered test
+suites and a `useSearchParams` or `useLocation` call inside either would throw
+there. Stated as a rule rather than an observation, because the next feature that
+wants a query parameter will reach for the hook at the component that needs the
+value. Plan 029 is also the first caller of `useSearchParams` and the first
+`scrollIntoView` in `src/`.
+
+**`useNavigate` is the accepted form when a navigation follows from choosing a
+control rather than from following a link** (plan 008, step 003). Every in-entry
+navigation under `src/` before it was declarative (`component={Link} to=…`), and
+the user menu's Settings item is the first imperative one — a `useNavigate()`
+behind a `Menu.Item`'s `onClick`. It is deliberate, not an inconsistency: a menu
+item that also carried an `href` would read as a cross-entry link and would sit
+one attribute away from the admin item it is pointedly unlike
+(`workspace-shell.md`). Recorded so the declarative-only reading of the existing
+code is not mistaken for a rule.
 
 Four corrections against the previous route list:
 
@@ -469,41 +661,64 @@ Four corrections against the previous route list:
   lists characters with their sessions, newest use first (UC-069, UC-026, US-088,
   US-089), so a route whose whole content is one of those lists would render the
   left column twice.
-- **Setups have no route.** The character page holds the persona, notes, setups,
-  resolved configuration and sessions in one place (US-096).
+- **Setups have no route**, and that holds as built (010 D1). The character page
+  holds the persona, notes, setups, resolved configuration and sessions in one
+  place (US-096).
 - **`/memos` is gone.** User-level notes live on the settings screen (US-092); the
   other three levels live on the wall (UC-072, UC-075).
 
+**`/settings` is built** (017 D15) — `SettingsScreen`, with the Languages form and
+the user level's notes (`workspace-shell.md`).
+
 **`/characters/:id` also starts sessions.** Writing in the character page's
 composer (`workspace-shell.md`) posts **once**, to
-`POST /api/characters/{id}/sessions` (`backend-structure.md`), which creates the
-session and seeds its current zone in one transaction. **The new session's id
-comes back in that response**, and the client navigates to `/sessions/:id` with
-it. The id is a **`string`** and is used exactly as received — see "Ids are
-strings" below; there is nothing to parse and nothing to assemble client-side,
-and the `useParams()` value on arrival is that same string. The navigation is an
-in-entry router navigation, not a document navigation: the character page and the
-workspace are both the `app` entry. What the client must **not** do is create the
-session and then post the message as two calls — that sequence can fail between
-them and leave an empty session behind, which is why the backend exposes one
-route.
+`POST /api/characters/{id}/sessions` (`session-stream.md`), which creates the
+session and seeds its current zone in one transaction. What the client must **not**
+do is create the session and then post the message as two calls — that sequence can
+fail between them and leave an empty session behind, which is why the backend
+exposes one route.
 
-`/characters/new` is this doc's **design inference**, not a requirement: UC-074 and
+As built (018 D5), through `app/sessionsApi.ts`'s start-with-message call:
+
+- **The response's eight `Session` keys are applied to the workspace
+  `SessionsState`**, so the tree shows the new session without a list reload.
+- **The client pushes `/sessions/<id>`** — push, not replace, so **Back returns to
+  the character page** the roleplayer started from. (Contrast the draft page
+  below, which replaces for the opposite reason.)
+- **The returned opening message is not used to pre-seed the stream**, because the
+  session screen re-reads its zone on mount anyway. Seeding it would be a second
+  source for rows the next request overwrites.
+- The id is a **`string`** and is used exactly as received — see "Ids are strings"
+  below; there is nothing to parse and nothing to assemble client-side, and the
+  `useParams()` value on arrival is that same string. The navigation is an
+  in-entry router navigation, not a document navigation: the character page and
+  the workspace are both the `app` entry.
+
+**`/characters/new` is this doc's design inference, not a requirement**: UC-074 and
 US-097 require a **draft page** that persists nothing until the roleplayer types
 something, and a page needs an address. The path is architecture's to choose; the
-behaviour is the product's.
+behaviour is the product's. **As built** (018 D6) it is the draft page in full —
+**no Create button**, the character created on the **first committed non-blank
+name**, then a **`replace`** navigation to `/characters/<id>` so Back does not
+return to a draft page for a character that now exists. Plan 009's interim
+explicit **Create** is gone. `workspace-shell.md` holds the page's behaviour.
 
-My-search is reachable **from any screen** (UC-058) and from the tree expanded or
-collapsed (US-118), so its trigger lives at the top of the tree — duplicated onto
-the collapsed rail — rather than only on `/search` (`workspace-shell.md`).
+**My-search's URL carries the query** (029 U4, D8, D9). `/search?q=<text>`, and
+the query lives in the URL rather than in a store **because the tree remounts when
+it expands** — a query held in component state would vanish on a collapse toggle.
+A blank `q` makes **no request**. The trigger is reachable from any screen
+(UC-058) and from the tree expanded or collapsed (US-118): a **text input in the
+tree header** (Enter submits) and the **icon button on the collapsed rail**, which
+navigates to `/search`. The results page focuses its own box on every arrival, so
+arriving from the rail lands the cursor where the roleplayer is about to type.
 
-Archived objects are reached by an explicit toggle, never by a separate route —
-archive is a filter on the working list, not a different place (R6).
-`_TBD: where that toggle sits is not settled. It used to hang on a character list
-and a session list and both are gone; the tree (UC-069) and the character page
-(UC-073) now show those objects, but docs/product/ places the toggle on neither.
-FEAT-006 / FEAT-007 / FEAT-008's plans must place it — R6 already fixes the
-behaviour, so this is a placement question, not a design one._
+**Archived objects are reached by an explicit toggle, never by a separate route** —
+archive is a filter on the working list, not a different place (R6). **Placement
+is section-local, and the `_TBD:` that asked where is closed in full** (009 D4,
+010 D4, 011 D5, 018 D11): the tree header's "Show archived" for characters, the
+Setups section's "Show archived setups", the Sessions section's "Show archived
+sessions". **None is persisted.** `workspace-shell.md` holds the rendering and the
+reason persistence was declined.
 
 ## Ids are strings, everywhere in the frontend
 
@@ -547,11 +762,26 @@ throws and nothing warns.
   (`data-model.md`); the client renders the order it was given. A client-side sort
   on an id string is lexicographic and wrong; on a parsed id it is the defect
   above.
+  **The one client-side sort in the `app` entry obeys this** (011 D6, D15): the
+  tree orders sessions, and characters by newest session use, by comparing
+  **fixed-width `last_used_at` text** — which sorts correctly as a string because
+  the timestamp format is fixed-width by schema rule (`data-model.md`). An id was
+  the tempting key here, since the tree already has one on every row, and it would
+  have been wrong twice over: lexicographically as a string, and roundingly as a
+  number.
+- **One divergence between the client port and the server, and it is accepted as
+  display-only** (013 D16): `app/parens.ts` trims with JavaScript's `trim`, while
+  the server uses Python's `isspace`. The two disagree on a handful of rare code
+  points. It is accepted because the client's copy is a **preview and is never
+  authoritative** (R12), so the worst case is a preview sentence that disagrees
+  with what settle does on a character almost nobody types. Recorded so the
+  difference is not "fixed" into a hand-built code-point set, which would be a new
+  thing to keep in step with CPython.
 
-The one place in the doc set that contradicted this rule — `ui-conventions.md`'s
-page-state example writing `disableUser(state, id: number, ...)` — has been
-corrected to `id: string`. **That `_TBD:` is closed**; the rule here remains the
-authoritative statement of it.
+The one place in the doc set that contradicted this rule — the admin page-state
+example writing `disableUser(state, id: number, ...)` — has been corrected to
+`id: string` (it now lives in `forms-and-lists.md`). **That `_TBD:` is closed**;
+the rule here remains the authoritative statement of it.
 
 ## The API client
 
@@ -565,10 +795,20 @@ One module in `shared/`, used by every entry:
 - On a non-2xx, parses `{ error: { code, message, detail } }`
   (`backend-structure.md`) into a typed `ApiError` and **throws it**, so call sites
   branch on `error.code` rather than on a status number or a message string. The
-  codes the UI must branch on specifically are `model_not_enabled`,
-  `no_embedding_model`, `translation_failed`, `zone_empty`, `zone_not_empty`,
-  `nothing_to_reopen`, `message_not_editable`, `already_configured` and
-  `invalid_credentials`. **`discussion_not_resumable` is gone** — it named a table
+  codes the UI may branch on are `model_not_enabled`, `no_model_enabled`,
+  `model_not_chosen`, `no_embedding_model`, `llm_unreachable`,
+  `translation_failed`, `zone_empty`, `zone_not_empty`, `nothing_to_reopen`,
+  `message_not_editable`, `already_configured`, `not_authenticated` and
+  `invalid_credentials`.
+  **Most of them are not branched on, and that is fine.** A code reaches
+  `notifyFailure` and renders its server message unless some surface needs to do
+  something *different* for it. As built: the stream branches on none of
+  `zone_empty` / `zone_not_empty` / `nothing_to_reopen` / `message_not_editable`
+  — all four go through `notifyFailure` uniformly (013 D14); `translation_failed`
+  likewise, with no branch (023 D5); plan 017 branches on `model_not_enabled`
+  alone, for the model picker's inline failure line, and the compose's
+  presentation of the three model errors is plan 021's.
+  **`discussion_not_resumable` is gone** — it named a table
   that no longer exists and a condition that has changed; `zone_not_empty` is its
   replacement and the rename is not cosmetic (`backend-structure.md`).
   **`account_disabled` is gone too** (plan 004): no backend code raises it, so a
@@ -585,6 +825,45 @@ One module in `shared/`, used by every entry:
   login route's own refusal is a 400, never a 401 — `backend-structure.md`.) The
   navigation target is exactly `/login`, without a trailing slash, which nginx
   must resolve — an open seam recorded in `deployment.md`.
+
+### The verbs and the two non-JSON additions
+
+`shared/api.ts` grew three times, and each addition stayed **inside** the client
+rather than becoming a module of its own — because each needs the **one** error
+decode, the 401 → `/login` navigation and the `client_*` codes below:
+
+| Addition | Plan | What it is |
+|---|---|---|
+| `apiPut` | 016 D12 | an ordinary verb, same decode and error mapping as the others; the note-reorder route is the only caller |
+| **two exported helpers** | 019 D10 | the **non-2xx decode** (401 navigation included) and the **rejection mapping** (an abort propagates unchanged, anything else becomes `client_transport_failed`). `apiRequest` and the SSE consumer are their two callers, so the decode exists once for both transports |
+| `apiDownload(path, signal?)` | 030 | the **first non-JSON call**: it reads a blob, saves it through a temporary object URL and an `<a download>` anchor, and resolves to `{ filename, size }`. The filename comes from `Content-Disposition`, falling back to `rphelper-export.json`. An abort is not wrapped |
+
+**`shared/importFile.ts` is the one module that sits beside the client rather than
+inside it** (plan 031): `readExportFile` reads the chosen file **as text and parses
+it client-side**, and `postExportFile` sends the parsed object through the ordinary
+`apiPost`. **There is no `FormData` and no multipart anywhere in the product** —
+the import body is JSON like every other body, which is why the practical size
+bound is nginx's `client_max_body_size` (`deployment.md`) rather than an upload
+pipeline. It adds **one** client code, **`client_unreadable_file`** (status `0`,
+"The chosen file is not a readable export."), for a file that is not JSON at all;
+anything that parses but is not an export is the server's `export_invalid`
+(`transfer.md`).
+
+**`shared/embeddingFailure.ts` maps two codes to sentences** (024 D10):
+`no_embedding_model` and `llm_unreachable`, for the **authoring** surfaces that can
+degrade — a memo, a character, a setup. It is a presentation module, not a branch
+table: the codes are shown, not handled. The stream's own types carry the optional
+`search_coverage_incomplete` flag that drives the coverage banner
+(`workspace-shell.md`).
+
+**An inline-failure page needs the generic fallback text exported** (plan 029,
+step 004). The house sentence for a thrown value that is **not** an `ApiError` —
+"Something went wrong. Please try again." — lives as a module-private constant
+inside `shared/notifyFailure.ts`, and my-search's results page must not notify, so
+`searchState.ts` repeats the literal. **The duplication is the defect to remove,
+not the rule**: export it from `shared/apiError.ts` (or from `notifyFailure`) the
+next time a page needs it, so the two channels cannot drift into two different
+sentences for the same condition.
 
 ### Not-ready-yet — one shared classification
 
@@ -624,7 +903,7 @@ surface that needs the condition uses it too, rather than re-deriving it.
 
 **Call sites branch on `.code`, never on a status number and never on a message
 string.** `status` is carried for diagnostics and for the by-status half of a
-draft's field mapping (`ui-conventions.md`), not as a branch key. **An exported
+draft's field mapping (`forms-and-lists.md`), not as a branch key. **An exported
 type guard is the one sanctioned way a `catch` block narrows** to `ApiError`. The
 doc used to say the client throws "a typed `ApiError`" without defining the type;
 four features would otherwise have defined four.
@@ -658,7 +937,7 @@ The error path has exactly two steps, and each happens in exactly one place:
 
 1. **One decode, in the client.** It parses the envelope and throws a typed
    `ApiError`. Nothing else parses an error body.
-2. **One field-mapping, per draft.** `ui-conventions.md`'s `submitX` free function
+2. **One field-mapping, per draft.** `forms-and-lists.md`'s `submitX` free function
    maps that `ApiError` onto `serverErrors` field keys **by status or code, never
    by parsing prose**; anything unmappable lands on the general key.
 
@@ -677,7 +956,7 @@ because that is the silent fallback R4 forbids.
 **Realizes:** FEAT-010, UC-032, UC-034, UC-083, UC-085, US-132, US-133
 
 One module in `shared/`, speaking to exactly one route:
-**`POST /api/sessions/{id}/zone/compose`** (`backend-structure.md`). The old
+**`POST /api/sessions/{id}/zone/compose`** (`session-stream.md`). The old
 `/api/discussions/{id}/messages` is gone with the `discussions` table — there is
 no discussion id to address, and the zone has no id of its own either, so every
 zone operation is addressed through its session. The sibling append route
@@ -720,7 +999,7 @@ Four details that are all load-bearing:
   the stop control (`IconPlayerStop`, UC-085). There is no stop route and nothing
   to notify — the server detects the closed connection, persists the partial
   assistant text as an ordinary zone row and unwinds
-  (`llm-and-streaming.md`, `backend-structure.md`). The controller is owned by
+  (`llm-and-streaming.md`, `session-stream.md`). The controller is owned by
   the same store that owns the in-flight message, so the control knows whether
   there is anything to stop.
 - **A stream that ends without a `done` frame is a failure — unless this client
@@ -743,7 +1022,7 @@ Four details that are all load-bearing:
 - **After a stop the consumer re-reads the zone** —
   `GET /api/sessions/{id}/zone` — because no `done` frame arrived and therefore
   no `message_id` names the persisted partial row (US-132.AC-1). This is
-  `ui-conventions.md`'s never-optimistic re-load rule applying to a mutation
+  `forms-and-lists.md`'s never-optimistic re-load rule applying to a mutation
   whose result the client did not observe, not a special case; the same rule
   already governs every other mutation in the product.
 - **The stop clears nothing.** R10's prohibition covers this path too: aborting
@@ -751,47 +1030,138 @@ Four details that are all load-bearing:
   own zone messages, or the settled record — the reload replaces the in-flight
   message with the persisted row, it does not empty the zone first.
 
-Frame handling maps onto the **current zone** store (`workspace-shell.md`):
+### The module's own contract — one function, four outcomes, never a rejection
 
-- **`token` appends to the in-flight assistant message in the zone.** There is no
-  answer box to append to — the product removed it. The message the tokens build
-  is an ordinary zone message the roleplayer may **edit in place before settling**
-  (US-115), so the consumer writes into the same observable the editor binds to,
-  not into a separate streaming buffer copied over at `done`. A separate buffer
-  makes an edit during streaming either impossible or silently discarded.
-- **`tool_start` / `tool_result` / `tool_fail` append or update a tool row**,
-  rendered as the collapsible blocks US-114 describes. These are persisted
-  `role='tool'` rows server-side (`data-model.md`), not transient UI state, so a
-  reload does not lose them.
+As built (019 D9) the consumer is **`shared/sse.ts`**, one function that **never
+rejects** and resolves to exactly one of four outcomes:
+
+| Outcome | Carries | Decided by |
+|---|---|---|
+| **done** | the message id, a **decimal string** | a `done` frame |
+| **error** | an `ApiError` | an `error` frame, or a non-2xx decoded **exactly as `apiRequest` decodes it** (the shared helper above), or a malformed frame → `client_malformed_error` |
+| **stopped** | nothing | `signal.aborted` — the consumer's own state, never the bytes |
+| **unexpected end** | nothing; the caller renders it as `llm_unreachable` | the stream ended with no terminal frame and no abort |
+
+Two frame-level rules go with it: **an unknown `event` is skipped**, not treated
+as an error, so the server can add a frame type without breaking an old client;
+and **frames after a terminal one are never delivered**, so a trailing byte cannot
+reopen a finished exchange.
+
+**The controller is per compose, and it lives in a non-observable handle** on
+`StreamState` beside a wound-down promise (019 D12, and the sanctioned
+non-observable field above). It is **linked to `SessionStream`'s mount
+controller**, so unmount aborts a compose in flight — and a **mount abort writes
+nothing**, which is what keeps a response arriving after navigation from writing
+into a dead store. `isStreaming` derives from the streaming-text field, not from
+the controller.
+
+### Frame handling — what each frame writes
+
+Mapped onto the **stream** store (`workspace-shell.md` for what it renders):
+
+- **`token` appends to a dedicated observable streaming-text field on
+  `StreamState`** — **not** to a placeholder row in `zone`. This is the final
+  shape (019 D11, settled by 022 D6 and user decision U4), and the reason is
+  concrete: 013's `ZoneList` offers an edit control on **every** zone row, and a
+  placeholder's **client-minted id must never reach
+  `PATCH /api/messages/{id}`**. The streaming text renders **read-only** as the
+  live reply, and every outcome of the stream replaces it with the server's rows
+  by a **zone re-read**; **the persisted row is then editable like any other zone
+  message.**
+  **"Edit while streaming" is deliberately not offered**, because an edit would
+  **race the server's own write of that row**. That narrowing of `US-115.AC-1`'s
+  streaming half is recorded as **`docs/plans/defects.md` D-02**, together with
+  the open alternative reading of the criterion; `workspace-shell.md` carries
+  both halves. Nothing here is an open design question — 019 deferred the call to
+  022 and 022 made it.
+- **`tool_start` / `tool_result` / `tool_fail` maintain an observable live tool
+  list on `StreamState`, keyed by call id** — `running` → `ok` / `failed`
+  (022 D7, superseding 019 D18). **They never write `zone`.** The list is
+  **cleared in the same action as the streaming text**, when the re-read brings in
+  the persisted `role='tool'` rows (`data-model.md`) — so there is exactly one
+  moment at which the live view becomes the stored view, and no window in which
+  both are rendered. The persisted rows are what a reload shows, which is why the
+  live list can be discarded outright rather than reconciled.
+- **`regenerate` is a textless compose that shares the compose run** (022 D8) —
+  the same handle, the same stop, the same settle-mid-stream behaviour, the same
+  outcome table. **It never touches the composer's draft.** It is a second entry
+  point into one effect, not a second effect.
 - **`error` renders a visible failure without discarding anything already in the
   zone or in the settled record above the ruler** (R10, UC-032) — the one rule
   here that is a product guarantee rather than a transport detail.
 - **`done` finalises**, and its `message_id` is a **decimal string** (above).
 
-The protocol itself is defined in `llm-and-streaming.md` — this module's contract
-is only that it never drops roleplayer text on any frame.
+The protocol itself is defined in `llm-and-streaming.md` and the server half in
+`session-stream.md` — this module's contract is only that it never drops
+roleplayer text on any frame.
 
 ## Markdown
 
 - **Editing** (memo bodies, character sheets): TipTap via `@mantine/tiptap`, plus
   `tiptap-markdown` for markdown in and out. This is what satisfies UC-043's
-  markdown editor with live preview.
-- **Rendering** (notes shown read-only, settled entries and current-zone messages,
-  search result snippets): `react-markdown`.
+  markdown editor with live preview, and the editor's own rendering **is** that
+  preview (US-056.AC-1) — there is no second preview pane.
+- **Rendering** (notes shown read-only, settled entries and current-zone
+  messages): `react-markdown`, which **is** a dependency as of plan 013 — this
+  doc named the library before it was installed.
+- **Search result snippets render as plain text, not markdown** (029 D7). This
+  **corrects** the older line that listed them under `react-markdown`: a snippet
+  is a **cut fragment** of a markdown body and may open a structure it never
+  closes, so rendering it would let one result's unterminated emphasis or code
+  fence reformat the rest of the page.
 
 Two libraries rather than one because the editing surface needs a document model
-and a toolbar while the read surfaces need neither, and loading an editor to
-render a search snippet is a poor trade.
+and a toolbar while the read surfaces need neither.
+
+### One editor wrapper, and its two emit rules
+
+**`src/shared/MarkdownEditor.tsx`** is the one wrapper (009 D3): a label, a
+markdown `value`, `onChange(markdown)`, `readOnly`, and an optional **`autoFocus`**
+(016 D9) over `@mantine/tiptap` + `tiptap-markdown`, importing the stylesheet
+itself. **Every markdown editing surface reuses it** — notes (015), the user
+level's notes on `/settings` (017), the character persona (018). **TipTap is
+pinned to major 2**, because both peers bind to it and a routine install of 3
+breaks them.
+
+**The "never echo" rule, and the two library defaults that both go the wrong
+way** (plan 009, step 005). `onChange` is emitted **from `onUpdate` only**, and
+**every programmatic content or editability write passes `emitUpdate: false`**:
+
+- `editor.setEditable(editable)` defaults `emitUpdate` to **true**;
+- `editor.commands.setContent(content)` must be given `emitUpdate: false`
+  **explicitly**.
+
+Either default alone makes `onChange` fire on mount, which in a blur-save world
+means an unedited note writes itself back to the server the moment it appears.
+Recorded for every future consumer of the wrapper, because the symptom is a write
+nobody asked for rather than a visible error.
+
+### One renderer, three variants
+
+**`app/MessageBody.tsx`** is the stream's only renderer (013 D5), with three
+variants: **painted** (zone messages, where `(( ))` is marked up —
+`workspace-shell.md`), the **decision card**, and **plain** (settled `partner` and
+`turn` entries). The variant is chosen by `kind` and by which side of the ruler
+the row sits on, never by re-parsing the text (R12).
+
+**Assistant text is split before it reaches the renderer** (022 D4, D5) by a
+**pure** client parser, `app/thinking.ts`, consistent with 021 D4's strip rule.
+Think segments render as **plain text** — they are the model's scratch work and
+marking them up would dress them as prose — and answer segments go through the
+painted `MessageBody`.
 
 ## Bundle-level constraints worth stating
 
-- **`@dnd-kit` is used for exactly one interaction: reordering notes within a
-  level on the note wall** (UC-076, US-102). The previous `_TBD:` here — "do not
-  build reorder until a requirement asks for it" — is **closed**: US-102 is that
-  requirement, and it is the project's first and only drag interaction
-  (`workspace-shell.md`). Four constraints come with it:
+- **`@dnd-kit` is used for exactly one interaction — reordering notes within a
+  level — at two mount points** (UC-076, US-102). The previous `_TBD:` here — "do
+  not build reorder until a requirement asks for it" — is **closed**: US-102 is
+  that requirement, and it is the project's first and only drag interaction
+  (`workspace-shell.md`). As built the packages are **`@dnd-kit/core`,
+  `@dnd-kit/sortable` and `@dnd-kit/utilities`** (016 D8). Five constraints come
+  with it:
   - **A note cannot cross a level boundary by dragging** (US-103.AC-2), enforced
-    in the drop handler, not merely signalled in the drag preview.
+    in a **pure drop-decision function plus the drop effect**, not merely
+    signalled in the drag preview.
   - The ordering column is **`memos.sort_key`**, scoped within `(scope, scope_id)`
     and nowhere wider (`data-model.md`) — the one mutable ordering in the schema.
     The `position` column this bullet used to cite **does not exist**:
@@ -800,6 +1170,11 @@ render a search snippet is a poor trade.
   - **Reordering is not decoration: it changes what the system prompt contains**
     (R3, US-102, `llm-and-streaming.md`), which is why `@dnd-kit`'s keyboard sensor
     is required rather than optional (`ui-conventions.md`'s accessibility floor).
+  - **There are two `DndContext`s — the note wall's and the character page's notes
+    grid — and their configuration is shared, not duplicated** (018 D8). The
+    sensors and the position-only announcements live in **`app/memoDnd.ts`**, so
+    the two mount points keep **one** keyboard path. Two contexts with two sensor
+    sets is how one of them silently loses its keyboard sensor.
   - Nothing else may use `@dnd-kit` without a requirement that asks for it.
 - No component library other than Mantine, no Tailwind, no CSS modules, no
   styled-components (`overview.md`).
@@ -812,7 +1187,23 @@ stylesheets and there is no third:
 | File | Holds | Imported by |
 |---|---|---|
 | `src/global.css` | **resets only** | every entry — imported by **`shared/AppProviders`**, after Mantine's core and notifications stylesheets, and so reaching every entry transitively |
-| `src/shell.css` | **the `app` workspace's layout only** — the three-column grid and its `1px` gap, the `--navw` custom property and the collapsed-rail class that re-points it, the `820px` media query | the **`app` entry** alone — imported directly by **`src/app/main.tsx`**, the one stylesheet an entry imports itself |
+| `src/shell.css` | **the `app` workspace's layout only** — the shell grid and its `1px` gap, the `--navw` custom property and the collapsed-rail class that re-points it, the narrow-width overlay, the `(width < 820px)` media query, **and the session screen's stream/wall layout** | the **`app` entry** alone — imported directly by **`src/app/main.tsx`**, the one stylesheet an entry imports itself |
+
+**`shell.css` grew by six selectors and no new media query** (016 D11). Plan 016
+added the session screen's own grid — `.app-session`,
+`.app-session.wall-pinned`, `.app-stream`, `.app-wall`, `.app-wall.wall-open` and
+`.app-session.wall-pinned .app-wall` — which is still **workspace layout only** and
+still **colourless**: the wall's background and drop shadow are Mantine's
+(`Paper`). The table's older wording, "the three-column grid … only", understated
+it; the boundary that matters is *layout, not decoration*, and
+`tests/stylesheets.test.ts` is what checks it. `workspace-shell.md` lists every
+selector the file holds and names the one colour token it is allowed.
+
+**The narrow-width wall rule is the one layout condition that is *not* in CSS**,
+and deliberately: it is a conjunction of a stored pin, a transient open flag and
+the viewport, and CSS can see only the third. TypeScript reads the **same query
+string**, exported as `NARROW_VIEWPORT_QUERY`, so there is one threshold and not
+two (`workspace-shell.md`).
 
 **Who performs the imports is fixed** (decided in plan 002). Resets must land
 **after** Mantine's base sheet to win the cascade. Leaving that to

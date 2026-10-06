@@ -1,7 +1,8 @@
 # Deployment
 
-**Realizes:** FEAT-001, FEAT-002, FEAT-005, FEAT-009, FEAT-010, FEAT-018,
-FEAT-019, UC-001, UC-003, UC-016, UC-027, UC-061, US-035.AC-1, US-035.AC-2
+**Realizes:** FEAT-001, FEAT-002, FEAT-005, FEAT-009, FEAT-010, FEAT-011,
+FEAT-016, FEAT-018, FEAT-019, UC-001, UC-003, UC-016, UC-027, UC-061, UC-065,
+UC-066, US-035.AC-1, US-035.AC-2
 
 Ports, the dev and prod topologies, every nginx directive with its reason, the
 configuration conventions, and the logging posture. Build and test commands live
@@ -49,6 +50,31 @@ flip condition attached: TLS termination anywhere in front of the application
 makes `Secure` mandatory (`backend-structure.md`'s cookie-flag table). The change
 is **one function** — the cookie setter in `app/dependencies.py` — so the TLS
 work has a checklist entry rather than a memory.
+
+### The HTTP-only posture's first visible feature consequence — copy-out
+
+**`navigator.clipboard` does not exist on a non-secure origin**, and every LAN
+address this instance is reached at today is a non-secure origin. So the one
+operation that crosses the product's outbound boundary — copying a settled turn
+out (UC-030, UC-082, US-033.AC-1) — cannot rely on the modern clipboard API at
+all: `app/copyOut.ts` falls back to **`execCommand("copy")`** whenever
+`navigator.clipboard` is absent (014 D9, `workspace-shell.md`).
+
+Recorded here rather than only beside the control, because it is the **first
+place the HTTP-only posture above shows up as a feature decision** rather than as
+an operational note. Two consequences follow:
+
+- `execCommand("copy")` is deprecated and is carried deliberately, not by
+  oversight. A plan that removes it on the strength of the deprecation breaks
+  copy-out on every LAN deployment, and the symptom is a silent clipboard
+  failure on the product's main flow. The failure path is visible —
+  `notifyFailure` on a clipboard error (`ui-conventions.md`) — but a removed
+  fallback would fail on *every* copy, not occasionally.
+- **When TLS lands, the fallback becomes dead code.** On a secure origin
+  `navigator.clipboard` is always present, so the `execCommand` branch stops
+  being reachable and can be deleted. That makes it a checklist entry for the TLS
+  work above, beside the cookie's `Secure` flag: two things to change, in two
+  named places, rather than a search.
 
 ---
 
@@ -385,6 +411,14 @@ per-user export is an upload, and it is not small. Set generously and deliberate
 bound, only that a paste is never refused. Raise it if a real import exceeds it;
 never lower it below what US-035.AC-2 implies._`
 
+**The import is built now, and this limit is its practical bound** (plan 031).
+The upload is a **JSON body, not multipart**, and it is **held fully parsed in
+memory** (`transfer.md`), so `client_max_body_size` is the only ceiling an import
+meets — there is no streaming parse underneath it that would tolerate more.
+**Flip condition:** an export that exceeds 64m in practice means either raising
+the limit or moving to a streamed upload, and the second is the real fix if the
+memory posture becomes the binding constraint rather than nginx.
+
 **4. SSE directives on the dev-compose nginx too.**
 BookWriter added its streaming directives only to the **prod** config, so its
 dev-compose nginx path has never been hardened for streaming — meaning a developer
@@ -437,6 +471,33 @@ requesting an asset bundle that no longer exists after a deploy. `no-cache`
   (`backend-structure.md`). The operational consequence, stated in
   `data-model.md`: a restored whole-database export needs its environment supplied
   separately, because the export deliberately carries no credentials.
+  **The web-search API key is a second secret that is not a pointer either**, for
+  the opposite reason: it never goes near the database at all, so it lives only in
+  the environment (next bullet, and `backend-structure.md`'s `$ENV_VAR` section).
+- **Web search takes two environment variables, and they do NOT carry the
+  `RPHELPER_` prefix** (plan 028, D2, D3):
+
+  | Variable | Holds |
+  |---|---|
+  | `SEARCH_CSE_KEY` | the Google Custom Search API key — a secret-string type, **masked in `repr`** |
+  | `SEARCH_CSE_ID` | the custom search engine id (`cx`) |
+
+  Both are **optional with no default**, read from the environment like every
+  other setting (`env_file` in prod, the backend's `.env` in dev). **When either
+  is missing or blank, web search is simply not offered** — no error, no startup
+  failure, no degraded mode: the tool is absent from the registry the request
+  builds (`llm-and-streaming.md`). An instance that never configures them behaves
+  exactly as one whose roleplayers all switched the tool off.
+
+  **The missing `RPHELPER_` prefix is a named deliberate exception, not an
+  oversight** (028 U2, user-confirmed). These are **the user's existing
+  environment variable names**, already set on the machines this runs on. The
+  explicit-alias rule still holds — each field names its variable, so the
+  environment contract stays greppable — and **only the prefix differs**. Written
+  down so that nobody "fixes" the two aliases to `RPHELPER_SEARCH_CSE_KEY` and
+  `RPHELPER_SEARCH_CSE_ID`: that change breaks nothing loudly, it **silently
+  unconfigures web search** on every instance that was working, and the symptom
+  is a tool quietly no longer being offered.
 
 ---
 
@@ -536,10 +597,17 @@ rather than a guideline because it is enforceable only as one.
 - memo bodies;
 - character persona / sheet text;
 - setup text;
-- session titles or partner labels;
+- session titles or partner labels — **columns `sessions` does not have**
+  (011 D4, `US-145`: a session is identified by its start time), so the
+  prohibition has no call site today and is kept deliberately: if a title or a
+  partner-label column ever lands, it is already covered rather than needing
+  this list to be remembered and extended;
 - translations;
 - LLM prompt payloads;
 - LLM completions;
+- **web-search queries** — they are composed from message text, so a query is
+  message text by another name (plan 028);
+- **web-search results**;
 - API keys or resolved secret values.
 
 **Allowed, and sufficient to debug with:**
@@ -565,8 +633,16 @@ Concrete shapes, so a coder can pattern-match. **Allowed:**
 compose start session=7250416938275332095 model=llamaswap/qwen3-30b
 tool_failed tool=memo_search code=no_embedding_model session=7250416938275332095
 settle session=7250416938275332095 rows=3 kind=turn
-translate cached=false message=7250416938275332096 status=200 ms=812
+translate cached=false message=7250416938275332096 ms=812
+translate cached=false message=7250416938275332096 ms=812 written=false
+translate failed message=7250416938275332096 code=translation_failed
 ```
+
+**The translate line as built has no `status=` field** (023 D4): the translation
+service has no HTTP status to report — it is a service, not a handler — and the
+earlier example here carried one. It gains **` written=false`** when the
+disconnect check skipped the cache write (`llm-and-streaming.md`), which is the
+one thing that distinguishes a skipped write from a cache miss in the log.
 
 **Forbidden**, each an instance of the list above:
 
@@ -584,14 +660,80 @@ the same kind of outbound surface and is bound the same way — more strictly, i
 fact, since the list above forbids *all* memo bodies rather than only disabled
 ones.
 
-### loguru's `diagnose` / backtrace must be off for the file sink
+#### Third-party request logs are in scope, and a URL can carry message text
+
+**The rule binds records this codebase never wrote.** `configure_logging`
+installs an `InterceptHandler` as the stdlib root handler (above), so **every
+library's records land in both sinks** — including an HTTP client's own request
+log, which logs a URL.
+
+That became concrete with plan 028: it is the first feature to put message text
+in a **query string** (`q=<the roleplayer's query>`), and `httpx`'s own request
+record was carrying it at `DEBUG`. The mechanism that holds the line is named in
+`backend-structure.md`: **`app/logging.py` owns third-party logger suppression**
+(`_SILENCED_LOGGERS` beside `_PROPAGATING_LOGGERS`) and **no service module may
+touch a third-party logger** — otherwise the redaction surface would depend on
+import order.
+
+#### Access-log lines record the path without its query string
+
+**A filter on the `uvicorn.access` logger strips the query string** (plan 032,
+step 001), because a query string can carry user text — `GET /api/search?q=…` is
+the live example (029). The path is kept, because the path is what an operator
+needs; the arguments are what they must not have.
+
+This was the **first leak plan 032 found**, and it is worth seeing why it is easy
+to miss: nobody writes an access log line, so nobody reviews one against this
+section's forbidden list.
+
+`_TBD: nginx's OWN access_log still records full request URIs including query
+strings, so GET /api/search?q=<user text> lands in the nginx access log even
+though the application's does not. The fix — a log_format without $args /
+$request_uri, or access_log off for /api/ — belongs to the deployment surface and
+is owned by fast/001.dev-and-container-harness. It was found during 032's
+planning and is explicitly out of 032's scope; the application-side filter above
+does not cover it._
+
+#### SQL parameters never reach a log line — defence in depth
+
+Two settings rather than one, because a bound value can escape by two routes:
+
+- **The engine is built with bound parameters hidden**, so a rendered statement
+  in an exception message carries placeholders rather than values.
+- **The `sqlalchemy` loggers stay at WARNING or above**, so statement echoing
+  never turns itself on.
+
+Either alone would be enough on a good day; both are set because a SQLite error
+text can embed a column **value** (`backend-structure.md`'s 500 posture makes the
+same point for `schema_apply_failed`'s `detail`), and a value here is the
+roleplayer's prose.
+
+#### The rule is proved, not only stated
+
+Two enforcement tests, named so a change to this section comes with a check:
+**`backend/tests/test_logging_redaction.py`** and
+**`backend/tests/test_privacy_audit_logs.py`**, the second a **dynamic sentinel
+sweep at level 0** — it drives the application with recognisable content and
+asserts the sentinels appear in no record at any level. A prohibition that is only
+written down is a prohibition that drifts; this one fails a build.
+
+### loguru's `diagnose` and `backtrace` must be off on **every** sink
 
 loguru's exception formatting can print **local variable values** alongside a
 traceback. That would defeat the rule above the moment an exception is raised
 inside a function holding message text, a memo body or a resolved API key —
-which is most of the compose path. **`diagnose=False` on the file sink**, and the
-`backtrace` frame expansion is not what makes a traceback useful here anyway; the
-frames are.
+which is most of the compose path.
+
+**So `diagnose=False` and `backtrace=False` on both sinks — the rotating file
+*and* the console/stderr.** The `backtrace` frame expansion is not what makes a
+traceback useful here anyway; the frames are.
+
+**This was broadened from the file sink alone, and the reason is a real leak**
+(plan 032, step 001). The console sink kept loguru's default `diagnose=True` and
+was printing traceback locals into console output — which in prod is
+`supervisord`'s captured stream, i.e. a durable operator-facing log. "The file
+sink is the durable one" was the assumption behind the narrower rule, and it was
+wrong.
 
 Named explicitly because `diagnose=True` is loguru's own default in several
 configurations and reads as a debugging convenience rather than as a data-leak
@@ -619,3 +761,15 @@ path.
   so that one surface owns the operation rather than two that can diverge. The
   consequence is worth stating because it is exactly backwards from when you
   want it: the remedy is unavailable precisely when the app will not start.
+- **A restored export needs the search credentials supplied with the rest of the
+  environment**, if web search is wanted: `SEARCH_CSE_KEY` and `SEARCH_CSE_ID`
+  live only in the environment and are in no export, exactly like the
+  `"$ENV_VAR"` targets. A restored instance with the database back and these two
+  unset is working correctly and simply does not offer `web_search`.
+- **Watch item with a date: Google's Custom Search JSON API transition,
+  `2027-01-01`.** The API is closed to new customers and existing customers must
+  transition by that date. The code-side flip condition is recorded in
+  `llm-and-streaming.md` — one provider class plus a factory — but the **first
+  symptom is operational**: `web_search` starts failing as `tool_failed` for every
+  call while everything else keeps working. Listed here so the date is in the
+  operator's notes and not only in a design doc.

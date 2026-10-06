@@ -162,3 +162,9 @@ the architect to apply at finalization.
 - Add the four export routes to the route index, and `rphelper-export`
   `version` / `schema_version` to the invariants list, with the note that
   `schema_version` is bumped by hand on a `db/schema.py` shape change.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: The export/import contract moved out of `data-model.md` into the new `transfer.md`; the table and column definitions stayed. Its `translations`-are-never-exported question is answered in the same place.

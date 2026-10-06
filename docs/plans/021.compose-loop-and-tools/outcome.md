@@ -96,3 +96,9 @@ the user-confirmed decisions it records.
     criterion behind them; raised so the product layer can record them or rule otherwise.
 
 ## Observations
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: Its "Named divergences" status note is rejected (as 019's); its "tool columns are not on the wire" (D7) is superseded by 022 D3's twelve-key `MessageResponse`, and its "production registry empty" by the final three-tool state.
+Notes: All three items flagged for review are accepted — settle's head is the last non-tool zone row, `message_not_editable` now also means a tool row, and `tool_failed` is 502. The R11 change is recorded as deliberate so it is not read as a slip, and its three `/product-spec` flags are discharged by `US-044.AC-5`, `US-146` and `US-115.AC-1`'s `Constraint:`.

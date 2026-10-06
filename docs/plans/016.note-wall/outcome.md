@@ -170,3 +170,9 @@ applied, replace it.
   order on the wall.
 
 ## Observations
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: none
+Notes: Its `sort_key` rule supersedes 015's and is the only one written — 016 D5/D6 supersedes 015 D4, so this plan's rule is the one of record. Both product flags are discharged: the new-note-first rule is `US-102.AC-2`, and the narrow-width dismissal is `US-094.AC-3` / `US-094.AC-4`. The note-card drag tension and the always-shown flag icons were settled by the user (accept as built; always-shown becomes the convention), and the pin-glyph collision is closed as accepted and named.

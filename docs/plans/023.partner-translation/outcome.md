@@ -83,3 +83,9 @@ file. "Dn" are `context.md` decisions in this folder.
 - **021:** its D4 "exactly two places" statement is now three (D10).
 
 ## Observations
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
+Rejected items: Its "named divergence unchanged" status note is rejected (as 019's and 021's).
+Notes: The English-fallback conflict it raised for `/product-spec` is discharged by `US-142`, and its `data-model.md` translation-invalidation `_TBD:` is closed rather than carried — `US-111.AC-3` now requires what the build does. The stop-control deviation is recorded as design in both `llm-and-streaming.md` and `workspace-shell.md`, whose sentence claiming the composer's Stop reaches a translation is corrected and FEAT-011 removed from that section's `Realizes:` line.

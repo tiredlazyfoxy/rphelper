@@ -51,3 +51,9 @@ records.
   product layer can record them or rule otherwise.
 
 ## Observations
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`), plus three `backend-structure.md` and two `domain-rules.md` items in B3.
+Rejected items: Its "tool rows are skipped in context" rule is superseded by 021 D9's replay and was not written.
+Notes: Five items were orphaned by the orchestrator's batching and applied in B3, including `services/context.py`'s absence from the module tree and its missing row in the service-to-service import table. The English fallback is recorded as realizing `US-142` rather than as a plan-time choice.

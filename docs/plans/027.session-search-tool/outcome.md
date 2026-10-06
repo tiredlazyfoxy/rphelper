@@ -69,3 +69,9 @@ file. "Dn" refers to decisions in this folder's `context.md`.
   Possible impact: a sentence in `backend/CLAUDE.md` (or `docs/architecture/backend-structure.md`'s
   layer-separation note) saying that `app/errors.py` is the framework-coupled leaf every service
   may import, and that framework-freedom is a source-level property.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`).
+Rejected items: none
+Notes: One `## Observation` applied in B1 — `app/errors.py` is the framework-coupled leaf every service may import, and framework-freedom is a source-level property, never a `sys.modules` check. Its `backend-structure.md` items were orphaned by the orchestrator's batching and applied in B2, and the embedding-cost `_TBD:` it declined to close stays open, re-pointed away from FEAT-015's plan.

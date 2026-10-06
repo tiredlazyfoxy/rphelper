@@ -81,3 +81,9 @@ folder's `context.md`; "011 Dn" are in `docs/plans/011.rp-sessions/context.md`.
 - **`027` (`session_search`):** US-122.AC-2 is delivered there, over `settled_entries`.
 - **FEAT-008** (011's outcome): US-027.AC-3's entries half and US-024.AC-2's
   adding-entries half are proved by `004` DoD-16.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`).
+Rejected items: Every "until `014`" qualifier was dropped rather than written — 014 widened `PATCH` and 021 added the tool-row refusal, so the final rule is recorded once.
+Notes: The `admin-surfaces.md` views gap was removed as asked, but the section was rewritten rather than trimmed, because 024 opens a different gap there (virtual tables outside `metadata`, and a Sync rebuild dropping FTS triggers). The four named Core selectables are recorded with the explicit statement that no SQL view exists anywhere.

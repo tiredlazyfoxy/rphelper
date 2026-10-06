@@ -87,3 +87,9 @@ are the user-confirmed decisions it records.
   and record in `backend-structure.md` that **`app/logging.py` owns third-party logger
   suppression** (constant `_SILENCED_LOGGERS`, alongside `_PROPAGATING_LOGGERS`) — no service
   module may touch a third-party logger.
+
+---
+Status: Applied 2026-10-06 — /architect finalization (with /product-spec finalization the same day)
+Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`) and B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`).
+Rejected items: none
+Notes: Its step 001 `## Observation` applied in B1 — `app/logging.py` owns third-party logger suppression, and no service module may touch a third-party logger. The non-`RPHELPER_` alias prefix is recorded as a named deliberate exception so nobody "fixes" it and silently unconfigures web search; the 2027-01-01 Google Custom Search transition is recorded as both a flip condition and an operational watch item, and its frontend `_TBD:` on instance-level tool availability is discharged by `US-073.AC-2`.

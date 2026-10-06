@@ -2,8 +2,8 @@
 
 **Realizes:** FEAT-003, FEAT-004, FEAT-005, FEAT-018, FEAT-019,
 FEAT-020 (the admin entry point only), ACT-001,
-UC-006, UC-007, UC-008, UC-009, UC-010, UC-011, UC-012, UC-013, UC-014, UC-015,
-UC-016, UC-061, UC-065, UC-066, UC-071, UC-087
+UC-002, UC-006, UC-007, UC-008, UC-009, UC-010, UC-011, UC-012, UC-013, UC-014,
+UC-015, UC-016, UC-061, UC-065, UC-066, UC-071, UC-087, US-077
 
 The `admin` Vite entry in full: its routes, its shell, its access gate, and the
 three pages ACT-001 works in. Entry-level build reasoning is in
@@ -283,6 +283,24 @@ care:
   exposes no user content — no character, setup, session, entry or memo, and no
   count derived from them (FEAT-019, UC-065, UC-066).
 
+### Two properties of this entry are now proved rather than intended (plan 032)
+
+- **The `admin` entry's own files call only `/api/admin/`, `/api/me`,
+  `/api/auth/` and `/api/health`** — and that is **Vitest-enforced**, not a
+  convention. It is the frontend half of the separate-bundle posture: the
+  roleplayer's document does not name the admin area, and the admin document does
+  not reach a roleplayer route. A test rather than a review rule because the
+  tempting addition is small and plausible — one call to
+  `GET /api/characters` to make a page "more useful" — and R5's boundary is
+  exactly what it would cross.
+- **Admin responses are invariant under user content**: the admin surfaces answer
+  identically before and after roleplayer material exists, and a test asserts it.
+  That is the positive form of "no count derived from user content" — not "we
+  looked and found no counts", but "creating content changes nothing an
+  administrator can see". It is the strongest statement available about an
+  absence, which is why R5 names it as its own enforcement point
+  (`domain-rules.md`).
+
 `require_role(Role.admin)` is what `backend-structure.md`'s authorization table
 previously called `require_admin`; see that doc for how it sits alongside
 `require_unconfigured` and `require_user`.
@@ -541,17 +559,25 @@ introspection of `db/drift.py` against the `db/schema.py` registry
 single introspectable source of truth and why the ORM decision below was
 constrained by it.
 
-### As delivered by FEAT-005 (plan 007) — the report and its row actions only
+### What the page holds, action by action
 
-**The page ships with the report table and its per-row Create and Sync, and
-nothing else.** **Rebuild index (UC-016 / US-019) is deferred to
-`fast/002.vector-index-rebuild`**, which has no vectors to rebuild until stage
-004 creates the `vec0` tables; **Export** and **Import** belong to features `030`
-and `031`. **No disabled placeholder is built for any of the three.** The
-page-level actions table further down is the design those features build to; it
-is not what this page shows today. (Plan 006's `context.md` calls UC-016 "feature
-`007`'s"; that cross-reference is stale — `007`'s `brief.md` defers it to
-`fast/002`.)
+| Action | State |
+|---|---|
+| the drift report, per-row **Create** and **Sync** | delivered (plan 007) |
+| **Export** — the whole-database export | **delivered** (plan 030) |
+| **Import** — the whole-database replace | **delivered** (plan 031) |
+| **Rebuild index** (UC-016 / US-019) | **not built** — `fast/002.vector-index-rebuild` |
+
+Plan 007 shipped the report and its row actions and **nothing else**, with **no
+disabled placeholder** for the other three — a control that explains nothing is
+worse than an absent one. Two of the three have since arrived.
+
+**Rebuild index is still absent.** It was deferred to `fast/002` because there
+were no vectors to rebuild until stage 004 created the `vec0` tables; they exist
+now (plan 024), so the remaining dependency is the plan itself. (Plan 006's
+`context.md` calls UC-016 "feature `007`'s"; that cross-reference is stale —
+`007`'s `brief.md` defers it to `fast/002`.) The page-level actions table further
+down is the design `fast/002` builds to.
 
 **Three statuses, fixed: in sync, missing, drifted.** Declared once in
 `db/drift.py` and reused by the router model and the frontend row type. The
@@ -586,31 +612,83 @@ colour is redundant to it** — a colour-only status column fails
 `ui-conventions.md`'s accessibility floor. The mapping is one pure helper, so the
 component maps nothing.
 
-**Two recorded gaps — views and virtual tables.** The report walks
-**`metadata.tables` only**, so the two SQL views (`settled_entries`,
-`current_zone`) and the `vec0` / FTS5 virtual tables are **outside it**. This is a
-known gap, not an oversight: **none of them exists yet**, and a `kind`
-discriminator with one reachable value, or a virtual-table comparison designed
-against zero examples, is worse than the gap. **Ownership:** whichever feature
-introduces the views (FEAT-009 / FEAT-010's plans, `011` / `012`) and whichever
-introduces the vector and FTS tables (stage 004) **owns extending the report**,
-each adding the case with its first real instance.
+**One recorded gap — the derived tables.** The report walks **`metadata.tables`
+only**, and the `vec0` / FTS5 virtual tables live **outside `metadata`**, in
+`db/search_tables.py` (plan 024, `data-model.md`). So **`memo_vec`,
+`session_vec`, `memo_fts` and `message_fts` are not in the drift report at all**,
+and nothing on this page reports their presence, their shape or their dimension.
 
-**The views gap has a second edge, with the same owner.** Once the views exist, a
-Sync rebuild of a table a view references may fail at the rename step, because
-SQLite re-parses views on `ALTER TABLE … RENAME`. The failure is safe — rollback
-plus `schema_apply_failed` — but the table is **un-syncable** until the
-views-introducing feature handles views around the rebuild.
+**The views half of this gap is gone, because the views are.** This section used
+to record two gaps and name the second as "the two SQL views (`settled_entries`,
+`current_zone`)". **There are no SQL views anywhere in this schema** — plan 012
+built four **named Core selectables** instead, which execute no DDL and are
+therefore nothing the drift report could describe (`data-model.md`,
+`backend-structure.md`). The companion warning that a Sync rename could break a
+view is gone with it: no view exists to be re-parsed.
+
+**The surviving gap has a sharper edge than the one it replaced** (024 D2). A
+Sync rebuild of `memos` or `messages` is a create-copy-drop-rename, and **the
+drop takes that table's FTS triggers with it**. The next ensure-on-write restores
+the triggers but does **not** back-fill an already-existing FTS table — so between
+the Sync and the next full rebuild, that lexical index is **stale for every row
+written in between**, and the page that caused it says nothing about it.
+
+- **The repair is `fast/002.vector-index-rebuild` rebuilding both FTS tables**,
+  which makes **rebuild-after-Sync an operational step** rather than an optional
+  tidy-up.
+- **Why the tables are outside `metadata` in the first place:** a `vec0` table's
+  dimension is measured when an administrator designates an embedding model, so no
+  `Table` literal can declare it (`data-model.md`). That is a reason, not an
+  oversight, which is why the gap is recorded rather than closed by moving them.
+- **Ownership:** extending the report to cover virtual tables belongs to whichever
+  feature first needs it; a virtual-table comparison designed against the four
+  instances that now exist is at least possible, which it was not when this gap
+  was first written.
 
 ### The page's full design — page-level actions, Create/Sync, scope
 
-Page-level actions — **the design, not yet delivered** (above):
+**The page-level actions sit in one group beside the Database title** (plan 030),
+and Import and Rebuild index join that same group rather than each finding its own
+corner:
 
-| Action | Behaviour | Realizes |
-|---|---|---|
-| Export | download the whole-database export | FEAT-018, UC-061 |
-| Import | file picker, then upload | FEAT-018, UC-002 |
-| Rebuild index | re-embed everything; returns an **indexed-row count** | FEAT-005, UC-016 |
+| Action | Behaviour | State | Realizes |
+|---|---|---|---|
+| Export | download the whole-database export | delivered, plan 030 | FEAT-018, UC-061 |
+| Import | file picker → confirm → upload → redirect to `/login` | delivered, plan 031 | FEAT-018, UC-002, UC-061 |
+| Rebuild index | re-embed everything; reports completion | **not built** — `fast/002` | FEAT-005, UC-016 |
+
+**Import is a four-step sequence, not a picker-and-upload** (plan 031):
+
+1. a **file picker**;
+2. a **red `ConfirmModal`** — "Replace the whole database?" — stating that
+   everything is replaced **including the administrator's own account**, and that
+   they will be **signed out**;
+3. the upload;
+4. a **redirect to `/login`**.
+
+The redirect is not a courtesy: the import wipes `auth_sessions`, the caller's row
+included, and the route answers **204 with the session cookie cleared**
+(`transfer.md`). Step 2 is the confirm convention applying to the most destructive
+action in the product — `ui-conventions.md` owns the wording rules — and the
+realizes column carries **UC-061 alongside UC-002**, because this is the restore
+half of the whole-database granularity and not only bootstrap's import.
+
+**Failures render in their own inline red `Alert`**, separate from the drift
+report's error, and **never as a notification** — including `database_not_empty`,
+which is the common one (the instance already holds content, `US-077.AC-3`).
+Separate from the report's error because the two are unrelated operations on one
+page, and one shared error slot would have a Sync failure overwritten by an import
+failure.
+
+**`fast/002`'s response is expected to carry no count, and that is a requirement
+on that plan rather than an as-built fact** (plan 032's audit question;
+`fast/002` is unbuilt). UC-016 asks for completion to be reported, and R5 forbids
+an administrative surface from showing **a count derived from user content** — and
+a rebuild's "N rows indexed" is derived from every user's content, so it discloses
+that other users have material and roughly how much. What "counts and completion
+only" permits is therefore narrower than it sounds: completion, and at most counts
+that are **not** derived from user content. A rebuilt-table count would qualify; a
+row, memo or session count would not.
 
 **Rebuild is always available, with no precondition beyond authentication.**
 UC-016's postcondition says so in those words, and it is the remedy for **any**
@@ -629,9 +707,20 @@ button is therefore:
   1), which is a reported failure the administrator can act on rather than a
   disabled control that explains nothing.
 
-Its report is **counts and completion only** — no per-user breakdown, no sample,
-no progress line naming a character (UC-066, R5). Rebuild is expensive and
-touches every user's content, so it takes the **confirm step** below. The confirm
+Its report is **completion and nothing derived from user content** — no per-user
+breakdown, no sample, no progress line naming a character, and no row count
+(UC-066, R5; the expectation above). Rebuild is expensive and
+touches every user's content, so it takes the **confirm step** below.
+
+**Rebuild-after-restore is a normal operational step, not a repair** (plan 031).
+A whole-database import **drops** `memo_vec` and `session_vec` inside its
+transaction and **embeds nothing**, so immediately after a restore the vector
+tables are **absent** and the restored material has no vectors. They are
+re-created at the then-designated model's dimension by the next qualifying write
+(ensure-on-write, `data-model.md`), and the restored material comes back into
+coverage only when the rebuild runs. So an administrator who restores an export
+and wants semantic search should expect to press this button — and until
+`fast/002` exists, there is no button to press. The confirm
 is a **designed addition required by no acceptance criterion**
 (`ui-conventions.md`) and it **may stay** — a confirm is not a precondition: it
 does not gate availability, it asks about an expensive action the administrator
@@ -718,8 +807,10 @@ so it stays open here._`
 
 **Export/import here is the whole-database granularity only.** FEAT-018's
 per-user, per-character and per-session exports are **roleplayer-side** (ACT-002,
-UC-062/UC-063/UC-064) and live in the `app` entry; their full contract is
-deferred (`data-model.md`'s sketch, `overview.md`'s deferred list).
+UC-062/UC-063/UC-064) and live in the `app` entry. Their full contract is no
+longer deferred — it is **`transfer.md`**, which owns the envelope, the
+granularity table, the id-serialization rules and the import policy for every
+granularity including this one.
 
 **The whole-database export is opaque to the administrator.** FEAT-018/UC-061
 produces the one artifact that necessarily contains every user's data, and R5
@@ -728,7 +819,30 @@ rendering** of it. This page therefore has no export preview, no export diff and
 no export browser, now or later. It downloads a file and says how large it was;
 it never shows what is inside. The export also carries **no credentials** — only
 `"$ENV_VAR"` pointers — so a restored instance needs its environment supplied
-separately (`data-model.md`).
+separately (`data-model.md`, `deployment.md`).
+
+**As built, in both directions** (plans 030, 031):
+
+- After a successful export the page renders **a single inline size line** — "Export
+  downloaded — 12.3 KB", formatted 1024-based — and **nothing else**. **No
+  content, no table name, no row count, and a test asserts it.**
+- An **export failure** renders in its own inline red `Alert`, separate from the
+  drift report's error, and **never as a notification**.
+- **The size line does not break the no-success-toast rule**, because it is
+  **inline page text** rather than a notification. The rule is about transient
+  success noise (`ui-conventions.md`); a byte count sitting on the page is the
+  answer to "did that work and how big was it", which is the one question a
+  download leaves open.
+- **The import shows nothing of the file either** — no preview, no counts, no
+  table list, **before or after**. The administrator chooses a file, confirms, and
+  learns only that it succeeded or failed. The failure's `detail` carries a single
+  `reason` token and never a table name, a column name or row content
+  (`export_invalid`, `backend-structure.md`).
+
+A byte size is the one number permitted here, and the reason it is permitted is
+worth stating: it is a property of the *artifact*, not an aggregate over anybody's
+content. "12.3 KB" tells an administrator the download was not empty; it does not
+tell them how many users exist or what they wrote.
 
 ---
 
@@ -760,8 +874,10 @@ short list, so a reader of this doc knows what shape to expect:
 - **Confirm step** on destructive admin actions, through the shared
   `shared/ConfirmModal.tsx`: disabling an account (FEAT-003), deleting an LLM
   connection and clearing the embedding designation (FEAT-004), a **lossy** Sync
-  (FEAT-005, conditional on data loss), and rebuilding the vector index (FEAT-005,
-  not yet realized). Re-enable, saving an enabled-model set and `Create` are
-  deliberately **not** confirmed.
+  (FEAT-005, conditional on data loss), **the whole-database replace**
+  (FEAT-018, plan 031 — the red confirm above), and rebuilding the vector index
+  (FEAT-005, not yet realized). Re-enable, saving an enabled-model set, `Create`
+  and the **export** are deliberately **not** confirmed — an export destroys
+  nothing.
 - **Page state** — one `makeAutoObservable` class with **no methods**, driven by
   free functions from a page-level `useEffect` with an `AbortController`.
