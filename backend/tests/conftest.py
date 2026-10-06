@@ -4,17 +4,76 @@ Step 001 establishes the environment-isolation fixture. Step 005 adds the temp-f
 database fixture (decision D4), which could not land before ``app/db/engine.py`` existed.
 """
 
+import ipaddress
 import os
+import socket
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
+from argon2 import PasswordHasher
 from sqlalchemy import Engine
 
+import app.services.passwords as passwords
 from app.config import Settings, get_settings
 from app.db.engine import dispose_engines, get_engine
 
 ENV_PREFIX = "RPHELPER_"
+
+# --- Test-speed and network guards ---------------------------------------------------
+
+#: Minimal-cost Argon2id. Still a real `$argon2id$` hash; only the cost parameters drop.
+CHEAP_HASHER = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
+
+_LOOPBACK_NAMES = {"localhost", "localhost.localdomain"}
+_real_getaddrinfo = socket.getaddrinfo
+_real_connect = socket.socket.connect
+
+
+def _is_loopback(host: Any) -> bool:
+    if isinstance(host, bytes):
+        host = host.decode()
+    if not isinstance(host, str):
+        return True  # AF_UNIX paths and the like
+    if host.lower() in _LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _guarded_getaddrinfo(host: Any, *args: Any, **kwargs: Any) -> Any:
+    if not _is_loopback(host):
+        raise socket.gaierror(socket.EAI_NONAME, f"network disabled in tests: {host!r}")
+    return _real_getaddrinfo(host, *args, **kwargs)
+
+
+def _guarded_connect(self: socket.socket, address: Any) -> Any:
+    host = address[0] if isinstance(address, tuple) else address
+    if not _is_loopback(host):
+        raise ConnectionRefusedError(f"network disabled in tests: {host!r}")
+    return _real_connect(self, address)
+
+
+@pytest.fixture(autouse=True)
+def no_external_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail every non-loopback lookup or connect **instantly**.
+
+    A fake URL (``http://llm.test:8080``) therefore answers like an unreachable server
+    at once, never after a DNS or request timeout. Tests marked ``live`` are exempt.
+    """
+    if request.node.get_closest_marker("live"):
+        return
+    monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
+    monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
+
+
+@pytest.fixture(autouse=True)
+def cheap_password_hashing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Swap production-cost Argon2id for minimal cost; hashing dominated per-test setup."""
+    monkeypatch.setattr(passwords, "_hasher", CHEAP_HASHER)
 
 # Feature 028 D2 reads these two from the environment without the ``RPHELPER_`` prefix.
 SEARCH_CREDENTIAL_VARIABLES = ("SEARCH_CSE_KEY", "SEARCH_CSE_ID")

@@ -25,7 +25,8 @@ them (`uv sync` in `backend/`, `npm ci` in `frontend/`).
 
 ```
 Backend  (run from backend/)
-  test       <py> -m pytest
+  test       <py> -m pytest            # parallel (-n auto), 60s per-test limit, no network
+  live       <py> -m pytest -m live    # opt-in: real llama-swap at RPHELPER_LIVE_LLM_URL
   typecheck  <py> -m mypy app
   lint       <py> -m ruff check .
 Frontend (run from frontend/)
