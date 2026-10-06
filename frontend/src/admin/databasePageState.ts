@@ -66,6 +66,12 @@ export type DatabaseExportStatus = "idle" | "exporting";
  */
 export type DatabaseImportStatus = "idle" | "importing";
 
+/**
+ * The index rebuild's own two-value status, shaped like `DatabaseExportStatus`: gates the
+ * Rebuild index button's disabled state and the rebuild confirm's loading state.
+ */
+export type DatabaseRebuildStatus = "idle" | "rebuilding";
+
 /** The status badge's rendering, derived by `statusBadgeOf`. The label is the status word. */
 export type StatusBadge = {
   label: string;
@@ -115,6 +121,15 @@ export class DatabasePageState {
    * `exportErrorMessage`, so no failure ever overwrites another's message.
    */
   importErrorMessage: string | null = null;
+  /** `"rebuilding"` while an index rebuild is in flight; `"idle"` otherwise. */
+  rebuildStatus: DatabaseRebuildStatus = "idle";
+  /**
+   * The last rebuild failure's message, for the rebuild's own inline red Alert; `null` when
+   * none. Separate from the drift report's, export's and import's slots.
+   */
+  rebuildErrorMessage: string | null = null;
+  /** `true` after a successful rebuild; cleared when a new rebuild starts. Never a count. */
+  rebuildComplete: boolean = false;
 
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
@@ -480,4 +495,44 @@ export async function importDatabase(state: DatabasePageState, signal?: AbortSig
   // No write on success: the page is leaving. The confirm stays in its loading state until the
   // navigation takes effect.
   documentNavigation.assign(LOGIN_PATH);
+}
+
+/** The index rebuild route. Sent with no query parameter and no body. */
+export const DATABASE_REBUILD_PATH = "/api/admin/database/rebuild";
+
+/**
+ * The index rebuild: posts `/api/admin/database/rebuild` through `apiPost`.
+ *
+ * Sets `rebuildStatus` to `"rebuilding"` and clears `rebuildErrorMessage` and
+ * `rebuildComplete` first. On success sets `rebuildComplete` to `true`; on a failure stores
+ * `failureMessageOf(error, <fallback>)` in `rebuildErrorMessage`. Always returns
+ * `rebuildStatus` to `"idle"`. Every write is inside `runInAction`. Touches neither the drift
+ * report, export nor import state. Raises no notification and does not reject.
+ */
+export async function rebuildIndex(state: DatabasePageState, signal?: AbortSignal): Promise<void> {
+  runInAction(() => {
+    state.rebuildStatus = "rebuilding";
+    state.rebuildErrorMessage = null;
+    state.rebuildComplete = false;
+  });
+
+  try {
+    // The body is the fixed list of rebuilt table names; nothing is read from it.
+    await apiPost<unknown>(DATABASE_REBUILD_PATH, undefined, signal);
+  } catch (error) {
+    const aborted = signal?.aborted === true || isAbortRejection(error);
+    const message = aborted ? null : failureMessageOf(error, "The index could not be rebuilt.");
+    runInAction(() => {
+      state.rebuildStatus = "idle";
+      if (message !== null) {
+        state.rebuildErrorMessage = message;
+      }
+    });
+    return;
+  }
+
+  runInAction(() => {
+    state.rebuildStatus = "idle";
+    state.rebuildComplete = true;
+  });
 }

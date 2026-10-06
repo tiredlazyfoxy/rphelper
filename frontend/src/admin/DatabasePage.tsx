@@ -18,7 +18,7 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconDots, IconDownload, IconUpload } from "@tabler/icons-react";
+import { IconDots, IconDownload, IconRefresh, IconUpload } from "@tabler/icons-react";
 import { ConfirmModal } from "../shared/ConfirmModal";
 import { IconButton } from "../shared/IconButton";
 import {
@@ -33,6 +33,7 @@ import {
   importDatabase,
   isLossySync,
   loadDriftReport,
+  rebuildIndex,
   statusBadgeOf,
   syncConsequenceOf,
   syncDriftTable,
@@ -51,6 +52,13 @@ const IMPORT_CONFIRM_CONSEQUENCE =
   "Everything in this instance, including your own account, is replaced by the contents of " +
   "the file, and you will be signed out.";
 const IMPORT_CONFIRM_LABEL = "Replace database";
+
+/** The rebuild confirm's text: names the expense, never a count (UC-016, R5). */
+const REBUILD_CONFIRM_TITLE = "Rebuild the search index?";
+const REBUILD_CONFIRM_CONSEQUENCE =
+  "Rebuilding re-embeds every memo and session in this instance, which takes time and makes " +
+  "metered calls to the embedding provider.";
+const REBUILD_CONFIRM_LABEL = "Rebuild";
 
 function ignoreRejection(): void {
   // Free functions never reject; this only keeps a surprise from going unhandled.
@@ -71,6 +79,8 @@ export const DatabasePage = observer(function DatabasePage(
   // The lossy-Sync confirm: open flag and the row awaiting confirmation.
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
   const [syncTarget, setSyncTarget] = useState<DriftTableRow | null>(null);
+  // The rebuild confirm's open flag; the store keeps none, like the Sync confirm.
+  const [rebuildConfirmOpen, setRebuildConfirmOpen] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
   // Mantine fills this with `FileButton`'s own reset, which clears the hidden input's value so
   // the same file can be chosen again after a cancel or a failure.
@@ -122,6 +132,27 @@ export const DatabasePage = observer(function DatabasePage(
     void importDatabase(state, currentSignal()).catch(ignoreRejection);
   };
 
+  const requestRebuild = (): void => {
+    setRebuildConfirmOpen(true);
+  };
+
+  /** The rebuild confirm's Cancel: closes it and sends nothing. */
+  const cancelRebuild = (): void => {
+    setRebuildConfirmOpen(false);
+  };
+
+  /**
+   * The rebuild confirm's Rebuild: the confirm stays open in its loading state until the
+   * request returns, then closes on success and failure alike. No notification, ever.
+   */
+  const confirmRebuild = (): void => {
+    void rebuildIndex(state, currentSignal())
+      .catch(ignoreRejection)
+      .finally(() => {
+        setRebuildConfirmOpen(false);
+      });
+  };
+
   const createTable = (row: DriftTableRow): void => {
     void createDriftTable(state, row.table_name, currentSignal()).catch(ignoreRejection);
   };
@@ -158,8 +189,8 @@ export const DatabasePage = observer(function DatabasePage(
     <Container size="lg" py="md">
       <Group justify="space-between" align="center" mb="md" wrap="nowrap">
         <Title order={2}>Database</Title>
-        {/* The page-level action group. 031 adds Import beside Export; `fast/002` adds Rebuild
-            index to this same group and is not rendered here, not even as a placeholder. */}
+        {/* The page-level action group: Export, Import and Rebuild index. Rebuild index is never
+            gated on drift state; it is disabled only while a rebuild is in flight. */}
         <Group gap="sm" wrap="nowrap">
           <Button
             variant="default"
@@ -187,6 +218,14 @@ export const DatabasePage = observer(function DatabasePage(
               </Button>
             )}
           </FileButton>
+          <Button
+            variant="default"
+            leftSection={<IconRefresh size={ICON_SIZE} stroke={ICON_STROKE} />}
+            disabled={state.rebuildStatus === "rebuilding"}
+            onClick={requestRebuild}
+          >
+            Rebuild index
+          </Button>
         </Group>
       </Group>
 
@@ -209,6 +248,21 @@ export const DatabasePage = observer(function DatabasePage(
         <Alert color="red" mb="md">
           {state.importErrorMessage}
         </Alert>
+      )}
+
+      {/* A rebuild failure, in its own slot apart from the drift, export and import messages.
+          Inline and never also a notification. */}
+      {state.rebuildErrorMessage !== null && (
+        <Alert color="red" mb="md">
+          {state.rebuildErrorMessage}
+        </Alert>
+      )}
+
+      {/* The rebuild's completion: a fixed line, never a count derived from content (R5). */}
+      {state.rebuildComplete && (
+        <Text size="sm" c="dimmed" mb="md">
+          Index rebuild complete.
+        </Text>
       )}
 
       {/* The one permitted report about an export: the saved file's size. Nothing about its
@@ -303,6 +357,16 @@ export const DatabasePage = observer(function DatabasePage(
         loading={state.importStatus === "importing"}
         onCancel={cancelImportChoice}
         onConfirm={confirmImport}
+      />
+
+      <ConfirmModal
+        opened={rebuildConfirmOpen}
+        title={REBUILD_CONFIRM_TITLE}
+        consequence={REBUILD_CONFIRM_CONSEQUENCE}
+        confirmLabel={REBUILD_CONFIRM_LABEL}
+        loading={state.rebuildStatus === "rebuilding"}
+        onCancel={cancelRebuild}
+        onConfirm={confirmRebuild}
       />
     </Container>
   );

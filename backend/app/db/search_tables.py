@@ -202,3 +202,31 @@ def ensure_vector_tables(connection: Connection, dimension: int) -> None:
                     f"{key_column} INTEGER PRIMARY KEY, embedding FLOAT[{dimension}])"
                 )
             )
+
+
+def drop_vector_tables(connection: Connection) -> None:
+    """Drop `memo_vec` and `session_vec` if they exist (feature `fast/002`).
+
+    `connection` is already inside the caller's transaction; nothing is committed here, so a
+    rolled-back rebuild restores both tables. An absent table is not an error. Pairs with
+    `ensure_vector_tables(connection, dimension)` for re-declaration. Returns nothing.
+    """
+    for table_name in _VECTOR_KEY_COLUMNS:
+        connection.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+
+
+def rebuild_fts_indexes(connection: Connection) -> None:
+    """Re-derive both FTS5 indexes' contents from their source rows (feature `fast/002`).
+
+    `connection` is already inside the caller's transaction. Ensures both tables and their
+    triggers via `ensure_fts_tables`, then rebuilds `memo_fts` from all of `memos.body`
+    (FTS5 `'rebuild'`), and rebuilds `message_fts` by deleting every row and re-inserting the
+    record rows only — the `_MESSAGE_FTS_BACK_FILL` predicate. Never issues `'rebuild'` on
+    `message_fts`. Returns nothing.
+    """
+    ensure_fts_tables(connection)
+    connection.execute(text(_MEMO_FTS_BACK_FILL))
+    # External-content FTS5's 'delete-all' clears the index without reading `messages`, so the
+    # zone and buried rows never enter it; only the record rows are inserted back.
+    connection.execute(text(f"INSERT INTO {MESSAGE_FTS_TABLE}({MESSAGE_FTS_TABLE}) VALUES('delete-all')"))
+    connection.execute(text(_MESSAGE_FTS_BACK_FILL))

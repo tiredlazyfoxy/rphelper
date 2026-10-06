@@ -105,10 +105,20 @@ const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
  *
  * S031_008_DoD1 — narrowed again: feature 031 ships the page-level **Import** action, so
  * `import` is no longer out of scope either; 031's own Import assertions live in
- * `DatabasePage.import.test.tsx`. `rebuild` / `re-index` (`fast/002`) have **not** shipped and
- * this guard still protects them — never widen it to permit either.
+ * `DatabasePage.import.test.tsx`.
+ *
+ * F002_DoD22 (fast/002 amendment 2026-10-07) — fast/002 ships the page-level **Rebuild index**
+ * action, so the regex itself is unchanged but the clauses below now admit exactly that one
+ * control and its label: any *other* rebuild / re-index control or wording on the idle page
+ * still fails. fast/002's own Rebuild assertions live in `DatabasePage.rebuild.test.tsx`.
  */
 const OUT_OF_SCOPE_CONTROL = /\b(rebuild|re-?index)(s|ed|ing)?\b/i;
+/** F002_DoD22 — the one admitted rebuild control's name, compared whitespace-squashed. */
+const REBUILD_INDEX_CONTROL = "Rebuildindex";
+/** F002_DoD22 — the admitted label, removed from readable text before the out-of-scope match. */
+const REBUILD_INDEX_LABEL = /\bRebuild index\b/gi;
+/** F002_DoD22 — the re-index spelling is still nowhere in the page source. */
+const RE_INDEX_WORDING = /\bre-?index(es|ed|ing)?\b/i;
 
 // ---------------------------------------------------------------- fixtures (no digit anywhere)
 
@@ -904,19 +914,21 @@ describe("no sorting, filtering or pagination", () => {
 // ===========================================================================
 describe("nothing out of scope on the page", () => {
   // S030_005_DoD1/DoD-7, S031_008_DoD1 — the four regex clauses below keep their assertions
-  // unchanged; only the shared `OUT_OF_SCOPE_CONTROL` narrowed (Export and Import shipped;
-  // Rebuild / re-index have not).
-  it("no control, enabled or disabled, is named Rebuild or Re-index — DoD-10 (S030_005_DoD1)", async () => {
+  // unchanged; only the shared `OUT_OF_SCOPE_CONTROL` narrowed (Export and Import shipped).
+  // F002_DoD22 — fast/002 ships the Rebuild index action: each clause now admits exactly that
+  // one control (and its label) and still rejects any other rebuild / re-index control or text.
+  it("the only control named Rebuild or Re-index is the one Rebuild index action — DoD-10 (S030_005_DoD1, F002_DoD22)", async () => {
     await renderLoaded();
-    const offenders = controls()
+    const named = controls()
       .map(controlName)
-      .filter((name) => OUT_OF_SCOPE_CONTROL.test(name));
-    expect(offenders).toEqual([]);
+      .filter((name) => OUT_OF_SCOPE_CONTROL.test(name))
+      .map(squash);
+    expect(named).toEqual([REBUILD_INDEX_CONTROL]);
   });
 
-  it("nothing on the page reads Rebuild or Re-index — DoD-10 (S030_005_DoD1)", async () => {
+  it("nothing on the page reads Rebuild or Re-index beyond the Rebuild index label — DoD-10 (S030_005_DoD1, F002_DoD22)", async () => {
     await renderLoaded();
-    expect(readableText()).not.toMatch(OUT_OF_SCOPE_CONTROL);
+    expect(readableText().replace(REBUILD_INDEX_LABEL, "")).not.toMatch(OUT_OF_SCOPE_CONTROL);
   });
 
   // S030_005_DoD3/DoD-7, S031_008_DoD1 — replaced, not disarmed. 030 adds exactly one page-level
@@ -925,26 +937,39 @@ describe("nothing out of scope on the page", () => {
   // report table still fails here. `input[type="file"]` is excluded because Mantine's
   // `FileButton` renders a hidden, deliberately unnamed file input for the Import button —
   // it is the button's own plumbing and not a control a person sees.
-  it("the only controls outside the report table are the Export and Import actions — DoD-10 (S030_005_DoD3)", async () => {
+  // F002_DoD22 — the permitted set gains fast/002's Rebuild index action, which sits in the same
+  // page-level group. Export and Import keep their relative order; Rebuild index appears exactly
+  // once (its position within the group is fast/002's to choose); a stray fourth control fails.
+  it("the only controls outside the report table are the Export, Import and Rebuild index actions — DoD-10 (S030_005_DoD3, F002_DoD22)", async () => {
     await renderLoaded();
-    const outside = controls().filter(
-      (el) => !table().contains(el) && !el.matches('input[type="file"]'),
-    );
-    expect(outside.map(controlName).map(squash)).toEqual(["Export", "Import"]);
+    const outside = controls()
+      .filter((el) => !table().contains(el) && !el.matches('input[type="file"]'))
+      .map(controlName)
+      .map(squash);
+    expect(outside.filter((name) => name === REBUILD_INDEX_CONTROL)).toHaveLength(1);
+    expect(outside.filter((name) => name !== REBUILD_INDEX_CONTROL)).toEqual(["Export", "Import"]);
   });
 
-  it("an empty report and a failed load show no Rebuild or Re-index either — DoD-10 (S030_005_DoD1)", async () => {
+  it("an empty report and a failed load show no Rebuild or Re-index beyond the Rebuild index action either — DoD-10 (S030_005_DoD1, F002_DoD22)", async () => {
     await renderLoaded([]);
-    expect(readableText()).not.toMatch(OUT_OF_SCOPE_CONTROL);
-    expect(controls().map(controlName).filter((name) => OUT_OF_SCOPE_CONTROL.test(name))).toEqual([]);
+    expect(readableText().replace(REBUILD_INDEX_LABEL, "")).not.toMatch(OUT_OF_SCOPE_CONTROL);
+    expect(
+      controls()
+        .map(controlName)
+        .filter((name) => OUT_OF_SCOPE_CONTROL.test(name))
+        .map(squash),
+    ).toEqual([REBUILD_INDEX_CONTROL]);
   });
 
-  it("the page source renders no Rebuild or Re-index wording in any string or JSX text — DoD-10 (S030_005_DoD1)", () => {
+  // F002_DoD22 — the page source now legitimately carries the Rebuild index label, its confirm
+  // and its completion wording, so `rebuild` is admitted in source literals; the re-index
+  // spelling (no shipped control uses it) is still rejected.
+  it("the page source renders no Re-index wording in any string or JSX text — DoD-10 (S030_005_DoD1, F002_DoD22)", () => {
     const page = readSource(PAGE_SOURCE);
     const literals = Array.from(page.matchAll(/"([^"\n]*)"|'([^'\n]*)'|`([^`]*)`|>([^<>{}]+)</g), (m) =>
       (m[1] ?? m[2] ?? m[3] ?? m[4] ?? "").trim(),
     ).filter((text) => text !== "" && !text.startsWith(".") && !text.startsWith("@") && !text.includes("/"));
-    expect(literals.filter((text) => OUT_OF_SCOPE_CONTROL.test(text))).toEqual([]);
+    expect(literals.filter((text) => RE_INDEX_WORDING.test(text))).toEqual([]);
   });
 });
 
@@ -954,6 +979,8 @@ describe("the store is a data class; the load is a free function", () => {
   // `exportSizeBytes`, `exportErrorMessage`); S031_008_DoD9 adds three more (`importFile`,
   // `importStatus`, `importErrorMessage`). The list stays alphabetical and still pins the
   // store's whole surface, so any *other* new own property still fails this block.
+  // F002_DoD22 — fast/002 adds three more (`rebuildComplete`, `rebuildErrorMessage`,
+  // `rebuildStatus`).
   const ALLOWED_FIELDS = [
     "applyingTable",
     "errorMessage",
@@ -963,6 +990,9 @@ describe("the store is a data class; the load is a free function", () => {
     "importErrorMessage",
     "importFile",
     "importStatus",
+    "rebuildComplete",
+    "rebuildErrorMessage",
+    "rebuildStatus",
     "rows",
     "status",
   ];

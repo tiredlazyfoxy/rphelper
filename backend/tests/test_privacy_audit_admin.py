@@ -23,7 +23,6 @@ them. That is what keeps ``POST …/test``, ``GET …/available-models`` and the
 designation off the network.
 """
 
-import re
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any, Final, get_args
 
@@ -37,7 +36,6 @@ from app.config import Settings
 from tests.privacy_audit_support import (
     ENUMERATED_ROUTES,
     EXISTING_TABLE_NAME,
-    UNBUILT_SURFACES,
     AuditUser,
     AuditWorld,
     EnumeratedRoute,
@@ -136,12 +134,26 @@ EXPECTED_ADMIN_FIELD_NAMES: Final[tuple[str, ...]] = (
 # Registry counts `006.context.md` exempts by name, plus the near-misses Report 3 flagged.
 EXEMPT_FIELD_NAMES: Final[tuple[str, ...]] = ("embedding_dim", "enabled_model_names", "usage", "independent")
 
-# fast/002's enumeration row (`context.md` row 74), carried by step 002's `UNBUILT_SURFACES`.
+# fast/002's enumeration row (`context.md` row 74). fast/002 DoD-22 (amendment 2026-10-07):
+# the rebuild route is built, so row 74 is an ordinary `admin` row of `ENUMERATED_ROUTES` and
+# DoD-7's slot is now behavioural — fast/002 plan DoD-1 / DoD-14: the response body is exactly
+# the four derived table names, whatever the content volume, with no count and no user text.
 REBUILD_SURFACE_ROW: Final[int] = 74
-REBUILD_PROBE_PATHS: Final[tuple[str, ...]] = (
-    "/api/admin/database/rebuild",
-    "/api/admin/database/tables/{}/rebuild",
-)
+REBUILD_OPERATION: Final[tuple[str, str]] = ("POST", "/api/admin/database/rebuild")
+REBUILD_EXPECTED_BODY: Final[dict[str, list[str]]] = {
+    "tables_rebuilt": ["memo_vec", "session_vec", "memo_fts", "message_fts"],
+}
+
+
+def _numeric_leaves(value: Any) -> list[Any]:
+    """Every number anywhere in a JSON payload (booleans excluded)."""
+    if isinstance(value, Mapping):
+        return [leaf for inner in value.values() for leaf in _numeric_leaves(inner)]
+    if isinstance(value, list):
+        return [leaf for inner in value for leaf in _numeric_leaves(inner)]
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return [value]
+    return []
 
 
 @pytest.fixture
@@ -313,10 +325,15 @@ def test_every_admin_read_carries_only_administrative_data__S032_006_DoD1_DoD2_D
     DoD-2 — every admin GET response is identical before and after more content is seeded.
     DoD-5 — no admin route's declared response model has a forbidden field name (R5).
     DoD-6 — ``GET /api/health`` carries no sentinel and is identical across the same seeding.
-    DoD-7 — fast/002's vector-rebuild surface still does not exist (``[blocked/unbuilt-dependency]``).
+    DoD-7 — fast/002's vector-rebuild response carries no count derived from content volume.
+    (fast/002 DoD-22, amendment 2026-10-07: was "the surface still does not exist", recorded
+    ``[blocked/unbuilt-dependency]`` until fast/002 built it. Its slot now asserts fast/002
+    plan DoD-1 / DoD-14: the body is exactly the four derived table names before and after
+    more content is seeded, carries no number and no sentinel of either user.)
 
-    All five clauses are read-only apart from DoD-2's additional seeding, so they share one
-    world build; each problem message names its clause and its surface.
+    All five clauses are read-only apart from DoD-2's additional seeding and DoD-7's rebuild
+    (which re-derives only the derived search tables), so they share one world build; each
+    problem message names its clause and its surface.
     """
     adm = world.clients.adm
     anon = world.clients.anon
@@ -378,6 +395,12 @@ def test_every_admin_read_carries_only_administrative_data__S032_006_DoD1_DoD2_D
     for label, response in health_before.items():
         assert response.status_code == 200, f"GET /api/health as {label} answered {response.status_code}"
         problems.extend(_sentinel_problems(response.json(), world=world, where=f"DoD-6 GET /api/health as {label}"))
+
+    # ---- DoD-7, before: the rebuild response with only the world's content seeded ----
+    rebuild_before = adm.post(REBUILD_OPERATION[1])
+    assert rebuild_before.status_code == 200, (
+        f"POST {REBUILD_OPERATION[1]} as ADM answered {rebuild_before.status_code}: {rebuild_before.text}"
+    )
 
     # ---- seed more content through already-authenticated clients (DoD-2 / DoD-6) ----
     extra = {
@@ -467,27 +490,32 @@ def test_every_admin_read_carries_only_administrative_data__S032_006_DoD1_DoD2_D
         f"{uncovered}"
     )
 
-    # ---- DoD-7: fast/002's rebuild surface still does not exist ----
-    surface = next((item for item in UNBUILT_SURFACES if item.row == REBUILD_SURFACE_ROW), None)
-    assert surface is not None, f"step 002's UNBUILT_SURFACES holds no row {REBUILD_SURFACE_ROW} entry"
-    assert surface.allowed_paths == frozenset(), (
-        "row 74 is the unbuilt fast/002 vector-rebuild surface, so no registered path is "
-        f"legitimately allowed to match it; allowed_paths={sorted(surface.allowed_paths)}"
+    # ---- DoD-7: fast/002's rebuild response carries no content-derived count ----
+    # fast/002 DoD-22: row 74 is built. It is enumerated as an admin route and registered.
+    rebuild_rows = [row for row in _admin_rows("POST") if (row.method, row.path) == REBUILD_OPERATION]
+    assert [row.row for row in rebuild_rows] == [REBUILD_SURFACE_ROW], (
+        f"the enumeration does not classify {REBUILD_OPERATION} as admin row {REBUILD_SURFACE_ROW}"
     )
-    for probe in REBUILD_PROBE_PATHS:
-        assert re.search(surface.path_pattern, probe, re.IGNORECASE), (
-            f"row 74's path pattern {surface.path_pattern!r} does not match {probe!r}: the guard "
-            "would pass by matching nothing"
-        )
     operations = route_operations(application)
-    assert operations, "the route walk found no operations: the DoD-7 guard would pass vacuously"
-    landed = sorted({path for _, path in operations if re.search(surface.path_pattern, path, re.IGNORECASE)})
-    assert landed == [], (
-        "fast/002's vector-rebuild surface has landed. DoD-7 (the rebuild response and every "
-        "progress payload carry no count derived from content volume) has no behavioural test "
-        "here — it is recorded [blocked/unbuilt-dependency], owner fast/002 — and 032's "
-        f"enumeration row {REBUILD_SURFACE_ROW} must be amended before the route ships: {landed}"
+    assert REBUILD_OPERATION in operations, f"{REBUILD_OPERATION} is not registered"
+
+    rebuild_after = adm.post(REBUILD_OPERATION[1])
+    assert rebuild_after.status_code == 200, (
+        f"POST {REBUILD_OPERATION[1]} as ADM answered {rebuild_after.status_code}: {rebuild_after.text}"
     )
+    for label, response in (("before seeding", rebuild_before), ("after seeding", rebuild_after)):
+        where = f"DoD-7 row {REBUILD_SURFACE_ROW} POST {REBUILD_OPERATION[1]} {label}"
+        payload = response.json()
+        if payload != REBUILD_EXPECTED_BODY:
+            problems.append(f"{where}: body {payload!r} is not exactly {REBUILD_EXPECTED_BODY!r}")
+        if _numeric_leaves(payload):
+            problems.append(f"{where}: carries a number {_numeric_leaves(payload)!r} (R5: no count)")
+        problems.extend(_sentinel_problems(payload, world=world, where=where))
+    if rebuild_after.json() != rebuild_before.json():
+        problems.append(
+            f"DoD-7 POST {REBUILD_OPERATION[1]}: the response moved when content was seeded — "
+            f"before={rebuild_before.json()!r} after={rebuild_after.json()!r}"
+        )
 
     assert problems == [], "\n".join(problems)
 
@@ -608,11 +636,15 @@ def test_every_admin_mutation_response_carries_no_user_content__S032_006_DoD3(wo
 
     # Coverage: the exercised set plus the named, separately-tested import must be exactly the
     # enumeration's admin mutations, so a new admin mutation route can never go unswept.
+    # fast/002 DoD-22: the rebuild (row 74) is likewise held out by name — it is not one of
+    # DoD-3's fourteen named mutations, and its response is swept for both users' sentinels
+    # (and for any count) by DoD-7 in the admin-read test above.
+    separately_tested = {DATABASE_IMPORT_OPERATION, REBUILD_OPERATION}
     exercised = {(method, path) for _, method, path, _ in calls}
     expected = {(row.method, row.path) for row in _admin_rows() if row.method != "GET"}
-    assert exercised | {DATABASE_IMPORT_OPERATION} == expected, (
+    assert exercised | separately_tested == expected, (
         "DoD-3's mutation sweep and the enumeration's admin mutations disagree — "
-        f"missing={sorted(expected - exercised - {DATABASE_IMPORT_OPERATION})} "
+        f"missing={sorted(expected - exercised - separately_tested)} "
         f"unexpected={sorted(exercised - expected)}"
     )
     assert len(exercised) == 14, f"DoD-3 names fourteen mutations; {len(exercised)} were exercised"

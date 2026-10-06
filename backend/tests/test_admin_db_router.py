@@ -29,6 +29,14 @@ two DoD-14 scope guards are **narrowed** to admit that one route. They are not d
 and ``POST .../export`` remains rejected, because 031 owns Import and ``fast/002`` owns
 Rebuild and neither may appear early. No behavioural assertion about the three original
 routes changed.
+
+Amended by fast feature 002 (``docs/plans/fast/002.vector-index-rebuild/plan.md``, DoD-22,
+amendment 2026-10-07). That feature adds ``POST /api/admin/database/rebuild`` to this router,
+deliberately overturning the earlier "no rebuild surface" rule. Every amendment is cited
+inline with ``F002_DoD22``: ``EXPECTED_OPERATIONS`` gains the operation, the no-path-parameter
+branch widens, the DoD-14 surface guard admits ``rebuild`` on that single operation only
+(``vector`` and ``vec0`` stay rejected everywhere), the documentation guard skips that one
+operation, and ``POST .../rebuild`` leaves the out-of-scope list. No other assertion changed.
 """
 
 import ast
@@ -460,6 +468,8 @@ EXPECTED_OPERATIONS = {
     ("POST", f"{PREFIX}/tables/{{table_name}}/sync"),
     ("GET", f"{PREFIX}/export"),
     ("POST", f"{PREFIX}/import"),
+    # F002_DoD22: fast/002 adds the rebuild route; its behaviour is in `test_admin_db_rebuild.py`.
+    ("POST", f"{PREFIX}/rebuild"),
 }
 
 
@@ -645,12 +655,14 @@ def test_router_declares_no_query_parameter_and_no_non_table_key__DoD3(applicati
     no-path-parameter arm of the branch below. S031_005_DoD11: 031's `POST /import` takes no id
     either, so it joins that same arm. The query-parameter half is untouched and still holds for
     every operation, the two new ones included.
+
+    F002_DoD22: fast/002's `POST /rebuild` takes no id either, so it joins that same arm.
     """
     for (method, path), operation in _feature_operations(application).items():
         parameters = operation.get("parameters", [])
         assert [p["name"] for p in parameters if p["in"] == "query"] == [], (method, path)
         path_names = [p["name"] for p in parameters if p["in"] == "path"]
-        if path.endswith(("/tables", "/export", "/import")):
+        if path.endswith(("/tables", "/export", "/import", "/rebuild")):
             assert path_names == [], (method, path)
         else:
             assert path_names == ["table_name"], (method, path)
@@ -1469,6 +1481,8 @@ def test_database_contact_goes_only_through_the_connection_dependency__DoD13(
 # four members: `rebuild`, `vector` and `vec0` stay rejected on **every** operation, `export` on
 # everything but 030's single export operation, and `import` on everything but that one import
 # operation. `fast/002`'s Rebuild still cannot appear early.
+# F002_DoD22: `rebuild` now has exactly one admitted operation, `POST /api/admin/database/rebuild`,
+# which fast/002 delivers. `vector` and `vec0` stay rejected on every operation.
 FORBIDDEN_SURFACE = ("rebuild", "import", "vector", "vec0")
 
 #: S030_003_DoD1 — the one operation permitted to name an export.
@@ -1477,8 +1491,11 @@ PERMITTED_EXPORT_OPERATION = ("GET", f"{PREFIX}/export")
 #: S031_005_DoD11 — the one operation permitted to name an import.
 PERMITTED_IMPORT_OPERATION = ("POST", f"{PREFIX}/import")
 
+#: F002_DoD22 — the one operation permitted to name a rebuild.
+PERMITTED_REBUILD_OPERATION = ("POST", f"{PREFIX}/rebuild")
 
-def test_route_surface_has_no_rebuild_or_vector_route_and_one_import_route__DoD14(
+
+def test_route_surface_has_no_vector_route_one_import_route_and_one_rebuild_route__DoD14(
     application: FastAPI,
 ) -> None:
     """DoD-14 — brief Scope Out: exactly the expected routes, none of them naming
@@ -1492,6 +1509,11 @@ def test_route_surface_has_no_rebuild_or_vector_route_and_one_import_route__DoD1
     S031_005_DoD11: narrowed once more, the same way. `import` is now admitted on the single
     `POST .../import` that 031 delivers and on nothing else; `rebuild`, `vector` and `vec0`
     remain rejected everywhere.
+
+    F002_DoD22: renamed from `..._has_no_rebuild_or_vector_route_and_one_import_route__DoD14`.
+    The no-rebuild half is dropped the same way: `rebuild` is admitted on the single
+    `POST .../rebuild` that fast/002 delivers and on nothing else; `vector` and `vec0` remain
+    rejected everywhere, and the one-import-route half is unchanged.
     """
     operations = _feature_operations(application)
     assert set(operations) == EXPECTED_OPERATIONS
@@ -1499,17 +1521,26 @@ def test_route_surface_has_no_rebuild_or_vector_route_and_one_import_route__DoD1
         for word in FORBIDDEN_SURFACE:
             if word == "import" and (method, path) == PERMITTED_IMPORT_OPERATION:
                 continue
+            if word == "rebuild" and (method, path) == PERMITTED_REBUILD_OPERATION:
+                continue
             assert word not in path.lower(), (method, path)
         if (method, path) != PERMITTED_EXPORT_OPERATION:
             assert "export" not in path.lower(), (method, path)
 
 
 def test_route_surface_documents_nothing_about_a_vector_index__DoD14(application: FastAPI) -> None:
-    """DoD-14 — nothing in the operations or their models mentions a vector index or a rebuild."""
+    """DoD-14 — nothing in the operations or their models mentions a vector index or a rebuild.
+
+    F002_DoD22: narrowed. fast/002's `POST .../rebuild` legitimately documents a rebuild of the
+    vector and FTS tables, so that single operation is left out of the scan; every other
+    operation and the two drift-report models are still checked for all three words.
+    """
     operations = {
         f"{method} {path}": operation
         for (method, path), operation in _feature_operations(application).items()
+        if (method, path) != PERMITTED_REBUILD_OPERATION
     }
+    assert operations, "no operation left to scan: the guard would pass against nothing"
     documented = json.dumps(
         [
             operations,
@@ -1524,7 +1555,7 @@ def test_route_surface_documents_nothing_about_a_vector_index__DoD14(application
 @pytest.mark.parametrize(
     ("method", "path"),
     [
-        ("POST", f"{PREFIX}/rebuild"),
+        # F002_DoD22: `POST {PREFIX}/rebuild` has left this list — fast/002 delivers it.
         ("POST", f"{PREFIX}/vector-index/rebuild"),
         ("POST", f"{TABLES_PATH}/models/rebuild"),
         # S030_003_DoD1: `GET {PREFIX}/export` has left this list — 030 step 003 delivers
@@ -1548,5 +1579,9 @@ def test_out_of_scope_routes_do_not_exist__DoD14(
 
     S031_005_DoD11: the one admitted import route is `POST .../import`; `fast/002`'s Rebuild
     entries and 030's `POST .../export` and `GET .../vector-index` entries all stay armed.
+
+    F002_DoD22: fast/002 delivers `POST .../rebuild`, so that one entry has left the list; the
+    other rebuild-shaped paths (`.../vector-index/rebuild`, `.../tables/models/rebuild`) and the
+    rest stay armed.
     """
     assert _admin(application, db_settings).request(method, path).status_code in (404, 405)

@@ -62,3 +62,13 @@ class DriftReportResponse(BaseModel):
     """The whole report — one entry per registry table, declaration order, under `tables`."""
 
     tables: list[TableReportResponse]
+
+
+#: The four derived tables a rebuild re-derives, in report order.
+RebuiltTableName = Literal["memo_vec", "session_vec", "memo_fts", "message_fts"]
+
+
+class RebuildReportResponse(BaseModel):
+    """`POST /rebuild`'s answer: the fixed list of derived tables rebuilt — never a count (R5)."""
+
+    tables_rebuilt: list[RebuiltTableName]

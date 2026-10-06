@@ -52,9 +52,11 @@ from tests.privacy_audit_support import (
     route_operations,
 )
 
-#: `context.md`'s enumeration holds 74 rows; rows 5 and 74 are excluded by name with their
-#: reason inline (orientation decision 1), leaving exactly 72 for the two-way comparison.
-EXPECTED_ROW_COUNT = 72
+#: `context.md`'s enumeration holds 74 rows; row 5 is excluded by name with its reason
+#: inline (orientation decision 1), leaving exactly 73 for the two-way comparison.
+#: fast/002 DoD-22 (amendment 2026-10-07): was 72 with rows 5 and 74 excluded; row 74
+#: (`POST /api/admin/database/rebuild`, owner fast/002) is now built and enumerated.
+EXPECTED_ROW_COUNT = 73
 
 #: The owner column of every coverage-list table that has one (`002.context.md`'s list,
 #: resolved against the real schema: character and session configuration and user settings
@@ -144,7 +146,8 @@ def test_app_routes_and_the_enumeration_agree_exactly__S032_002_DoD1(world: Audi
     route equals the enumeration literal's set exactly, in both directions."""
     assert len(ENUMERATED_ROUTES) == EXPECTED_ROW_COUNT
     assert len(ENUMERATED_OPERATIONS) == EXPECTED_ROW_COUNT, "the literal holds a duplicate key"
-    assert set(EXCLUDED_ROWS) == {5, 74}
+    assert set(EXCLUDED_ROWS) == {5}  # fast/002 DoD-22: row 74 is built, no longer excluded
+    assert ("POST", "/api/admin/database/rebuild") in ENUMERATED_OPERATIONS  # fast/002 DoD-22
     for row, reason in EXCLUDED_ROWS.items():
         assert reason.strip(), f"row {row} is excluded without a recorded reason"
 
@@ -163,8 +166,12 @@ def test_app_routes_and_the_enumeration_agree_exactly__S032_002_DoD1(world: Audi
 
 
 def test_no_unbuilt_surface_has_landed__S032_002_DoD1(world: AuditWorld) -> None:
-    """DoD-1 (US-083.AC-1): rows 5 and 74 name surfaces no built feature delivers, so no
-    registered route may match a bootstrap-from-export or a vector-rebuild shape."""
+    """DoD-1 (US-083.AC-1): row 5 names a surface no built feature delivers, so no
+    registered route may match a bootstrap-from-export shape.
+
+    fast/002 DoD-22 (amendment 2026-10-07): row 74 (vector-index rebuild) left this guard —
+    fast/002 builds it, and it is now classified in the enumeration like any admin route."""
+    assert [surface.row for surface in UNBUILT_SURFACES] == [5]
     registered_paths = {path for _method, path in route_operations(world.application)}
     for surface in UNBUILT_SURFACES:
         pattern = re.compile(surface.path_pattern, re.IGNORECASE)

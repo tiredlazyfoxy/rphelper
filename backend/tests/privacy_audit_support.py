@@ -960,21 +960,18 @@ class EnumeratedRoute:
         return (self.method, self.path)
 
 
-#: Rows 5 and 74 are excluded **by name, with the reason inline** (orientation decision 1):
-#: they belong to ``fast/003`` (bootstrap from export) and ``fast/002`` (vector rebuild),
-#: which hold only a ``brief.md``, so neither feature is planned and no route exists. They
-#: are never silently dropped and DoD-1 is never loosened to a subset check;
+#: Row 5 is excluded **by name, with the reason inline** (orientation decision 1): it
+#: belongs to ``fast/003`` (bootstrap from export), which is not built, so no route exists.
+#: It is never silently dropped and DoD-1 is never loosened to a subset check;
 #: ``UNBUILT_SURFACES`` arms the absence instead.
+#: fast/002 DoD-22 (amendment 2026-10-07): row 74 (``fast/002`` vector-index rebuild) has
+#: left this mapping — fast/002 builds ``POST /api/admin/database/rebuild``, so the row is
+#: now an ordinary ``admin`` entry of ``ENUMERATED_ROUTES`` below.
 EXCLUDED_ROWS: Final[Mapping[int, str]] = {
     5: (
         "fast/003 bootstrap-from-export: the folder holds only brief.md, so the feature is "
         "unplanned and unbuilt and no method or path may be invented. Absence armed by "
         "UNBUILT_SURFACES row 5."
-    ),
-    74: (
-        "fast/002 vector-index-rebuild: the folder holds only brief.md, so the feature is "
-        "unplanned and unbuilt and no method or path may be invented. Absence armed by "
-        "UNBUILT_SURFACES row 74."
     ),
 }
 
@@ -1054,6 +1051,8 @@ ENUMERATED_ROUTES: Final[tuple[EnumeratedRoute, ...]] = (
     EnumeratedRoute(71, "POST", "/api/admin/database/tables/{}/sync", "admin", None),
     EnumeratedRoute(72, "GET", "/api/admin/database/export", "admin", None),
     EnumeratedRoute(73, "POST", "/api/admin/database/import", "admin", None),
+    # fast/002 DoD-22: row 74, owner fast/002 (vector-index rebuild), now built.
+    EnumeratedRoute(74, "POST", "/api/admin/database/rebuild", "admin", None),
 )
 
 ENUMERATED_OPERATIONS: Final[frozenset[tuple[str, str]]] = frozenset(
@@ -1074,20 +1073,14 @@ class UnbuiltSurface:
 #: One entry per excluded row. The pattern is matched case-insensitively with
 #: ``re.search`` against each **normalized** registered path; every matching path must be
 #: in ``allowed_paths``. Row 5's pattern deliberately cannot match the three built
-#: ``.../restore`` routes (it requires ``restore`` followed by ``from``), and row 74's
-#: cannot match ``/api/admin/llm-servers/{}/embedding-model``.
+#: ``.../restore`` routes (it requires ``restore`` followed by ``from``).
+#: fast/002 DoD-22: row 74's entry is removed — the rebuild route is built and enumerated.
 UNBUILT_SURFACES: Final[tuple[UnbuiltSurface, ...]] = (
     UnbuiltSurface(
         row=5,
         description="fast/003 bootstrap-from-export (public, swept by 005) — unplanned, unbuilt",
         path_pattern=r"bootstrap|from[-_]?export|restore[-_]?from",
         allowed_paths=frozenset({"/api/bootstrap/create"}),
-    ),
-    UnbuiltSurface(
-        row=74,
-        description="fast/002 vector-index rebuild (admin, swept by 006) — unplanned, unbuilt",
-        path_pattern=r"rebuild|re-?index|vector",
-        allowed_paths=frozenset(),
     ),
 )
 

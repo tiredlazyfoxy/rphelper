@@ -16,12 +16,12 @@ plain string and never used to build SQL here; `db/sync.py` validates it.
 **`require_role(Role.ADMIN)` is attached to the router, never to a handler**, so a route
 added later cannot forget the guard.
 
-**Five routes.** The first three are feature `007`'s (`context.md` D9); the fourth is feature
+**Six routes.** The first three are feature `007`'s (`context.md` D9); the fourth is feature
 `030`'s `GET /export` — the whole-database export (FEAT-018, UC-061, US-077) — and the fifth is
 feature `031`'s `POST /import`, its mirror image (UC-061, US-077.AC-2). Both live here rather than
 in `routers/transfer.py` precisely so they inherit the router-level admin guard. No route takes a
-query parameter; `POST /import` is the **only** route with a request body, and there is still
-**no rebuild route** anywhere on this router.
+query parameter; `POST /import` is the **only** route with a request body.
+`POST /rebuild` (feature `fast/002`, FEAT-005) re-derives every vector and FTS index via `rebuild_index`.
 
 **This module contains no `try`, no `except` and no `raise`, and that is load-bearing.** Every
 refusal of the whole-database import — `database_not_empty` (409) for an ineligible instance, the
@@ -48,15 +48,18 @@ from app.db.drift import ColumnShape, IndexShape, TableReport, build_drift_repor
 from app.db.engine import get_connection
 from app.db.schema import metadata
 from app.db.sync import create_table, sync_table
-from app.dependencies import clear_session_cookie, require_role
+from app.dependencies import clear_session_cookie, get_llm_client_factory, require_role
 from app.models.admin_db import (
     ChangedColumnResponse,
     ColumnShapeResponse,
     DriftReportResponse,
     IndexShapeResponse,
+    RebuildReportResponse,
     TableReportResponse,
 )
 from app.roles import Role
+from app.services.index_rebuild import rebuild_index
+from app.services.llm_registry import LlmClientFactory
 from app.services.transfer import encode_envelope, export_database, export_filename
 from app.services.transfer_import import import_database
 
@@ -181,3 +184,23 @@ def import_whole_database(
     """
     import_database(connection, body)
     clear_session_cookie(response, settings)
+
+
+@router.post("/rebuild", status_code=200)
+def rebuild_search_index(
+    connection: Annotated[Connection, Depends(get_connection)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
+) -> RebuildReportResponse:
+    """Re-derive both vector tables and both FTS5 indexes via `rebuild_index`; answers 200.
+
+    Full path `/api/admin/database/rebuild`; admin-only through the **router-level** guard. No
+    body, no path or query parameter. Passes `client_factory` and
+    `settings.llm_request_timeout_seconds` by keyword and catches nothing: `no_embedding_model`
+    (409) and an unreachable server travel through the single `DomainError` handler.
+    """
+    return rebuild_index(
+        connection,
+        client_factory=client_factory,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
