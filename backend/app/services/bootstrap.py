@@ -14,6 +14,11 @@ session through `app.services.auth.open_session` on the same connection — all 
 single `with conn.begin():` block. It returns the session token and expiry as plain data
 and sets no cookie; the router is what turns the token into a cookie. It logs at most the
 new id (as a decimal string) and the outcome; never the password, the hash or the token.
+
+`restore_from_export` (`fast/003`) is the second way in: inside one `with conn.begin():` block it
+re-checks `is_configured`, applies the registry, ensures the FTS5 tables and runs the
+whole-database import through `app.services.transfer_import.import_database_in_transaction`, so a
+failed restore rolls the DDL back with it. It opens no session and logs the outcome token only.
 """
 
 from dataclasses import dataclass
@@ -24,11 +29,12 @@ from sqlalchemy import Connection, select, text
 
 from app.db.schema import metadata, users
 from app.db.search_tables import ensure_fts_tables
-from app.errors import AlreadyConfiguredError
+from app.errors import AlreadyConfiguredError, DomainError
 from app.ids import SnowflakeGenerator
 from app.roles import Role
 from app.services.auth import open_session
 from app.services.passwords import hash_password
+from app.services.transfer_import import import_database_in_transaction
 
 
 @dataclass(frozen=True)
@@ -124,3 +130,35 @@ def create_first_administrator(
         token=session.token,
         expires_at=session.expires_at,
     )
+
+
+def restore_from_export(connection: Connection, body: object) -> None:
+    """Create the schema and restore a whole-database export into it, in one transaction.
+
+    `fast/003` (UC-002, US-002). Inside one `with connection.begin():` block: re-check
+    `is_configured` and raise `AlreadyConfiguredError` if true; apply the registry
+    (`metadata.create_all`); ensure the FTS5 virtual tables; call
+    `app.services.transfer_import.import_database_in_transaction(connection, body)`. Any error
+    raised inside rolls the whole block back, the created DDL included, so a failed restore leaves
+    no tables. Returns nothing and opens no session. Logs a single `bootstrap outcome=...` line
+    per call — success, refusal or failure — carrying the outcome token only.
+
+    """
+    try:
+        with connection.begin():
+            if is_configured(connection):
+                raise AlreadyConfiguredError()
+
+            metadata.create_all(connection)
+            # The FTS5 virtual tables live outside `metadata` (024 D2); ensured in this same block
+            # so a failed restore rolls them back with the rest of the DDL.
+            ensure_fts_tables(connection)
+            import_database_in_transaction(connection, body)
+    except DomainError as refusal:
+        logger.info("bootstrap outcome={}", refusal.code)
+        raise
+    except Exception:
+        logger.info("bootstrap outcome=restore_failed")
+        raise
+
+    logger.info("bootstrap outcome=restored")

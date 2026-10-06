@@ -56,17 +56,15 @@ easier path was not taken by accident: it is named here so a reader can see whic
 mutation reaches the rule. DoD-3 exercises the other admissible shape — a ``user``
 envelope whose ids all agree with each other — by importing A's own export as B.
 
-DoD-6 has no built target, so it is a guard, not a behavioural test
--------------------------------------------------------------------
-Enumeration **row 5** is ``fast/003``'s bootstrap-from-export route, and
-``docs/plans/fast/003.bootstrap-from-export/`` holds **only ``brief.md``** — unplanned,
-therefore unbuilt (confirmed three times at orient, harvest and skeleton; ``bootstrap.py``
-registers only ``POST /create``). Nothing about that route, its payload or its response is
-invented here. Instead DoD-6 is asserted as the **absence** of the surface, reusing step
-002's ``UNBUILT_SURFACES`` literal: if the route ever lands, the guard fails and DoD-6
-must be implemented before it ships. DoD-6 is recorded as
-``[blocked/unbuilt-dependency]`` with ``fast/003`` as owner — it is **not** a leak finding
-and **not** a ``SPEC`` defect in 032's enumeration.
+DoD-6 is a registration check, not a behavioural test
+-----------------------------------------------------
+Enumeration **row 5** is ``fast/003``'s bootstrap-from-export route. When this module was
+written ``fast/003`` was unplanned and unbuilt, so DoD-6 was asserted as the **absence**
+of the surface. ``fast/003`` (DoD-22, amendment 2026-10-07) has since built
+``POST /api/bootstrap/import``, so DoD-6 now checks **positively** that the route is
+registered, still reusing step 002's ``UNBUILT_SURFACES`` row-5 pattern so that any other,
+unenumerated bootstrap-from-export-shaped path is still caught. The route's behaviour is
+``fast/003``'s own contract and is tested there, not here.
 
 Mechanics
 ---------
@@ -141,6 +139,9 @@ SESSION_NOT_FOUND = "session_not_found"
 #: anti-vacuity control: row 5's pattern must really match something registered, or the
 #: guard would pass because it matched nothing at all.
 BOOTSTRAP_PATH = "/api/bootstrap/create"
+
+#: Enumeration row 5, ``fast/003``'s bootstrap-from-export route (fast/003 DoD-22).
+BOOTSTRAP_IMPORT_PATH = "/api/bootstrap/import"
 
 
 # --- fixture --------------------------------------------------------------------------
@@ -330,10 +331,9 @@ def test_own_export_carries_nothing_of_the_other_user__S032_005_DoD1_DoD6(world:
     ``model_server_id`` is passed through the documented ``allowed=`` carve-out because it
     is a registry id shared by every user, not an id of the other user.
 
-    DoD-6 — the bootstrap-from-export surface (enumeration row 5, ``fast/003``) **does not
-    exist**, so no behavioural test is written and nothing about it is invented. The guard
-    asserts the surface still has not landed, reusing step 002's ``UNBUILT_SURFACES``: if it
-    ever ships, this fails and DoD-6 must be asserted against ``fast/003`` first.
+    DoD-6 — the bootstrap-from-export surface (enumeration row 5, ``fast/003``) is built
+    (fast/003 DoD-22): ``POST /api/bootstrap/import`` must be registered, and no other
+    bootstrap-from-export-shaped path outside row 5's ``allowed_paths`` may have landed.
     """
     problems: list[str] = []
 
@@ -382,22 +382,27 @@ def test_own_export_carries_nothing_of_the_other_user__S032_005_DoD1_DoD6(world:
         except AssertionError as failure:
             problems.append(f"DoD-1: {user}'s export carries a {other} id: {failure}")
 
-    # DoD-6: the unbuilt-surface guard (orientation decision 1).
+    # DoD-6: row 5's surface is built (fast/003 DoD-22) — assert it positively.
     surfaces = [surface for surface in UNBUILT_SURFACES if surface.row == 5]
     assert len(surfaces) == 1, f"row 5 must be declared exactly once in UNBUILT_SURFACES: {UNBUILT_SURFACES}"
     surface = surfaces[0]
-    registered = sorted({path for _method, path in route_operations(world.application)})
+    operations = route_operations(world.application)
+    registered = sorted({path for _method, path in operations})
     matching = [path for path in registered if re.search(surface.path_pattern, path, re.IGNORECASE)]
     assert BOOTSTRAP_PATH in matching, (
         f"DoD-6 anti-vacuity: row 5's pattern {surface.path_pattern!r} matches no built bootstrap route, "
         f"so the guard would pass against nothing. Registered paths: {registered}"
     )
+    if ("POST", BOOTSTRAP_IMPORT_PATH) not in operations:
+        problems.append(
+            f"DoD-6: row 5's bootstrap-from-export route `POST {BOOTSTRAP_IMPORT_PATH}` is not registered "
+            f"(fast/003). Registered paths: {registered}"
+        )
     landed = [path for path in matching if path not in surface.allowed_paths]
     if landed:
         problems.append(
-            f"DoD-6: a bootstrap-from-export-shaped surface has landed: {landed}. "
-            f"{surface.description}. 032's enumeration row 5 and this DoD must be asserted "
-            "against fast/003 before that route ships."
+            f"DoD-6: an unenumerated bootstrap-from-export-shaped surface has landed: {landed}. "
+            f"{surface.description}. 032's enumeration must be amended before that route ships."
         )
 
     report = "\n".join(problems)

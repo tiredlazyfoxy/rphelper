@@ -12,6 +12,8 @@ import {
 } from "./bootstrapState";
 import { CreateAdminForm } from "./CreateAdminForm";
 import { CreateAdminDraft } from "./createAdminDraft";
+import { RestoreExportForm } from "./RestoreExportForm";
+import { RestoreExportState } from "./restoreExport";
 
 export type BootstrapPageProps = {
   state: BootstrapState;
@@ -31,6 +33,12 @@ function RetryButton(props: { onRetry: () => void }): React.JSX.Element {
 function CreateAdminMount(props: { state: BootstrapState }): React.JSX.Element {
   const [draft] = useState(() => new CreateAdminDraft());
   return <CreateAdminForm state={props.state} draft={draft} />;
+}
+
+/** The offer state's restore mount: a fresh restore state per mount, created once. */
+function RestoreExportMount(): React.JSX.Element {
+  const [restore] = useState(() => new RestoreExportState());
+  return <RestoreExportForm state={restore} />;
 }
 
 export const BootstrapPage = observer(function BootstrapPage(
@@ -80,6 +88,15 @@ export const BootstrapPage = observer(function BootstrapPage(
                   Start fresh with an empty database and an administrator account.
                 </Text>
                 <CreateAdminMount state={state} />
+              </Stack>
+            </List.Item>
+            <List.Item>
+              <Stack gap="xs">
+                <Text fw={600}>Restore from an export</Text>
+                <Text c="dimmed" size="sm">
+                  Restore a whole-database export taken from another instance.
+                </Text>
+                <RestoreExportMount />
               </Stack>
             </List.Item>
           </List>

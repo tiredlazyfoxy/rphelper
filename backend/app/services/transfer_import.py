@@ -1116,7 +1116,10 @@ def import_database(connection: Connection, body: object) -> None:
     It returns nothing — the caller's only question is whether it raised.
 
     One `with connection.begin():` block holds every phase, so a refusal of any kind stores nothing
-    and the instance is exactly as it was. In this order (`004.database-replace.md`):
+    and the instance is exactly as it was. The phases themselves live in
+    `import_database_in_transaction`, which this function calls inside that block; its second caller
+    is `app.services.bootstrap.restore_from_export` (`fast/003`), which runs schema creation and the
+    import in its own single transaction. In this order (`004.database-replace.md`):
 
     1. **The eligibility guard, first** — `_require_replaceable_database(connection)`. An ineligible
        instance answers `DatabaseNotEmptyError` whatever the file holds (DoD-5), so the guard runs
@@ -1163,25 +1166,42 @@ def import_database(connection: Connection, body: object) -> None:
     `sqlalchemy.exc`.
     """
     with connection.begin():
-        # The guard is first on purpose: an instance that may not be replaced answers
-        # `database_not_empty` whatever the file holds (DoD-5).
-        _require_replaceable_database(connection)
-        validated = validate_envelope(body, _DATABASE_GRANULARITIES)
-        _require_memo_scope_targets(validated.rows)
-        # Before the wipe, so the delete triggers clear whatever the FTS tables hold — whether they
-        # existed already or were just created and back-filled from the rows about to go (DoD-9).
-        ensure_fts_tables(connection)
-        _wipe_registry_rows(connection)
-        _drop_vector_tables(connection)
-        try:
-            # The identity path: the validated rows, unchanged. The writer mints nothing, so the
-            # export's own ids survive (ruling 22) — no policy value and no second writer.
-            _write_payload(connection, validated.rows)
-        except IntegrityError as refusal:
-            # FK, UNIQUE and CHECK only. The driver's text goes nowhere: no log line, and the error
-            # carries exactly `{"reason": "malformed_payload"}` (R5, DoD-11). Raising here leaves the
-            # `with` block by exception, so the wipe and the drop roll back with the inserts.
-            raise ExportInvalidError(REASON_MALFORMED_PAYLOAD) from refusal
+        import_database_in_transaction(connection, body)
+
+
+def import_database_in_transaction(connection: Connection, body: object) -> None:
+    """Replace the whole database with a `database` export, inside the caller's open transaction.
+
+    Services-layer only: the in-transaction body of `import_database`, extracted so that
+    `app.services.bootstrap.restore_from_export` (`fast/003`) can run schema creation and the
+    whole-database import in **one** transaction. `connection` must already be inside a
+    transaction; this function never calls `begin()` and never commits.
+
+    Runs exactly `import_database`'s sequence: `_require_replaceable_database` ->
+    `validate_envelope(body, _DATABASE_GRANULARITIES)` -> `_require_memo_scope_targets` ->
+    `ensure_fts_tables` -> `_wipe_registry_rows` -> `_drop_vector_tables` -> `_write_payload`, with
+    the `IntegrityError` -> `ExportInvalidError(REASON_MALFORMED_PAYLOAD)` translation. Returns
+    nothing; raises `DatabaseNotEmptyError` or `ExportInvalidError` exactly as `import_database` does.
+    """
+    # The guard is first on purpose: an instance that may not be replaced answers
+    # `database_not_empty` whatever the file holds (DoD-5).
+    _require_replaceable_database(connection)
+    validated = validate_envelope(body, _DATABASE_GRANULARITIES)
+    _require_memo_scope_targets(validated.rows)
+    # Before the wipe, so the delete triggers clear whatever the FTS tables hold — whether they
+    # existed already or were just created and back-filled from the rows about to go (DoD-9).
+    ensure_fts_tables(connection)
+    _wipe_registry_rows(connection)
+    _drop_vector_tables(connection)
+    try:
+        # The identity path: the validated rows, unchanged. The writer mints nothing, so the
+        # export's own ids survive (ruling 22) — no policy value and no second writer.
+        _write_payload(connection, validated.rows)
+    except IntegrityError as refusal:
+        # FK, UNIQUE and CHECK only. The driver's text goes nowhere: no log line, and the error
+        # carries exactly `{"reason": "malformed_payload"}` (R5, DoD-11). Raising here leaves the
+        # `with` block by exception, so the wipe and the drop roll back with the inserts.
+        raise ExportInvalidError(REASON_MALFORMED_PAYLOAD) from refusal
 
 
 def _require_replaceable_database(connection: Connection) -> None:

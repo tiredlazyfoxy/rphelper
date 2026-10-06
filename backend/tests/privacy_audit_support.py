@@ -960,20 +960,17 @@ class EnumeratedRoute:
         return (self.method, self.path)
 
 
-#: Row 5 is excluded **by name, with the reason inline** (orientation decision 1): it
-#: belongs to ``fast/003`` (bootstrap from export), which is not built, so no route exists.
-#: It is never silently dropped and DoD-1 is never loosened to a subset check;
-#: ``UNBUILT_SURFACES`` arms the absence instead.
+#: Rows of the enumeration with no built route are excluded **by name, with the reason
+#: inline** (orientation decision 1). Row 5 was the original entry: it belonged to
+#: ``fast/003`` (bootstrap from export) while that was unbuilt. An excluded row is never
+#: silently dropped and DoD-1 is never loosened to a subset check.
 #: fast/002 DoD-22 (amendment 2026-10-07): row 74 (``fast/002`` vector-index rebuild) has
 #: left this mapping — fast/002 builds ``POST /api/admin/database/rebuild``, so the row is
 #: now an ordinary ``admin`` entry of ``ENUMERATED_ROUTES`` below.
-EXCLUDED_ROWS: Final[Mapping[int, str]] = {
-    5: (
-        "fast/003 bootstrap-from-export: the folder holds only brief.md, so the feature is "
-        "unplanned and unbuilt and no method or path may be invented. Absence armed by "
-        "UNBUILT_SURFACES row 5."
-    ),
-}
+#: fast/003 DoD-22 (amendment 2026-10-07): row 5 (``fast/003`` bootstrap from export) has
+#: left this mapping too — fast/003 builds ``POST /api/bootstrap/import``, so the row is
+#: now an ordinary ``public`` entry of ``ENUMERATED_ROUTES`` below.
+EXCLUDED_ROWS: Final[Mapping[int, str]] = {}
 
 #: The enumeration of ``context.md``, with every ``†`` method taken from the step 002
 #: skeleton record (calling interface only; the class and outcome stay the plan's).
@@ -982,6 +979,8 @@ ENUMERATED_ROUTES: Final[tuple[EnumeratedRoute, ...]] = (
     EnumeratedRoute(2, "POST", "/api/bootstrap/create", "public", None),
     EnumeratedRoute(3, "POST", "/api/auth/login", "public", None),
     EnumeratedRoute(4, "POST", "/api/auth/logout", "public", None),
+    # fast/003 DoD-22: row 5, owner fast/003 (bootstrap from export), now built.
+    EnumeratedRoute(5, "POST", "/api/bootstrap/import", "public", None),
     EnumeratedRoute(6, "GET", "/api/me", "self", None),
     EnumeratedRoute(7, "GET", "/api/me/settings", "self", None),
     EnumeratedRoute(8, "PATCH", "/api/me/settings", "self", None),
@@ -1075,12 +1074,15 @@ class UnbuiltSurface:
 #: in ``allowed_paths``. Row 5's pattern deliberately cannot match the three built
 #: ``.../restore`` routes (it requires ``restore`` followed by ``from``).
 #: fast/002 DoD-22: row 74's entry is removed — the rebuild route is built and enumerated.
+#: fast/003 DoD-22: row 5's entry is kept as a shape guard, and the now-built
+#: ``POST /api/bootstrap/import`` joins its ``allowed_paths``: any *other*
+#: bootstrap-from-export-shaped path still has to be enumerated before it ships.
 UNBUILT_SURFACES: Final[tuple[UnbuiltSurface, ...]] = (
     UnbuiltSurface(
         row=5,
-        description="fast/003 bootstrap-from-export (public, swept by 005) — unplanned, unbuilt",
+        description="fast/003 bootstrap-from-export (public, swept by 005) — built as /api/bootstrap/import",
         path_pattern=r"bootstrap|from[-_]?export|restore[-_]?from",
-        allowed_paths=frozenset({"/api/bootstrap/create"}),
+        allowed_paths=frozenset({"/api/bootstrap/create", "/api/bootstrap/import"}),
     ),
 )
 

@@ -56,7 +56,9 @@ from tests.privacy_audit_support import (
 #: inline (orientation decision 1), leaving exactly 73 for the two-way comparison.
 #: fast/002 DoD-22 (amendment 2026-10-07): was 72 with rows 5 and 74 excluded; row 74
 #: (`POST /api/admin/database/rebuild`, owner fast/002) is now built and enumerated.
-EXPECTED_ROW_COUNT = 73
+#: fast/003 DoD-22 (amendment 2026-10-07): one higher again; row 5
+#: (`POST /api/bootstrap/import`, owner fast/003) is now built and enumerated.
+EXPECTED_ROW_COUNT = 74
 
 #: The owner column of every coverage-list table that has one (`002.context.md`'s list,
 #: resolved against the real schema: character and session configuration and user settings
@@ -146,8 +148,14 @@ def test_app_routes_and_the_enumeration_agree_exactly__S032_002_DoD1(world: Audi
     route equals the enumeration literal's set exactly, in both directions."""
     assert len(ENUMERATED_ROUTES) == EXPECTED_ROW_COUNT
     assert len(ENUMERATED_OPERATIONS) == EXPECTED_ROW_COUNT, "the literal holds a duplicate key"
-    assert set(EXCLUDED_ROWS) == {5}  # fast/002 DoD-22: row 74 is built, no longer excluded
+    # fast/002 DoD-22: row 74 is built, no longer excluded; fast/003 DoD-22: nor is row 5.
+    assert set(EXCLUDED_ROWS) == set()
     assert ("POST", "/api/admin/database/rebuild") in ENUMERATED_OPERATIONS  # fast/002 DoD-22
+    assert ("POST", "/api/bootstrap/import") in ENUMERATED_OPERATIONS  # fast/003 DoD-22
+    row_five = [route for route in ENUMERATED_ROUTES if route.row == 5]  # fast/003 DoD-22
+    assert [(route.method, route.path, route.route_class) for route in row_five] == [
+        ("POST", "/api/bootstrap/import", "public")
+    ]
     for row, reason in EXCLUDED_ROWS.items():
         assert reason.strip(), f"row {row} is excluded without a recorded reason"
 
