@@ -82,4 +82,17 @@
   - Roleplayer attempts to drag a note into a different level's group — the instance does not allow it; levels keep a fixed order (user, character, setup, session) and a note cannot move between them by dragging.
 - **Postconditions:** Forced notes in that level enter the system prompt in the new order (UC-045); order has no observable effect on disabled or not-forced notes.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 11, round 12.
+
+### UC-088 — Remove a note by emptying it
+- **Actor:** ACT-002
+- **Feature:** FEAT-012
+- **Preconditions:** A note exists at one of the four levels (UC-042).
+- **Main flow:**
+  1. Roleplayer clears all of a saved note's text.
+  2. Roleplayer moves focus away from the note.
+  3. Instance removes the note.
+- **Alternate flows:**
+  - The roleplayer creates a note and leaves it without entering any text — nothing is persisted and no note appears.
+- **Postconditions:** Emptying a note is the only way a note is removed. There is no separate delete action, and notes have no archived state (FEAT-012).
+- **Source:** `[confirmed: user]` plan 015 decision 2026-10-02, confirmed at finalization 2026-10-06, challenge C40.
 <!-- product-spec:end -->

@@ -101,7 +101,8 @@
 - **Story:** As a roleplayer, I want to control the order forced notes appear in within their level, so that I can put the most important ones first.
 - **Acceptance criteria:**
   - **US-102.AC-1** — Given the roleplayer reorders two forced notes within the same level, when a session within that level's scope is composed, then the notes appear in the system prompt in the new order.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 11, round 12.
+  - **US-102.AC-2** — Given a newly created note, when the roleplayer has not yet reordered it, then it holds the first position in its level.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 11, round 12; finalization 2026-10-06, C49.
 
 ### US-103 — Levels keep a fixed order and a note cannot move between levels by dragging
 - **Actor:** ACT-002 · **Feature:** FEAT-012 · **Exercises:** UC-076
@@ -124,4 +125,12 @@
 - **Acceptance criteria:**
   - **US-119.AC-1** — Given the roleplayer creates or opens a note, when they look for a title or name field, then none exists — the note is a single text body, and any heading they want is markdown they type inside it.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 16.
+
+### US-141 — Emptying a saved note removes it
+- **Actor:** ACT-002 · **Feature:** FEAT-012 · **Exercises:** UC-088
+- **Story:** As a roleplayer, I want a note to disappear when I clear its text, so that getting rid of a note needs no separate delete step.
+- **Acceptance criteria:**
+  - **US-141.AC-1** — Given a saved note holding text, when the roleplayer clears all of its text and moves focus away, then the note is removed.
+  - **US-141.AC-2** — Given a newly created note, when the roleplayer leaves it without entering any text, then no note is persisted.
+- **Source:** `[confirmed: user]` plan 015 decision 2026-10-02, confirmed at finalization 2026-10-06, challenge C40.
 <!-- product-spec:end -->

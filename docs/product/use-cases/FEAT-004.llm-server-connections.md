@@ -37,9 +37,9 @@
 - **Alternate flows:**
   - Administrator disables a previously enabled model — the model stops being selectable for new configuration.
 - **Exception flows:**
-  - Administrator disables a model that a session's resolved configuration (FEAT-013) depends on — the disable proceeds regardless; it is never refused on account of sessions depending on the model, since refusing would require telling the administrator about other users' sessions, which FEAT-019 forbids. There is no silent fallback up the `user → character → session` chain — the session never quietly changes model. The next time that session tries to use the model, it shows an error; the roleplayer resolves it by choosing another model through FEAT-013's chain.
+  - Administrator disables a model that a session's resolved configuration (FEAT-013) depends on — the disable proceeds regardless; it is never refused on account of sessions depending on the model, since refusing would require telling the administrator about other users' sessions, which FEAT-019 forbids. There is no silent fallback up the `character → session` chain — the session never quietly changes model. UC-050 owns resolution and states that the model has no user level at all. The next time that session tries to use the model, it shows an error; the roleplayer resolves it by choosing another model through FEAT-013's chain.
 - **Postconditions:** Enabled models are selectable; disabled models are not. A session whose resolved model has been disabled shows an error on use, never a silent substitution.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7, round 11.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7, round 11; finalization 2026-10-06, C42.
 
 ### UC-013 — Designate the embedding server and model
 - **Actor:** ACT-001

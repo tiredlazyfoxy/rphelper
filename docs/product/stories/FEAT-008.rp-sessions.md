@@ -40,4 +40,12 @@
   - **US-117.AC-3** — Given the roleplayer writes the first message on a character's page, when the session is created, then the assistant answers that message as it would any other discussion message.
   - **US-117.AC-4** — Given the character page's composer, when the roleplayer looks at it before writing, then it offers neither the kind switch nor a setup choice.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 15; 2026-09-28, gap-closure round.
+
+### US-145 — A session is identified by its start time, not a title
+- **Actor:** ACT-002 · **Feature:** FEAT-008 · **Exercises:** UC-026, UC-059
+- **Story:** As a roleplayer, I want sessions identified without naming them, so that starting a roleplay needs no naming step.
+- **Acceptance criteria:**
+  - **US-145.AC-1** — Given a session exists, when the roleplayer looks for a way to name or title it, then none is offered.
+  - **US-145.AC-2** — Given a session appears in a listing or a search result, when the roleplayer reads it, then it is labelled by its start time.
+- **Source:** `[confirmed: user]` finalization 2026-10-06, challenge C51 (plan 011 forward note).
 <!-- product-spec:end -->

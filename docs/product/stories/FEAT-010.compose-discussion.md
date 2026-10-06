@@ -37,7 +37,9 @@
 - **Story:** As a roleplayer, I want to still read a collapsed discussion, so that I can review how an answer came about.
 - **Acceptance criteria:**
   - **US-040.AC-1** — Given a discussion has collapsed, when the roleplayer opens the collapsed discussion, then every message in it is still readable.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4.
+  - **US-040.AC-2** — Given a discussion has collapsed, when the roleplayer looks at its collapsed row, then no message count is shown on it.
+  - **US-040.AC-3** — Given a collapsed discussion has been opened, when the roleplayer reads it, then its message count is shown.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4; finalization 2026-10-06, C53.
 
 ### US-041 — Re-open succeeds while it is last
 - **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-037
@@ -67,9 +69,10 @@
 - **Acceptance criteria:**
   - **US-044.AC-1** — Given a discussion is open and the roleplayer has typed text, when the LLM becomes unreachable mid-discussion, then the entry and discussion survive intact with nothing the roleplayer typed lost.
   - **US-044.AC-2** — Given the LLM was unreachable mid-discussion, when the failure occurs, then it is shown to the roleplayer visibly.
-  - **US-044.AC-3** — Given the LLM was unreachable mid-discussion, when the roleplayer acts on the visible failure, then a retry is possible.
+  - **US-044.AC-3** — Given the LLM was unreachable mid-discussion, when the roleplayer acts on the visible failure, then the assistant produces a fresh candidate for that exchange.
   - **US-044.AC-4** — Given a generation failed for any reason, when the failure is shown, then it states the reason, and the reason does not persist once the notice has gone.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4, round 9; 2026-09-28, gap-closure round, challenge C23.
+  - **US-044.AC-5** — Given an exchange that did not fail, when the roleplayer asks for a different candidate, then the assistant produces a fresh one for that same exchange.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4, round 9; 2026-09-28, gap-closure round, challenge C23; finalization 2026-10-06, C45.
 
 ### US-113 — A discussion appears beneath its answer in the same stream, and collapses there when the answer is settled
 - **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-079
@@ -92,10 +95,11 @@
 - **Actor:** ACT-002, ACT-004 · **Feature:** FEAT-010 · **Exercises:** UC-083
 - **Story:** As a roleplayer, I want to edit any message in the current zone before I settle, including one the assistant wrote, so that the final wording is always mine to control.
 - **Acceptance criteria:**
-  - **US-115.AC-1** — Given a message sits in the current zone, whoever wrote it, when the roleplayer edits its text, then the instance saves the edit in place.
+  - **US-115.AC-1** — Given a message the roleplayer or the assistant wrote sits in the current zone, when the roleplayer edits its text, then the instance saves the edit in place.
   - **US-115.AC-2** — Given a message in the current zone was edited, when the edit saves, then that message's text is not findable by session search — only settled entries are.
   - **US-115.AC-3** — Given a message in the current zone was edited, when the edit saves, then the assistant does not produce a new reply on its own.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 12; 2026-09-28, round 17.
+- **Constraint:** A tool's own record is not a message anyone wrote, and is not editable.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 12; 2026-09-28, round 17; finalization 2026-10-06, C46.
 
 ### US-116 — A collapsed discussion cannot be edited
 - **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-079
@@ -172,9 +176,10 @@
 - **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-085
 - **Story:** As a roleplayer, I want the stop to reach a tool call or a translation, not only a discussion reply, so that any runaway model work can be cut off the same way.
 - **Acceptance criteria:**
-  - **US-133.AC-1** — Given the assistant is waiting on a tool call, when the roleplayer stops it, then the discussion continues without that tool's result.
-  - **US-133.AC-2** — Given a partner-text translation is in flight, when the roleplayer stops it, then the original text stands and nothing is cached.
-- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
+  - **US-133.AC-1** — Given the assistant is waiting on a tool call, when the roleplayer stops it, then the exchange ends and whatever text was produced is kept.
+  - **US-133.AC-2** — Given a partner-text translation is in flight, when the roleplayer stops it, then the original text stands and the translation is not cached.
+- **Constraint:** Not caching a stopped translation is best-effort, not a guarantee — a stop arriving as the result is being written may not reach it in time. A *failed* translation caches nothing at all, which is a guarantee (UC-039).
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round; finalization 2026-10-06, C38.
 
 ### US-134 — An empty zone is discarded; one holding text must be settled
 - **Actor:** ACT-002 · **Feature:** FEAT-010 · **Exercises:** UC-086
@@ -190,4 +195,12 @@
 - **Acceptance criteria:**
   - **US-135.AC-1** — Given a current zone holds only the roleplayer's own message and the assistant has not answered, when the roleplayer settles, then their own text is settled as-is and nothing is lost.
 - **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
+
+### US-146 — The assistant's thinking never enters the settled record
+- **Actor:** ACT-002, ACT-004 · **Feature:** FEAT-010 · **Exercises:** UC-035
+- **Story:** As a roleplayer, I want the assistant's reasoning kept out of the settled text, so that what I post is only the reply itself.
+- **Acceptance criteria:**
+  - **US-146.AC-1** — Given a candidate holds the assistant's thinking alongside its reply, when the roleplayer settles it, then the settled entry's text holds the reply without the thinking.
+  - **US-146.AC-2** — Given a candidate holds nothing but the assistant's thinking, when the roleplayer settles it, then the settled entry's text is empty.
+- **Source:** `[confirmed: user]` finalization 2026-10-06, challenge C51 (plan 021 decision D4).
 <!-- product-spec:end -->

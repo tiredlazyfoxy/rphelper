@@ -27,5 +27,6 @@
 - **Story:** As a roleplayer, I want to be able to disable `web_search` through my configuration chain, so that I can turn it off wherever I don't want it available.
 - **Acceptance criteria:**
   - **US-073.AC-1** — Given `web_search` is disabled by the session's resolved configuration chain, when a discussion is open, then the assistant cannot call `web_search` in that session.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 5, round 6.
+  - **US-073.AC-2** — Given an instance holding no web-search credentials, when the roleplayer reads the session's web-search indicator, then it shows the state the configuration chain resolved, not whether the instance can actually search.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 5, round 6; finalization 2026-10-06, C53.
 <!-- product-spec:end -->
