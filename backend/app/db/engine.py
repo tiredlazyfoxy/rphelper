@@ -114,6 +114,16 @@ def get_engine(settings: Settings) -> Engine:
     `sqlite-vec`, sets `PRAGMA foreign_keys = ON` and sets `PRAGMA journal_mode = WAL`.
     The driver's implicit transactions are off and a `begin` listener sends the real
     `BEGIN`, so DDL inside a `with conn.begin():` block is transactional.
+
+    **Bound parameters are hidden**, so no SQLAlchemy log record at any level and no
+    rendered statement error (`str(exc)` of a `DBAPIError` and its subclasses) carries a
+    bound value — SQLAlchemy writes a placeholder in their place. The redaction rule has
+    no level exception (`docs/architecture/deployment.md` § "The redaction rule"), and a
+    bound parameter is the one place user text reaches the SQL layer verbatim. Read back
+    as **`engine.hide_parameters`**, which every engine this factory returns reports as
+    true. That is the *only* engine option added: the URL, the `connect_args` below, the
+    two listeners and the per-path caching are unchanged, and because engines are cached
+    per resolved path the flag is fixed at first creation for that path.
     """
     path = resolve_db_path(settings)
     cached = _engines.get(path)
@@ -125,6 +135,9 @@ def get_engine(settings: Settings) -> Engine:
         # `isolation_level=None`: the driver's own implicit BEGIN/COMMIT handling is off;
         # `_on_begin` below sends the real `BEGIN` (transactional DDL, see module doc).
         connect_args={"check_same_thread": False, "isolation_level": None},
+        # The one option this factory adds beyond the URL and `connect_args`: no SQLAlchemy
+        # log record and no rendered `DBAPIError` carries a bound value (see the docstring).
+        hide_parameters=True,
     )
 
     @event.listens_for(engine, "connect")
