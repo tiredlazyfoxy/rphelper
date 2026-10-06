@@ -16,7 +16,7 @@ import { Composer } from "./Composer";
 import { KindSwitch } from "./KindSwitch";
 import { StreamRecord } from "./StreamRecord";
 import { ZoneList } from "./ZoneList";
-import { StreamState, loadStream } from "./streamState";
+import { StreamState, composeFirstReply, loadStream } from "./streamState";
 import { TranslationState, disposeTranslations } from "./translationState";
 
 export type SessionStreamProps = {
@@ -30,6 +30,12 @@ export type SessionStreamProps = {
    * nothing is scrolled to and nothing is highlighted, which is every other caller's case.
    */
   focusEntryId?: string | null;
+  /**
+   * fast/004 D2/D3: whether this arrival carried the character page's first-reply marker, as
+   * decided once by `SessionScreen`. **Optional, absent means false.** When true, after the
+   * load resolves ready the stream starts `composeFirstReply` with its own signal.
+   */
+  firstReply?: boolean;
 };
 
 /** The ruler's visible label and accessible name — the stream's only separator (D12). */
@@ -53,6 +59,7 @@ export const SessionStream = observer(function SessionStream(
   // record it belongs to. Another session remounts and starts empty.
   const [translations] = useState(() => new TranslationState());
   const controllerRef = useRef<AbortController | null>(null);
+  const firstReply = props.firstReply ?? false;
 
   // 023 D13: on unmount every pending translate request is aborted. Nothing is notified.
   useEffect(() => {
@@ -66,14 +73,20 @@ export const SessionStream = observer(function SessionStream(
   useEffect(() => {
     const controller = new AbortController();
     controllerRef.current = controller;
-    void loadStream(state, controller.signal);
+    // fast/004 D3: once the load resolves ready, the first reply starts on this signal;
+    // `composeFirstReply` itself guards readiness, the zone, the abort and the once-flag.
+    void loadStream(state, controller.signal).then(() => {
+      if (firstReply && !controller.signal.aborted && state.status === "ready") {
+        void composeFirstReply(state, controller.signal);
+      }
+    });
     return () => {
       controller.abort();
       if (controllerRef.current === controller) {
         controllerRef.current = null;
       }
     };
-  }, [state]);
+  }, [state, firstReply]);
 
   const signal = controllerRef.current?.signal;
 

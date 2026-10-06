@@ -25,7 +25,7 @@
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMediaQuery } from "@mantine/hooks";
 import { IconNotes } from "@tabler/icons-react";
 import {
@@ -54,6 +54,7 @@ import { NARROW_VIEWPORT_QUERY } from "./shellState";
 import { SessionConfigState, sendBlockedReason } from "./sessionConfigState";
 import { SessionConfigBar } from "./SessionConfigBar";
 import { IconButton } from "../shared/IconButton";
+import { isFirstReplyState } from "./firstReply";
 
 /** The link text when the workspace list does not hold this session's character (D17). */
 const UNKNOWN_CHARACTER = "Character";
@@ -114,6 +115,25 @@ export const SessionScreen = observer(function SessionScreen(
   // simply matches nothing downstream.
   const focusEntryId = searchParams.get(ENTRY_PARAM);
   const notesParam = searchParams.get(NOTES_PARAM);
+
+  // fast/004 D2/D3: whether this arrival carried the character page's first-reply marker,
+  // captured once for this session id (the screen is keyed by it) so clearing the marker
+  // below never drops the intent before the stream's load resolves.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [firstReply] = useState(() => isFirstReplyState(location.state));
+  const markerPresent = isFirstReplyState(location.state);
+
+  // fast/004 D2: consume the marker at once — replace this history entry with the same path,
+  // search and hash and no state, so a reload, Back/Forward or re-render never fires again.
+  useEffect(() => {
+    if (markerPresent) {
+      void navigate(
+        { pathname: location.pathname, search: location.search, hash: location.hash },
+        { replace: true, state: null },
+      );
+    }
+  }, [markerPresent, navigate, location.pathname, location.search, location.hash]);
 
   // 029 `006` (decision 11): OPEN-ONLY. `notes=open` opens the wall on arrival, in place of
   // the closed-on-mount default; absence, any other value and every later in-entry navigation
@@ -230,6 +250,7 @@ export const SessionScreen = observer(function SessionScreen(
           sessionId={props.sessionId}
           sendBlockedReason={sendBlockedReason(configState)}
           focusEntryId={focusEntryId}
+          firstReply={firstReply}
         />
       </Stack>
     </Container>

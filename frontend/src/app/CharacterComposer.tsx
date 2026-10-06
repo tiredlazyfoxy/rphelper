@@ -15,6 +15,7 @@ import {
   setCharacterComposerDraft,
 } from "./characterComposerState";
 import { ComposerCore } from "./ComposerCore";
+import { firstReplyState } from "./firstReply";
 import type { SessionsState } from "./sessionsState";
 
 export type CharacterComposerProps = {
@@ -43,11 +44,12 @@ export const CharacterComposer = observer(function CharacterComposer(
   }, []);
 
   // D5: a push, so Back returns to the character page. The id is used exactly as received.
+  // fast/004 D2: the push carries the first-reply marker the session screen consumes.
   const onStarted = (sessionId: string): void => {
     if (!mountedRef.current) {
       return;
     }
-    void navigate(`/sessions/${sessionId}`);
+    void navigate(`/sessions/${sessionId}`, { state: firstReplyState() });
   };
 
   // Same `Title order={3}` as the page's other section headings.

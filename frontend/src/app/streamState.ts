@@ -54,10 +54,19 @@ export class StreamState {
    * written only by the effects below, never by a method on this class.
    */
   searchCoverageIncomplete = false;
+  /**
+   * fast/004 D3: whether `composeFirstReply` has already started a compose on this instance.
+   * The once-flag; a fresh `StreamState` (another session) starts false. Not observable.
+   */
+  firstReplyStarted = false;
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
-    makeAutoObservable(this, { composeHandle: false }, { autoBind: true });
+    makeAutoObservable(
+      this,
+      { composeHandle: false, firstReplyStarted: false },
+      { autoBind: true },
+    );
   }
 }
 
@@ -654,6 +663,32 @@ export async function regenerate(state: StreamState, signal?: AbortSignal): Prom
   if (signal?.aborted || !showsRegenerate(state) || state.composeHandle !== null) {
     return;
   }
+  await runCompose(state, undefined, signal);
+}
+
+/**
+ * fast/004 D3: effect: the first-reply compose after arrival from the character page — one
+ * textless compose (body `{}`) through `runCompose`, at most once per `StreamState`. Starts
+ * only when ready, not streaming or busy, the zone's last non-tool row is `role: "user"`, the
+ * signal is not aborted and no first reply was started before; otherwise a no-op with no
+ * request. Never rejects; failure goes through `notifyFailure`, the zone is re-read at the end.
+ */
+export async function composeFirstReply(state: StreamState, signal: AbortSignal): Promise<void> {
+  if (
+    state.firstReplyStarted ||
+    signal.aborted ||
+    state.status !== "ready" ||
+    isStreaming(state) ||
+    state.busy ||
+    state.composeHandle !== null
+  ) {
+    return;
+  }
+  const lastNonTool = state.zone.filter(isNonToolRow).at(-1);
+  if (lastNonTool === undefined || lastNonTool.role !== "user") {
+    return;
+  }
+  state.firstReplyStarted = true;
   await runCompose(state, undefined, signal);
 }
 
