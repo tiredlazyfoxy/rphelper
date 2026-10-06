@@ -1,0 +1,19 @@
+# RPHelper dev-compose — nginx only, serving the local frontend/dist and proxying /api/
+# to the uvicorn running on the host (start.ps1 -app).
+#
+# Port 8193 is shared with the host Vite dev server (start.ps1 -ui): run one or the
+# other, never both — the second to start fails to bind.
+#
+# Linux caveat: host.docker.internal maps to the host gateway via extra_hosts, but the
+# host uvicorn binds 127.0.0.1, which is unreachable from a container on native Linux
+# Docker. Docker Desktop (Windows/macOS) forwards it and works as-is.
+
+services:
+  web:
+    image: nginx:stable
+    ports: ["8193:80"]
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./docker/nginx.dev.conf:/etc/nginx/conf.d/default.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

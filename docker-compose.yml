@@ -1,0 +1,19 @@
+# RPHelper prod — one container (nginx + one uvicorn under supervisord).
+# See docs/architecture/deployment.md. The healthcheck asserts the HTTP status only and
+# never the body: /api/health answers 200 even on a fresh, unconfigured instance.
+
+services:
+  rphelper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports: ["8193:80"]
+    env_file: .env
+    volumes: ["./data:/app/data"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
