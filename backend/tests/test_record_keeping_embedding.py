@@ -10,8 +10,12 @@ the post-settle state — and the "Test shape") and from the feature `context.md
   that session's `session_vec`; a zone append and a zone-row edit do **none**;
 - **D6** what text represents a session (persona, then setup, then the `settled_entries` text in
   ascending id, joined with exactly `"\\n\\n"`), and the empty-text rule;
-- **D8** the degraded posture catches `NoEmbeddingModelError` **and** `LlmUnreachableError`;
-- **U5** a degraded write leaves any existing `session_vec` row exactly as it is (stale);
+- **D8** the degraded posture catches `NoEmbeddingModelError` **and** `LlmUnreachableError`
+  — widened by fast feature 005 to the named set that also includes `SecretRefError`;
+- **U5**'s second half (leave the existing row as it is) is **reversed** by fast feature 005
+  (`docs/plans/fast/005.degraded-embedding-path/plan.md`, US-112.AC-3): a degraded write now
+  clears the session's existing `session_vec` row. No test here asserts that a degraded catch
+  keeps a pre-existing vector;
 - the **Wire contract** — `search_coverage_incomplete` on `SettleResponse`, `ReopenResponse`
   and `MessageResponse`, always `false` for a zone row and a zone append.
 
@@ -21,7 +25,7 @@ and the fake's contract from `## Tests` → "Step 002 — tests" in `status.md`.
 derived from the implementation**; `settle.py`, `messages.py`, `models/stream.py` and
 `routers/stream.py` were never read.
 
-Each test name ends `__S024_005_DoD<n>` with the DoD item it covers.
+Each test name ends `__S024_005_DoD<n>` and/or `__F005_DoD<n>` with the DoD item it covers.
 
 Mechanics (`context.md` "Test conventions", `005.context.md` "Test shape"):
 - a real SQLite file per test (`db_engine`) with `schema.metadata.create_all`; `conftest.py` is
@@ -63,6 +67,7 @@ from app.services.passwords import hash_password
 from app.services.settle import ReopenResult, SettleResult, reopen, settle
 from tests.llm_fakes import (
     FakeClientFactory,
+    FakeEmbeddingClient,
     embedding_vector,
     fake_factory,
     unreachable_factory,
@@ -128,7 +133,8 @@ ZONE_DRAFT = "A zone draft."
 ZONE_EDITED = "A zone draft, revised."
 
 #: Exact float32 values (multiples of 2**-3), so a round-trip compares equal with no tolerance.
-#: This is the pre-existing vector U5 says a degraded write must leave exactly as it is.
+#: The pre-existing vector: a non-degraded no-vector-work write leaves it as it is; a degraded
+#: write clears it (F005, US-112.AC-3).
 VECTOR_V8 = [0.5, -1.5, 2.25, 0.0, 1.0, -0.125, 3.5, -2.0]
 
 #: The three kinds a settled record row can carry (DoD-4).
@@ -144,6 +150,18 @@ PLAYER_A_PASSWORD = "a quiet river at dusk"
 PLAYER_A_ID = 1_400_000_000_000_000_301
 
 COVERAGE_FLAG = "search_coverage_incomplete"
+
+#: F005: an `api_key_ref` naming an environment variable that is guaranteed unset.
+UNSET_KEY_VARIABLE = "F005_UNSET_EMBEDDING_KEY"
+UNSET_KEY_REF = f"${UNSET_KEY_VARIABLE}"
+#: F005 DoD-13: the memo body the strict path must refuse.
+MEMO_BODY = "A note the strict path must refuse."
+
+
+@pytest.fixture(autouse=True)
+def _unset_key_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """F005: the variable `UNSET_KEY_REF` names is never set while these tests run."""
+    monkeypatch.delenv(UNSET_KEY_VARIABLE, raising=False)
 
 
 # --- composition (D6, used to build the text a test expects to be embedded) --------------
@@ -284,7 +302,9 @@ def _settled_row(engine: Engine, message_id: int, body: str, *, kind: str = "tur
     )
 
 
-def _seed_designation(engine: Engine, *, dim: int | None = DIMENSION) -> None:
+def _seed_designation(
+    engine: Engine, *, dim: int | None = DIMENSION, api_key_ref: str | None = None
+) -> None:
     """Raw-insert one server and one model row — the designation, built without any service."""
     with engine.begin() as connection:
         connection.execute(
@@ -293,7 +313,7 @@ def _seed_designation(engine: Engine, *, dim: int | None = DIMENSION) -> None:
                 name="the embedding server",
                 kind="llamaswap",
                 base_url=BASE_URL,
-                api_key_ref=None,
+                api_key_ref=api_key_ref,
                 last_test_at=None,
                 last_test_ok=None,
                 last_test_error=None,
@@ -580,12 +600,14 @@ def test_a_settle_without_a_model_still_settles_and_flags_coverage__S024_005_DoD
     assert _vector_row_count(engine) == 0
 
 
-def test_a_settle_without_a_model_leaves_a_stale_vector_byte_identical__S024_005_DoD2(
+def test_a_settle_without_a_model_clears_the_preexisting_vector__S024_005_DoD2__F005_DoD5(
     engine: Engine,
 ) -> None:
-    """DoD-2 — U5: a degraded write leaves an existing `session_vec` row exactly as it is, which
-    makes it stale. Nothing records the staleness; the rebuild is the remedy."""
+    """024 DoD-2 / F005 DoD-5 / F005 DoD-6 — US-112.AC-3 reverses U5's second half: a degraded
+    settle **clears** the session's existing `session_vec` row instead of leaving it stale.
+    Nothing records that the session is unembedded; the rebuild is the remedy."""
     before = _preexisting_vector(engine, S_MAIN, VECTOR_V8)
+    assert before is not None
     _zone_row(engine, M_HEAD, CANDIDATE_TEXT)
     factory = fake_factory(DIMENSION)
 
@@ -594,18 +616,18 @@ def test_a_settle_without_a_model_leaves_a_stale_vector_byte_identical__S024_005
     assert result.search_coverage_incomplete is True
     assert _record_ids(engine) == [M_HEAD]
     assert _zone_ids(engine) == []
-    assert _stored_blob(engine, S_MAIN) == before
-    assert _stored_vector(engine, S_MAIN) == VECTOR_V8
-    assert _vector_row_count(engine) == 1
+    assert _stored_blob(engine, S_MAIN) is None
+    assert _vector_row_count(engine) == 0
 
 
-def test_a_settle_with_an_unreachable_provider_has_the_same_outcome__S024_005_DoD2(
+def test_a_settle_with_an_unreachable_provider_has_the_same_outcome__S024_005_DoD2__F005_DoD6(
     engine: Engine,
 ) -> None:
-    """DoD-2 — D8: the degraded path catches `LlmUnreachableError` too, so the outcome is the
-    same as the missing-designation one: settled, flag true, the old vector untouched."""
+    """024 DoD-2 / F005 DoD-6 — D8: the degraded path catches `LlmUnreachableError` too, so the
+    outcome is the same as the missing-designation one: settled, flag true, and the old vector
+    cleared (US-112.AC-3)."""
     _seed_designation(engine)
-    before = _preexisting_vector(engine, S_MAIN, VECTOR_V8)
+    _preexisting_vector(engine, S_MAIN, VECTOR_V8)
     _zone_row(engine, M_HEAD, CANDIDATE_TEXT)
     factory = unreachable_factory(DIMENSION)
 
@@ -614,9 +636,32 @@ def test_a_settle_with_an_unreachable_provider_has_the_same_outcome__S024_005_Do
     assert result.search_coverage_incomplete is True
     assert _record_ids(engine) == [M_HEAD]
     assert _zone_ids(engine) == []
-    assert _stored_blob(engine, S_MAIN) == before
+    assert _stored_blob(engine, S_MAIN) is None
+    assert _vector_row_count(engine) == 0
     # D1: one client per write operation, and the embed was really attempted.
     assert factory.call_count == 1
+
+
+def test_a_settle_with_an_unset_credential_settles_flags_and_clears__F005_DoD2(
+    engine: Engine,
+) -> None:
+    """F005 DoD-2 / DoD-4 — US-112.AC-1 / AC-3: the embedding server's key ref names an unset
+    `$VAR`. `settle` raises nothing, the settle is persisted, the flag is true, and the
+    session's pre-existing vector is cleared."""
+    _seed_designation(engine, api_key_ref=UNSET_KEY_REF)
+    _preexisting_vector(engine, S_MAIN, VECTOR_V8)
+    _zone_row(engine, M_HEAD, CANDIDATE_TEXT)
+    factory = fake_factory(DIMENSION)
+
+    result = _settle(engine, factory)
+
+    assert result.search_coverage_incomplete is True
+    assert result.entry_id == M_HEAD
+    assert _record_ids(engine) == [M_HEAD]
+    assert _settled_at(engine, M_HEAD) is not None
+    assert _zone_ids(engine) == []
+    assert _stored_blob(engine, S_MAIN) is None
+    assert _vector_row_count(engine) == 0
 
 
 # =========================================================================== DoD-3
@@ -706,13 +751,15 @@ def test_a_settled_edit_with_a_model_embeds_the_new_text__S024_005_DoD4(
 # =========================================================================== DoD-5
 
 
-def test_a_settled_edit_without_a_model_still_saves_and_flags_coverage__S024_005_DoD5(
+def test_a_settled_edit_without_a_model_saves_flags_and_clears_the_vector__S024_005_DoD5__F005_DoD5(
     engine: Engine,
 ) -> None:
-    """DoD-5 — US-112.AC-1 / US-112.AC-2 / U5: with no designated model the edit **saves** —
-    the stored text and the returned row both carry `"New words"` — the flag is true, and the
-    pre-existing `session_vec` row is byte-identical, hence stale."""
+    """024 DoD-5 / F005 DoD-5 — US-112.AC-1 / US-112.AC-2 / US-112.AC-3: with no designated
+    model the edit **saves** — the stored text and the returned row both carry `"New words"` —
+    the flag is true, and the session's pre-existing `session_vec` row is **gone** after the
+    edit commits (F005 reverses U5's "byte-identical, hence stale")."""
     before = _preexisting_vector(engine, S_MAIN, VECTOR_V8)
+    assert before is not None
     _settled_row(engine, M_SETTLED, OLD_WORDS)
     factory = fake_factory(DIMENSION)
 
@@ -721,9 +768,52 @@ def test_a_settled_edit_without_a_model_still_saves_and_flags_coverage__S024_005
     assert edited.search_coverage_incomplete is True
     assert edited.text == NEW_WORDS
     assert _stored_text(engine, M_SETTLED) == NEW_WORDS
+    assert _stored_blob(engine, S_MAIN) is None
+    assert _vector_row_count(engine) == 0
+
+
+def test_a_settled_edit_with_an_unset_credential_saves_flags_and_clears__F005_DoD1(
+    engine: Engine,
+) -> None:
+    """F005 DoD-1 / DoD-4 — US-112.AC-1 / AC-3: the embedding server's key ref names an unset
+    `$VAR`. The settled-entry edit raises nothing, the new text is persisted, the flag is true,
+    and the session's pre-existing vector is cleared."""
+    _seed_designation(engine, api_key_ref=UNSET_KEY_REF)
+    _preexisting_vector(engine, S_MAIN, VECTOR_V8)
+    _settled_row(engine, M_SETTLED, OLD_WORDS)
+    factory = fake_factory(DIMENSION)
+
+    edited = _edit(engine, factory, M_SETTLED, NEW_WORDS)
+
+    assert edited.search_coverage_incomplete is True
+    assert edited.text == NEW_WORDS
+    assert _stored_text(engine, M_SETTLED) == NEW_WORDS
+    assert _stored_blob(engine, S_MAIN) is None
+
+
+class _ExplodingFactory(FakeClientFactory):
+    """A client factory whose construction raises `RuntimeError` — a bug, not an outage."""
+
+    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeEmbeddingClient:
+        self.calls.append((base_url, api_key, timeout_seconds))
+        raise RuntimeError("a bug in the embedding code")
+
+
+def test_a_settled_edit_under_an_unnamed_fault_does_not_commit__F005_DoD10(engine: Engine) -> None:
+    """F005 DoD-10 — the degraded boundary is a named set: an embedding-side `RuntimeError` is not
+    "coverage incomplete". It propagates out of the settled edit, nothing commits: the old text
+    remains and the pre-existing vector is untouched."""
+    _seed_designation(engine)
+    before = _preexisting_vector(engine, S_MAIN, VECTOR_V8)
+    _settled_row(engine, M_SETTLED, OLD_WORDS)
+    factory = _ExplodingFactory(dim=DIMENSION)
+
+    with pytest.raises(RuntimeError):
+        _edit(engine, factory, M_SETTLED, NEW_WORDS)
+
+    assert _stored_text(engine, M_SETTLED) == OLD_WORDS
     assert _stored_blob(engine, S_MAIN) == before
     assert _stored_vector(engine, S_MAIN) == VECTOR_V8
-    assert _vector_row_count(engine) == 1
 
 
 # =========================================================================== DoD-6
@@ -1032,3 +1122,96 @@ def test_settle_answers_the_coverage_flag_false_with_a_model__S024_005_DoD8(
     }
     assert factory.call_count == 1
     assert factory.calls == [(BASE_URL, None, db_settings.llm_request_timeout_seconds)]
+
+
+# =========================================================================== F005 — the wire
+# Fast feature 005 — degraded-embedding-path. Expected values come from
+# `docs/plans/fast/005.degraded-embedding-path/plan.md` (DoD-1, 2, 5, 13) and its `context.md`.
+
+
+def test_a_settled_row_patch_with_an_unset_credential_answers_2xx__F005_DoD1(
+    wire_engine: Engine, db_settings: Settings
+) -> None:
+    """F005 DoD-1 — US-112.AC-1: the designated embedding server's key ref names an unset `$VAR`.
+    `PATCH /api/messages/{id}` on a settled entry answers 2xx (not 500) with the flag true, and
+    the new text is persisted."""
+    _seed_designation(wire_engine, api_key_ref=UNSET_KEY_REF)
+    factory = fake_factory(DIMENSION)
+    with _application(db_settings, factory) as application:
+        client = _player_a(application, db_settings)
+        session_id = _new_session(client)
+        message = _wire_append(client, session_id, OLD_WORDS)
+        _ok(client.post(f"{SESSIONS_PATH}/{session_id}/settle"), 200)
+
+        response = client.patch(f"{MESSAGES_PATH}/{message['id']}", json={"text": NEW_WORDS})
+
+    assert 200 <= response.status_code < 300, response.text
+    body = response.json()
+    assert body[COVERAGE_FLAG] is True
+    assert body["text"] == NEW_WORDS
+    assert _stored_text(wire_engine, int(message["id"])) == NEW_WORDS
+
+
+def test_settle_with_an_unset_credential_answers_2xx__F005_DoD2(
+    wire_engine: Engine, db_settings: Settings
+) -> None:
+    """F005 DoD-2 — US-112.AC-1: with the same unset-`$VAR` credential, `POST …/settle` answers
+    2xx with the flag true, and the settle is persisted."""
+    _seed_designation(wire_engine, api_key_ref=UNSET_KEY_REF)
+    factory = fake_factory(DIMENSION)
+    with _application(db_settings, factory) as application:
+        client = _player_a(application, db_settings)
+        session_id = _new_session(client)
+        message = _wire_append(client, session_id, CANDIDATE_TEXT)
+
+        response = client.post(f"{SESSIONS_PATH}/{session_id}/settle")
+
+    assert 200 <= response.status_code < 300, response.text
+    body = response.json()
+    assert body[COVERAGE_FLAG] is True
+    assert body["entry_id"] == message["id"]
+    assert _settled_at(wire_engine, int(message["id"])) is not None
+    assert _zone_ids(wire_engine, user_id=PLAYER_A_ID, session_id=int(session_id)) == []
+
+
+def test_a_settled_row_patch_without_a_model_clears_the_sessions_vector__F005_DoD5(
+    wire_engine: Engine, db_settings: Settings
+) -> None:
+    """F005 DoD-5 — US-112.AC-3, visible at the route: the session had a vector right before a
+    settled edit made with no designated model; after the edit commits the session has no
+    `session_vec` row."""
+    factory = fake_factory(DIMENSION)
+    with _application(db_settings, factory) as application:
+        client = _player_a(application, db_settings)
+        session_id = _new_session(client)
+        message = _wire_append(client, session_id, OLD_WORDS)
+        _ok(client.post(f"{SESSIONS_PATH}/{session_id}/settle"), 200)
+        _preexisting_vector(wire_engine, int(session_id), VECTOR_V8)
+
+        body = _ok(client.patch(f"{MESSAGES_PATH}/{message['id']}", json={"text": NEW_WORDS}), 200)
+
+    assert body[COVERAGE_FLAG] is True
+    assert _stored_text(wire_engine, int(message["id"])) == NEW_WORDS
+    assert _stored_blob(wire_engine, int(session_id)) is None
+
+
+def test_a_memo_create_with_an_unset_credential_still_fails__F005_DoD13(
+    wire_engine: Engine, db_settings: Settings
+) -> None:
+    """F005 DoD-13 — the memo strict path is unchanged: with an unset `$VAR` credential,
+    `POST /api/memos` with a non-empty body answers 500 `secret_ref_missing`, and no memo row
+    is stored."""
+    _seed_designation(wire_engine, api_key_ref=UNSET_KEY_REF)
+    factory = fake_factory(DIMENSION)
+    with _application(db_settings, factory) as application:
+        client = _player_a(application, db_settings)
+
+        response = client.post("/api/memos", json={"scope": "user", "body": MEMO_BODY})
+
+    assert response.status_code == 500, response.text
+    assert response.json()["error"]["code"] == "secret_ref_missing"
+    with wire_engine.connect() as connection:
+        stored = connection.execute(
+            select(schema.memos.c.id).where(schema.memos.c.body == MEMO_BODY)
+        ).all()
+    assert stored == []

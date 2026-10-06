@@ -5,13 +5,19 @@ Every expected value comes from `docs/plans/024.embedding-lifecycle/003.session-
 from `003.context.md` (the test shape, the refresh order, the degraded catch) and from the
 feature `context.md` (**D5** archived sessions included, **D6** the exact composition and the
 empty-text rule, **D8** the two failure codes and the `{"reason": "dimension_mismatch"}`
-detail, **U5** a degraded write leaves the existing row as it is, **R5** owner scope, **R11**
-reads go through `settled_entries`). Bindings come from `## Skeleton` → "Step 003 — frozen
-interface" (and steps 001 / 002 for `ensure_vector_tables`, `write_vector` and the table-name
-constants), and the fake's contract from `## Tests` → "Step 002 — tests" in `status.md`.
-Nothing here was derived from the implementation.
+detail, **R5** owner scope, **R11** reads go through `settled_entries`). Bindings come from
+`## Skeleton` → "Step 003 — frozen interface" (and steps 001 / 002 for `ensure_vector_tables`,
+`write_vector` and the table-name constants), and the fake's contract from `## Tests` → "Step
+002 — tests" in `status.md`. Nothing here was derived from the implementation.
 
-Each test name ends `__S024_003_DoD<n>` with the DoD item it covers.
+`024`'s **U5** second half ("a degraded write leaves the existing row as it is") is reversed by
+fast feature 005 (`docs/plans/fast/005.degraded-embedding-path/plan.md`, US-112.AC-3): a
+degraded catch now **clears** the session's existing vector, through an owner-scoped id lookup,
+and the caught set is the named `DEGRADED_EMBEDDING_ERRORS` (`NoEmbeddingModelError`,
+`LlmUnreachableError`, `SecretRefError`). No test here asserts that a degraded catch keeps a
+pre-existing vector.
+
+Each test name ends `__S024_003_DoD<n>` or `__F005_DoD<n>` with the DoD item it covers.
 
 Mechanics (`context.md` "Test conventions", `003.context.md` "Test shape"):
 - a real SQLite file per test (`db_engine`) with `schema.metadata.create_all`; `conftest.py`
@@ -38,10 +44,11 @@ from sqlalchemy import Connection, Engine, Table, select, text
 import app.services.session_index as session_index_module
 from app.db import schema
 from app.db.search_tables import MESSAGE_FTS_TABLE, SESSION_VEC_TABLE, ensure_vector_tables
-from app.errors import LlmUnreachableError, NoEmbeddingModelError
+from app.errors import LlmUnreachableError, NoEmbeddingModelError, SecretRefError
 from app.roles import Role
 from app.services.embedding import write_vector
 from app.services.session_index import (
+    DEGRADED_EMBEDDING_ERRORS,
     compose_session_text,
     refresh_session_vector_degraded,
     refresh_session_vectors,
@@ -50,6 +57,7 @@ from app.services.session_index import (
 )
 from tests.llm_fakes import (
     FakeClientFactory,
+    FakeEmbeddingClient,
     embedding_vector,
     fake_factory,
     unreachable_factory,
@@ -136,6 +144,19 @@ VECTOR_V16 = [
 
 #: A nonsense token, so a `MATCH` can only come from the row that carries it (DoD-11).
 FTS_TOKEN = "settledtokenxyz"
+
+#: F005: an `api_key_ref` naming an environment variable that is guaranteed unset.
+UNSET_KEY_VARIABLE = "F005_UNSET_EMBEDDING_KEY"
+UNSET_KEY_REF = f"${UNSET_KEY_VARIABLE}"
+
+#: F005 DoD-4: the three causes a degraded catch covers.
+DEGRADED_CAUSES = ["no_designated_model", "unreachable_server", "unset_credential"]
+
+
+@pytest.fixture(autouse=True)
+def _unset_key_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """F005: the variable `UNSET_KEY_REF` names is never set while these tests run."""
+    monkeypatch.delenv(UNSET_KEY_VARIABLE, raising=False)
 
 
 # --- seeding ---------------------------------------------------------------------------
@@ -284,6 +305,7 @@ def _seed_designation(
     dim: int | None = DIMENSION,
     is_enabled: bool = True,
     is_designated: bool = True,
+    api_key_ref: str | None = None,
 ) -> None:
     """Raw-insert one server and one model row — the designation, built without any service."""
     with engine.begin() as connection:
@@ -293,7 +315,7 @@ def _seed_designation(
                 name="the embedding server",
                 kind="llamaswap",
                 base_url=BASE_URL,
-                api_key_ref=None,
+                api_key_ref=api_key_ref,
                 last_test_at=None,
                 last_test_ok=None,
                 last_test_error=None,
@@ -405,6 +427,17 @@ def _stored_vector(engine: Engine, session_id: int, *, dim: int = DIMENSION) -> 
         query = text(f"SELECT embedding FROM {SESSION_VEC_TABLE} WHERE {key} = :row_id")
         blob = connection.execute(query, {"row_id": session_id}).scalar_one_or_none()
         return None if blob is None else list(struct.unpack(f"<{dim}f", bytes(blob)))
+
+
+def _stored_blob(engine: Engine, session_id: int) -> bytes | None:
+    """The raw stored blob for one session id — `None` when there is no row (or no table)."""
+    with engine.connect() as connection:
+        key = _key_column(connection, SESSION_VEC_TABLE)
+        if key is None:
+            return None
+        query = text(f"SELECT embedding FROM {SESSION_VEC_TABLE} WHERE {key} = :row_id")
+        blob = connection.execute(query, {"row_id": session_id}).scalar_one_or_none()
+        return None if blob is None else bytes(blob)
 
 
 def _vector_row_count(engine: Engine) -> int:
@@ -607,11 +640,12 @@ def test_a_table_at_another_dimension_is_a_dimension_mismatch__S024_003_DoD5(eng
 # =========================================================================== DoD-6
 
 
-def test_a_degraded_refresh_without_a_model_commits_the_row_and_keeps_the_stale_vector__S024_003_DoD6(
+def test_a_degraded_refresh_without_a_model_commits_the_row_and_clears_the_vector__S024_003_DoD6__F005_DoD6(
     engine: Engine,
 ) -> None:
-    """DoD-6 — US-112.AC-1: no designated model raises nothing, answers "incomplete", the earlier
-    relational write commits, and the existing vector stays as it was (stale, U5).
+    """024 DoD-6 / F005 DoD-6 — US-112.AC-1 and US-112.AC-3: no designated model raises nothing,
+    answers "incomplete", the earlier relational write commits, and the session's existing vector
+    is **cleared** (F005 reverses U5's "leave it in place").
     """
     _session_with_a_preexisting_vector(engine, dim=DIMENSION, vector=VECTOR_V8)
     factory = fake_factory(dim=DIMENSION)
@@ -620,13 +654,15 @@ def test_a_degraded_refresh_without_a_model_commits_the_row_and_keeps_the_stale_
 
     assert incomplete is True
     assert _last_used_at(engine, S_MAIN) == BUMPED_AT
-    assert _stored_vector(engine, S_MAIN) == VECTOR_V8
+    assert _stored_vector(engine, S_MAIN) is None
+    assert _vector_row_count(engine) == 0
 
 
-def test_a_degraded_refresh_with_an_unreachable_provider_commits_the_row__S024_003_DoD6(
+def test_a_degraded_refresh_when_unreachable_commits_the_row_and_clears_the_vector__S024_003_DoD6__F005_DoD6(
     engine: Engine,
 ) -> None:
-    """DoD-6 — the same for a failed embed call: caught, flagged, row committed, vector stale."""
+    """024 DoD-6 / F005 DoD-6 — the same for a failed embed call: caught, flagged, row committed,
+    vector cleared (US-112.AC-3)."""
     _session_with_a_preexisting_vector(engine, dim=DIMENSION, vector=VECTOR_V8)
     _seed_designation(engine)
     factory = unreachable_factory(dim=DIMENSION)
@@ -635,13 +671,16 @@ def test_a_degraded_refresh_with_an_unreachable_provider_commits_the_row__S024_0
 
     assert incomplete is True
     assert _last_used_at(engine, S_MAIN) == BUMPED_AT
-    assert _stored_vector(engine, S_MAIN) == VECTOR_V8
+    assert _stored_vector(engine, S_MAIN) is None
+    assert _vector_row_count(engine) == 0
 
 
-def test_a_degraded_refresh_with_a_dimension_mismatch_commits_the_row__S024_003_DoD6(
+def test_a_degraded_refresh_with_a_dimension_mismatch_commits_the_row_and_clears_the_vector__S024_003_DoD6__F005_DoD6(
     engine: Engine,
 ) -> None:
-    """DoD-6 — a dimension mismatch is "unavailable" too (D8), so it degrades identically."""
+    """024 DoD-6 / F005 DoD-6 — a dimension mismatch is `NoEmbeddingModelError` (D8), a member of
+    the degraded set, so it degrades identically: the clear removes the session's row by
+    session id, whatever dimension the existing table was declared at (US-112.AC-3)."""
     _session_with_a_preexisting_vector(engine, dim=OTHER_DIMENSION, vector=VECTOR_V16)
     _seed_designation(engine, dim=DIMENSION)
     factory = fake_factory(dim=DIMENSION)
@@ -650,12 +689,15 @@ def test_a_degraded_refresh_with_a_dimension_mismatch_commits_the_row__S024_003_
 
     assert incomplete is True
     assert _last_used_at(engine, S_MAIN) == BUMPED_AT
-    assert _stored_vector(engine, S_MAIN, dim=OTHER_DIMENSION) == VECTOR_V16
+    assert _stored_vector(engine, S_MAIN, dim=OTHER_DIMENSION) is None
 
 
-def test_a_wrong_length_vector_also_degrades_and_keeps_the_row__S024_003_DoD6(engine: Engine) -> None:
-    """DoD-6 — a returned vector of the wrong length is the other dimension-mismatch raise site
-    (D8), and the degraded path catches it just the same.
+def test_a_wrong_length_vector_also_degrades_and_clears_the_vector__S024_003_DoD6__F005_DoD6(
+    engine: Engine,
+) -> None:
+    """024 DoD-6 / F005 DoD-6 — a returned vector of the wrong length is the other
+    dimension-mismatch raise site (D8); the degraded path catches it just the same and clears
+    the session's existing vector (US-112.AC-3).
     """
     _session_with_a_preexisting_vector(engine, dim=DIMENSION, vector=VECTOR_V8)
     _seed_designation(engine)
@@ -665,7 +707,8 @@ def test_a_wrong_length_vector_also_degrades_and_keeps_the_row__S024_003_DoD6(en
 
     assert incomplete is True
     assert _last_used_at(engine, S_MAIN) == BUMPED_AT
-    assert _stored_vector(engine, S_MAIN) == VECTOR_V8
+    assert _stored_vector(engine, S_MAIN) is None
+    assert _vector_row_count(engine) == 0
 
 
 # =========================================================================== DoD-7
@@ -824,3 +867,215 @@ def test_the_module_binds_no_fastapi_symbol__S024_003_DoD12() -> None:
         if isinstance(origin, str) and origin.split(".")[0] in {"fastapi", "starlette"}:
             offenders.append(name)
     assert offenders == []
+
+
+# =========================================================================== F005
+# Fast feature 005 — degraded-embedding-path. Expected values come from
+# `docs/plans/fast/005.degraded-embedding-path/plan.md` (DoD-3, 4, 6, 7, 8, 9, 10, 11, 12, 14)
+# and its `context.md`; bindings from that plan's `## Skeleton` record.
+
+
+class _ExplodingFactory(FakeClientFactory):
+    """A client factory whose construction raises `RuntimeError` — a bug, not an outage."""
+
+    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeEmbeddingClient:
+        self.calls.append((base_url, api_key, timeout_seconds))
+        raise RuntimeError("a bug in the embedding code")
+
+
+def _break_embedding(engine: Engine, cause: str) -> FakeClientFactory:
+    """Make embedding unavailable for one of the three causes the degraded set covers."""
+    if cause == "no_designated_model":
+        return fake_factory(dim=DIMENSION)
+    if cause == "unreachable_server":
+        _seed_designation(engine)
+        return unreachable_factory(dim=DIMENSION)
+    if cause == "unset_credential":
+        _seed_designation(engine, api_key_ref=UNSET_KEY_REF)
+        return fake_factory(dim=DIMENSION)
+    raise AssertionError(f"unknown cause {cause!r}")
+
+
+def _session_of_b_with_a_vector(engine: Engine) -> bytes:
+    """User B's session with a non-empty text and a committed vector row; its stored blob."""
+    _insert_session(engine, session_id=S_OF_B, user_id=USER_B, character_id=CHAR_B, setup_id=SETUP_B)
+    _settled(engine, M5, "B's own entry.", session_id=S_OF_B, user_id=USER_B)
+    _preexisting_vector(engine, S_OF_B, VECTOR_V8, dim=DIMENSION)
+    blob = _stored_blob(engine, S_OF_B)
+    assert blob is not None
+    return blob
+
+
+def test_an_unset_credential_degrades_instead_of_raising__F005_DoD3(engine: Engine) -> None:
+    """F005 DoD-3 — US-112.AC-1: with the embedding server's key ref naming an unset `$VAR`,
+    `refresh_session_vector_degraded` returns `True` and raises nothing; the relational write
+    in the same transaction commits."""
+    _insert_session(engine, session_id=S_MAIN, character_id=CHAR_A, setup_id=SETUP_X)
+    _settled(engine, M1, TEXT_ALPHA, session_id=S_MAIN)
+    factory = _break_embedding(engine, "unset_credential")
+
+    incomplete = _degraded_after_a_relational_write(engine, S_MAIN, factory)
+
+    assert incomplete is True
+    assert _last_used_at(engine, S_MAIN) == BUMPED_AT
+
+
+@pytest.mark.parametrize("cause", DEGRADED_CAUSES)
+def test_a_degraded_catch_clears_the_preexisting_vector__F005_DoD4(engine: Engine, cause: str) -> None:
+    """F005 DoD-4 — US-112.AC-3: the session has a `session_vec` row from an earlier successful
+    embed; for each of the three causes the call returns `True` and the row is gone."""
+    _session_with_a_preexisting_vector(engine, dim=DIMENSION, vector=VECTOR_V8)
+    assert _stored_vector(engine, S_MAIN) == VECTOR_V8
+    factory = _break_embedding(engine, cause)
+
+    incomplete = _degraded_after_a_relational_write(engine, S_MAIN, factory)
+
+    assert incomplete is True
+    assert _last_used_at(engine, S_MAIN) == BUMPED_AT
+    assert _stored_blob(engine, S_MAIN) is None
+    assert _vector_row_count(engine) == 0
+
+
+@pytest.mark.parametrize("cause", DEGRADED_CAUSES)
+def test_a_degraded_catch_with_no_vector_table_returns_true__F005_DoD7(engine: Engine, cause: str) -> None:
+    """F005 DoD-7 — no pre-existing vector and **no `session_vec` table at all**: the degraded
+    catch returns `True` and raises nothing (the clear is a no-op)."""
+    _insert_session(engine, session_id=S_MAIN, character_id=CHAR_A, setup_id=SETUP_X)
+    _settled(engine, M1, TEXT_ALPHA, session_id=S_MAIN)
+    assert SESSION_VEC_TABLE not in _table_names(engine)
+    factory = _break_embedding(engine, cause)
+
+    incomplete = _degraded_after_a_relational_write(engine, S_MAIN, factory)
+
+    assert incomplete is True
+    assert _last_used_at(engine, S_MAIN) == BUMPED_AT
+    assert _stored_blob(engine, S_MAIN) is None
+
+
+@pytest.mark.parametrize("cause", DEGRADED_CAUSES)
+def test_a_degraded_catch_with_no_row_returns_true__F005_DoD7(engine: Engine, cause: str) -> None:
+    """F005 DoD-7 — the `session_vec` table exists but holds no row for the session: the
+    degraded catch returns `True` and raises nothing."""
+    _insert_session(engine, session_id=S_MAIN, character_id=CHAR_A, setup_id=SETUP_X)
+    _settled(engine, M1, TEXT_ALPHA, session_id=S_MAIN)
+    with engine.begin() as connection:
+        ensure_vector_tables(connection, DIMENSION)
+    factory = _break_embedding(engine, cause)
+
+    incomplete = _degraded_after_a_relational_write(engine, S_MAIN, factory)
+
+    assert incomplete is True
+    assert _last_used_at(engine, S_MAIN) == BUMPED_AT
+    assert _stored_blob(engine, S_MAIN) is None
+    assert _vector_row_count(engine) == 0
+
+
+@pytest.mark.parametrize("cause", DEGRADED_CAUSES)
+def test_a_degraded_refresh_of_another_users_session_leaves_its_vector__F005_DoD8(
+    engine: Engine, cause: str
+) -> None:
+    """F005 DoD-8 — owner scoping: user B's session has a vector; a degraded refresh called as
+    user A with B's session id, while embedding is unavailable, leaves B's row present and
+    byte-identical, whatever the call returns."""
+    before = _session_of_b_with_a_vector(engine)
+    factory = _break_embedding(engine, cause)
+
+    with engine.begin() as connection:
+        refresh_session_vector_degraded(
+            connection, USER_A, S_OF_B, client_factory=factory, timeout_seconds=PASSED_TIMEOUT
+        )
+
+    assert _stored_blob(engine, S_OF_B) == before
+    assert _stored_vector(engine, S_OF_B) == VECTOR_V8
+
+
+@pytest.mark.parametrize("cause", DEGRADED_CAUSES)
+def test_a_degraded_catch_clears_only_the_callers_session__F005_DoD9(engine: Engine, cause: str) -> None:
+    """F005 DoD-9 — owner scoping: A and B each have a session with a vector; a degraded catch for
+    A's session clears A's row and leaves B's row byte-identical."""
+    _session_with_a_preexisting_vector(engine, dim=DIMENSION, vector=VECTOR_V8)
+    before_b = _session_of_b_with_a_vector(engine)
+    factory = _break_embedding(engine, cause)
+
+    incomplete = _degraded_after_a_relational_write(engine, S_MAIN, factory)
+
+    assert incomplete is True
+    assert _stored_blob(engine, S_MAIN) is None
+    assert _stored_blob(engine, S_OF_B) == before_b
+    assert _vector_row_count(engine) == 1
+
+
+def test_an_error_outside_the_named_set_propagates_and_rolls_back__F005_DoD10(engine: Engine) -> None:
+    """F005 DoD-10 — the boundary is a named set: a factory raising `RuntimeError` propagates out
+    of `refresh_session_vector_degraded` (it does not answer `True`), so the caller's transaction
+    rolls back — the relational write is undone and the pre-existing vector is untouched."""
+    _session_with_a_preexisting_vector(engine, dim=DIMENSION, vector=VECTOR_V8)
+    before = _stored_blob(engine, S_MAIN)
+    _seed_designation(engine)
+    factory = _ExplodingFactory(dim=DIMENSION)
+
+    with pytest.raises(RuntimeError):
+        _degraded_after_a_relational_write(engine, S_MAIN, factory)
+
+    assert _last_used_at(engine, S_MAIN) == TIMESTAMP
+    assert _stored_blob(engine, S_MAIN) == before
+    assert _stored_vector(engine, S_MAIN) == VECTOR_V8
+
+
+def test_the_degraded_error_set_is_exactly_the_three_named_classes__F005_DoD11() -> None:
+    """F005 DoD-11 — a tuple of exactly `NoEmbeddingModelError`, `LlmUnreachableError` and
+    `SecretRefError`; no base type, nothing else."""
+    assert isinstance(DEGRADED_EMBEDDING_ERRORS, tuple)
+    assert len(DEGRADED_EMBEDDING_ERRORS) == 3
+    assert set(DEGRADED_EMBEDDING_ERRORS) == {NoEmbeddingModelError, LlmUnreachableError, SecretRefError}
+
+
+def test_the_strict_refresh_raises_on_an_unset_credential_and_keeps_the_vector__F005_DoD12(
+    engine: Engine,
+) -> None:
+    """F005 DoD-12 — the strict path is unchanged: with an unset `$VAR` credential and a
+    non-empty session text, `refresh_session_vectors` raises `SecretRefError`
+    (`secret_ref_missing`) and deletes no existing vector."""
+    _session_with_a_preexisting_vector(engine, dim=DIMENSION, vector=VECTOR_V8)
+    before = _stored_blob(engine, S_MAIN)
+    factory = _break_embedding(engine, "unset_credential")
+
+    with pytest.raises(SecretRefError) as raised:
+        _refresh(engine, USER_A, [S_MAIN], factory)
+
+    assert raised.value.code == "secret_ref_missing"
+    assert _stored_blob(engine, S_MAIN) == before
+    assert _stored_vector(engine, S_MAIN) == VECTOR_V8
+
+
+def test_the_strict_refresh_raises_without_a_model_and_keeps_the_vector__F005_DoD12(
+    engine: Engine,
+) -> None:
+    """F005 DoD-12 — with no designated model the strict refresh raises `NoEmbeddingModelError`
+    and deletes no existing vector."""
+    _session_with_a_preexisting_vector(engine, dim=DIMENSION, vector=VECTOR_V8)
+    before = _stored_blob(engine, S_MAIN)
+    factory = _break_embedding(engine, "no_designated_model")
+
+    with pytest.raises(NoEmbeddingModelError):
+        _refresh(engine, USER_A, [S_MAIN], factory)
+
+    assert _stored_blob(engine, S_MAIN) == before
+    assert _stored_vector(engine, S_MAIN) == VECTOR_V8
+
+
+def test_a_successful_degraded_call_returns_false_and_writes_the_vector__F005_DoD14(
+    engine: Engine,
+) -> None:
+    """F005 DoD-14 — the happy path is unchanged: with embedding available the wrapper returns
+    `False` and writes the session's vector (the fake's vector for the composed text)."""
+    _insert_session(engine, session_id=S_MAIN, character_id=CHAR_A, setup_id=SETUP_X)
+    _settled(engine, M1, TEXT_ALPHA, session_id=S_MAIN)
+    _seed_designation(engine)
+    factory = fake_factory(dim=DIMENSION)
+
+    incomplete = _refresh_degraded(engine, USER_A, S_MAIN, factory)
+
+    assert incomplete is False
+    assert _stored_vector(engine, S_MAIN) == embedding_vector(TEXT_MAIN, DIMENSION)
+    assert _vector_row_count(engine) == 1

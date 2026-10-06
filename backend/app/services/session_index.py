@@ -14,7 +14,8 @@ Feature 024, step `003`. Five things live here and nothing else:
   non-empty — opens the designated model, ensures the vector tables at its dimension,
   embeds **all** the non-empty texts in **one** call (D1) and writes each session's vector.
 - **`refresh_session_vector_degraded`** is the same work for one session with the
-  record-keeping posture (D8): "unavailable" is caught and reported as incomplete
+  record-keeping posture (D8): every failure in `DEGRADED_EMBEDDING_ERRORS` is caught,
+  the session's existing vector is cleared, and the outcome is reported as incomplete
   coverage instead of propagating.
 - **`session_ids_for_character` / `session_ids_for_setup`** are the two fan-out selections
   (D5, U4): every session of the owner's character, and every session of the owner whose
@@ -38,9 +39,10 @@ composition, the embed call and the vector write are one transaction (U1). The t
 listers and `compose_session_text` are reads with no transaction requirement, and write
 nothing.
 
-**No staleness is persisted (U5).** A degraded refresh leaves any existing `session_vec`
-row exactly as it was — stale — and records nothing anywhere. The remedy is the
-administrator's whole-index rebuild (`fast/002`).
+**No staleness is persisted (U5, US-112.AC-3).** A degraded refresh clears the session's
+existing `session_vec` row — resolved through an owner-scoped read — and records nothing
+anywhere: the session simply drops out of semantic search. The remedy is the
+administrator's whole-index rebuild (`fast/002`), which re-embeds it.
 
 This module imports nothing from the web framework: the client factory and the timeout
 arrive as keyword-only parameters with D9's defaults, and the routers supply them. Among
@@ -55,7 +57,7 @@ from sqlalchemy import Connection, select
 
 from app.db.schema import characters, sessions, settled_entries, setups
 from app.db.search_tables import SESSION_VEC_TABLE, ensure_fts_tables, ensure_vector_tables
-from app.errors import LlmUnreachableError, NoEmbeddingModelError
+from app.errors import LlmUnreachableError, NoEmbeddingModelError, SecretRefError
 from app.services.embedding import (
     DEFAULT_EMBED_TIMEOUT_SECONDS,
     LlmClient,
@@ -65,6 +67,18 @@ from app.services.embedding import (
     open_embedding_model,
     write_vector,
 )
+
+DEGRADED_EMBEDDING_ERRORS: tuple[type[Exception], ...] = (
+    NoEmbeddingModelError,
+    LlmUnreachableError,
+    SecretRefError,
+)
+"""The complete boundary of what the degraded path (`refresh_session_vector_degraded`) swallows.
+
+A named set on purpose, not a base type: programming errors and SQL errors (and every other
+exception) still propagate and roll the caller's transaction back. The strict path
+(`refresh_session_vectors`) ignores this set entirely.
+"""
 
 
 def compose_session_text(connection: Connection, user_id: int, session_id: int) -> str:
@@ -219,15 +233,17 @@ def refresh_session_vector_degraded(
     """Refresh one session's vector, reporting instead of raising — **`True` = incomplete**.
 
     Runs `refresh_session_vectors` for that one session on the caller's already-open
-    transaction and catches exactly `NoEmbeddingModelError` and `LlmUnreachableError`
-    (D8, U3). On a catch it writes no vector, leaves any existing `session_vec` row as it
-    was — stale, and recorded nowhere (U5) — and returns `True`. Otherwise it returns
-    `False`, which includes the empty-text case: deleting the row of a session with no
-    text is complete coverage, not degraded (D6).
+    transaction and catches exactly `DEGRADED_EMBEDDING_ERRORS` — `NoEmbeddingModelError`,
+    `LlmUnreachableError` and `SecretRefError` (`secret_ref_missing`) (D8, U3,
+    US-112.AC-1). On a catch it writes no vector, **clears** the session's existing
+    `session_vec` row through an owner-scoped read (US-112.AC-3; a session that is not the
+    caller's is never touched), records nothing anywhere (U5) and returns `True`. Otherwise
+    it returns `False`, which includes the empty-text case: deleting the row of a session
+    with no text is complete coverage, not degraded (D6).
 
-    Every other exception propagates, `SecretRefError` (`secret_ref_missing`) included.
+    Every other exception propagates unchanged — programming and SQL errors included.
     **The caller's transaction stays usable after a catch**, and the relational write that
-    preceded it commits: no SQL statement failed at either raise point, so no savepoint is
+    preceded it commits: no SQL statement failed at any raise point, so no savepoint is
     needed and none is taken.
 
     The returned boolean is what the record-keeping routes put on the wire as
@@ -241,12 +257,13 @@ def refresh_session_vector_degraded(
             client_factory=client_factory,
             timeout_seconds=timeout_seconds,
         )
-    except (NoEmbeddingModelError, LlmUnreachableError):
-        # Exactly the two "unavailable" classes (D8, U3) — a `SecretRefError` is not one of
-        # them and goes on propagating. Both raise points are Python-level, no SQL statement
-        # failed, so the caller's transaction is intact here and needs no savepoint: the
-        # relational write that preceded this still commits, and any existing `session_vec`
-        # row is left exactly as it was (stale, recorded nowhere — U5).
+    except DEGRADED_EMBEDDING_ERRORS:
+        # Exactly the named set — anything else goes on propagating. Every raise point is
+        # Python-level, no SQL statement failed, so the caller's transaction is intact here
+        # and needs no savepoint: the relational write that preceded this still commits. The
+        # strict refresh writes no vector before these raise, so the existing row is the
+        # stale one, and it is cleared rather than kept (US-112.AC-3).
+        _clear_session_vector(connection, user_id, session_id)
         return True
     return False
 
@@ -289,6 +306,28 @@ def session_ids_for_setup(connection: Connection, user_id: int, setup_id: int) -
             .order_by(sessions.c.id.asc())
         ).all()
     return [int(row.id) for row in rows]
+
+
+def _clear_session_vector(connection: Connection, user_id: int, session_id: int) -> None:
+    """Delete the owner's session's `session_vec` row, resolved through an owner-scoped select.
+
+    Selects `sessions.id` restricted to `session_id` **and** `user_id`, then calls
+    `delete_vector` on `SESSION_VEC_TABLE` for each id returned. A no-op when the session is
+    not the caller's, when the row is absent, or when the table is absent. Returns nothing.
+    """
+    # `delete_vector` takes no user id, so the owner term travels in this read's own WHERE
+    # (R5): another user's session id matches nothing and its row is left untouched.
+    with _reading(connection):
+        owned_ids = [
+            int(row.id)
+            for row in connection.execute(
+                select(sessions.c.id).where(sessions.c.id == session_id, sessions.c.user_id == user_id)
+            ).all()
+        ]
+    for owned_id in owned_ids:
+        # Keyed by id alone, so it works whatever dimension the table was built at, and is a
+        # no-op when the row or the table itself is absent.
+        delete_vector(connection, SESSION_VEC_TABLE, owned_id)
 
 
 @contextmanager
