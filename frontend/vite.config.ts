@@ -1,6 +1,7 @@
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { configureProxyLogging } from "./dev/proxyLog";
 
 const frontendDir = __dirname;
 const srcDir = path.resolve(frontendDir, "src");
@@ -23,7 +24,9 @@ export default defineConfig({
   server: {
     port: 8193,
     strictPort: true,
-    proxy: { "/api": "http://localhost:8184" },
+    proxy: {
+      "/api": { target: "http://localhost:8184", configure: configureProxyLogging },
+    },
   },
   test: {
     root: frontendDir,
