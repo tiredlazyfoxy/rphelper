@@ -37,12 +37,12 @@ function readNumber(obj: unknown, key: string): number | undefined {
 }
 
 /** Default line sink shared with fast/008's request logger: `process.stdout.write(line + "\n")`. */
-function defaultSink(line: string): void {
+export function defaultSink(line: string): void {
   process.stdout.write(line + "\n");
 }
 
 /** Default clock shared with fast/008's request logger: `performance.now()`. */
-function defaultNow(): number {
+export function defaultNow(): number {
   return performance.now();
 }
 

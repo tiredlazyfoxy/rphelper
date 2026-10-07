@@ -1,13 +1,14 @@
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
-import { configureProxyLogging } from "./dev/proxyLog";
+import { configureProxyLogging } from "./dev/proxyLog.ts";
+import { devRequestLogPlugin } from "./dev/requestLog.ts";
 
-const frontendDir = __dirname;
+const frontendDir = import.meta.dirname;
 const srcDir = path.resolve(frontendDir, "src");
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), devRequestLogPlugin()],
   root: srcDir,
   build: {
     outDir: path.resolve(frontendDir, "dist"),
