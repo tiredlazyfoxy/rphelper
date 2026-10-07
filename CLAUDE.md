@@ -87,7 +87,7 @@ RPHelper/
 | Vite dev server | **8193** |
 | nginx published by compose | **8193** → container `:80` |
 
-The host-run Vite dev server and the dev-compose nginx publish **the same port**.
+The host-run dev servers (`start.sh`, `start.ps1`) and the dev compose publish **the same port**.
 Run one or the other, never both. Ports are hardcoded literals in `start.ps1`,
 `vite.config.ts`, the Dockerfile and compose — not environment variables. The
 frontend never receives a backend base URL; it always calls same-origin
