@@ -80,18 +80,40 @@ an operational note. Two consequences follow:
 
 ## Dev topology
 
-```
-terminal 1:  start.ps1 -app        (or -api)   → uvicorn --port 8184 --reload
-terminal 2:  start.ps1 -ui         (or -web)   → npx vite --port 8193
+**Three launch paths, one shape.** Each runs the same pair — uvicorn with
+`--reload` on 8184 and the Vite dev server on 8193 — and differs only in how the
+pair is started:
 
+| Launch path | How the pair runs |
+|---|---|
+| `start.ps1 -app` (or `-api`) + `start.ps1 -ui` (or `-web`) | two invocations in **two terminals** |
+| `start.sh` | **one terminal**, both servers |
+| `docker-compose.dev.yml` | the `start.sh` pair in stock images — `api` in `ghcr.io/astral-sh/uv`, `ui` in `node:22` — with the repo bind-mounted |
+
+```
 browser ──► Vite :8193 ──/api──► uvicorn :8184 ──► ./data/rphelper.sqlite
                          proxy
 ```
 
-`start.ps1` takes `-app`/`-api` and `-ui`/`-web` as **separate invocations in
-separate terminals**, not one command that spawns both. Reason: each process has
-its own reload behaviour and its own log stream, and a single supervising script
-makes a backend traceback and a Vite compile error compete for the same console.
+`start.ps1` keeps its two flags as **separate invocations in separate
+terminals**: each process has its own reload behaviour and its own log stream,
+and separate consoles keep a backend traceback and a Vite compile error apart.
+`start.sh` is the one-terminal alternative for when that separation is not
+wanted.
+
+**Dev-compose runs no nginx** (as of commit `06baac6`). It runs the `start.sh`
+pair, so its routing is Vite's, exactly as on the host. The `ui` service **shares
+`api`'s network namespace**, which is why the `/api` → `localhost:8184` proxy
+below works unchanged inside the containers, and why **8193 is published on
+`api`**, not on `ui`.
+
+**Port 8193 is shared by all three paths.** Run one launch path at a time; the
+second to start fails to bind (`strictPort`, below).
+
+**The app answers at `http://localhost:8193/` in all three paths**, and every
+other entry at `/<entry>/`, through the serve-only Vite routing plugin described
+in "The app document at `/` — prod and dev" below. Dev and prod share one URL
+space.
 
 Vite proxy configuration — **one prefix only**:
 
@@ -292,29 +314,88 @@ must land on the **admin** document, not on the roleplayer's app document which
 would then 404 the route client-side. The catch-all handles the root and anything
 unmatched.
 
-#### Open seam — the `/` fallback and the app document
+#### The app document at `/` — prod and dev
 
-**The last rule above does not line up with the emitted build, and this is
-recorded as a real gap rather than as silence.** The build emits exactly four
-documents — `dist/bootstrap/index.html`, `dist/login/index.html`,
-`dist/admin/index.html`, `dist/app/index.html` (`frontend-structure.md`'s emitted
-layout) — and **no `dist/index.html`**. `location / { try_files $uri $uri/
-/index.html; }` resolves against that absent file, while the `app` entry's routes
-are mounted at the origin root with no basename (`frontend-structure.md`). As
-written, the root case has nothing to serve.
+**Decided (user-confirmed 2026-10-07).** The `app` entry's document answers at
+the **origin root `/`** and on every one of its client routes (`/sessions/:id`,
+`/characters/:id`, …), in **both dev and prod**. **`/app/` is not a user-facing
+URL.** The other three entries are reached at `/bootstrap/`, `/login/` and
+`/admin/`, deep links included. Slash-less `/bootstrap`, `/login` and `/admin`
+get a **relative 302** to the slash form. **Dev routing mirrors prod nginx
+routing exactly.**
 
-Something must bridge `dist/app/index.html` to the root: a copy in the image
-build, an nginx `root`/`alias`, or a fifth build input. **This doc does not pick
-one.** Plan 002 deliberately created no root HTML document, because that would be
-a fifth entry the architecture's input list does not have.
+Why: there is **one URL space** in dev and prod. The `app` entry is root-mounted
+with no basename (`overview.md`, `frontend-structure.md`), so a reload, a deep
+link, or the client's 401 navigation to `/login` must behave the same on :8193 in
+dev as it does in prod. A dev server that answers a different URL space is a dev
+server that cannot reproduce a routing bug.
 
-`_TBD: the mechanism that serves the app document at "/" is unchosen. Owned by
-fast/001.dev-and-container-harness (roadmapped, not built), whose nginx and image
-configuration it belongs to._`
+**The routing contract both environments satisfy** (HTML navigations only):
 
-**Dev-side consequence while it is unbridged:** the Vite dev server's root is
-`src/`, so `http://localhost:8193/` does not resolve, and the entries are reached
-at `/<entry>/index.html`.
+| Request | Answer |
+|---|---|
+| `/bootstrap`, `/login`, `/admin` (exact, no slash) | **302**, relative `Location` to the slash form |
+| `/bootstrap/…` not resolving to a file | `bootstrap/index.html` |
+| `/login/…` not resolving to a file | `login/index.html` |
+| `/admin/…` not resolving to a file | `admin/index.html` |
+| any other navigation — `/`, `/sessions/:id`, `/characters/:id`, … | the **app** document (`app/index.html`) |
+| `/api/…` | the backend — untouched by this routing |
+| a module or asset request, or a file that exists | served as-is — untouched by this routing |
+
+**Prod mechanism — as built by `fast/001.dev-and-container-harness`.** The
+build still emits exactly four documents (`frontend-structure.md`'s emitted
+layout). The Docker frontend stage **fails the build if any of the four
+`dist/<entry>/index.html` is missing**, then **copies `dist/app/index.html` to
+`dist/index.html`**, and the catch-all `location / { try_files $uri $uri/
+/index.html; }` above serves it for `/` and for every app client route. The copy
+is an image-build step, not a fifth build input: plan 002 deliberately created no
+root HTML document, and that still holds. The build-time presence check exists
+so a missing entry fails the image rather than a page load.
+
+**Dev mechanism — decided, to be built by an upcoming fast feature.** It applies
+to the Vite dev server on :8193 under all three dev launch paths (`start.sh`,
+`start.ps1 -ui`, `docker-compose.dev.yml`; "Dev topology" above).
+
+- A **dev-only Vite plugin** (`apply: "serve"`), whose `configureServer`
+  registers a middleware **directly** — not in a returned post-hook — so it runs
+  **before Vite's internal middlewares**.
+- The middleware **rewrites the request URL** of HTML navigations, per the table
+  above: an exact slash-less `/bootstrap|/login|/admin` gets the 302; a
+  `/bootstrap/…`, `/login/…` or `/admin/…` path that does not resolve to a file is
+  rewritten to that entry's `/<entry>/index.html`; any other navigation is
+  rewritten to `/app/index.html`.
+- It **never touches** `/api` (that is the proxy), Vite-internal URLs (`/@…`,
+  `/__…`, `/node_modules/…`), or module and asset requests. **The exact
+  predicate is the plan's to fix**; the architectural contract is "same URL space
+  as nginx, and module and asset requests pass through untouched".
+- **Rewrite, not redirect.** The browser URL stays `/` (or the deep link), and
+  Vite's own HTML transform still runs on the rewritten document and injects the
+  HMR client. A redirect to `/app/` would put the root-mounted, basename-less app
+  router at a path it does not mount, which is a client-side 404.
+- **The same plugin owns a `transformIndexHtml` hook that makes each entry
+  document's relative module-script `src` absolute**, resolved against the
+  served document's directory: `./main.tsx` in `/app/index.html` becomes
+  `/app/main.tsx`. Vite's own transform does not do this for us — in Vite 8.3.1
+  it adjusts a relative `src` only for `/index.html`, so the entry's
+  `<script type="module" src="./main.tsx">` reaches the browser verbatim. Without
+  the hook, the browser resolves it against the URL it navigated to: `/` requests
+  `/main.tsx`, `/sessions/5` requests `/sessions/main.tsx`, and the document
+  served at `/` or at a deep link loads its module from the wrong path. Because
+  the plugin is serve-only, the entry HTML files keep their relative `src` and
+  `vite build` is unaffected — the build already emits absolute hashed
+  `/assets/…` URLs.
+
+**Unchanged by the dev mechanism, deliberately:** Vite's `root` stays `src/`;
+the four build inputs stay as they are; there is **no fifth input** and **no
+`src/index.html` or `frontend/index.html`**. `frontend/tests/build-config.test.ts`
+asserts the root and the four inputs. **The plugin must not affect
+`vite build`** — `apply: "serve"` is what guarantees that, and the emitted layout
+above is the build's only contract with nginx.
+
+**This supersedes the dev-side note in `fast/001`'s outcome.** That outcome
+(not yet finalized) proposed restating that host Vite does not serve `/`; it is
+replaced by the dev mechanism above. How the earlier reading arose is recorded in
+"Decision history" at the bottom of this doc.
 
 **The `location /app/` block conflicts with the same fact, under the same
 owner.** The `app` entry is mounted at the **origin root** with no basename
@@ -326,6 +407,10 @@ catch-all. Whatever closes the `/` seam must also decide this block's fate
 (drop it, or make it the source the root is bridged from). Owned by
 `fast/001.dev-and-container-harness` with the seam above; **this doc does not
 pick.**
+
+_Forward pointer: the `/` seam is now decided ("The app document at `/`" above —
+`/app/` is not a user-facing URL); this block's fate is recorded at
+`fast/001`'s finalization._
 
 #### Open seam — `/login` without a trailing slash
 
@@ -342,6 +427,11 @@ near nginx.
 a second "location = /login", or whatever the root fix turns out to be — is
 unchosen. Owned by fast/001.dev-and-container-harness, with the "/" fallback
 seam._`
+
+_Forward pointer: the routing contract in "The app document at `/`" above now
+fixes the required behaviour — slash-less `/login` gets a relative 302 to
+`/login/`, in dev and prod alike; the prod directive that delivers it is recorded
+at `fast/001`'s finalization._
 
 ### `/api/` proxy
 
@@ -773,3 +863,31 @@ path.
   symptom is operational**: `web_search` starts failing as `tool_failed` for every
   call while everything else keeps working. Listed here so the date is in the
   operator's notes and not only in a design doc.
+
+---
+
+## Decision history
+
+### 2026-10-07 — dev serves the app at `/`, mirroring prod
+
+**Before:** this doc recorded that the Vite dev server did not resolve
+`http://localhost:8193/` and that entries were reached at `/<entry>/index.html`
+in dev. **After:** dev and prod share one URL space, and dev answers `/` through
+a serve-only Vite routing plugin ("The app document at `/` — prod and dev").
+
+How the earlier reading arose — **no requirement ever said dev should differ from
+prod; the dev half of the gap was simply never owned**:
+
+1. **Plan 002.frontend-foundation, D13 / seam S1** rooted the Vite build at
+   `src/`, refused a fifth root document, deferred the `/` bridge to `fast/001`,
+   and recorded "`http://localhost:8193/` does not resolve … entries reached at
+   `/<entry>/index.html`" as a **known wart**.
+2. Commit `75c7166` applied that outcome here as "Dev-side consequence while it
+   is unbridged", and the wart then read as documented dev behaviour.
+3. **`fast/001.dev-and-container-harness`** closed only the prod half, with the
+   image-only copy. Its DoD-19 scoped Vite dev to `/<entry>/` and promised `/`
+   only through the nginx dev-compose; its not-yet-finalized outcome proposed
+   restating that host Vite still does not serve `/`. **That dev-side note is
+   superseded by this decision.**
+4. **`fast/008.vite-dev-request-log`**, DoD-16, then encoded `GET / 404` as
+   expected dev output.

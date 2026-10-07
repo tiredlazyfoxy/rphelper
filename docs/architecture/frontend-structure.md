@@ -130,9 +130,12 @@ resolve against. **This layout is a consequence of the build's `root` being
 `src/`** (above), so a later change to `root` or to the input values must re-check
 it. It is the seam between the frontend build and the nginx configuration, and
 getting it wrong is invisible until deployment — as plan 002's own first build
-showed. The half of the seam that is **not** this doc's — the catch-all `/`
-fallback, for which no `dist/index.html` exists — is an open seam recorded in
-`deployment.md`.
+showed. The half of the seam that is **not** this doc's — serving the `app`
+document at `/` and on its client routes — is decided in `deployment.md`'s "The
+app document at `/` — prod and dev" (prod: the image build copies
+`dist/app/index.html` to `dist/index.html`). In dev the same mapping is done by a
+serve-only Vite plugin (`apply: "serve"`) that rewrites navigation URLs, and
+`root` and the four inputs are unchanged.
 
 ### `src/shared/` is one folder for all four entries — and that does not violate UC-066
 

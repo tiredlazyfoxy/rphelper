@@ -27,7 +27,7 @@ four batches landed.
 | `admin-surfaces.md` | The `admin` entry in full: 3 routes + 404, shell (no user menu, no sign-out), the admin gate and why it deviates, the Users / LLM Servers / Database pages each with its as-built state, the drift report's granularity and statuses, Create/Sync postconditions, the surviving derived-tables gap, the whole-database export/import controls and their opacity |
 | `llm-and-streaming.md` | The one LLM client (`chat_stream` / `embed` / `probe`), use-time validation and `resolve_model_for_use`, the SSE frame protocol, **the four ways a stream ends**, the `<think>` convention, **"Stopping, and what a stop is not"** (UC-085), the tool loop (**no iteration cap**), `web_search`'s provider seam, **context assembly** and its exclusions, language handling, translation |
 | `search-and-retrieval.md` | Hybrid vec+FTS+RRF, the narrow port and its **three variants**, **the forbidden KNN form**, `memo_search`, `session_search` (**vector arm only**), my-search (three port variants + two `LIKE` corpora), the persona-edit fan-out, the embedding lifecycle and its two write postures, rebuild |
-| `deployment.md` | Ports, TLS (none — **and the clipboard consequence**), `start.ps1`, prod topology, the single-generator guarantee, nginx directives (the five deliberate deviations and the three open seams), compose, configuration conventions (incl. the two unprefixed search variables), **logging** (loguru, two sinks, the redaction rule, the access-log filter), operational notes |
+| `deployment.md` | Ports, TLS (none — **and the clipboard consequence**), the three dev launch paths (`start.ps1`, `start.sh`, `docker-compose.dev.yml`), prod topology, the single-generator guarantee, nginx directives (the five deliberate deviations, **the app document at `/` in prod and dev — one URL space, the dev routing plugin**, and the two open seams), compose, configuration conventions (incl. the two unprefixed search variables), **logging** (loguru, two sinks, the redaction rule, the access-log filter), operational notes |
 
 Requirements are **not** here. They are in `docs/product/` and are cited by id.
 The id registry is `docs/product/quick-reference.md`.
@@ -1298,7 +1298,7 @@ be wrong. The doc named beside it owns the reasoning.
 | `admin-surfaces.md` | **Seed** exists in the inherited drift report and is **required by no UC** — RPHelper has no seed data at all, so it is recorded as prior art and deliberately not written up as a requirement. FEAT-005's plan (007) looked and declined without resolving it, so it stays open; the status set is correspondingly three values, not BookWriter's four |
 | `overview.md`, `deployment.md` | **TLS / the exposure model.** Nothing in `docs/product/` states an exposure model. The cookie's `Secure` flag is no longer part of it (shipped off with a flip condition) and neither is the clipboard fallback (recorded with the same flip) |
 | `deployment.md` | **`client_max_body_size 64m` is a judgement, not a measured figure.** `docs/product/` states no size bound, only that a paste is never refused. Raise it if a real import exceeds it; never lower it below what US-035.AC-2 implies |
-| `deployment.md` | **Three nginx seams, one owner — `fast/001.dev-and-container-harness`:** the catch-all **`/` fallback** (the build emits no `dist/index.html`, so something must bridge `dist/app/index.html` to the root, and the mechanism is unchosen); the **`location /app/` block**, which serves a URL space the root-mounted `app` entry never uses; and **`/login` without a trailing slash**, the exact target of the client's 401 navigation and the bootstrap refusal link, which does not match `location /login/` |
+| `deployment.md` | **Two nginx seams, one owner — `fast/001.dev-and-container-harness`, pending its finalization:** the **`location /app/` block**, which serves a URL space the root-mounted `app` entry never uses; and **`/login` without a trailing slash**, the exact target of the client's 401 navigation and the bootstrap refusal link, which does not match `location /login/` (the required behaviour — a relative 302 to `/login/` — is now fixed by the decided routing contract; only the prod directive's record is pending) |
 | `deployment.md` | **NEW — nginx's own `access_log` still records full request URIs including query strings**, so `GET /api/search?q=<user text>` lands in it even though the application's access log no longer does. The fix — a `log_format` without `$args` / `$request_uri`, or `access_log off` for `/api/` — belongs to the deployment surface and is **owned by `fast/001`**. Found during plan 032's planning and explicitly out of its scope |
 | `llm-and-streaming.md` | **NEW — the streaming read timeout.** The streaming call reuses `llm_request_timeout_seconds` — **30 s per httpx phase, including the READ between chunks**. Whether a slow first token on a large context needs a longer read timeout than a connect or a write is **unmeasured** (021 D10); no requirement states a latency bound, and splitting one setting into four before anything is observed would be a guess with four numbers instead of one |
 | `ui-conventions.md` | **No wider accessibility target** (WCAG level, screen-reader matrix) is stated in `docs/product/`. The floor is what the icon and interaction contracts require, not a considered accessibility posture |
@@ -1351,6 +1351,15 @@ disabled memos (`US-137`) · the `session_vec` refresh *policy* · `IconMessageC
 for settle · the ORM choice · whether `session_search` gets a lexical arm ·
 schema evolution · where the shell's layout CSS lives · `ui-conventions.md`'s
 `id: number` page-state snippet.
+
+**Closed since this pass (decision revision, 2026-10-07):** **the catch-all `/`
+fallback and the app document** (`deployment.md`) — the app answers at `/` and
+on its client routes **in dev and prod alike**. Prod: the image build copies
+`dist/app/index.html` to `dist/index.html` (built by `fast/001`). Dev: a
+serve-only Vite plugin rewrites navigation URLs to the same URL space as nginx
+(to be built by an upcoming fast feature); `root: src/` and the four inputs are
+unchanged. The old "host Vite does not serve `/`" reading is superseded — see
+`deployment.md`'s Decision history.
 
 ## Defects — specified but unsatisfied, and NOT `_TBD:` items
 
