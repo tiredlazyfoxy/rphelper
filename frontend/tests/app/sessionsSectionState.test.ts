@@ -1,17 +1,20 @@
 // Feature 011, step 007 — the Sessions section's state (DoD-1..DoD-12).
 //
+// Amended by feature 033, step 005 (D9): the message-less start is dropped, so
+// `startSessionFromSection`, `selectSetup`, `loadSetupChoices` and the fields `setups`,
+// `setupsStatus`, `selectedSetupId`, `startStatus` and `startError` are removed from the state.
+// 011's DoD-3 (the setup choices), DoD-4 (the selection), DoD-5..DoD-7 (the start) clauses and
+// every assertion on those fields are retired; the remaining clauses are unchanged.
+//
 // Every expected value here comes from the specification, never from the implementation:
-// `007.sessions-section-state.md`'s Interface intent and Definition of done,
-// `007.context.md` ("The setup choices are a separate load", the reset/keep rule for a
-// reloaded selection), and `context.md`'s D1, D5, D15 (apply the returned row to **both**
-// states), D18 (the three fixed sentences, asserted as literals), D19, plus the
-// "Never optimistic" and "Ids are strings" constraints. Bindings come from status.md's
-// `### Step 007 — frozen interface` and `### Step 004 — frozen interface`.
+// `007.sessions-section-state.md`'s Interface intent and Definition of done, and `context.md`'s
+// D1, D5, D15 (apply the returned row to **both** states), D18 (the fixed sentences, asserted as
+// literals), plus the "Never optimistic" and "Ids are strings" constraints. Bindings come from
+// status.md's `### Step 007 — frozen interface` (011) and `### Step 005 — frozen interface` (033).
 //
 // Test conventions: Vitest with `globals: false` (every symbol imported explicitly), one
 // `fetch` stub per test via `vi.stubGlobal`, each `it` title ending `— DoD-N`, and stubs /
-// request assertions keyed on the **exact pathname plus query string** — never a prefix,
-// because `/api/characters/<id>/sessions` and `/api/characters/<id>/setups` share one.
+// request assertions keyed on the **exact pathname plus query string** — never a prefix.
 // Fixture ids are past Number.MAX_SAFE_INTEGER and their `last_used_at` order is
 // deliberately the reverse of their id order, so anything ordering by id is caught.
 import { autorun, runInAction, toJS } from "mobx";
@@ -21,12 +24,9 @@ import {
   applySectionSession,
   archiveSectionRow,
   loadSectionSessions,
-  loadSetupChoices,
   restoreSectionRow,
-  selectSetup,
   SessionsSectionState,
   setShowArchived,
-  startSessionFromSection,
 } from "../../src/app/sessionsSectionState";
 import { SessionsState } from "../../src/app/sessionsState";
 import type { Setup } from "../../src/app/setupsApi";
@@ -35,16 +35,14 @@ type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respons
 
 const CHARACTER_ID = "7250000000000000001";
 const SESSIONS_PATH = `/api/characters/${CHARACTER_ID}/sessions`;
-const SETUPS_PATH = `/api/characters/${CHARACTER_ID}/setups`;
 const FAILURE_MESSAGE = "The session ledger tore gq-41.";
 
-// D18's three sentences, verbatim from the step file. Deliberately literal: the module's
-// own constants are not exported and nothing may assert against them.
-const START_FAILED = "Could not start the session.";
+// D18's sentences, verbatim from the step file. Deliberately literal: the module's own
+// constants are not exported and nothing may assert against them.
 const ARCHIVE_FAILED = "Could not archive the session.";
 const RESTORE_FAILED = "Could not restore the session.";
 
-// ------------------------------------------------------------------ setup choices
+// ------------------------------------------------------------------ setups (row labels only)
 
 const SETUP_ONE: Setup = {
   id: "7260000000000000001",
@@ -73,8 +71,6 @@ const SETUP_THREE: Setup = {
   created_at: "2026-02-03T10:00:00.000000+00:00",
   updated_at: "2026-02-03T10:00:00.000000+00:00",
 };
-
-const CHOICES: Setup[] = [SETUP_ONE, SETUP_TWO, SETUP_THREE];
 
 // ------------------------------------------------------------------ sessions
 // Ids ascend while last_used_at descends.
@@ -158,24 +154,6 @@ const TIED_WITH_NOON: Session = {
   updated_at: NOON.updated_at,
 };
 
-/** The row the start route answers with: a fresh session, so the newest last use. */
-const STARTED: Session = {
-  id: "7270000000000000009",
-  character_id: CHARACTER_ID,
-  setup_id: null,
-  setup_name: null,
-  archived_at: null,
-  last_used_at: "2026-05-01T07:30:00.000000+00:00",
-  created_at: "2026-05-01T07:30:00.000000+00:00",
-  updated_at: "2026-05-01T07:30:00.000000+00:00",
-};
-/** The same start, with SETUP_ONE attached. */
-const STARTED_WITH_SETUP: Session = {
-  ...STARTED,
-  setup_id: SETUP_ONE.id,
-  setup_name: SETUP_ONE.name,
-};
-
 const ARCHIVED_AT = "2026-05-05T10:00:00.000000+00:00";
 
 function archivedCopy(session: Session): Session {
@@ -221,10 +199,6 @@ function serveSessionList(rows: readonly Session[]) {
   return stubFetch(() => Promise.resolve(jsonResponse({ sessions: copyRows(rows) }, 200)));
 }
 
-function serveSetupList(rows: readonly Setup[]) {
-  return stubFetch(() => Promise.resolve(jsonResponse({ setups: copyRows(rows) }, 200)));
-}
-
 function serveSession(session: Session, status = 200) {
   return stubFetch(() => Promise.resolve(jsonResponse({ ...session }, status)));
 }
@@ -248,13 +222,6 @@ function seen(mock: ReturnType<typeof stubFetch>): Seen[] {
   });
 }
 
-/** The JSON body of the n-th request, or undefined when none was sent. */
-function sentBody(mock: ReturnType<typeof stubFetch>, index = 0): unknown {
-  const raw = mock.mock.calls[index]?.[1]?.body;
-  if (raw === undefined || raw === null) return undefined;
-  return typeof raw === "string" ? (JSON.parse(raw) as unknown) : raw;
-}
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -269,18 +236,13 @@ async function flush(rounds = 4): Promise<void> {
   }
 }
 
-/** Every one of the eleven observable fields, for an "unchanged" comparison. */
+/** Every one of the remaining observable fields (033 D9), for an "unchanged" comparison. */
 function snapshot(state: SessionsSectionState) {
   return {
     characterId: state.characterId,
     sessions: toJS(state.sessions),
     status: state.status,
     showArchived: state.showArchived,
-    setups: toJS(state.setups),
-    setupsStatus: state.setupsStatus,
-    selectedSetupId: state.selectedSetupId,
-    startStatus: state.startStatus,
-    startError: state.startError,
     error: state.error,
     pendingId: state.pendingId,
   };
@@ -323,24 +285,6 @@ function workspaceWith(rows: readonly Session[]): SessionsState {
   return workspace;
 }
 
-function withChoices(
-  state: SessionsSectionState,
-  rows: readonly Setup[],
-  selectedSetupId: string | null,
-): SessionsSectionState {
-  runInAction(() => {
-    state.setups = copyRows(rows);
-    state.setupsStatus = "ready";
-    state.selectedSetupId = selectedSetupId;
-  });
-  return state;
-}
-
-/** An `onStarted` spy, so a test can assert it was or was not called. */
-function noopStarted() {
-  return vi.fn<(sessionId: string) => void>();
-}
-
 // ---------------------------------------------------------------------------
 describe("a fresh SessionsSectionState", () => {
   it("has the character id as constructed and every other field at its initial value — DoD-1", () => {
@@ -349,20 +293,9 @@ describe("a fresh SessionsSectionState", () => {
       sessions: [],
       status: "idle",
       showArchived: false,
-      setups: [],
-      setupsStatus: "idle",
-      selectedSetupId: null,
-      startStatus: "idle",
-      startError: null,
       error: null,
       pendingId: null,
     });
-  });
-
-  it("holds no setup by default, so nothing invents a default or sentinel setup — DoD-1", () => {
-    const state = new SessionsSectionState(CHARACTER_ID);
-    expect(state.selectedSetupId).toBeNull();
-    expect(toJS(state.setups)).toEqual([]);
   });
 });
 
@@ -471,332 +404,6 @@ describe("loadSectionSessions", () => {
     await expect(running).resolves.toBeUndefined();
     await flush();
     expect(snapshot(state)).toEqual(atAbort);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("loadSetupChoices", () => {
-  it("requests exactly GET /api/characters/c1/setups with no include_archived at all — DoD-3", async () => {
-    const mock = serveSetupList(CHOICES);
-    await loadSetupChoices(new SessionsSectionState(CHARACTER_ID));
-    expect(seen(mock)).toEqual([{ method: "GET", path: SETUPS_PATH, search: "" }]);
-  });
-
-  it("asks for the working setups even while the sessions switch is on — DoD-3", async () => {
-    const mock = serveSetupList(CHOICES);
-    const state = new SessionsSectionState(CHARACTER_ID);
-    setShowArchived(state, true);
-    await loadSetupChoices(state);
-    expect(seen(mock)).toEqual([{ method: "GET", path: SETUPS_PATH, search: "" }]);
-  });
-
-  it("is loading while pending, then ready with the server's setups in order — DoD-3", async () => {
-    const pending = deferred<Response>();
-    stubFetch(() => pending.promise);
-    const state = new SessionsSectionState(CHARACTER_ID);
-    const running = loadSetupChoices(state);
-    await flush();
-    expect(state.setupsStatus).toBe("loading");
-    pending.resolve(jsonResponse({ setups: copyRows([SETUP_THREE, SETUP_ONE]) }, 200));
-    await expect(running).resolves.toBeUndefined();
-    expect(state.setupsStatus).toBe("ready");
-    expect(toJS(state.setups)).toEqual([SETUP_THREE, SETUP_ONE]);
-  });
-
-  it("an empty choice list is ready with no setups — DoD-3", async () => {
-    serveSetupList([]);
-    const state = new SessionsSectionState(CHARACTER_ID);
-    await loadSetupChoices(state);
-    expect(toJS(state.setups)).toEqual([]);
-    expect(state.setupsStatus).toBe("ready");
-  });
-
-  it("a failure is failed, keeps the previous setups and the selection, and resolves — DoD-3", async () => {
-    stubFetch(() => Promise.resolve(failureResponse()));
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), CHOICES, SETUP_ONE.id);
-    await expect(loadSetupChoices(state)).resolves.toBeUndefined();
-    expect(state.setupsStatus).toBe("failed");
-    expect(toJS(state.setups)).toEqual([SETUP_ONE, SETUP_TWO, SETUP_THREE]);
-    expect(state.selectedSetupId).toBe(SETUP_ONE.id);
-  });
-
-  it("a failed choice load leaves the sessions list and its status untouched — DoD-3", async () => {
-    stubFetch(() => Promise.resolve(failureResponse()));
-    const state = withSessions(WORKING);
-    await expect(loadSetupChoices(state)).resolves.toBeUndefined();
-    expect(state.setupsStatus).toBe("failed");
-    expect(toJS(state.sessions)).toEqual([DAWN, NOON, DUSK]);
-    expect(state.status).toBe("ready");
-  });
-
-  it("a transport failure is failed too, not a rejection — DoD-3", async () => {
-    stubFetch(() => Promise.reject(new TypeError("Failed to fetch")));
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), CHOICES, SETUP_TWO.id);
-    await expect(loadSetupChoices(state)).resolves.toBeUndefined();
-    expect(state.setupsStatus).toBe("failed");
-    expect(toJS(state.setups)).toEqual([SETUP_ONE, SETUP_TWO, SETUP_THREE]);
-    expect(state.selectedSetupId).toBe(SETUP_TWO.id);
-  });
-
-  it("writes nothing once its signal has aborted — DoD-3", async () => {
-    const pending = deferred<Response>();
-    stubFetch(() => pending.promise);
-    const state = withChoices(withSessions(WORKING), CHOICES, SETUP_ONE.id);
-    const controller = new AbortController();
-    const running = loadSetupChoices(state, controller.signal);
-    await flush();
-    const atAbort = snapshot(state);
-    controller.abort();
-    pending.resolve(jsonResponse({ setups: copyRows([SETUP_TWO]) }, 200));
-    await expect(running).resolves.toBeUndefined();
-    await flush();
-    expect(snapshot(state)).toEqual(atAbort);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("a reloaded choice list against the current selection", () => {
-  it("keeps the selection when the new payload still holds the selected setup — DoD-4", async () => {
-    serveSetupList([SETUP_ONE, SETUP_THREE]);
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), CHOICES, SETUP_ONE.id);
-    await loadSetupChoices(state);
-    expect(state.selectedSetupId).toBe(SETUP_ONE.id);
-    expect(toJS(state.setups)).toEqual([SETUP_ONE, SETUP_THREE]);
-  });
-
-  it("keeps the selection when the selected setup moved position in the payload — DoD-4", async () => {
-    serveSetupList([SETUP_TWO, SETUP_THREE, SETUP_ONE]);
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), CHOICES, SETUP_ONE.id);
-    await loadSetupChoices(state);
-    expect(state.selectedSetupId).toBe(SETUP_ONE.id);
-  });
-
-  it("resets the selection to null when the new payload lacks the selected setup — DoD-4", async () => {
-    serveSetupList([SETUP_TWO, SETUP_THREE]);
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), CHOICES, SETUP_ONE.id);
-    await loadSetupChoices(state);
-    expect(state.selectedSetupId).toBeNull();
-    expect(toJS(state.setups)).toEqual([SETUP_TWO, SETUP_THREE]);
-  });
-
-  it("resets the selection to null when the new payload is empty — DoD-4", async () => {
-    serveSetupList([]);
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), CHOICES, SETUP_ONE.id);
-    await loadSetupChoices(state);
-    expect(state.selectedSetupId).toBeNull();
-  });
-
-  it("leaves an already-null selection null on a successful reload — DoD-4", async () => {
-    serveSetupList(CHOICES);
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), [], null);
-    await loadSetupChoices(state);
-    expect(state.selectedSetupId).toBeNull();
-    expect(toJS(state.setups)).toEqual([SETUP_ONE, SETUP_TWO, SETUP_THREE]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("selectSetup", () => {
-  it("sets the selected setup id — DoD-5", () => {
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), CHOICES, null);
-    selectSetup(state, SETUP_ONE.id);
-    expect(state.selectedSetupId).toBe(SETUP_ONE.id);
-  });
-
-  it("sets it back to null for \"No setup\" — DoD-5", () => {
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), CHOICES, SETUP_ONE.id);
-    selectSetup(state, null);
-    expect(state.selectedSetupId).toBeNull();
-  });
-
-  it("issues no request and touches nothing else — DoD-5", () => {
-    const mock = stubFetch(() => Promise.resolve(jsonResponse({ sessions: [] }, 200)));
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    selectSetup(state, SETUP_TWO.id);
-    expect(mock).not.toHaveBeenCalled();
-    expect(toJS(state.sessions)).toEqual([DAWN, NOON, DUSK]);
-    expect(toJS(state.setups)).toEqual([SETUP_ONE, SETUP_TWO, SETUP_THREE]);
-    expect(state.startStatus).toBe("idle");
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("startSessionFromSection — the request", () => {
-  it("POSTs /api/characters/c1/sessions with the body { setup_id: null } for \"No setup\" — DoD-6", async () => {
-    const mock = serveSession(STARTED, 201);
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    await startSessionFromSection(state, workspaceWith(WORKING), noopStarted());
-    expect(seen(mock)).toEqual([{ method: "POST", path: SESSIONS_PATH, search: "" }]);
-    expect(sentBody(mock)).toEqual({ setup_id: null });
-  });
-
-  it("POSTs the body { setup_id: \"s1\" } with a setup selected, as a string — DoD-6", async () => {
-    const mock = serveSession(STARTED_WITH_SETUP, 201);
-    const state = withChoices(withSessions(WORKING), CHOICES, SETUP_ONE.id);
-    await startSessionFromSection(state, workspaceWith(WORKING), noopStarted());
-    expect(seen(mock)).toEqual([{ method: "POST", path: SESSIONS_PATH, search: "" }]);
-    expect(sentBody(mock)).toEqual({ setup_id: SETUP_ONE.id });
-    expect(typeof (sentBody(mock) as { setup_id: unknown }).setup_id).toBe("string");
-  });
-
-  it("issues exactly one request, and never the setups path — DoD-6", async () => {
-    const mock = serveSession(STARTED, 201);
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    await startSessionFromSection(state, workspaceWith(WORKING), noopStarted());
-    expect(seen(mock)).toHaveLength(1);
-    expect(seen(mock).map((call) => call.path)).not.toContain(SETUPS_PATH);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("startSessionFromSection — never optimistic", () => {
-  it("is submitting while pending, with the new row in neither state — DoD-6", async () => {
-    const pending = deferred<Response>();
-    stubFetch(() => pending.promise);
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    const workspace = workspaceWith(WORKING);
-    const onStarted = noopStarted();
-
-    const running = startSessionFromSection(state, workspace, onStarted);
-    await flush();
-    expect(state.startStatus).toBe("submitting");
-    expect(ids(state)).toEqual([DAWN.id, NOON.id, DUSK.id]);
-    expect(listed(state, STARTED.id)).toBeUndefined();
-    expect(workspaceIds(workspace)).toEqual([DAWN.id, NOON.id, DUSK.id]);
-    expect(workspaceRow(workspace, STARTED.id)).toBeUndefined();
-    expect(onStarted).not.toHaveBeenCalled();
-
-    pending.resolve(jsonResponse({ ...STARTED }, 201));
-    await expect(running).resolves.toBeUndefined();
-  });
-
-  it("after the 201 the row is first in the section and in the workspace state, and startStatus is idle — DoD-6", async () => {
-    serveSession(STARTED, 201);
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    const workspace = workspaceWith(WORKING);
-    await expect(
-      startSessionFromSection(state, workspace, noopStarted()),
-    ).resolves.toBeUndefined();
-
-    expect(ids(state)).toEqual([STARTED.id, DAWN.id, NOON.id, DUSK.id]);
-    expect(listed(state, STARTED.id)).toEqual(STARTED);
-    expect(workspaceIds(workspace)).toEqual([STARTED.id, DAWN.id, NOON.id, DUSK.id]);
-    expect(workspaceRow(workspace, STARTED.id)).toEqual(STARTED);
-    expect(state.startStatus).toBe("idle");
-    expect(state.startError).toBeNull();
-  });
-
-  it("renders the server's row, including the setup it answered with — DoD-6", async () => {
-    serveSession(STARTED_WITH_SETUP, 201);
-    const state = withChoices(withSessions(WORKING), CHOICES, SETUP_ONE.id);
-    const workspace = workspaceWith(WORKING);
-    await startSessionFromSection(state, workspace, noopStarted());
-    expect(listed(state, STARTED.id)).toEqual(STARTED_WITH_SETUP);
-    expect(workspaceRow(workspace, STARTED.id)).toEqual(STARTED_WITH_SETUP);
-  });
-
-  it("calls onStarted exactly once with the response's id string — DoD-6", async () => {
-    serveSession(STARTED, 201);
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    const seenIds: unknown[] = [];
-    const onStarted = vi.fn<(sessionId: string) => void>((sessionId) => {
-      seenIds.push(sessionId);
-    });
-    await startSessionFromSection(state, workspaceWith(WORKING), onStarted);
-    expect(onStarted).toHaveBeenCalledTimes(1);
-    expect(seenIds).toEqual([STARTED.id]);
-    expect(typeof seenIds[0]).toBe("string");
-  });
-
-  it("starts with \"No setup\" from an empty section and empty workspace list — DoD-6", async () => {
-    const mock = serveSession(STARTED, 201);
-    const state = withChoices(withSessions([]), [], null);
-    const workspace = workspaceWith([]);
-    await startSessionFromSection(state, workspace, noopStarted());
-    expect(sentBody(mock)).toEqual({ setup_id: null });
-    expect(toJS(state.sessions)).toEqual([STARTED]);
-    expect(toJS(workspace.sessions)).toEqual([STARTED]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("a failed start", () => {
-  it("reports \"Could not start the session.\", leaves both lists, skips onStarted and resolves — DoD-7", async () => {
-    stubFetch(() => Promise.resolve(failureResponse()));
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    const workspace = workspaceWith(WORKING);
-    const onStarted = noopStarted();
-
-    await expect(startSessionFromSection(state, workspace, onStarted)).resolves.toBeUndefined();
-
-    expect(state.startError).toBe(START_FAILED);
-    expect(toJS(state.sessions)).toEqual([DAWN, NOON, DUSK]);
-    expect(toJS(workspace.sessions)).toEqual([DAWN, NOON, DUSK]);
-    expect(onStarted).not.toHaveBeenCalled();
-    expect(state.startStatus).toBe("idle");
-  });
-
-  it("reports the same sentence for a refused stale setup (409) — DoD-7", async () => {
-    stubFetch(() =>
-      Promise.resolve(
-        jsonResponse({ error: { code: "setup_archived", message: "", detail: {} } }, 409),
-      ),
-    );
-    const state = withChoices(withSessions(WORKING), CHOICES, SETUP_ONE.id);
-    const workspace = workspaceWith(WORKING);
-    await expect(
-      startSessionFromSection(state, workspace, noopStarted()),
-    ).resolves.toBeUndefined();
-    expect(state.startError).toBe(START_FAILED);
-    expect(state.startStatus).toBe("idle");
-    expect(toJS(state.sessions)).toEqual([DAWN, NOON, DUSK]);
-    expect(toJS(workspace.sessions)).toEqual([DAWN, NOON, DUSK]);
-  });
-
-  it("reports the same sentence for a transport failure and does not reject — DoD-7", async () => {
-    stubFetch(() => Promise.reject(new TypeError("Failed to fetch")));
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    const workspace = workspaceWith(WORKING);
-    const onStarted = noopStarted();
-    await expect(startSessionFromSection(state, workspace, onStarted)).resolves.toBeUndefined();
-    expect(state.startError).toBe(START_FAILED);
-    expect(onStarted).not.toHaveBeenCalled();
-    expect(state.startStatus).toBe("idle");
-  });
-
-  it("a later start has cleared startError before its request — DoD-7", async () => {
-    stubFetch(() => Promise.resolve(failureResponse()));
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    const workspace = workspaceWith(WORKING);
-    await startSessionFromSection(state, workspace, noopStarted());
-    expect(state.startError).toBe(START_FAILED);
-
-    const errorAtRequest: Array<string | null> = [];
-    stubFetch(() => {
-      errorAtRequest.push(state.startError);
-      return Promise.resolve(jsonResponse({ ...STARTED }, 201));
-    });
-    const onStarted = noopStarted();
-    await expect(startSessionFromSection(state, workspace, onStarted)).resolves.toBeUndefined();
-    expect(errorAtRequest).toEqual([null]);
-    expect(state.startError).toBeNull();
-    expect(onStarted).toHaveBeenCalledTimes(1);
-  });
-
-  it("a later start that also fails has cleared startError before its request — DoD-7", async () => {
-    stubFetch(() => Promise.resolve(failureResponse()));
-    const state = withChoices(withSessions(WORKING), CHOICES, null);
-    const workspace = workspaceWith(WORKING);
-    await startSessionFromSection(state, workspace, noopStarted());
-
-    const errorAtRequest: Array<string | null> = [];
-    stubFetch(() => {
-      errorAtRequest.push(state.startError);
-      return Promise.resolve(failureResponse());
-    });
-    await startSessionFromSection(state, workspace, noopStarted());
-    expect(errorAtRequest).toEqual([null]);
-    expect(state.startError).toBe(START_FAILED);
   });
 });
 
@@ -1063,14 +670,6 @@ describe("a failed row action", () => {
     expect(state.pendingId).toBeNull();
   });
 
-  it("a failed row action leaves startError alone — DoD-11", async () => {
-    stubFetch(() => Promise.resolve(failureResponse()));
-    const state = withSessions(WORKING);
-    await archiveSectionRow(state, workspaceWith(WORKING), NOON.id);
-    expect(state.error).toBe(ARCHIVE_FAILED);
-    expect(state.startError).toBeNull();
-  });
-
   it("a later restore has cleared the previous error before its request — DoD-11", async () => {
     stubFetch(() => Promise.resolve(failureResponse()));
     const state = withSessions([DAWN, archivedCopy(NOON), DUSK], true);
@@ -1117,13 +716,11 @@ describe("setShowArchived and the observability of the writes", () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  it("leaves the rows, the status and the choices alone — DoD-12", () => {
-    const state = withChoices(withSessions(WORKING), CHOICES, SETUP_ONE.id);
+  it("leaves the rows and the status alone — DoD-12", () => {
+    const state = withSessions(WORKING);
     setShowArchived(state, true);
     expect(toJS(state.sessions)).toEqual([DAWN, NOON, DUSK]);
     expect(state.status).toBe("ready");
-    expect(toJS(state.setups)).toEqual([SETUP_ONE, SETUP_TWO, SETUP_THREE]);
-    expect(state.selectedSetupId).toBe(SETUP_ONE.id);
   });
 
   it("an autorun reading sessions re-runs after applySectionSession — DoD-12", () => {
@@ -1149,19 +746,6 @@ describe("setShowArchived and the observability of the writes", () => {
     applySectionSession(state, archivedCopy(NOON));
     expect(observed.length).toBeGreaterThan(1);
     expect(observed[observed.length - 1]).toEqual([DAWN.id, DUSK.id]);
-    dispose();
-  });
-
-  it("an autorun reading selectedSetupId re-runs after selectSetup — DoD-12", () => {
-    const state = withChoices(new SessionsSectionState(CHARACTER_ID), CHOICES, null);
-    const observed: Array<string | null> = [];
-    const dispose = autorun(() => {
-      observed.push(state.selectedSetupId);
-    });
-    expect(observed).toEqual([null]);
-    selectSetup(state, SETUP_ONE.id);
-    selectSetup(state, null);
-    expect(observed).toEqual([null, SETUP_ONE.id, null]);
     dispose();
   });
 

@@ -14,10 +14,8 @@
 //                   (`006.context.md`); `aria-label` is deliberately not used.
 //   heading         "Setups" at `<Title order={3}>` — the same level as the screen's
 //                   "Sessions" heading (`CharacterScreen.tsx`), so the two read as siblings.
-//   header button   "New setup", a labelled `Button` with
-//                   `leftSection={<IconPlus size={18} stroke={1.5} />}` (D2). It sets
-//                   `createOpen` to true. Labelled, not an `IconButton`, because the
-//                   screen's own actions are labelled buttons.
+//   header button   "New setup", a shared `IconButton` (`IconPlus`, 033 D7). It sets
+//                   `createOpen` to true and is disabled while the inline form is open.
 //   header switch   a Mantine `Switch` labelled "Show archived setups" (D4) — deliberately
 //                   *not* the tree's "Show archived", because both are on screen at once.
 //                   `checked={state.showArchived}`, `onChange` calls `setShowArchived` and
@@ -50,10 +48,12 @@
 // menu). A bare `ActionIcon` is forbidden (`ui-conventions.md`). The trigger's accessible
 // name stays "Actions for <name>".
 //
-// Which modal is open is component-local `useState` — `createOpen: boolean` and
-// `editTarget: Setup | null` — never MobX (`ui-conventions.md`, D2). `SetupModal` is mounted
-// only while one of them says so, so its draft is fresh per open; its `onSaved` applies the
-// returned row with `applySetup` and then closes, its `onClose` just closes.
+// What is open is component-local `useState` — `createOpen: boolean` and
+// `editTarget: Setup | null` — never MobX (`ui-conventions.md`, D2). Create is the inline
+// `SetupCreateForm` (033 D7), mounted above the list only while `createOpen`; edit is
+// `SetupModal`, mounted only while `editTarget` is set. Each is conditionally mounted, so its
+// draft is fresh per open; on success the returned row is applied with `applySetup` and then
+// the form / modal closes.
 //
 // No notification is raised anywhere and `shared/notifyFailure` is not imported: 010 adds no
 // call site (D12).
@@ -77,6 +77,7 @@ import {
 import { IconArchive, IconArchiveOff, IconDots, IconEdit, IconPlus } from "@tabler/icons-react";
 
 import { IconButton } from "../shared/IconButton";
+import { SetupCreateForm } from "./SetupCreateForm";
 import { SetupModal } from "./SetupModal";
 import { isSetupArchived } from "./setupsApi";
 import type { Setup } from "./setupsApi";
@@ -89,8 +90,6 @@ import {
   setShowArchived,
 } from "./setupsSectionState";
 
-/** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
-const ICON_SIZE = 18;
 /** The "inline" metric, for the icons inside the row menu's items. */
 const MENU_ICON_SIZE = 16;
 const ICON_STROKE = 1.5;
@@ -111,7 +110,7 @@ export const SetupsSection = observer(function SetupsSection(
   // Created once, never with `useMemo`; `CharacterScreen` keys the section by the character
   // id, so a different character builds fresh section state (D11).
   const [state] = useState(() => new SetupsSectionState(characterId));
-  // Which modal is open is component-local state, never MobX (D2).
+  // What is open is component-local state, never MobX (D2, 033 D7).
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Setup | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
@@ -142,7 +141,6 @@ export const SetupsSection = observer(function SetupsSection(
   };
 
   const closeModal = (): void => {
-    setCreateOpen(false);
     setEditTarget(null);
   };
 
@@ -150,6 +148,12 @@ export const SetupsSection = observer(function SetupsSection(
   const onSaved = (saved: Setup): void => {
     applySetup(state, saved);
     closeModal();
+  };
+
+  // 033 D7: the inline create form follows the same order — apply, then unmount.
+  const onCreated = (created: Setup): void => {
+    applySetup(state, created);
+    setCreateOpen(false);
   };
 
   const renderRow = (setup: Setup): React.JSX.Element => {
@@ -258,14 +262,14 @@ export const SetupsSection = observer(function SetupsSection(
           <Title order={3} id={headingId}>
             Setups
           </Title>
-          <Button
-            leftSection={<IconPlus size={ICON_SIZE} stroke={ICON_STROKE} />}
+          <IconButton
+            icon={IconPlus}
+            label="New setup"
+            disabled={createOpen}
             onClick={() => {
               setCreateOpen(true);
             }}
-          >
-            New setup
-          </Button>
+          />
           {/* D4: session-only, never persisted. The reload is the effect's job — calling
               `loadSetups` here too would double the request. */}
           <Switch
@@ -277,15 +281,25 @@ export const SetupsSection = observer(function SetupsSection(
             }}
           />
         </Group>
+        {/* 033 D7: the inline create form, above the list output. */}
+        {createOpen && (
+          <SetupCreateForm
+            characterId={characterId}
+            onCreated={onCreated}
+            onCancel={() => {
+              setCreateOpen(false);
+            }}
+          />
+        )}
         {/* D12: the row-action failure, inline inside the region. */}
         {state.error !== null && <Alert color="red">{state.error}</Alert>}
         {renderList()}
       </Stack>
-      {/* Mounted only while a flag says so, so the draft is fresh per open (D2). */}
-      {(createOpen || editTarget !== null) && (
+      {/* Edit only; mounted only while a row is targeted, so the draft is fresh per open (D2). */}
+      {editTarget !== null && (
         <SetupModal
           characterId={characterId}
-          setup={createOpen ? null : editTarget}
+          setup={editTarget}
           onClose={closeModal}
           onSaved={onSaved}
         />

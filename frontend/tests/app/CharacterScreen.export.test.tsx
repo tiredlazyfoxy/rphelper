@@ -27,11 +27,20 @@
 //   buttons resolve to the same `.mantine-Group-root` ancestor.
 // - `src/shared/MarkdownEditor` is replaced by the repo's sanctioned stub (context.md "Test
 //   conventions — TipTap in jsdom"), as in `CharacterScreen.test.tsx`.
+//
+// Amended by feature 033, step 001 (DoD-8, DoD-9; D3): Archive/Restore and Export are now
+// icon-only `IconButton`s in the page header, above the tab list, keeping the accessible names
+// "Archive" / "Restore" / "Export". 030's "same action group" clause (a `.mantine-Group-root`
+// shared with Archive/Restore) is replaced by what 033 D3 promises: both controls sit in the page
+// header — before the tab list and outside every tab panel — and carry no visible label text.
+// Export is disabled while its export is in flight (033 DoD-9), observed with a held export
+// response. Every other 030 clause (route, silence on success, one notification on failure, no
+// dialog, no export on the draft page) is unchanged.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { CharacterRoute, CharacterScreen } from "../../src/app/CharacterScreen";
 import type { Character } from "../../src/app/charactersApi";
 import type { CharacterConfiguration } from "../../src/app/configurationApi";
@@ -47,6 +56,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
     value: string;
     onChange: (markdown: string) => void;
     readOnly?: boolean;
+    toolbarActions?: ReactNode;
   };
   return {
     MarkdownEditor: (props: StubProps) => {
@@ -61,6 +71,10 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
           readOnly: props.readOnly ?? false,
           onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
         }),
+        // fast 012: the toolbar-actions prop (a saved note's flags) renders inside the root.
+        props.toolbarActions === undefined || props.toolbarActions === null
+          ? null
+          : createElement("div", { "data-testid": "stub-toolbar-actions" }, props.toolbarActions),
       );
     },
   };
@@ -76,7 +90,6 @@ const ARCHIVE_NAME = /^archive$/i;
 const RESTORE_NAME = /^restore$/i;
 
 const NOTIFICATION = ".mantine-Notification-root";
-const GROUP_ROOT = ".mantine-Group-root";
 
 /** The message the error envelope carries; a notification must show it (DoD-7). */
 const FAILURE_MESSAGE = "That character does not exist (zq-404 marker).";
@@ -201,7 +214,13 @@ function mountRead(request: Seen, characterId: string): Response | null {
 }
 
 /** Routes by exact pathname; every unknown request is a visible 404. */
-function stubBackend(row: Character, options: { failExport?: boolean } = {}) {
+type BackendOptions = {
+  failExport?: boolean;
+  /** 033 step 001 (DoD-9): when given, the export answers only once this promise settles. */
+  holdExport?: Promise<Response>;
+};
+
+function stubBackend(row: Character, options: BackendOptions = {}) {
   const calls: Seen[] = [];
   const mock = vi.fn<FetchFn>((input, init) => {
     const url = requestUrl(input);
@@ -213,6 +232,7 @@ function stubBackend(row: Character, options: { failExport?: boolean } = {}) {
     calls.push(request);
 
     if (request.method === "GET" && request.path === exportPath(row.id)) {
+      if (options.holdExport !== undefined) return options.holdExport;
       return Promise.resolve(
         options.failExport === true ? envelope("character_not_found", 404) : exportResponse(),
       );
@@ -271,7 +291,7 @@ function renderScreen(initialPath: string) {
 }
 
 /** Loads `row` at its own route and settles the mount's reads. */
-async function renderLoaded(row: Character, options: { failExport?: boolean } = {}) {
+async function renderLoaded(row: Character, options: BackendOptions = {}) {
   const server = stubBackend(row, options);
   renderScreen(`/characters/${row.id}`);
   await flush();
@@ -291,9 +311,24 @@ function queryButton(name: RegExp): HTMLElement | null {
   return within(mainRegion()).queryByRole("button", { name });
 }
 
-/** The Mantine `Group` a control sits in — "the same action group" (DoD-4). */
-function groupOf(element: HTMLElement): HTMLElement | null {
-  return element.closest<HTMLElement>(GROUP_ROOT);
+/** True when `first` comes before `second` in document order. */
+function precedes(first: Element, second: Element): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+/**
+ * 033 step 001 (D3): a control "in the page header" sits before the page's tab list and inside
+ * no tab panel. The tab list is queried including hidden elements so the check never depends on
+ * which tab is active.
+ */
+function isInPageHeader(element: HTMLElement): boolean {
+  const tablist = within(mainRegion()).getByRole("tablist", { hidden: true });
+  return precedes(element, tablist) && element.closest('[role="tabpanel"]') === null;
+}
+
+/** 033 step 001 (D3): an icon-only button names itself through its accessible name alone. */
+function visibleLabel(element: HTMLElement): string {
+  return (element.textContent ?? "").trim();
 }
 
 function notificationRoots(): HTMLElement[] {
@@ -318,25 +353,29 @@ async function clickExport(user: User): Promise<void> {
 
 // ===========================================================================
 describe("a persisted character offers Export beside Archive/Restore (US-080.AC-1)", () => {
-  it("an active character's screen shows Export in the same action group as Archive — DoD-4", async () => {
+  it("(030 DoD-4, amended by 033 DoD-8) an active character's page header shows icon-only Export and Archive, before the tabs — DoD-4", async () => {
     await renderLoaded(CHAR_A);
 
     const exportButton = button(EXPORT_NAME);
     const archiveButton = button(ARCHIVE_NAME);
 
-    expect(groupOf(exportButton)).not.toBeNull();
-    expect(groupOf(exportButton)).toBe(groupOf(archiveButton));
+    expect(isInPageHeader(exportButton)).toBe(true);
+    expect(isInPageHeader(archiveButton)).toBe(true);
+    expect(visibleLabel(exportButton)).toBe("");
+    expect(visibleLabel(archiveButton)).toBe("");
   });
 
-  it("an archived character's screen shows Export in the same action group as Restore — DoD-4", async () => {
+  it("(030 DoD-4, amended by 033 DoD-8) an archived character's page header shows icon-only Export and Restore, before the tabs — DoD-4", async () => {
     await renderLoaded(ARCHIVED_A);
 
     const exportButton = button(EXPORT_NAME);
     const restoreButton = button(RESTORE_NAME);
 
     expect(queryButton(ARCHIVE_NAME)).toBeNull();
-    expect(groupOf(exportButton)).not.toBeNull();
-    expect(groupOf(exportButton)).toBe(groupOf(restoreButton));
+    expect(isInPageHeader(exportButton)).toBe(true);
+    expect(isInPageHeader(restoreButton)).toBe(true);
+    expect(visibleLabel(exportButton)).toBe("");
+    expect(visibleLabel(restoreButton)).toBe("");
   });
 
   it("clicking it requests GET /api/characters/<that id>/export, once — DoD-4", async () => {
@@ -361,8 +400,50 @@ describe("a persisted character offers Export beside Archive/Restore (US-080.AC-
 });
 
 // ===========================================================================
+// 033 step 001 (DoD-9, D3): the header's icon-only Export still downloads, and is disabled while
+// its export is in flight — the shared IconButton's "busy" is `disabled`.
+describe("033 step 001 — the header Export downloads and is busy while in flight (D3)", () => {
+  it("clicking Export downloads that character's export through an anchor click — 033 DoD-9", async () => {
+    const { calls } = await renderLoaded(CHAR_A);
+    const anchorClick = vi.mocked(HTMLAnchorElement.prototype.click);
+    const user = newUser();
+
+    await clickExport(user);
+
+    expect(matching(calls, "GET", exportPath(ID_A))).toHaveLength(1);
+    await waitFor(() => {
+      expect(anchorClick).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("Export is disabled while the export request is pending, and enabled again once it settles — 033 DoD-9", async () => {
+    let release!: (response: Response) => void;
+    const held = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const { calls } = await renderLoaded(CHAR_A, { holdExport: held });
+    const user = newUser();
+
+    expect(button(EXPORT_NAME)).toBeEnabled();
+
+    await clickExport(user);
+
+    expect(matching(calls, "GET", exportPath(ID_A))).toHaveLength(1);
+    expect(button(EXPORT_NAME)).toBeDisabled();
+
+    release(exportResponse());
+    await flush();
+
+    await waitFor(() => {
+      expect(button(EXPORT_NAME)).toBeEnabled();
+    });
+    expect(matching(calls, "GET", exportPath(ID_A))).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
 describe("the draft page offers no export (DoD-5)", () => {
-  it("renders no Export button at /characters/new — DoD-5", async () => {
+  it("renders no Export button at /characters/new — DoD-5 (and 033 DoD-12)", async () => {
     const { calls } = stubBackend(CHAR_A);
     renderScreen(NEW_PATH);
     await flush();

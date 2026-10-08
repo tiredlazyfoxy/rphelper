@@ -23,6 +23,16 @@
 //   "Description", "Create" / "Save" and "Cancel"; the sentences "Could not create the setup."
 //   and "Could not archive the setup.".
 // - A notification: `.mantine-Notification-root` (the repo's convention). 010 raises none.
+//
+// Feature 033, step 003 (D7) amends this file: the labelled "New setup" button becomes an
+// icon-only '+' "New setup" in the header that opens an inline create form above the list
+// (text input "Name", Description editor, icon buttons "Save setup" / "Cancel new setup"; the
+// create failure inside the form; no modal for create). Edit stays in the modal. 010 DoD-2,
+// DoD-4 and DoD-6 are rewritten for the inline form (each title cites the 033 step 003 DoD it
+// now also defends); the new "033 step 003" blocks at the end cover DoD-1..DoD-8. The inline
+// form has no role of its own: it is reached through `within(region())` (its fields are the
+// region's only "Name" / "Description" textboxes while no dialog is open), and "inside the
+// form" means inside the smallest element holding both the "Save setup" button and "Name".
 // - `src/shared/MarkdownEditor` is replaced by the sanctioned stub (context.md "Test
 //   conventions"), so "Description" is a plain labelled `<textarea>` in jsdom.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -77,6 +87,10 @@ const RETRY_NAME = /^retry$/i;
 const EDIT_ITEM = /^edit$/i;
 const ARCHIVE_ITEM = /^archive$/i;
 const RESTORE_ITEM = /^restore$/i;
+// 033 step 003 (D7): the inline create form's icon buttons.
+const SAVE_SETUP_NAME = /^save setup$/i;
+const CANCEL_NEW_SETUP_NAME = /^cancel new setup$/i;
+const LOADER = ".mantine-Loader-root";
 
 const EMPTY_LINE = "No setups yet.";
 const LOAD_FAILED_TEXT = "Could not load setups";
@@ -391,9 +405,65 @@ async function chooseMenuItem(user: User, name: RegExp): Promise<void> {
   await user.click(item);
 }
 
-async function openCreateDialog(user: User): Promise<void> {
+// ---------------------------------------------------------------- 033 step 003: inline form
+function heading(): HTMLElement {
+  return within(region()).getByRole("heading", { name: SETUPS_HEADING });
+}
+
+function formNameInput(): HTMLElement {
+  return within(region()).getByRole("textbox", { name: NAME_LABEL });
+}
+
+function formDescriptionInput(): HTMLElement {
+  return within(region()).getByRole("textbox", { name: DESCRIPTION_LABEL });
+}
+
+function saveSetupButton(): HTMLElement {
+  return within(region()).getByRole("button", { name: SAVE_SETUP_NAME });
+}
+
+function cancelNewSetupButton(): HTMLElement {
+  return within(region()).getByRole("button", { name: CANCEL_NEW_SETUP_NAME });
+}
+
+/** Whether the inline create form is mounted (its Save setup button is in the region). */
+function formOpen(): boolean {
+  return within(region()).queryByRole("button", { name: SAVE_SETUP_NAME }) !== null;
+}
+
+/** The smallest element holding both the form's Save setup button and its Name input. */
+function formScope(): HTMLElement {
+  const name = formNameInput();
+  let scope: HTMLElement | null = saveSetupButton();
+  while (scope !== null && !scope.contains(name)) scope = scope.parentElement;
+  if (scope === null) throw new Error("no element holds both Save setup and Name");
+  return scope;
+}
+
+function precedes(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+/** Whether a button shows the given text as its own visible content (a labelled button). */
+function showsText(element: HTMLElement, text: string): boolean {
+  return (element.textContent ?? "").includes(text);
+}
+
+async function openCreateForm(user: User): Promise<void> {
   await user.click(newSetupButton());
-  await screen.findByRole("dialog");
+  await waitFor(() => {
+    expect(formOpen()).toBe(true);
+  });
+}
+
+type Held = { promise: Promise<Response>; resolve: (value: Response) => void };
+
+function held(): Held {
+  let resolve: (value: Response) => void = () => undefined;
+  const promise = new Promise<Response>((ok) => {
+    resolve = ok;
+  });
+  return { promise, resolve };
 }
 
 // ---------------------------------------------------------------------------
@@ -440,22 +510,20 @@ describe("the section loads the character's setups on mount (US-023.AC-1, D13)",
 
 // ---------------------------------------------------------------------------
 describe("an empty listing is one neutral line (R2, D13)", () => {
-  it("shows No setups yet. and no table — DoD-2", async () => {
+  it("shows No setups yet. and no table — DoD-2 (and 033 step 003 DoD-8)", async () => {
     await renderListed([]);
 
     expect(within(region()).getByText(EMPTY_LINE)).toBeInTheDocument();
     expect(queryTable()).toBeNull();
   });
 
-  it("holds no other text and no other control inviting a setup to be created — DoD-2", async () => {
+  it("holds no other text and no other control inviting a setup to be created — DoD-2 (and 033 step 003 DoD-8)", async () => {
     await renderListed([]);
 
-    // The header's "New setup" is the only affordance: nothing else is rendered.
-    expect(
-      within(region())
-        .getAllByRole("button")
-        .map((control) => control.textContent ?? ""),
-    ).toEqual(["New setup"]);
+    // The header's '+' "New setup" (033 D7: an icon button) is the only affordance.
+    const buttons = within(region()).getAllByRole("button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toBe(newSetupButton());
 
     let remainder = regionText();
     for (const known of ["Show archived setups", EMPTY_LINE, "New setup", "Setups"]) {
@@ -509,23 +577,26 @@ describe("a failed load reports inline with a Retry (D12)", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("New setup creates through the modal and applies the returned row (US-023.AC-1, D2, D11)", () => {
-  it("POSTs the collection, closes the dialog, puts the new row first and refetches nothing — DoD-4", async () => {
+describe("New setup creates through the inline form and applies the returned row (US-023.AC-1, 033 D7, D11)", () => {
+  it("POSTs the collection once with the name and description, closes the form, puts the new row first and refetches nothing — DoD-4 (and 033 step 003 DoD-4)", async () => {
     const user = newUser();
     const { calls } = await renderListed([TAVERN, HARBOUR]);
 
-    await openCreateDialog(user);
-    expect(within(dialog()).getByText(NEW_SETUP_TITLE)).toBeInTheDocument();
+    await openCreateForm(user);
+    expect(queryDialog()).toBeNull();
 
-    await user.type(dialogField(NAME_LABEL), TYPED_NAME);
-    await user.type(dialogField(DESCRIPTION_LABEL), TYPED_DESCRIPTION);
-    await user.click(dialogButton(CREATE_NAME));
+    await user.type(formNameInput(), TYPED_NAME);
+    await user.type(formDescriptionInput(), TYPED_DESCRIPTION);
+    await user.click(saveSetupButton());
     await flush();
 
     const posts = matching(calls, "POST", COLLECTION_PATH);
     expect(posts).toHaveLength(1);
-    expect(posts[0].body).toMatchObject({ name: TYPED_NAME });
+    expect(posts[0].body).toMatchObject({ name: TYPED_NAME, description: TYPED_DESCRIPTION });
     expect(queryDialog()).toBeNull();
+    expect(formOpen()).toBe(false);
+    expect(within(region()).queryByRole("textbox", { name: NAME_LABEL })).toBeNull();
+    expect(newSetupButton()).toBeEnabled();
     expect(listedOrder([TYPED_NAME, TAVERN.name, HARBOUR.name])).toEqual([
       TYPED_NAME,
       TAVERN.name,
@@ -543,7 +614,7 @@ describe("New setup creates through the modal and applies the returned row (US-0
 
 // ---------------------------------------------------------------------------
 describe("a row's Edit opens the prefilled modal and saves in place (D2, D11)", () => {
-  it("PATCHes /api/setups/<id> and the row shows the server's name in the same position — DoD-5", async () => {
+  it("PATCHes /api/setups/<id> and the row shows the server's name in the same position — DoD-5 (and 033 step 003 DoD-8)", async () => {
     const user = newUser();
     const { calls } = await renderListed([TAVERN, HARBOUR, CELLAR]);
 
@@ -573,18 +644,23 @@ describe("a row's Edit opens the prefilled modal and saves in place (D2, D11)", 
 });
 
 // ---------------------------------------------------------------------------
-describe("a failed create stays in the modal, and reopening starts a fresh draft (D2, D12)", () => {
-  it("keeps the dialog open with Could not create the setup. inside it and the table unchanged — DoD-6", async () => {
+describe("a failed create stays in the inline form, and reopening starts a fresh draft (033 D7, D12)", () => {
+  it("keeps the form open with Could not create the setup. inside it, the typed values kept and the table unchanged — DoD-6 (and 033 step 003 DoD-5)", async () => {
     const user = newUser();
     await renderListed([TAVERN, HARBOUR], { create: true });
 
-    await openCreateDialog(user);
-    await user.type(dialogField(NAME_LABEL), TYPED_NAME);
-    await user.click(dialogButton(CREATE_NAME));
+    await openCreateForm(user);
+    await user.type(formNameInput(), TYPED_NAME);
+    await user.type(formDescriptionInput(), TYPED_DESCRIPTION);
+    await user.click(saveSetupButton());
     await flush();
 
-    expect(queryDialog()).not.toBeNull();
-    expect(within(dialog()).getByText(CREATE_FAILED_TEXT)).toBeInTheDocument();
+    expect(formOpen()).toBe(true);
+    expect(queryDialog()).toBeNull();
+    expect(within(formScope()).getByText(CREATE_FAILED_TEXT)).toBeInTheDocument();
+    expect(within(region()).getAllByText(CREATE_FAILED_TEXT)).toHaveLength(1);
+    expect(formNameInput()).toHaveValue(TYPED_NAME);
+    expect(formDescriptionInput()).toHaveValue(TYPED_DESCRIPTION);
     expect(listedOrder([TYPED_NAME, TAVERN.name, HARBOUR.name])).toEqual([
       TAVERN.name,
       HARBOUR.name,
@@ -592,28 +668,31 @@ describe("a failed create stays in the modal, and reopening starts a fresh draft
     expect(notificationsShown()).toEqual([]);
   });
 
-  it("Cancel closes the dialog, and reopening New setup shows an empty Name — DoD-6", async () => {
+  it("Cancel new setup closes the failed form, and reopening New setup shows an empty Name and Description — DoD-6 (and 033 step 003 DoD-7)", async () => {
     const user = newUser();
     await renderListed([TAVERN], { create: true });
 
-    await openCreateDialog(user);
-    await user.type(dialogField(NAME_LABEL), TYPED_NAME);
-    await user.click(dialogButton(CREATE_NAME));
+    await openCreateForm(user);
+    await user.type(formNameInput(), TYPED_NAME);
+    await user.type(formDescriptionInput(), TYPED_DESCRIPTION);
+    await user.click(saveSetupButton());
     await flush();
-    expect(within(dialog()).getByText(CREATE_FAILED_TEXT)).toBeInTheDocument();
+    expect(within(formScope()).getByText(CREATE_FAILED_TEXT)).toBeInTheDocument();
 
-    await user.click(dialogButton(CANCEL_NAME));
+    await user.click(cancelNewSetupButton());
     await flush();
-    expect(queryDialog()).toBeNull();
+    expect(formOpen()).toBe(false);
 
-    await openCreateDialog(user);
-    expect(dialogField(NAME_LABEL)).toHaveValue("");
+    await openCreateForm(user);
+    expect(formNameInput()).toHaveValue("");
+    expect(formDescriptionInput()).toHaveValue("");
+    expect(within(region()).queryByText(CREATE_FAILED_TEXT)).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
 describe("Archive and the Show archived setups switch (US-087.AC-1, D4)", () => {
-  it("Archive POSTs, drops the row, and the switch brings it back badged with Restore in its menu and no confirm — DoD-7", async () => {
+  it("Archive POSTs, drops the row, and the switch brings it back badged with Restore in its menu and no confirm — DoD-7 (and 033 step 003 DoD-8)", async () => {
     const user = newUser();
     const { calls } = await renderListed([TAVERN, HARBOUR]);
 
@@ -641,7 +720,7 @@ describe("Archive and the Show archived setups switch (US-087.AC-1, D4)", () => 
 
 // ---------------------------------------------------------------------------
 describe("Restore brings an archived setup back to the working list (US-087.AC-2)", () => {
-  it("POSTs the restore, drops the Archived badge, and the row is still listed with the switch off — DoD-8", async () => {
+  it("POSTs the restore, drops the Archived badge, and the row is still listed with the switch off — DoD-8 (and 033 step 003 DoD-8)", async () => {
     const user = newUser();
     const { calls } = await renderListed([ARCHIVED_TAVERN, HARBOUR]);
     expect(within(region()).queryByText(TAVERN.name)).toBeNull();
@@ -686,5 +765,292 @@ describe("a failed row action reports inline in the section (D12)", () => {
     });
     expect(queryRow(TAVERN.name)).not.toBeNull();
     expect(notificationsShown()).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Feature 033, step 003 — the header '+' and the inline create form (D7).
+// ===========================================================================
+describe("033 step 003: the Setups header (D7)", () => {
+  it("holds the Setups heading, then an icon-only New setup button, then the Show archived setups switch — 033 step 003 DoD-1", async () => {
+    await renderListed([TAVERN, HARBOUR]);
+
+    const header = heading().parentElement;
+    expect(header).not.toBeNull();
+    const plus = newSetupButton();
+    const toggle = archivedSwitch();
+    expect(header?.contains(plus)).toBe(true);
+    expect(header?.contains(toggle)).toBe(true);
+    expect(precedes(heading(), plus)).toBe(true);
+    expect(precedes(plus, toggle)).toBe(true);
+    expect(header?.contains(table())).toBe(false);
+    expect(plus).toBeEnabled();
+  });
+
+  it("leaves no labelled New setup text button: the only New setup is the icon button — 033 step 003 DoD-1", async () => {
+    await renderListed([TAVERN]);
+
+    expect(within(region()).getAllByRole("button", { name: NEW_SETUP_NAME })).toHaveLength(1);
+    expect(showsText(newSetupButton(), "New setup")).toBe(false);
+    const labelled = within(region())
+      .getAllByRole("button")
+      .filter((control) => showsText(control, "New setup"));
+    expect(labelled).toEqual([]);
+  });
+});
+
+describe("033 step 003: '+' opens the inline form above the list (D7)", () => {
+  it("shows an empty Name and Description with Save setup / Cancel new setup, opens no dialog, disables '+' and sends no request — 033 step 003 DoD-2", async () => {
+    const user = newUser();
+    const { calls } = await renderListed([TAVERN, HARBOUR]);
+
+    await openCreateForm(user);
+
+    expect(formNameInput()).toHaveValue("");
+    expect(formDescriptionInput()).toHaveValue("");
+    expect(saveSetupButton()).toBeInTheDocument();
+    expect(cancelNewSetupButton()).toBeInTheDocument();
+    expect(queryDialog()).toBeNull();
+    expect(screen.queryByText(NEW_SETUP_TITLE, { selector: "h1, h2, h3, h4, h5, h6" })).toBeNull();
+    expect(screen.queryByRole("button", { name: CREATE_NAME })).toBeNull();
+    expect(newSetupButton()).toBeDisabled();
+    expect(listings(calls)).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("places the form below the header and above the table — 033 step 003 DoD-2", async () => {
+    const user = newUser();
+    await renderListed([TAVERN, HARBOUR]);
+
+    await openCreateForm(user);
+
+    expect(precedes(newSetupButton(), formNameInput())).toBe(true);
+    expect(precedes(archivedSwitch(), formNameInput())).toBe(true);
+    expect(precedes(formNameInput(), table())).toBe(true);
+    expect(precedes(saveSetupButton(), table())).toBe(true);
+    expect(precedes(cancelNewSetupButton(), table())).toBe(true);
+    // The rows are still listed below the form.
+    expect(listedOrder([TAVERN.name, HARBOUR.name])).toEqual([TAVERN.name, HARBOUR.name]);
+  });
+
+  it("with no setups the form sits above No setups yet. — 033 step 003 DoD-2", async () => {
+    const user = newUser();
+    await renderListed([]);
+
+    await openCreateForm(user);
+
+    expect(precedes(formNameInput(), within(region()).getByText(EMPTY_LINE))).toBe(true);
+  });
+
+  it("after a failed load the form sits above Could not load setups — 033 step 003 DoD-2", async () => {
+    const user = newUser();
+    await renderListed([TAVERN], { listing: true });
+
+    await openCreateForm(user);
+
+    expect(precedes(formNameInput(), within(region()).getByText(LOAD_FAILED_TEXT))).toBe(true);
+  });
+
+  it("while the listing is still loading the form sits above the loader — 033 step 003 DoD-2", async () => {
+    const user = newUser();
+    const never = held();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<FetchFn>(async () => never.promise),
+    );
+    renderSection();
+    await flush();
+    const loader = region().querySelector(LOADER);
+    expect(loader).not.toBeNull();
+
+    await openCreateForm(user);
+
+    expect(precedes(formNameInput(), region().querySelector(LOADER) as Element)).toBe(true);
+  });
+});
+
+describe("033 step 003: Cancel new setup (D7)", () => {
+  it("removes the typed form, sends no request, opens no dialog and enables '+' again — 033 step 003 DoD-3", async () => {
+    const user = newUser();
+    const { calls } = await renderListed([TAVERN, HARBOUR]);
+
+    await openCreateForm(user);
+    await user.type(formNameInput(), TYPED_NAME);
+    await user.type(formDescriptionInput(), TYPED_DESCRIPTION);
+    await user.click(cancelNewSetupButton());
+    await flush();
+
+    expect(formOpen()).toBe(false);
+    expect(within(region()).queryByRole("textbox", { name: NAME_LABEL })).toBeNull();
+    expect(within(region()).queryByRole("button", { name: CANCEL_NEW_SETUP_NAME })).toBeNull();
+    expect(queryDialog()).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(listings(calls)).toHaveLength(1);
+    expect(newSetupButton()).toBeEnabled();
+    expect(listedOrder([TYPED_NAME, TAVERN.name, HARBOUR.name])).toEqual([
+      TAVERN.name,
+      HARBOUR.name,
+    ]);
+  });
+});
+
+describe("033 step 003: Save setup (UC-020, US-023, D7)", () => {
+  it("from an empty list: one create for this character, the new setup is listed, No setups yet. is gone and the form closes — 033 step 003 DoD-4", async () => {
+    const user = newUser();
+    const { calls } = await renderListed([]);
+
+    await openCreateForm(user);
+    await user.type(formNameInput(), TYPED_NAME);
+    await user.click(saveSetupButton());
+    await flush();
+
+    const posts = matching(calls, "POST", COLLECTION_PATH);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body).toMatchObject({ name: TYPED_NAME });
+    expect(calls.filter((call) => call.method !== "GET")).toHaveLength(1);
+    expect(queryRow(TYPED_NAME)).not.toBeNull();
+    expect(within(region()).queryByText(EMPTY_LINE)).toBeNull();
+    expect(formOpen()).toBe(false);
+    expect(queryDialog()).toBeNull();
+    expect(newSetupButton()).toBeEnabled();
+    expect(listings(calls)).toHaveLength(1);
+  });
+});
+
+describe("033 step 003: a save in flight and a failed save (D7, D12)", () => {
+  it("disables Save setup and Cancel new setup while the save is in flight; the failure renders inside the open form with the values kept — 033 step 003 DoD-5", async () => {
+    const user = newUser();
+    const response = held();
+    const calls: Seen[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<FetchFn>(async (input, init) => {
+        const url = requestUrl(input);
+        const method = requestMethod(input, init);
+        calls.push({ method, path: url.pathname, search: url.search, body: parseBody(init) });
+        if (method === "GET" && url.pathname === COLLECTION_PATH) {
+          return jsonResponse({ setups: [TAVERN] }, 200);
+        }
+        if (method === "POST" && url.pathname === COLLECTION_PATH) return response.promise;
+        return setupNotFound();
+      }),
+    );
+    renderSection();
+    await flush();
+
+    await openCreateForm(user);
+    await user.type(formNameInput(), TYPED_NAME);
+    await user.type(formDescriptionInput(), TYPED_DESCRIPTION);
+    await user.click(saveSetupButton());
+
+    await waitFor(() => {
+      expect(matching(calls, "POST", COLLECTION_PATH)).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(saveSetupButton()).toBeDisabled();
+    });
+    expect(cancelNewSetupButton()).toBeDisabled();
+
+    await act(async () => {
+      response.resolve(serverError());
+    });
+    await waitFor(() => {
+      expect(within(region()).queryByText(CREATE_FAILED_TEXT)).not.toBeNull();
+    });
+    await flush();
+
+    expect(formOpen()).toBe(true);
+    expect(within(formScope()).getByText(CREATE_FAILED_TEXT)).toBeInTheDocument();
+    expect(formNameInput()).toHaveValue(TYPED_NAME);
+    expect(formDescriptionInput()).toHaveValue(TYPED_DESCRIPTION);
+    expect(matching(calls, "POST", COLLECTION_PATH)).toHaveLength(1);
+    expect(queryRow(TYPED_NAME)).toBeNull();
+    expect(newSetupButton()).toBeDisabled();
+    expect(saveSetupButton()).toBeEnabled();
+    expect(cancelNewSetupButton()).toBeEnabled();
+    expect(queryDialog()).toBeNull();
+    expect(notificationsShown()).toEqual([]);
+  });
+});
+
+describe("033 step 003: Save follows the draft's submit guard (D7)", () => {
+  it("Save setup is disabled with a blank or whitespace-only name and sends nothing; a name enables it — 033 step 003 DoD-6", async () => {
+    const user = newUser();
+    const { calls } = await renderListed([TAVERN]);
+
+    await openCreateForm(user);
+    expect(saveSetupButton()).toBeDisabled();
+
+    await user.type(formDescriptionInput(), TYPED_DESCRIPTION);
+    expect(saveSetupButton()).toBeDisabled();
+
+    await user.type(formNameInput(), "   ");
+    expect(saveSetupButton()).toBeDisabled();
+    await user.click(saveSetupButton());
+    await flush();
+    expect(matching(calls, "POST", COLLECTION_PATH)).toEqual([]);
+    expect(formOpen()).toBe(true);
+
+    await user.clear(formNameInput());
+    await user.type(formNameInput(), TYPED_NAME);
+    expect(saveSetupButton()).toBeEnabled();
+  });
+});
+
+describe("033 step 003: a fresh draft per open (forms-and-lists.md draft lifetime)", () => {
+  it("reopening after a cancel starts from an empty Name and Description — 033 step 003 DoD-7", async () => {
+    const user = newUser();
+    await renderListed([TAVERN]);
+
+    await openCreateForm(user);
+    await user.type(formNameInput(), TYPED_NAME);
+    await user.type(formDescriptionInput(), TYPED_DESCRIPTION);
+    await user.click(cancelNewSetupButton());
+    await flush();
+
+    await openCreateForm(user);
+    expect(formNameInput()).toHaveValue("");
+    expect(formDescriptionInput()).toHaveValue("");
+    expect(saveSetupButton()).toBeDisabled();
+  });
+
+  it("reopening after a successful save starts from an empty Name and Description — 033 step 003 DoD-7", async () => {
+    const user = newUser();
+    await renderListed([TAVERN]);
+
+    await openCreateForm(user);
+    await user.type(formNameInput(), TYPED_NAME);
+    await user.type(formDescriptionInput(), TYPED_DESCRIPTION);
+    await user.click(saveSetupButton());
+    await flush();
+    expect(formOpen()).toBe(false);
+
+    await openCreateForm(user);
+    expect(formNameInput()).toHaveValue("");
+    expect(formDescriptionInput()).toHaveValue("");
+    expect(saveSetupButton()).toBeDisabled();
+  });
+});
+
+describe("033 step 003: Edit still goes through the modal (D7)", () => {
+  it("a row's Edit opens the Edit setup dialog prefilled, mounts no inline form, and its Cancel closes it — 033 step 003 DoD-8", async () => {
+    const user = newUser();
+    const { calls } = await renderListed([TAVERN, HARBOUR]);
+
+    await openRowMenu(user, HARBOUR.name);
+    await chooseMenuItem(user, EDIT_ITEM);
+    await screen.findByRole("dialog");
+
+    expect(within(dialog()).getByText(EDIT_SETUP_TITLE)).toBeInTheDocument();
+    expect(within(dialog()).queryByText(NEW_SETUP_TITLE)).toBeNull();
+    expect(dialogField(NAME_LABEL)).toHaveValue(HARBOUR.name);
+    expect(dialogField(DESCRIPTION_LABEL)).toHaveValue(HARBOUR.description);
+    expect(formOpen()).toBe(false);
+    expect(within(region()).queryByRole("button", { name: CANCEL_NEW_SETUP_NAME })).toBeNull();
+
+    await user.click(dialogButton(CANCEL_NAME));
+    await flush();
+    expect(queryDialog()).toBeNull();
+    expect(calls.filter((call) => call.method !== "GET")).toEqual([]);
   });
 });

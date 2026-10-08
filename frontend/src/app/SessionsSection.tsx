@@ -14,22 +14,18 @@
 //                   its role is `region` and its accessible name is "Sessions".
 //   heading         "Sessions" at `<Title order={3}>` — 010's "Setups" level, and the level
 //                   009's heading-only section used, so the two read as siblings.
+//   import session  (031 007, 033 D8) a shared `IconButton` "Import session" (`IconUpload`)
+//                   in the header beside the switch, inside a Mantine `FileButton` accepting
+//                   `.json`: the render-prop's `onClick` feeds the `IconButton`'s `onClick`.
+//                   Disabled while the import is in flight (component-local `useState`).
+//                   No confirm — an import is additive and destroys nothing. The section
+//                   starts no session itself (033 D9): the composer's send is the only create.
 //   header switch   a Mantine `Switch` labelled "Show archived sessions" (D5 — distinct from
 //                   the tree's "Show archived" and 010's "Show archived setups", because all
 //                   three are on screen at once). `onChange` calls `setShowArchived` and
 //                   nothing else: the reload is the effect's job, and loading here too would
 //                   double the request.
-//   inline start    a "Setup" `Select` ("No setup" first, then the working setups in state
-//                   order) plus a labelled "Start session" `Button`, disabled ONLY while the
-//                   start is in flight — never because the choices are empty or failed
-//                   (R2, US-024.AC-3). No modal: one choice is not a form (D1).
-//   import session  (031 007) an "Import session" `Button` (`variant="default"`) in that same
-//                   row, beside "Start session": the two session-creating actions read as a
-//                   pair, and the row already aligns buttons against the labelled `Select`.
-//                   It is wrapped in a Mantine `FileButton` accepting `.json`, and it shows a
-//                   loading state from component-local `useState` while the import is in
-//                   flight. No confirm — an import is additive and destroys nothing.
-//   the alerts      `startError` and `error`, each when non-null, inline inside the region
+//   the alert       `error`, when non-null, inline inside the region
 //                   (D18). No notification anywhere: 011 adds no notification call site
 //                   and this module imports no notification helper.
 //   the list        idle/loading to a `Loader`; failed to "Could not load sessions" plus a
@@ -52,7 +48,6 @@ import {
   Group,
   Loader,
   Menu,
-  Select,
   Stack,
   Switch,
   Table,
@@ -64,10 +59,9 @@ import {
   IconArchiveOff,
   IconDots,
   IconDownload,
-  IconPlus,
   IconUpload,
 } from "@tabler/icons-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { IconButton } from "../shared/IconButton";
 import { runExport, sessionExportPath } from "./exportDownloads";
@@ -80,21 +74,9 @@ import {
   SessionsSectionState,
   archiveSectionRow,
   loadSectionSessions,
-  loadSetupChoices,
   restoreSectionRow,
-  selectSetup,
   setShowArchived,
-  startSessionFromSection,
 } from "./sessionsSectionState";
-
-/**
- * The "No setup" option's fixed value. Mantine's `Select` speaks strings and treats `null`
- * as "nothing selected", which would let the field be emptied, so the neutral choice needs
- * a value of its own. It can never equal a decimal snowflake, and it lives ONLY in this
- * module: it is mapped to `null` before it reaches `selectSetup`, so it never reaches the
- * section state, the API client or the wire (R2, "no sentinel").
- */
-const NO_SETUP_VALUE = "none";
 
 /**
  * 031 007: the file types the session import offers. An export is a `.json` document, and
@@ -102,8 +84,6 @@ const NO_SETUP_VALUE = "none";
  */
 const IMPORT_ACCEPT = ".json,application/json";
 
-/** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
-const ICON_SIZE = 18;
 /** The "inline" metric, for the icons inside the row menu's items. */
 const MENU_ICON_SIZE = 16;
 const ICON_STROKE = 1.5;
@@ -113,19 +93,19 @@ function openedByMenuTarget(): void {
 }
 
 export type SessionsSectionProps = {
-  /** The character whose sessions this section lists and starts. A string, never parsed. */
+  /** The character whose sessions this section lists. A string, never parsed. */
   characterId: string;
   /**
-   * The one workspace sessions state `App` creates (D15). Passed straight to 007's start
-   * and row-action effects so a mutated row lands in the tree with no refetch.
+   * The one workspace sessions state `App` creates (D15). Passed straight to 007's
+   * row-action effects and the import so a mutated row lands in the tree with no refetch.
    */
   sessions: SessionsState;
 };
 
 /**
- * The character screen's Sessions section: the inline start (the "Setup" select and "Start
- * session"), the "Show archived sessions" switch, the table of session rows with their
- * Archive / Restore overflow menu, and the loading / failed / empty branches. Rendered only
+ * The character screen's Sessions section: the header (heading, "Show archived sessions"
+ * switch, "Import session" icon button), the table of session rows with their
+ * Archive / Restore / Export overflow menu, and the loading / failed / empty branches. Rendered only
  * in existing mode at status `"ready"` and keyed by the character id (D1, D15).
  */
 export const SessionsSection = observer(function SessionsSection(
@@ -137,11 +117,7 @@ export const SessionsSection = observer(function SessionsSection(
   const [state] = useState(() => new SessionsSectionState(characterId));
   // The heading's id: `aria-labelledby` on the `<section>` names the region "Sessions".
   const headingId = useId();
-  const navigate = useNavigate();
-  // One controller per load kind: the two loads are independent, so aborting a choices
-  // reload must never cancel the listing (and the other way round).
   const listControllerRef = useRef<AbortController | null>(null);
-  const choicesControllerRef = useRef<AbortController | null>(null);
   // 031 007: the in-flight flag for the one import control. Component-local, never in the
   // section state — no store owns domain state about an import.
   const [importing, setImporting] = useState(false);
@@ -152,18 +128,6 @@ export const SessionsSection = observer(function SessionsSection(
   // Read during render, so the `observer` re-renders — and the effect re-runs — when the
   // switch flips. `loadSectionSessions` reads the same field for the query, so the two agree.
   const showArchived = state.showArchived;
-
-  /**
-   * Starts a choices load with a fresh controller, aborting any in-flight one, so the last
-   * opening of the Select is the one that wins. The current options stay rendered while it
-   * runs (D19).
-   */
-  const reloadSetupChoices = (): void => {
-    choicesControllerRef.current?.abort();
-    const controller = new AbortController();
-    choicesControllerRef.current = controller;
-    void loadSetupChoices(state, controller.signal);
-  };
 
   // One listing load on mount and one per `showArchived` change (D5). The previous run is
   // aborted by the cleanup, so a slow first response can never overwrite a later one, and an
@@ -179,16 +143,6 @@ export const SessionsSection = observer(function SessionsSection(
       }
     };
   }, [state, showArchived]);
-
-  // The choices: one load on mount, and after that only `onDropdownOpen` (D19) — no second
-  // render effect, which would turn every unrelated re-render into a request.
-  useEffect(() => {
-    reloadSetupChoices();
-    return () => {
-      choicesControllerRef.current?.abort();
-      choicesControllerRef.current = null;
-    };
-  }, [state]);
 
   const retry = (): void => {
     void loadSectionSessions(state, listControllerRef.current?.signal);
@@ -215,25 +169,10 @@ export const SessionsSection = observer(function SessionsSection(
       loadSectionSessions(state, listControllerRef.current?.signal),
     ).then(() => {
       // `runSessionImport` never rejects — success and handled failure both land here — so
-      // the loading state is cleared on one path and there is nothing to catch.
+      // the in-flight state is cleared on one path and there is nothing to catch.
       setImporting(false);
     });
   };
-
-  const start = (): void => {
-    void startSessionFromSection(state, props.sessions, (sessionId) => {
-      // D1: a push, not a `replace` — the character page stays a valid place to come back
-      // to. The id string goes into the path exactly as it was received.
-      navigate(`/sessions/${sessionId}`);
-    });
-  };
-
-  // "No setup" first, then the working setups' names in state order with their id strings as
-  // values (R2: no sentinel row exists — the neutral choice is this module's own value).
-  const setupOptions = [
-    { value: NO_SETUP_VALUE, label: "No setup" },
-    ...state.setups.map((setup) => ({ value: setup.id, label: setup.name })),
-  ];
 
   const renderRow = (session: Session): React.JSX.Element => {
     const archived = isSessionArchived(session);
@@ -368,64 +307,26 @@ export const SessionsSection = observer(function SessionsSection(
               setShowArchived(state, event.currentTarget.checked);
             }}
           />
+          {/* 031 007, 033 D8: beside the switch. `FileButton` renders its own hidden input
+              and works here — unlike in a `Menu`, nothing portals or unmounts the header on
+              click. `IconButton` forwards no ref, so only the render-prop's `onClick` is
+              passed on. */}
+          <FileButton
+            accept={IMPORT_ACCEPT}
+            resetRef={importResetRef}
+            onChange={onImportSessionFileChosen}
+          >
+            {(fileButtonProps) => (
+              <IconButton
+                icon={IconUpload}
+                label="Import session"
+                onClick={fileButtonProps.onClick}
+                disabled={importing}
+              />
+            )}
+          </FileButton>
         </Group>
-        {/* D1: the inline start. One choice is not a form, so there is no modal. */}
-        <Stack gap={4}>
-          <Group gap="sm" align="flex-end">
-            <Select
-              label="Setup"
-              data={setupOptions}
-              // `allowDeselect={false}`: the field can never be emptied, so the displayed
-              // value is always either a setup id or this module's "No setup".
-              allowDeselect={false}
-              value={state.selectedSetupId ?? NO_SETUP_VALUE}
-              onChange={(value) => {
-                // "No setup" (and a cleared field) is `null` on the wire — no sentinel.
-                selectSetup(state, value === null || value === NO_SETUP_VALUE ? null : value);
-              }}
-              // D19: the choices reload on each open, so a setup just saved in the Setups
-              // section above is choosable without a remount.
-              onDropdownOpen={reloadSetupChoices}
-            />
-            <Button
-              leftSection={<IconPlus size={ICON_SIZE} stroke={ICON_STROKE} />}
-              // Disabled only while the start is in flight: an empty or failed choices load
-              // must never block starting with no setup (US-024.AC-3, R2).
-              disabled={state.startStatus === "submitting"}
-              onClick={start}
-            >
-              Start session
-            </Button>
-            {/* 031 007: beside "Start session", because both bring a session into being.
-                `FileButton` renders its own hidden input and works here — unlike in a
-                `Menu`, nothing portals or unmounts this row on click. */}
-            <FileButton
-              accept={IMPORT_ACCEPT}
-              resetRef={importResetRef}
-              onChange={onImportSessionFileChosen}
-            >
-              {(fileButtonProps) => (
-                <Button
-                  {...fileButtonProps}
-                  variant="default"
-                  leftSection={<IconUpload size={ICON_SIZE} stroke={ICON_STROKE} />}
-                  loading={importing}
-                >
-                  Import session
-                </Button>
-              )}
-            </FileButton>
-          </Group>
-          {/* D18: a silent failure would hide why the list holds only "No setup". No retry,
-              and no effect at all on starting (R2, US-024.AC-3). */}
-          {state.setupsStatus === "failed" && (
-            <Text size="sm" c="dimmed">
-              Could not load setups to choose from.
-            </Text>
-          )}
-        </Stack>
-        {/* D18: the start failure and the row-action failure, inline inside the region. */}
-        {state.startError !== null && <Alert color="red">{state.startError}</Alert>}
+        {/* D18: the row-action failure, inline inside the region. */}
         {state.error !== null && <Alert color="red">{state.error}</Alert>}
         {renderList()}
       </Stack>

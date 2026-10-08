@@ -143,7 +143,9 @@ describe("Composer while streaming — Stop holds Send's slot (UC-085, workspace
     expect(notifyFailureSpy).not.toHaveBeenCalled();
   });
 
-  it('"Stop" sits where Send sat: after the composer textbox and before "Settle" — DoD-7', () => {
+  // Amended by fast/011 (DoD-8, DoD-14): Send's place is now inside the text box, so Stop sits
+  // there — inside the composer's input wrapper, ahead of "Settle" (which stays under the box).
+  it('"Stop" sits where Send sits: inside the composer text box and before "Settle" — DoD-7 (fast/011 DoD-14)', () => {
     stubFetch();
     const state = seeded({ zone: [zoneRow("7250000000000000101", "user", "Mine")] });
     startStreaming(state, freshHandle());
@@ -152,7 +154,12 @@ describe("Composer while streaming — Stop holds Send's slot (UC-085, workspace
     const textbox = screen.getByRole("textbox", { name: "Composer" });
     const stop = screen.getByRole("button", { name: "Stop" });
     const settle = screen.getByRole("button", { name: "Settle" });
-    expect(precedes(textbox, stop)).toBe(true);
+    const box =
+      textbox.closest<HTMLElement>(".mantine-InputWrapper-root, .mantine-Textarea-root") ??
+      textbox.closest<HTMLElement>(".mantine-Input-wrapper, .mantine-Textarea-wrapper");
+    expect(box).not.toBeNull();
+    expect(box?.contains(stop)).toBe(true);
+    expect(box?.contains(settle)).toBe(false);
     expect(precedes(stop, settle)).toBe(true);
   });
 

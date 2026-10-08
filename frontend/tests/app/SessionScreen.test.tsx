@@ -82,7 +82,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionRoute, SessionScreen } from "../../src/app/SessionScreen";
@@ -103,6 +103,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
     value: string;
     onChange: (markdown: string) => void;
     readOnly?: boolean;
+    toolbarActions?: ReactNode;
   };
   return {
     MarkdownEditor: (props: StubProps) => {
@@ -117,6 +118,10 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
           readOnly: props.readOnly ?? false,
           onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
         }),
+        // fast 012: the toolbar-actions prop (a saved note's flags) renders inside the root.
+        props.toolbarActions === undefined || props.toolbarActions === null
+          ? null
+          : createElement("div", { "data-testid": "stub-toolbar-actions" }, props.toolbarActions),
       );
     },
   };

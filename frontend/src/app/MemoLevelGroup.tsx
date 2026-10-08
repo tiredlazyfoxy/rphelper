@@ -1,7 +1,8 @@
 // One level's notes as a titled region (feature 015, step 007, D1 / D5 / D6 / D13 / D14):
 // each note one list item with the shared `MarkdownEditor` (saved on focus loss), the two
-// independent flag `IconButton`s, its reach line and its inline failure; a "New note"
-// button and the unsaved new note; the empty, loading and failed states; and the flush on
+// independent flag `IconButton`s in the editor's toolbar (fast 012), its reach line and its
+// inline failure; the header's '+' "New note" button and the unsaved new note (saved on focus
+// loss); the empty, loading and failed states; and the flush on
 // unmount. It does not create, load or own its state — the session screen (008) and the
 // character page (009) both mount it with a `MemoLevelState` (006).
 //
@@ -12,7 +13,12 @@ import type * as React from "react";
 import { useEffect, useId, useState } from "react";
 import { Box, Button, Group, Loader, Stack, Text, Title } from "@mantine/core";
 import type { TitleOrder } from "@mantine/core";
-import { IconCircleCheck, IconCircleOff, IconPin, IconPlus } from "@tabler/icons-react";
+import {
+  IconCircleCheck,
+  IconCircleOff,
+  IconPin,
+  IconPlus,
+} from "@tabler/icons-react";
 import { observer } from "mobx-react-lite";
 import {
   SortableContext,
@@ -42,10 +48,6 @@ import {
   toggleForced,
 } from "./memoLevelState";
 import type { MemoLevelState } from "./memoLevelState";
-
-/** The repo's "main" icon metrics, for the "New note" button's left section. */
-const ICON_SIZE = 18;
-const ICON_STROKE = 1.5;
 
 /** The forced toggle's colour while the note is forced (D14); none otherwise. */
 const FORCED_COLOR = "orange";
@@ -122,32 +124,34 @@ const NoteCardBody = observer(function NoteCardBody(
           onChange={(markdown) => {
             setNoteText(state, memo.id, markdown);
           }}
+          toolbarActions={
+            <>
+              <IconButton
+                icon={memo.is_enabled ? IconCircleCheck : IconCircleOff}
+                label={memo.is_enabled ? "Disable note" : "Enable note"}
+                sizeVariant="inline"
+                disabled={inFlight}
+                onClick={() => {
+                  void toggleEnabled(state, memo.id);
+                }}
+              />
+              <IconButton
+                icon={IconPin}
+                label={memo.is_forced ? "Stop forcing note" : "Force note"}
+                sizeVariant="inline"
+                color={memo.is_forced ? FORCED_COLOR : undefined}
+                disabled={inFlight}
+                onClick={() => {
+                  void toggleForced(state, memo.id);
+                }}
+              />
+            </>
+          }
         />
       </Box>
-      <Group gap="xs" wrap="nowrap">
-        <IconButton
-          icon={memo.is_enabled ? IconCircleCheck : IconCircleOff}
-          label={memo.is_enabled ? "Disable note" : "Enable note"}
-          sizeVariant="inline"
-          disabled={inFlight}
-          onClick={() => {
-            void toggleEnabled(state, memo.id);
-          }}
-        />
-        <IconButton
-          icon={IconPin}
-          label={memo.is_forced ? "Stop forcing note" : "Force note"}
-          sizeVariant="inline"
-          color={memo.is_forced ? FORCED_COLOR : undefined}
-          disabled={inFlight}
-          onClick={() => {
-            void toggleForced(state, memo.id);
-          }}
-        />
-        <Text c="dimmed" size="sm">
-          {reachStatement(memoReach(memo))}
-        </Text>
-      </Group>
+      <Text c="dimmed" size="sm">
+        {reachStatement(memoReach(memo))}
+      </Text>
       {failure !== null && (
         <Text c="red" size="sm">
           {failure}
@@ -242,7 +246,14 @@ export type MemoLevelLayout = "list" | "grid";
 export const MemoLevelGroup = observer(function MemoLevelGroup(
   props: MemoLevelGroupProps,
 ): React.JSX.Element {
-  const { state, title, headingOrder, onRetry, reorderable = false, layout = "list" } = props;
+  const {
+    state,
+    title,
+    headingOrder,
+    onRetry,
+    reorderable = false,
+    layout = "list",
+  } = props;
   const headingId = useId();
 
   // D5: leaving keeps the edit. Flushes the state captured at mount, once, on unmount.
@@ -287,7 +298,8 @@ export const MemoLevelGroup = observer(function MemoLevelGroup(
     if (newNote === null) {
       return null;
     }
-    // D13: no flag controls and no reach line — there is no stored row yet.
+    // D13: no flag controls and no reach line — there is no stored row yet. Fast 012: saved
+    // on focus leaving it, no Save/Cancel.
     return (
       <Box component="li" key="new-note">
         <Stack gap={4}>
@@ -349,17 +361,6 @@ export const MemoLevelGroup = observer(function MemoLevelGroup(
             {renderSavedNotes()}
           </Box>
         )}
-        <Group>
-          <Button
-            leftSection={<IconPlus size={ICON_SIZE} stroke={ICON_STROKE} />}
-            disabled={state.newNote !== null}
-            onClick={() => {
-              openNewNote(state);
-            }}
-          >
-            New note
-          </Button>
-        </Group>
       </Stack>
     );
   };
@@ -368,9 +369,21 @@ export const MemoLevelGroup = observer(function MemoLevelGroup(
   return (
     <section aria-labelledby={headingId}>
       <Stack gap="xs">
-        <Title order={headingOrder} id={headingId}>
-          {title}
-        </Title>
+        <Group gap="xs" wrap="nowrap">
+          <Title order={headingOrder} id={headingId}>
+            {title}
+          </Title>
+          {state.status === "ready" && (
+            <IconButton
+              icon={IconPlus}
+              label="New note"
+              disabled={state.newNote !== null}
+              onClick={() => {
+                openNewNote(state);
+              }}
+            />
+          )}
+        </Group>
         {failedReorder !== null && (
           // The level's own failure: inside the region, outside every listitem (D7).
           <Text c="red" size="sm">

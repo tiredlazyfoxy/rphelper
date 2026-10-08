@@ -20,6 +20,15 @@
 // is unchanged. The slot cases are in the block after DoD-4, under a describe naming 019 step 004,
 // so their "— DoD-N" tags are 019 step 004's: a given slot renders in Send's place with "Send"
 // absent and the send-blocked reason still shown; an omitted slot keeps the labelled Send.
+//
+// Amended by fast feature 011 (composer-send-icon-and-shortcut). Send is now an icon-only
+// button (accessible name exactly "Send", no visible text) inside the text box's Mantine input
+// wrapper; `sendSlot` takes that in-box position; the row under the box holds the blocked reason
+// and `besideSend` only. So `buttonNames()` now reads accessible names, and the two order cases
+// (018 DoD-4, 019 DoD-7) assert "inside the box" instead of "after the under-area" — tagged
+// "fast/011 DoD-14". New fast/011 cases (DoD-6..DoD-12) are in the block at the end; the
+// Ctrl/Cmd+Enter cases (DoD-1..DoD-5) live in ComposerCore.keyboard.test.tsx. jsdom has no
+// layout, so layout is asserted on attributes and inline styles / CSS variables only.
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readdirSync, readFileSync } from "node:fs";
@@ -106,8 +115,57 @@ function precedes(first: Node, second: Node): boolean {
   return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 }
 
+/** Each button's accessible name: its aria-label when it has one, else its text (fast/011). */
 function buttonNames(): string[] {
-  return screen.getAllByRole("button").map((button) => button.textContent?.trim() ?? "");
+  return screen
+    .getAllByRole("button")
+    .map((button) => button.getAttribute("aria-label") ?? button.textContent?.trim() ?? "");
+}
+
+/**
+ * fast/011: the Mantine input root/wrapper that contains the "Composer" textarea — the "text
+ * box" Send now sits inside. The outermost of Mantine's input root / input wrapper.
+ */
+function inputBox(textarea: HTMLElement): HTMLElement {
+  const box =
+    textarea.closest<HTMLElement>(".mantine-InputWrapper-root, .mantine-Textarea-root") ??
+    textarea.closest<HTMLElement>(".mantine-Input-wrapper, .mantine-Textarea-wrapper");
+  if (box === null) throw new Error("the Composer textarea has no Mantine input wrapper");
+  return box;
+}
+
+/** fast/011: every ancestor of `node` strictly inside document.body. */
+function ancestors(node: HTMLElement): HTMLElement[] {
+  const found: HTMLElement[] = [];
+  for (let el = node.parentElement; el !== null && el !== document.body; el = el.parentElement) {
+    found.push(el);
+  }
+  return found;
+}
+
+const CAP_720 = /(^|[^\d.])(720px|45rem)/;
+
+/** fast/011: whether the element carries a 720px max-width (inline style, as Mantine emits `maw`). */
+function carries720MaxWidth(el: HTMLElement): boolean {
+  const raw = el.getAttribute("style") ?? "";
+  const declared = [...raw.matchAll(/(?:^|;)\s*max-width\s*:\s*([^;]+)/g)].map((match) => match[1] ?? "");
+  const candidates = [...declared, el.style.maxWidth, el.style.getPropertyValue("--maw")];
+  return candidates.some((value) => CAP_720.test(value));
+}
+
+/** fast/011: every resize value set inline on the textarea or its ancestors. */
+function resizeValues(textarea: HTMLElement): string[] {
+  const values: string[] = [];
+  for (const el of [textarea, ...ancestors(textarea)]) {
+    const raw = el.getAttribute("style") ?? "";
+    for (const match of raw.matchAll(/(?:^|;)\s*(?:--input-resize|resize)\s*:\s*([a-z-]+)/g)) {
+      if (match[1] !== undefined) values.push(match[1]);
+    }
+    const variable = el.style.getPropertyValue("--input-resize").trim();
+    if (variable !== "") values.push(variable);
+    if (el.style.resize !== "") values.push(el.style.resize);
+  }
+  return values;
 }
 
 // ---------------------------------------------------------------- DoD-1
@@ -311,7 +369,9 @@ describe("ComposerCore — paste (US-035.AC-1, US-035.AC-2, D4)", () => {
 
 // ---------------------------------------------------------------- DoD-4
 describe("ComposerCore — slots, and nothing of the stream's own (D4, US-117.AC-4)", () => {
-  it("renders the under-area slot after the text area and the beside-Send slot after Send, in document order — DoD-4", () => {
+  // Amended by fast/011 (DoD-9, DoD-14): Send moved inside the text box, so it no longer sits
+  // after the under-area slot; the beside-Send slot still follows Send and the under-area.
+  it("renders the under-area slot after the text area, Send inside the text box, and the beside-Send slot after Send and the under-area, in document order — DoD-4 (fast/011 DoD-14)", () => {
     renderCore(
       baseProps({
         draft: "Hello",
@@ -326,7 +386,8 @@ describe("ComposerCore — slots, and nothing of the stream's own (D4, US-117.AC
     const beside = screen.getByRole("button", { name: "Beside Send" });
 
     expect(precedes(textbox, under)).toBe(true);
-    expect(precedes(under, send)).toBe(true);
+    expect(inputBox(textbox).contains(send)).toBe(true);
+    expect(precedes(under, beside)).toBe(true);
     expect(precedes(send, beside)).toBe(true);
     expect(buttonNames()).toEqual(["Send", "Beside Send"]);
   });
@@ -363,7 +424,9 @@ describe("019 step 004 — ComposerCore's sendSlot (workspace-shell 'The stop co
     expect(buttonNames()).toEqual(["Slot Stop"]);
   });
 
-  it("the slot sits where Send sat: after the text area and the under-area slot, before the beside-Send slot — DoD-7", () => {
+  // Amended by fast/011 (DoD-8, DoD-14): Send's place is now inside the text box, so the slot
+  // sits there too — inside the box, ahead of the under-area slot and the beside-Send slot.
+  it("the slot sits where Send sits: inside the text box, with the under-area after the text area and the beside-Send slot after both — DoD-7 (fast/011 DoD-14)", () => {
     renderCore(
       baseProps({
         draft: "Hello",
@@ -379,7 +442,8 @@ describe("019 step 004 — ComposerCore's sendSlot (workspace-shell 'The stop co
     const beside = screen.getByRole("button", { name: "Beside Send" });
 
     expect(precedes(textbox, under)).toBe(true);
-    expect(precedes(under, slot)).toBe(true);
+    expect(inputBox(textbox).contains(slot)).toBe(true);
+    expect(precedes(under, beside)).toBe(true);
     expect(precedes(slot, beside)).toBe(true);
     expect(buttonNames()).toEqual(["Slot Stop", "Beside Send"]);
   });
@@ -438,6 +502,153 @@ describe("019 step 004 — ComposerCore's sendSlot (workspace-shell 'The stop co
 
     expect(sendButton()).toBeDisabled();
     expect(buttonNames()).toEqual(["Send"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fast feature 011 — Send as an in-box icon, the row under the box, resize and layout props.
+// Every "fast/011 DoD-N" here is fast feature 011's.
+describe("fast/011 — Send inside the text box (Interface intent: Send control)", () => {
+  it('Send is a button named exactly "Send" with no visible "Send" text, an icon, inside the text box\'s input wrapper — fast/011 DoD-6', () => {
+    renderCore(baseProps({ draft: "Hello", underArea: <p>Under the text area</p> }));
+
+    const textbox = composer();
+    const send = sendButton();
+
+    expect(send.textContent ?? "").not.toMatch(/Send/);
+    expect(send.querySelector("svg")).not.toBeNull();
+    expect(screen.queryByText("Send")).toBeNull();
+    expect(inputBox(textbox).contains(send)).toBe(true);
+    // Not in the row under the box: it precedes the under-area slot.
+    expect(precedes(send, screen.getByText("Under the text area"))).toBe(true);
+  });
+
+  it("Send is enabled when sendEnabled is true and no reason is set; clicking it calls onSend once — fast/011 DoD-7", async () => {
+    const onSend = vi.fn<() => void>();
+    const user = newUser();
+    renderCore(baseProps({ draft: "Hello", onSend, sendEnabled: true, sendBlockedReason: null }));
+
+    expect(sendButton()).toBeEnabled();
+    await user.click(sendButton());
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("Send is disabled when sendEnabled is false — fast/011 DoD-7", () => {
+    renderCore(baseProps({ draft: "Hello", sendEnabled: false }));
+
+    expect(sendButton()).toBeDisabled();
+  });
+
+  it("Send is disabled when a blocked reason is set, even with sendEnabled true — fast/011 DoD-7", () => {
+    renderCore(baseProps({ draft: "Hello", sendEnabled: true, sendBlockedReason: NO_MODEL_REASON }));
+
+    expect(sendButton()).toBeDisabled();
+  });
+
+  it('with sendSlot provided, no "Send" button exists and the slot renders inside the text box\'s input wrapper — fast/011 DoD-8', () => {
+    renderCore(baseProps({ draft: "Hello", sendSlot: <button type="button">Slot Stop</button> }));
+
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    const slot = screen.getByRole("button", { name: "Slot Stop" });
+    expect(inputBox(composer()).contains(slot)).toBe(true);
+  });
+});
+
+describe("fast/011 — the row under the box (Interface intent: Row under the box)", () => {
+  it("besideSend and the blocked reason render outside the input wrapper, after the textarea and after underArea; underArea follows the textarea — fast/011 DoD-9", () => {
+    renderCore(
+      baseProps({
+        draft: "Hello",
+        sendBlockedReason: NO_MODEL_REASON,
+        underArea: <p>Under the text area</p>,
+        besideSend: <button type="button">Settle</button>,
+      }),
+    );
+
+    const textbox = composer();
+    const box = inputBox(textbox);
+    const under = screen.getByText("Under the text area");
+    const reason = screen.getByText(NO_MODEL_REASON);
+    const settle = screen.getByRole("button", { name: "Settle" });
+
+    expect(box.contains(under)).toBe(false);
+    expect(box.contains(reason)).toBe(false);
+    expect(box.contains(settle)).toBe(false);
+
+    expect(precedes(textbox, under)).toBe(true);
+    expect(precedes(textbox, reason)).toBe(true);
+    expect(precedes(textbox, settle)).toBe(true);
+    expect(precedes(under, reason)).toBe(true);
+    expect(precedes(under, settle)).toBe(true);
+  });
+
+  it("with sendSlot given, besideSend still renders outside the input wrapper after underArea — fast/011 DoD-9", () => {
+    renderCore(
+      baseProps({
+        draft: "Hello",
+        underArea: <p>Under the text area</p>,
+        besideSend: <button type="button">Settle</button>,
+        sendSlot: <button type="button">Slot Stop</button>,
+      }),
+    );
+
+    const textbox = composer();
+    const settle = screen.getByRole("button", { name: "Settle" });
+    const under = screen.getByText("Under the text area");
+
+    expect(inputBox(textbox).contains(settle)).toBe(false);
+    expect(precedes(textbox, under)).toBe(true);
+    expect(precedes(under, settle)).toBe(true);
+  });
+});
+
+describe("fast/011 — resize and layout props (Interface intent: Text box, full-width flag, minimum rows)", () => {
+  it("the Composer textarea is resizable vertically only — fast/011 DoD-10", () => {
+    renderCore(baseProps({ draft: "Hello" }));
+
+    const values = resizeValues(composer());
+
+    expect(values).toContain("vertical");
+    expect(values).not.toContain("both");
+    expect(values).not.toContain("horizontal");
+  });
+
+  it("with fullWidth and minRows set, the textarea is still resizable vertically only — fast/011 DoD-10", () => {
+    renderCore(baseProps({ draft: "Hello", fullWidth: true, minRows: 10 }));
+
+    const values = resizeValues(composer());
+
+    expect(values).toContain("vertical");
+    expect(values).not.toContain("both");
+    expect(values).not.toContain("horizontal");
+  });
+
+  it("with defaults, the textarea has rows 2 and the composer's outer wrapper carries a 720px max-width — fast/011 DoD-11", () => {
+    renderCore(baseProps({ draft: "Hello" }));
+
+    const textbox = composer();
+
+    expect(textbox).toHaveAttribute("rows", "2");
+    expect(ancestors(textbox).some(carries720MaxWidth)).toBe(true);
+  });
+
+  it.each([1, 5, 10])("with minRows %i, the textarea's rows is that number — fast/011 DoD-11", (rows) => {
+    renderCore(baseProps({ draft: "Hello", minRows: rows }));
+
+    expect(composer()).toHaveAttribute("rows", String(rows));
+  });
+
+  it("with fullWidth on, no ancestor of the textarea carries a 720px max-width — fast/011 DoD-12", () => {
+    renderCore(baseProps({ draft: "Hello", fullWidth: true }));
+
+    expect(ancestors(composer()).filter(carries720MaxWidth)).toEqual([]);
+  });
+
+  it("with fullWidth explicitly false, the 720px max-width is kept — fast/011 DoD-11", () => {
+    renderCore(baseProps({ draft: "Hello", fullWidth: false }));
+
+    expect(ancestors(composer()).some(carries720MaxWidth)).toBe(true);
   });
 });
 

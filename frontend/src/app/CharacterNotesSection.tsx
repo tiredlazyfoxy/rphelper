@@ -7,6 +7,10 @@
 // Feature 018, step 005 (D8): the group renders as a reorderable grid inside this section's
 // own `DndContext` (the page has no chain section), with the shared sensors and
 // announcements from `memoDnd` and 016's drop effect over its one level.
+//
+// Feature 033, step 002 (D6): the group renders as a reorderable single-column list in
+// "header add" mode — a '+' beside the "Notes" heading opens an inline draft with Save and
+// Cancel icon buttons and no blur-save.
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
@@ -75,7 +79,7 @@ export const CharacterNotesSection = observer(function CharacterNotesSection(
         title="Notes"
         headingOrder={3}
         onRetry={retry}
-        layout="grid"
+        layout="list"
         reorderable
       />
     </DndContext>

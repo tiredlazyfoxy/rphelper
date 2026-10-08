@@ -25,7 +25,7 @@
 // movement are never exercised (jsdom zero-size rects, 016 D8).
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoChainSection } from "../../src/app/MemoChainSection";
 import type { Memo, MemoChainLevel, MemoScope } from "../../src/app/memosApi";
@@ -38,13 +38,14 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
     value: string;
     onChange: (markdown: string) => void;
     readOnly?: boolean;
+    toolbarActions?: ReactNode;
   };
   return {
     MarkdownEditor: (props: StubProps) => {
       const id = `markdown-editor-${useId()}`;
       return createElement(
         "div",
-        null,
+        { "data-testid": "markdown-editor-stub" },
         createElement("label", { htmlFor: id }, props.label),
         createElement("textarea", {
           id,
@@ -52,6 +53,10 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
           readOnly: props.readOnly ?? false,
           onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
         }),
+        // fast 012: the toolbar-actions prop (a saved note's flags) renders inside the root.
+        props.toolbarActions === undefined || props.toolbarActions === null
+          ? null
+          : createElement("div", { "data-testid": "stub-toolbar-actions" }, props.toolbarActions),
       );
     },
   };
@@ -693,5 +698,153 @@ describe("the chain's announcements come from the shared builder (018 005)", () 
     for (const id of memoIds(FOUR_LEVELS)) {
       expect(message).not.toContain(id);
     }
+  });
+});
+
+// ===========================================================================
+// Fast feature 012 — the wall's levels inherit the one note behaviour (012 plan.md Interface
+// intent "MemoLevelGroup"; DoD-3, DoD-5, DoD-6, DoD-10, DoD-13). The stub renders the
+// `toolbarActions` prop inside its root as `[data-testid="stub-toolbar-actions"]`.
+const SAVE_NEW_NOTE = "Save new note";
+const CANCEL_NEW_NOTE = "Cancel new note";
+const ORDER_PATH = "/api/memos/order";
+
+function precedes(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+describe("fast 012 — each wall level's header '+', no Save / Cancel, flags in the editor", () => {
+  it("each level group has exactly one New note button, in its header beside its title and before its list — fast 012 DoD-3", async () => {
+    await readyFour();
+
+    for (const title of ALL_TITLES) {
+      const buttons = within(group(title)).getAllByRole("button", { name: NEW_NOTE });
+      expect(buttons).toHaveLength(1);
+      const plus = buttons[0];
+      const heading = within(group(title)).getByRole("heading", { name: title });
+      expect(heading.parentElement?.contains(plus)).toBe(true);
+      const list = groupItems(title)[0].closest("ul");
+      expect(list).not.toBeNull();
+      expect(precedes(heading, plus)).toBe(true);
+      expect(precedes(plus, list as HTMLElement)).toBe(true);
+      for (const item of groupItems(title)) {
+        expect(item.contains(plus)).toBe(false);
+      }
+    }
+  });
+
+  it("no Save new note or Cancel new note renders, before or with a draft open; the draft saves when focus leaves it — fast 012 DoD-5, DoD-6", async () => {
+    const { calls } = await readyFour();
+    const user = newUser();
+
+    expect(screen.queryByRole("button", { name: SAVE_NEW_NOTE })).toBeNull();
+    expect(screen.queryByRole("button", { name: CANCEL_NEW_NOTE })).toBeNull();
+    await user.click(within(group(SESSION_NOTES)).getByRole("button", { name: NEW_NOTE }));
+    await waitFor(() => {
+      expect(groupItems(SESSION_NOTES)).toHaveLength(SESSION_BODIES.length + 1);
+    });
+    expect(within(group(SESSION_NOTES)).getByRole("button", { name: NEW_NOTE })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: SAVE_NEW_NOTE })).toBeNull();
+    expect(screen.queryByRole("button", { name: CANCEL_NEW_NOTE })).toBeNull();
+
+    const fresh = within(groupItems(SESSION_NOTES)[0]).getByRole("textbox", { name: NOTE_LABEL });
+    fireEvent.change(fresh, { target: { value: "The lanterns go out at midnight." } });
+    fireEvent.blur(fresh);
+
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    });
+    await waitFor(() => {
+      expect(within(group(SESSION_NOTES)).getByRole("button", { name: NEW_NOTE })).toBeEnabled();
+    });
+    expect(groupBodies(SESSION_NOTES)[0]).toBe("The lanterns go out at midnight.");
+    expect(screen.queryByRole("button", { name: SAVE_NEW_NOTE })).toBeNull();
+  });
+
+  it("each saved note's flag buttons render inside its editor root — fast 012 DoD-10", async () => {
+    await readyFour();
+
+    for (const title of ALL_TITLES) {
+      for (const item of groupItems(title)) {
+        const root = item.querySelector('[data-testid="markdown-editor-stub"]');
+        expect(root).not.toBeNull();
+        const disable = within(item).getByRole("button", { name: "Disable note" });
+        const force = within(item).getByRole("button", { name: "Force note" });
+        expect((root as HTMLElement).contains(disable)).toBe(true);
+        expect((root as HTMLElement).contains(force)).toBe(true);
+      }
+    }
+  });
+});
+
+describe("fast 012 — the wall's notes stay keyboard-reorderable (US-102)", () => {
+  /** Stack every note row on the page: the i-th listitem in the document spans y = i*100 .. +80. */
+  function stackAllRows(): void {
+    const original = Element.prototype.getBoundingClientRect;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      if (this.tagName === "LI" && this.parentElement?.tagName === "UL") {
+        const index = Array.from(document.querySelectorAll("ul > li")).indexOf(this);
+        const top = index * 100;
+        return {
+          x: 0,
+          y: top,
+          top,
+          left: 0,
+          right: 300,
+          bottom: top + 80,
+          width: 300,
+          height: 80,
+          toJSON: () => ({}),
+        } as DOMRect;
+      }
+      return original.call(this);
+    });
+  }
+
+  it("moving the first Session note down one place by keyboard sends that level's whole order once — fast 012 DoD-13", async () => {
+    stackAllRows();
+    const sessionIds = SESSION_LEVEL.memos.map((row) => row.id);
+    const { calls } = stubBackend((request) => {
+      if (isChainRead(request)) return jsonResponse({ levels: FOUR_LEVELS }, 200);
+      if (request.method === "PUT" && request.path === ORDER_PATH && request.search === "") {
+        const sent = request.body as { memo_ids: string[] };
+        const byId = new Map(SESSION_LEVEL.memos.map((row) => [row.id, row]));
+        const ordered = sent.memo_ids.map((id, index) => {
+          const row = byId.get(id);
+          if (row === undefined) throw new Error(`unknown memo id ${id}`);
+          return { ...row, sort_key: index };
+        });
+        return jsonResponse({ memos: ordered }, 200);
+      }
+      return notFoundResponse();
+    });
+    renderSection();
+    await waitFor(() => {
+      expect(within(notesRegion()).queryByRole("region", { name: SESSION_NOTES })).not.toBeNull();
+    });
+
+    const card = groupItems(SESSION_NOTES)[0];
+    card.focus();
+    pressSpace(card);
+    await settle();
+    fireEvent.keyDown(document.activeElement ?? card, { code: "ArrowDown", key: "ArrowDown" });
+    await settle();
+    fireEvent.keyDown(document.activeElement ?? card, { code: "Space", key: " " });
+
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === "PUT")).toHaveLength(1);
+    });
+    await settle();
+    const puts = calls.filter((call) => call.method === "PUT");
+    expect(puts).toHaveLength(1);
+    expect(puts[0]).toMatchObject({ method: "PUT", path: ORDER_PATH, search: "" });
+    expect(puts[0].body).toMatchObject({
+      scope: "session",
+      scope_id: SESSION_ID,
+      memo_ids: [sessionIds[1], sessionIds[0]],
+    });
+    await waitFor(() => {
+      expect(groupBodies(SESSION_NOTES)).toEqual([SESSION_BODIES[1], SESSION_BODIES[0]]);
+    });
   });
 });

@@ -35,6 +35,12 @@
 //   asserted (jsdom rects are zero-size).
 // - Negative keyboard checks run before the positive control in the same render, because a
 //   successful activation leaves a drag in progress.
+//
+// Fast feature 012 (DoD-14): the stub renders the `toolbarActions` prop inside its root
+// element (`[data-testid="stub-toolbar-actions"]`), so the saved notes' flag buttons, now
+// passed as the editor's toolbar actions, still resolve by role and name. "New note" is the
+// header '+' (one button, same name). The 012 behaviour itself is in
+// MemoLevelGroup.headerAdd.test.tsx.
 import { DndContext, KeyboardSensor, useSensor, useSensors, type DragStartEvent } from "@dnd-kit/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -69,6 +75,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
     onChange: (markdown: string) => void;
     readOnly?: boolean;
     autoFocus?: boolean;
+    toolbarActions?: ReactNode;
   };
   return {
     MarkdownEditor: (props: StubProps) => {
@@ -81,7 +88,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
       const id = `markdown-editor-${useId()}`;
       return createElement(
         "div",
-        null,
+        { "data-testid": "markdown-editor-stub" },
         createElement("label", { htmlFor: id }, props.label),
         createElement("textarea", {
           id,
@@ -90,6 +97,11 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
           "data-autofocus": props.autoFocus === true ? "true" : "false",
           onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
         }),
+        // fast 012: the toolbar-actions prop renders inside the stub's root, as the real
+        // editor renders it inside its toolbar (so focus moving to a flag stays in the note).
+        props.toolbarActions === undefined || props.toolbarActions === null
+          ? null
+          : createElement("div", { "data-testid": "stub-toolbar-actions" }, props.toolbarActions),
       );
     },
   };

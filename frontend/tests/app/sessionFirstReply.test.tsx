@@ -58,6 +58,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
     value: string;
     onChange: (markdown: string) => void;
     readOnly?: boolean;
+    toolbarActions?: ReactNode;
   };
   return {
     MarkdownEditor: (props: StubProps) => {
@@ -72,6 +73,10 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
           readOnly: props.readOnly ?? false,
           onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
         }),
+        // fast 012: the toolbar-actions prop (a saved note's flags) renders inside the root.
+        props.toolbarActions === undefined || props.toolbarActions === null
+          ? null
+          : createElement("div", { "data-testid": "stub-toolbar-actions" }, props.toolbarActions),
       );
     },
   };
@@ -454,7 +459,8 @@ describe("CharacterComposer — the push carries the marker (US-117.AC-3, D2, 01
     const user = newUser();
     renderComposer();
 
-    const region = screen.getByRole("region", { name: "Start a session" });
+    // 033 DoD-13: the composer region is named "New session".
+    const region = screen.getByRole("region", { name: "New session" });
     await user.type(within(region).getByRole("textbox", { name: "Composer" }), "Hello there");
     await user.click(within(region).getByRole("button", { name: "Send" }));
 

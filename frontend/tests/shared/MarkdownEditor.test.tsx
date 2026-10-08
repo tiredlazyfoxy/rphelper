@@ -269,6 +269,142 @@ describe("readOnly hides the toolbar and locks the surface", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Fast feature 012 — the optional toolbar-actions slot (012 DoD-1, DoD-2).
+// Expected behaviour comes from docs/plans/fast/012.notes-autosave-toolbar-flags/plan.md
+// (Interface intent "MarkdownEditor (shared)"): content passed as toolbar actions renders
+// inside the editor's toolbar as one extra controls group after the four existing groups; when
+// omitted the toolbar is exactly as before; when readOnly no toolbar renders and neither does
+// the content. Bound to the frozen `toolbarActions?: React.ReactNode`.
+// Recognition conventions: the toolbar is Mantine's `.mantine-RichTextEditor-toolbar`, its
+// groups `.mantine-RichTextEditor-controlsGroup`; the Bold control is the button named /bold/i.
+// The actions are a sentinel button named "Sentinel action".
+
+const TOOLBAR = ".mantine-RichTextEditor-toolbar";
+const CONTROLS_GROUP = ".mantine-RichTextEditor-controlsGroup";
+const SENTINEL = "Sentinel action";
+
+function sentinelActions() {
+  return (
+    <button type="button" aria-label={SENTINEL} data-testid="sentinel-action">
+      S
+    </button>
+  );
+}
+
+function precedes(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+describe("the toolbar-actions slot (fast 012)", () => {
+  it("renders the toolbar actions inside the toolbar, after the Bold control in document order — 012 DoD-1", async () => {
+    renderEditor({
+      label: LABEL,
+      value: RICH_MARKDOWN,
+      onChange: vi.fn<(markdown: string) => void>(),
+      toolbarActions: sentinelActions(),
+    });
+
+    await screen.findByRole("textbox", { name: LABEL });
+    const sentinel = await screen.findByRole("button", { name: SENTINEL });
+    const toolbar = document.querySelector(TOOLBAR);
+    expect(toolbar).not.toBeNull();
+    expect((toolbar as HTMLElement).contains(sentinel)).toBe(true);
+    const bold = within(toolbar as HTMLElement).getByRole("button", { name: /bold/i });
+    expect(precedes(bold, sentinel)).toBe(true);
+    // One extra group after the existing four: the actions are not inside any of them.
+    const groups = Array.from((toolbar as HTMLElement).querySelectorAll(CONTROLS_GROUP));
+    const groupsWithBuiltIns = groups.filter((group) => group.contains(bold));
+    expect(groupsWithBuiltIns).toHaveLength(1);
+    expect(groupsWithBuiltIns[0].contains(sentinel)).toBe(false);
+    // The editable surface does not contain the actions.
+    expect(surface().contains(sentinel)).toBe(false);
+  });
+
+  it("renders the toolbar actions after every built-in control — 012 DoD-1", async () => {
+    renderEditor({
+      label: LABEL,
+      value: "",
+      onChange: vi.fn<(markdown: string) => void>(),
+      toolbarActions: sentinelActions(),
+    });
+
+    const sentinel = await screen.findByRole("button", { name: SENTINEL });
+    const toolbar = document.querySelector(TOOLBAR) as HTMLElement;
+    const builtIns = within(toolbar)
+      .getAllByRole("button")
+      .filter((element) => element !== sentinel);
+    expect(builtIns.length).toBeGreaterThan(0);
+    for (const control of builtIns) {
+      expect(precedes(control, sentinel)).toBe(true);
+    }
+  });
+
+  it("does not call onChange because toolbar actions are given — 012 DoD-1 (never-echo untouched)", async () => {
+    const onChange = vi.fn<(markdown: string) => void>();
+    renderEditor({ label: LABEL, value: FIRST_MARKDOWN, onChange, toolbarActions: sentinelActions() });
+
+    await screen.findByRole("button", { name: SENTINEL });
+    await settle();
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("without toolbar actions the toolbar renders its four existing controls groups and no extra content — 012 DoD-2", async () => {
+    renderEditor({ label: LABEL, value: RICH_MARKDOWN, onChange: vi.fn<(markdown: string) => void>() });
+
+    await screen.findByRole("textbox", { name: LABEL });
+    await waitFor(() => {
+      expect(document.querySelector(TOOLBAR)).not.toBeNull();
+    });
+    const toolbar = document.querySelector(TOOLBAR) as HTMLElement;
+    expect(within(toolbar).getByRole("button", { name: /bold/i })).toBeInTheDocument();
+    const groups = Array.from(toolbar.querySelectorAll(CONTROLS_GROUP));
+    expect(groups).toHaveLength(4);
+    // Nothing in the toolbar but those four groups.
+    expect(Array.from(toolbar.children).every((child) => groups.includes(child))).toBe(true);
+    expect(toolbar.children).toHaveLength(4);
+    expect(screen.queryByRole("button", { name: SENTINEL })).toBeNull();
+  });
+
+  it("with readOnly and toolbar actions, neither the toolbar nor the actions render — 012 DoD-2", async () => {
+    renderEditor({
+      label: LABEL,
+      value: RICH_MARKDOWN,
+      onChange: vi.fn<(markdown: string) => void>(),
+      readOnly: true,
+      toolbarActions: sentinelActions(),
+    });
+
+    await screen.findByRole("textbox", { name: LABEL });
+    await settle();
+
+    expect(document.querySelector(TOOLBAR)).toBeNull();
+    expect(screen.queryByRole("button", { name: SENTINEL })).toBeNull();
+    expect(screen.queryByTestId("sentinel-action")).toBeNull();
+    expect(screen.queryAllByRole("button")).toEqual([]);
+  });
+
+  it("flipping readOnly to true removes the toolbar actions with the toolbar — 012 DoD-2", async () => {
+    const onChange = vi.fn<(markdown: string) => void>();
+    const { rerenderWith } = renderEditor({
+      label: LABEL,
+      value: RICH_MARKDOWN,
+      onChange,
+      toolbarActions: sentinelActions(),
+    });
+
+    await screen.findByRole("button", { name: SENTINEL });
+
+    rerenderWith({ label: LABEL, value: RICH_MARKDOWN, onChange, readOnly: true, toolbarActions: sentinelActions() });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: SENTINEL })).toBeNull();
+    });
+    expect(document.querySelector(TOOLBAR)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DoD-5 — the dependency contract. package.json is configuration, not implementation.
 
 const FRONTEND_ROOT = path.resolve(__dirname, "..", "..");

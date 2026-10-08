@@ -16,15 +16,18 @@ import {
   Button,
   Center,
   Container,
+  Divider,
   Group,
   Loader,
   Stack,
+  Tabs,
   Text,
   TextInput,
   Title,
 } from "@mantine/core";
 import { IconArchive, IconArchiveOff, IconDownload } from "@tabler/icons-react";
 
+import { IconButton } from "../shared/IconButton";
 import { MarkdownEditor } from "../shared/MarkdownEditor";
 import { isArchived } from "./charactersApi";
 import type { CharactersState } from "./charactersState";
@@ -47,9 +50,8 @@ import { CharacterConfigSection } from "./CharacterConfigSection";
 import { CharacterComposer } from "./CharacterComposer";
 import type { SessionsState } from "./sessionsState";
 
-/** The repo's "main" icon metrics (`IconButton`'s `ICON_SIZES.main` / `ICON_STROKE`). */
-const ICON_SIZE = 18;
-const ICON_STROKE = 1.5;
+/** 033 D4: the Main info persona editor's minimum content height, in pixels. */
+const PERSONA_MIN_HEIGHT = 360;
 
 export type CharacterScreenProps = {
   /** The one workspace characters state `App` creates (D11); mutations apply into it. */
@@ -68,9 +70,10 @@ export type CharacterScreenProps = {
  * The character screen. New mode is the draft page: "New character", a "Draft" badge,
  * the marker line, Name and Persona, creating on the first committed non-blank name
  * (018 D6). Existing mode loads on mount and renders loading / not-found / failed / ready,
- * where ready carries the header, Name and Persona (saved on focus loss, 018 D7),
- * Archive-or-Restore, then Notes → Setups → Configuration → Sessions → the page composer
- * (018 D10). Pending edits are flushed on unmount. Failures render inline (D12).
+ * where ready carries the header (saved name, Archived badge, icon-only Archive-or-Restore
+ * and Export, 033 D3), then five tabs (033 D1): Sessions (composer, divider, sessions
+ * list), Main info (Name and Persona, saved on focus loss, 018 D7), Configuration, Notes,
+ * Setups. Pending edits are flushed on unmount. Failures render inline (D12).
  */
 export const CharacterScreen = observer(function CharacterScreen(
   props: CharacterScreenProps,
@@ -259,76 +262,95 @@ export const CharacterScreen = observer(function CharacterScreen(
   return (
     <Container size="md" py="md">
       <Stack gap="md">
-        <Group gap="sm">
-          {/* The saved name, not the draft: the heading follows the server's row. */}
-          <Title order={2}>{character === null ? "" : character.name}</Title>
-          {archived && (
-            <Badge color="gray" variant="light">
-              Archived
-            </Badge>
-          )}
+        {/* 033 D3: the page header — saved name, the Archived badge and the icon-only
+            actions. The draft page returns above, so it offers none of them. */}
+        <Group gap="sm" justify="space-between" wrap="nowrap">
+          <Group gap="sm">
+            {/* The saved name, not the draft: the heading follows the server's row. */}
+            <Title order={2}>{character === null ? "" : character.name}</Title>
+            {archived && (
+              <Badge color="gray" variant="light">
+                Archived
+              </Badge>
+            )}
+          </Group>
+          <Group gap="xs" wrap="nowrap">
+            {/* D4: no confirm — archiving destroys nothing. */}
+            {archived ? (
+              <IconButton
+                icon={IconArchiveOff}
+                label="Restore"
+                disabled={submitting}
+                onClick={onRestore}
+              />
+            ) : (
+              <IconButton
+                icon={IconArchive}
+                label="Archive"
+                disabled={submitting}
+                onClick={onArchive}
+              />
+            )}
+            {/* 030 006: rendered under Archive/Restore's condition. No confirm: an export
+                is not lossy. Busy is expressed as disabled while the export is in flight. */}
+            <IconButton icon={IconDownload} label="Export" disabled={exporting} onClick={onExport} />
+          </Group>
         </Group>
         {renderError()}
-        <TextInput
-          label="Name"
-          value={state.name}
-          onChange={onNameChange}
-          onBlur={() => {
-            void commitName(state, characters);
-          }}
-          error={state.nameError}
-        />
-        <Box onBlur={onPersonaBlur}>
-          <MarkdownEditor
-            label="Persona"
-            value={state.sheet}
-            onChange={onSheetChange}
-            readOnly={submitting}
-          />
-        </Box>
-        <Group>
-          {/* D4: no confirm — archiving destroys nothing. */}
-          {archived ? (
-            <Button
-              variant="default"
-              leftSection={<IconArchiveOff size={ICON_SIZE} stroke={ICON_STROKE} />}
-              disabled={submitting}
-              onClick={onRestore}
-            >
-              Restore
-            </Button>
-          ) : (
-            <Button
-              variant="default"
-              leftSection={<IconArchive size={ICON_SIZE} stroke={ICON_STROKE} />}
-              disabled={submitting}
-              onClick={onArchive}
-            >
-              Archive
-            </Button>
-          )}
-          {/* 030 006: beside Archive/Restore and inside the same `Group`, so its render
-              condition is that button's exactly — the draft page returns above and offers
-              no export. No confirm: an export is not lossy. */}
-          <Button
-            variant="default"
-            leftSection={<IconDownload size={ICON_SIZE} stroke={ICON_STROKE} />}
-            loading={exporting}
-            onClick={onExport}
-          >
-            Export
-          </Button>
-        </Group>
-        {/* 018 D10: the body order — Notes (the page's grid) → Setups → Configuration →
-            Sessions → the page composer last. Each section is keyed by the character id
-            so a different character builds fresh section state; the id is the route's
-            string, used verbatim. Sibling keys must be distinct, so each carries its own
-            prefix — a shared key made React duplicate the regions on every re-render. */}
-        {id !== null && <CharacterNotesSection key={`notes-${id}`} characterId={id} />}
-        {id !== null && <SetupsSection key={`setups-${id}`} characterId={id} />}
-        {id !== null && <CharacterConfigSection key={`config-${id}`} characterId={id} headingOrder={3} />}
-        {id !== null && <SessionsSection key={`sessions-${id}`} characterId={id} sessions={sessions} />}
-        {id !== null && <CharacterComposer key={`composer-${id}`} characterId={id} sessions={sessions} />}
+        {/* 033 D1 / D2: five tabs, Sessions selected on open. The active tab is local
+            component state (not in the URL); keyed by the id so another character starts
+            on Sessions. `keepMounted` stays at its default, so every section mounts and
+            loads once on page open. Each section keeps its own distinct key prefix — a
+            shared sibling key made React duplicate the regions on every re-render. */}
+        {id !== null && (
+          <Tabs key={`tabs-${id}`} defaultValue="sessions">
+            <Tabs.List>
+              <Tabs.Tab value="sessions">Sessions</Tabs.Tab>
+              <Tabs.Tab value="main">Main info</Tabs.Tab>
+              <Tabs.Tab value="config">Configuration</Tabs.Tab>
+              <Tabs.Tab value="notes">Notes</Tabs.Tab>
+              <Tabs.Tab value="setups">Setups</Tabs.Tab>
+            </Tabs.List>
+            <Tabs.Panel value="sessions" pt="md">
+              <Stack gap="md">
+                <CharacterComposer key={`composer-${id}`} characterId={id} sessions={sessions} />
+                <Divider />
+                <SessionsSection key={`sessions-${id}`} characterId={id} sessions={sessions} />
+              </Stack>
+            </Tabs.Panel>
+            <Tabs.Panel value="main" pt="md">
+              <Stack gap="md">
+                <TextInput
+                  label="Name"
+                  value={state.name}
+                  onChange={onNameChange}
+                  onBlur={() => {
+                    void commitName(state, characters);
+                  }}
+                  error={state.nameError}
+                />
+                <Box onBlur={onPersonaBlur}>
+                  <MarkdownEditor
+                    label="Persona"
+                    value={state.sheet}
+                    onChange={onSheetChange}
+                    readOnly={submitting}
+                    contentMinHeight={PERSONA_MIN_HEIGHT}
+                  />
+                </Box>
+              </Stack>
+            </Tabs.Panel>
+            <Tabs.Panel value="config" pt="md">
+              <CharacterConfigSection key={`config-${id}`} characterId={id} headingOrder={3} />
+            </Tabs.Panel>
+            <Tabs.Panel value="notes" pt="md">
+              <CharacterNotesSection key={`notes-${id}`} characterId={id} />
+            </Tabs.Panel>
+            <Tabs.Panel value="setups" pt="md">
+              <SetupsSection key={`setups-${id}`} characterId={id} />
+            </Tabs.Panel>
+          </Tabs>
+        )}
       </Stack>
     </Container>
   );

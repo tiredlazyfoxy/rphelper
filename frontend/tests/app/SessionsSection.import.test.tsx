@@ -25,6 +25,11 @@
 // renders inside `AppProviders` + `MemoryRouter`, so notifications are observable through
 // `.mantine-Notification-root`; `fetch` is stubbed per test, routed by method + exact pathname,
 // and answers anything else loudly.
+//
+// Amended by feature 033, step 005 (D8, D9): "Import session" is now an icon-only button in the
+// section's header beside the "Show archived sessions" switch (the "Start session" button it
+// used to sit beside is gone), still driven by the `FileButton`, and disabled while an import is
+// in flight. Its accessible name is unchanged, so the import clauses below hold as before.
 import { notifications } from "@mantine/notifications";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -43,7 +48,10 @@ type User = ReturnType<typeof userEvent.setup>;
 // ---------------------------------------------------------------- the spec's names
 const SESSIONS_REGION = /^sessions$/i;
 const IMPORT_BUTTON = /^import session$/i;
+/** 033 D9: the removed control, named only to assert its absence. */
 const START_BUTTON = /^start session$/i;
+const SESSIONS_HEADING = /^sessions$/i;
+const SHOW_ARCHIVED_SESSIONS = /^show archived sessions$/i;
 const UPLOAD_ICON = ".tabler-icon-upload";
 
 const NOTIFICATION = ".mantine-Notification-root";
@@ -142,10 +150,26 @@ function errorEnvelope(code: string, message: string, status: number): Response 
  * method and exact pathname. A successful import makes the server hold one more session, so a
  * later section-list answer carries a row the first one did not. Anything else is a loud 404.
  */
-function serveSection(options: { importFailure?: { code: string; status: number } } = {}) {
+type ServeOptions = {
+  importFailure?: { code: string; status: number };
+  /** 033 step 005: hold the import's answer until `releaseImport()` is called. */
+  holdImport?: true;
+};
+
+function serveSection(options: ServeOptions = {}) {
   const calls: Seen[] = [];
   const listed: Session[] = [ROW_A];
-  const mock = vi.fn<FetchFn>((input, init) => {
+  let releaseHeld: (() => void) | null = null;
+  const held =
+    options.holdImport === true
+      ? new Promise<void>((resolve) => {
+          releaseHeld = resolve;
+        })
+      : Promise.resolve();
+  const releaseImport = (): void => {
+    releaseHeld?.();
+  };
+  const mock = vi.fn<FetchFn>(async (input, init) => {
     const url = requestUrl(input);
     const method = requestMethod(input, init);
     calls.push({
@@ -156,6 +180,7 @@ function serveSection(options: { importFailure?: { code: string; status: number 
     });
 
     if (method === "POST" && url.pathname === IMPORT_PATH) {
+      await held;
       if (options.importFailure !== undefined) {
         return Promise.resolve(
           errorEnvelope(options.importFailure.code, SERVER_MESSAGE, options.importFailure.status),
@@ -180,7 +205,7 @@ function serveSection(options: { importFailure?: { code: string; status: number 
     );
   });
   vi.stubGlobal("fetch", mock);
-  return { mock, calls };
+  return { mock, calls, releaseImport };
 }
 
 function matching(calls: Seen[], method: string, path: string): Seen[] {
@@ -222,7 +247,7 @@ function renderSection() {
   );
 }
 
-async function renderListed(options: { importFailure?: { code: string; status: number } } = {}) {
+async function renderListed(options: ServeOptions = {}) {
   const server = serveSection(options);
   renderSection();
   await flush();
@@ -258,6 +283,16 @@ function sessionRow(id: string): HTMLElement | null {
   return link?.closest("tr") ?? null;
 }
 
+/** The smallest element containing every one of `nodes` — the header row they share. */
+function commonAncestor(nodes: HTMLElement[]): HTMLElement {
+  let candidate: HTMLElement | null = nodes[0];
+  while (candidate !== null && !nodes.every((node) => candidate?.contains(node) === true)) {
+    candidate = candidate.parentElement;
+  }
+  if (candidate === null) throw new Error("the given elements share no ancestor");
+  return candidate;
+}
+
 function notificationRoots(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>(NOTIFICATION));
 }
@@ -272,12 +307,23 @@ function dialogs(): HTMLElement[] {
 
 // ===========================================================================
 describe("the Sessions section offers Import session (US-082.AC-1, UC-064)", () => {
-  it("the section shows an Import session button beside Start session — DoD-6", async () => {
+  // Amended by 033 step 005 (D8, D9): the button sits in the header beside the archived switch;
+  // the "Start session" button it used to sit beside is gone.
+  it("the section shows an Import session button in its header beside the Show archived sessions switch, and no Start session — DoD-6 (and 033 step 005 DoD-1, DoD-2)", async () => {
     await renderListed();
 
     expect(importButton()).toBeInTheDocument();
-    // The existing control is still there: Import session is an addition, not a replacement.
-    expect(within(region()).getByRole("button", { name: START_BUTTON })).toBeInTheDocument();
+    const scope = within(region());
+    const title = scope.getByRole("heading", { name: SESSIONS_HEADING });
+    const toggle =
+      scope.queryByRole("switch", { name: SHOW_ARCHIVED_SESSIONS }) ??
+      scope.getByRole("checkbox", { name: SHOW_ARCHIVED_SESSIONS });
+    const header = commonAncestor([title, toggle, importButton()]);
+    expect(header).not.toBe(region());
+    const firstRow = sessionRow(ROW_A.id);
+    expect(firstRow).not.toBeNull();
+    expect(header.contains(firstRow)).toBe(false);
+    expect(scope.queryByRole("button", { name: START_BUTTON, hidden: true })).toBeNull();
   });
 
   it("choosing a session export posts it, parsed, to that character's import path — DoD-6", async () => {
@@ -293,7 +339,7 @@ describe("the Sessions section offers Import session (US-082.AC-1, UC-064)", () 
     expect(JSON.parse(posts[0].body ?? "null")).toEqual(envelope);
   });
 
-  it("after success it requests the section list again and shows the new session — DoD-6", async () => {
+  it("after success it requests the section list again and shows the new session — DoD-6 (and 033 step 005 DoD-3)", async () => {
     const { calls } = await renderListed();
     const user = newUser();
     // Baseline: the mount's listing carried only the existing row.
@@ -325,7 +371,7 @@ describe("the Sessions section offers Import session (US-082.AC-1, UC-064)", () 
     ]);
   });
 
-  it("a successful section import raises the coverage caveat and nothing else — DoD-6", async () => {
+  it("a successful section import raises the coverage caveat and nothing else — DoD-6 (and 033 step 005 DoD-3)", async () => {
     const { calls } = await renderListed();
     const user = newUser();
 
@@ -421,16 +467,96 @@ describe("no confirm dialog stands between the choice and the request (DoD-8)", 
 
 // ===========================================================================
 describe("the control's name and icon (DoD-9)", () => {
-  it("the button's accessible name is exactly Import session — DoD-9", async () => {
+  // Amended by 033 step 005 (D8): the control is icon-only; its accessible name stays exactly
+  // "Import session" and it shows no text of its own.
+  it("the button's accessible name is exactly Import session, and it is icon-only — DoD-9 (and 033 step 005 DoD-2)", async () => {
     await renderListed();
 
-    const button = importButton();
-    expect((button.textContent ?? "").trim()).toBe("Import session");
+    const named = within(region()).getAllByRole("button", { name: "Import session" });
+    expect(named).toHaveLength(1);
+    expect(named[0]).toBe(importButton());
+    expect((importButton().textContent ?? "").trim()).toBe("");
   });
 
-  it("the button renders the Tabler upload icon — DoD-9", async () => {
+  it("the button renders the Tabler upload icon — DoD-9 (and 033 step 005 DoD-2)", async () => {
     await renderListed();
 
     expect(importButton().querySelector(UPLOAD_ICON)).not.toBeNull();
+  });
+});
+
+// ===========================================================================
+// Feature 033, step 005 (D8, US-082): the icon button is busy — disabled — while the import is in
+// flight, and the import itself behaves as before.
+describe("033 step 005: Import session is disabled while an import is in flight (D8)", () => {
+  it("is enabled at rest, disabled while the import request is held, and enabled again once it answers — 033 step 005 DoD-3", async () => {
+    const { calls, releaseImport } = await renderListed({ holdImport: true });
+    const user = newUser();
+    expect(importButton()).toBeEnabled();
+
+    await chooseFile(user, exportFile(sessionEnvelope()));
+
+    expect(matching(calls, "POST", IMPORT_PATH)).toHaveLength(1);
+    await waitFor(() => {
+      expect(importButton()).toBeDisabled();
+    });
+
+    await act(async () => {
+      releaseImport();
+      await Promise.resolve();
+    });
+    await flush();
+
+    await waitFor(() => {
+      expect(importButton()).toBeEnabled();
+    });
+    await waitFor(() => {
+      expect(sessionRow(NEW_SESSION_ID)).not.toBeNull();
+    });
+  });
+
+  it("a held import that is then refused also re-enables the button — 033 step 005 DoD-3", async () => {
+    const { calls, releaseImport } = await renderListed({
+      holdImport: true,
+      importFailure: { code: "export_invalid", status: 400 },
+    });
+    const user = newUser();
+
+    await chooseFile(user, exportFile(sessionEnvelope()));
+
+    expect(matching(calls, "POST", IMPORT_PATH)).toHaveLength(1);
+    await waitFor(() => {
+      expect(importButton()).toBeDisabled();
+    });
+
+    await act(async () => {
+      releaseImport();
+      await Promise.resolve();
+    });
+    await flush();
+
+    await waitFor(() => {
+      expect(importButton()).toBeEnabled();
+    });
+  });
+
+  it("choosing a file through the header icon button imports it under this character, lists the session and raises the coverage caveat — 033 step 005 DoD-3", async () => {
+    const envelope = sessionEnvelope();
+    const { calls } = await renderListed();
+    const user = newUser();
+
+    await chooseFile(user, exportFile(envelope));
+
+    const posts = matching(calls, "POST", IMPORT_PATH);
+    expect(posts).toHaveLength(1);
+    expect(JSON.parse(posts[0].body ?? "null")).toEqual(envelope);
+    await waitFor(() => {
+      expect(sessionRow(NEW_SESSION_ID)).not.toBeNull();
+    });
+    await waitFor(() => {
+      expect(notificationRoots()).toHaveLength(1);
+    });
+    expect(notificationTexts()[0]).toContain(COVERAGE_SENTENCE);
+    expect(importButton()).toBeEnabled();
   });
 });

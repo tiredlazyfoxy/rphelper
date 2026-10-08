@@ -3,31 +3,31 @@
 // the `App` integration clause in `tests/app/App.test.tsx`; DoD-16 is the amendment of those
 // two files; DoD-17 is [manual/live] and carries no test.
 //
-// Expected behaviour comes from the step file's Interface intent and Definition of done,
-// 008.context.md and the feature's context.md: D1 (the inline start — a "Setup" select whose
-// first and default option is "No setup", and a "Start session" button that pushes to
-// `/sessions/<id>`), D5 (the "Show archived sessions" switch, the row menu, archived rows
-// badged, no confirm), D15 (the server's returned row is applied to the section and to the
-// workspace `SessionsState` — nothing is optimistic and nothing refetches), D18 (the fixed
-// sentences, all inline, nothing notified), D19 (the setup choices reload on each open).
+// Amended by feature 033, step 005 (D8, D9): the section's inline start — the "Setup" select,
+// the "Start session" button, the setup-choices load and its "Could not load setups to choose
+// from." line — is removed, so 011's DoD-4..DoD-8 clauses (start with/without a setup, the
+// choices and their reload on open, the failed start) are retired; a session now starts only
+// through the page composer's send (`CharacterComposer` tests). The header carries "Sessions",
+// the "Show archived sessions" switch and an icon-only "Import session" button. The import's own
+// behaviour lives in `SessionsSection.import.test.tsx`.
+//
+// Expected behaviour comes from the step files' Interface intent and Definition of done and the
+// features' context.md: 011 D5 (the "Show archived sessions" switch, the row menu, archived rows
+// badged, no confirm), D15 (the server's returned row is applied — nothing is optimistic and
+// nothing refetches), D18 (the fixed sentences, all inline, nothing notified); 033 D8 / D9.
 //
 // Recognition conventions (from the spec's wording, for the verifier):
 // - The section is a region whose accessible name is "Sessions"; every assertion about what
-//   the section shows goes through `within(region())` (context.md "Scoping").
-// - Mantine `Select` and `Menu` render into portals, so options and menu items are queried
-//   through `screen`, never `within(region())` (context.md "Mantine `Select`").
+//   the section shows goes through `within(region())`.
+// - Mantine `Menu` renders into a portal, so menu items are queried through `screen`.
 // - The contract names and texts: the heading "Sessions"; the switch "Show archived
-//   sessions"; the select "Setup" with the option "No setup"; the button "Start session";
-//   "No sessions yet."; "Could not load sessions" plus "Retry"; "Could not load setups to
-//   choose from."; the row trigger "Actions for <start-time label>"; the menu items "Archive"
-//   and "Restore"; the badge text exactly "Archived"; the sentences "Could not start the
-//   session.", "Could not archive the session." and "Could not restore the session.".
+//   sessions"; the icon button "Import session"; "No sessions yet."; "Could not load sessions"
+//   plus "Retry"; the row trigger "Actions for <start-time label>"; the menu items "Archive",
+//   "Restore" and "Export"; the badge text exactly "Archived"; the sentence "Could not archive
+//   the session.".
 // - A session row is identified by its link's `href` (`/sessions/<id>`), never by its
-//   start-time label, because two sessions started in the same minute share a label and share
-//   the menu trigger's name (008.context.md "Row labels and the menu trigger"). A start-time
-//   label is asserted only by its fixed shape `YYYY-MM-DD HH:MM`, never by an exact local
-//   value and never by calling the formatter (context.md "Start-time labels").
-// - A notification: `.mantine-Notification-root` (the repo's convention). 011 raises none.
+//   start-time label. A start-time label is asserted only by its fixed shape `YYYY-MM-DD HH:MM`.
+// - A notification: `.mantine-Notification-root` (the repo's convention).
 // - The router location: a probe rendered beside the section inside the same MemoryRouter.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -47,18 +47,21 @@ type User = ReturnType<typeof userEvent.setup>;
 const SESSIONS_REGION = /^sessions$/i;
 const SESSIONS_HEADING = /^sessions$/i;
 const SHOW_ARCHIVED_SESSIONS = /^show archived sessions$/i;
-const SETUP_LABEL = /^setup$/i;
-const START_NAME = /^start session$/i;
+const IMPORT_SESSION = /^import session$/i;
 const RETRY_NAME = /^retry$/i;
 const ROW_TRIGGER_NAME = /^actions for /i;
 const ARCHIVE_ITEM = /^archive$/i;
 const RESTORE_ITEM = /^restore$/i;
+const EXPORT_ITEM = /^export$/i;
 
+/** 033 D9: the removed controls, named only to assert their absence. */
+const SETUP_LABEL = /^setup$/i;
+const START_NAME = /^start session$/i;
 const NO_SETUP_OPTION = "No setup";
+const SETUPS_FAILED_TEXT = "Could not load setups to choose from.";
+
 const EMPTY_LINE = "No sessions yet.";
 const LOAD_FAILED_TEXT = "Could not load sessions";
-const SETUPS_FAILED_TEXT = "Could not load setups to choose from.";
-const START_FAILED_TEXT = "Could not start the session.";
 const ARCHIVE_FAILED_TEXT = "Could not archive the session.";
 const ARCHIVED_BADGE = "Archived";
 
@@ -68,8 +71,7 @@ const LABEL_SHAPE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
 const NOTIFICATION = ".mantine-Notification-root";
 
 // ---------------------------------------------------------------- fixtures
-// Ids are decimal strings past Number.MAX_SAFE_INTEGER (context.md "Ids are strings"), so any
-// coercion would show in an href or in the location.
+// Ids are decimal strings past Number.MAX_SAFE_INTEGER, so any coercion would show in an href.
 const CHARACTER_ID = "7250000000000000011";
 const SESSIONS_PATH = `/api/characters/${CHARACTER_ID}/sessions`;
 const SETUPS_PATH = `/api/characters/${CHARACTER_ID}/setups`;
@@ -85,16 +87,6 @@ const TAVERN: Setup = {
   archived_at: null,
   created_at: "2026-05-03T09:26:53.000000+00:00",
   updated_at: "2026-05-03T09:26:53.000000+00:00",
-};
-
-const HARBOUR: Setup = {
-  id: "7250000000000000032",
-  character_id: CHARACTER_ID,
-  name: "Harbour at dusk",
-  description: "Lanterns, tar, and a ship that should not be here.",
-  archived_at: null,
-  created_at: "2026-04-02T08:15:42.000000+00:00",
-  updated_at: "2026-04-02T08:15:42.000000+00:00",
 };
 
 /** The newest row, carrying a setup label (US-088.AC-1). */
@@ -168,27 +160,23 @@ function parseBody(init?: RequestInit): unknown {
 type Config = {
   /** The character's sessions, in the order the listing answers them. */
   sessions?: Session[];
-  /** One payload per `GET …/setups`, the last repeating — D19's reload-on-open. */
-  setupsResponses?: Setup[][];
   /** How many `GET …/sessions` fail before the listing starts answering (`true` = always). */
   failSessions?: number | true;
+  /** Any `GET …/setups` fails — the section must not ask, and must never say it failed. */
   failSetups?: true;
-  failStart?: true;
   failArchive?: true;
   failRestore?: true;
 };
 
 /**
  * The wire contract of the sessions routes over an in-memory row set, every request recorded
- * in order and routed by the **exact** pathname plus query string (context.md "Stubs routed by
- * exact path"). Only the listing honours the include-archived flag; a mutation answers the one
- * row it changed.
+ * in order and routed by the **exact** pathname plus query string. Only the listing honours the
+ * include-archived flag; a mutation answers the one row it changed. The setups listing and the
+ * session create are still answered (and recorded) so that a stray request is observable as a
+ * call rather than as a loud failure.
  */
 function serveSection(config: Config = {}) {
   const order: Session[] = [...(config.sessions ?? [])];
-  const setupsResponses: Setup[][] = config.setupsResponses ?? [[]];
-  const knownSetups: Setup[] = setupsResponses.flat();
-  let setupsServed = 0;
   let sessionFailuresLeft =
     config.failSessions === true
       ? Number.POSITIVE_INFINITY
@@ -215,21 +203,15 @@ function serveSection(config: Config = {}) {
 
     if (url.pathname === SETUPS_PATH && method === "GET") {
       if (config.failSetups === true) return serverError();
-      const index = Math.min(setupsServed, setupsResponses.length - 1);
-      setupsServed += 1;
-      return jsonResponse({ setups: setupsResponses[index] }, 200);
+      return jsonResponse({ setups: [TAVERN] }, 200);
     }
 
     if (url.pathname === SESSIONS_PATH && method === "POST") {
-      if (config.failStart === true) return serverError();
-      const sent = (body ?? {}) as { setup_id?: string | null };
-      const setupId = sent.setup_id ?? null;
-      const chosen = knownSetups.find((setup) => setup.id === setupId);
       const created: Session = {
         id: CREATED_ID,
         character_id: CHARACTER_ID,
-        setup_id: setupId,
-        setup_name: chosen === undefined ? null : chosen.name,
+        setup_id: null,
+        setup_name: null,
         archived_at: null,
         last_used_at: CREATED_STAMP,
         created_at: CREATED_STAMP,
@@ -271,9 +253,14 @@ function listings(calls: Seen[]): Seen[] {
   return matching(calls, "GET", SESSIONS_PATH);
 }
 
-/** Every setup-choices request, in order — the Select's `GET …/setups`. */
+/** Every setups listing request — 033 D9: the section asks for none. */
 function setupsRequests(calls: Seen[]): Seen[] {
   return matching(calls, "GET", SETUPS_PATH);
+}
+
+/** Every session create — 033 D9: the section issues none. */
+function sessionCreates(calls: Seen[]): Seen[] {
+  return matching(calls, "POST", SESSIONS_PATH);
 }
 
 async function flush(rounds = 6): Promise<void> {
@@ -323,6 +310,10 @@ function region(): HTMLElement {
   return screen.getByRole("region", { name: SESSIONS_REGION });
 }
 
+function heading(): HTMLElement {
+  return within(region()).getByRole("heading", { name: SESSIONS_HEADING });
+}
+
 function table(): HTMLElement {
   return within(region()).getByRole("table");
 }
@@ -370,53 +361,37 @@ function archivedSwitch(): HTMLElement {
   );
 }
 
-function setupSelect(): HTMLElement {
-  const scope = within(region());
-  return (
-    scope.queryByRole("combobox", { name: SETUP_LABEL }) ??
-    scope.queryByRole("textbox", { name: SETUP_LABEL }) ??
-    scope.getByLabelText(SETUP_LABEL)
-  );
-}
-
-/** What the "Setup" field currently displays. */
-function setupSelectText(): string {
-  const element = setupSelect();
-  const shown = element instanceof HTMLInputElement ? element.value : element.textContent ?? "";
-  return shown.trim();
-}
-
-function startButton(): HTMLElement {
-  return within(region()).getByRole("button", { name: START_NAME });
+function importButton(): HTMLElement {
+  return within(region()).getByRole("button", { name: IMPORT_SESSION });
 }
 
 function notificationsShown(): Element[] {
   return Array.from(document.querySelectorAll(NOTIFICATION));
 }
 
-/** The options live in a portal, so they are read off `screen` (context.md). */
-function optionTexts(): string[] {
-  return screen.queryAllByRole("option").map((option) => (option.textContent ?? "").trim());
+/** Whether `first` comes before `second` in document order. */
+function precedes(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 }
 
-async function openSelect(user: User): Promise<void> {
-  await user.click(setupSelect());
-  await waitFor(() => {
-    expect(screen.queryAllByRole("option").length).toBeGreaterThan(0);
-  });
-  await flush();
+/** The smallest element containing every one of `nodes` — the header row they share. */
+function commonAncestor(nodes: HTMLElement[]): HTMLElement {
+  let candidate: HTMLElement | null = nodes[0];
+  while (candidate !== null && !nodes.every((node) => candidate?.contains(node) === true)) {
+    candidate = candidate.parentElement;
+  }
+  if (candidate === null) throw new Error("the given elements share no ancestor");
+  return candidate;
 }
 
-async function closeSelect(user: User): Promise<void> {
-  await user.keyboard("{Escape}");
-  await waitFor(() => {
-    expect(screen.queryAllByRole("option")).toEqual([]);
-  });
-}
-
-async function chooseOption(user: User, name: string): Promise<void> {
-  await user.click(screen.getByRole("option", { name }));
-  await flush();
+/** 033 D9: whether the section renders anything that is the removed "Setup" select. */
+function querySetupSelect(): HTMLElement | null {
+  const scope = within(region());
+  return (
+    scope.queryByRole("combobox", { name: SETUP_LABEL, hidden: true }) ??
+    scope.queryByRole("textbox", { name: SETUP_LABEL, hidden: true }) ??
+    scope.queryByLabelText(SETUP_LABEL)
+  );
 }
 
 /** Opens one row's overflow menu; the items are in a portal, so they are found on `screen`. */
@@ -437,29 +412,25 @@ async function toggleArchivedSwitch(user: User): Promise<void> {
 
 // ---------------------------------------------------------------------------
 describe("the section loads the character's sessions on mount (US-028.AC-1, US-088.AC-1, US-088.AC-2)", () => {
-  it("requests exactly the sessions listing and the setup choices — DoD-1", async () => {
-    const { calls } = await renderListed({
-      sessions: [WITH_SETUP, WITHOUT_SETUP],
-      setupsResponses: [[TAVERN]],
-    });
+  it("requests exactly the sessions listing — no setup choices, no create — DoD-1 (and 033 step 005 DoD-1, DoD-4)", async () => {
+    const { calls } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
 
-    expect(
-      calls.map((call) => `${call.method} ${call.path}${call.search}`).sort((a, b) => a.localeCompare(b)),
-    ).toEqual([`GET ${SESSIONS_PATH}`, `GET ${SETUPS_PATH}`].sort((a, b) => a.localeCompare(b)));
+    expect(calls.map((call) => `${call.method} ${call.path}${call.search}`)).toEqual([
+      `GET ${SESSIONS_PATH}`,
+    ]);
   });
 
-  it("shows the Sessions region with its heading, an off switch, No setup and an enabled Start session — DoD-1", async () => {
-    await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP], setupsResponses: [[TAVERN]] });
+  it("shows the Sessions region with its heading, an off switch and an enabled Import session — DoD-1 (and 033 step 005 DoD-2)", async () => {
+    await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
 
     expect(region()).toBeInTheDocument();
-    expect(within(region()).getByRole("heading", { name: SESSIONS_HEADING })).toBeInTheDocument();
+    expect(heading()).toBeInTheDocument();
     expect(archivedSwitch()).not.toBeChecked();
-    expect(setupSelectText()).toBe(NO_SETUP_OPTION);
-    expect(startButton()).toBeEnabled();
+    expect(importButton()).toBeEnabled();
   });
 
-  it("lists one row per session in the payload's order, each linking to /sessions/<id> — DoD-1", async () => {
-    await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP], setupsResponses: [[TAVERN]] });
+  it("lists one row per session in the payload's order, each linking to /sessions/<id> — DoD-1 (and 033 step 005 DoD-5)", async () => {
+    await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
 
     expect(table()).toBeInTheDocument();
     expect(listedHrefs()).toEqual([sessionHref(WITH_SETUP), sessionHref(WITHOUT_SETUP)]);
@@ -468,7 +439,7 @@ describe("the section loads the character's sessions on mount (US-028.AC-1, US-0
   });
 
   it("shows the first row's setup name and no other text on the second row — DoD-1", async () => {
-    await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP], setupsResponses: [[TAVERN]] });
+    await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
 
     expect(within(row(WITH_SETUP)).getByText(TAVERN.name)).toBeInTheDocument();
 
@@ -482,7 +453,7 @@ describe("the section loads the character's sessions on mount (US-028.AC-1, US-0
 
 // ---------------------------------------------------------------------------
 describe("an empty listing is one neutral line (D18)", () => {
-  it("shows No sessions yet. and no table — DoD-2", async () => {
+  it("shows No sessions yet. and no table — DoD-2 (and 033 step 005 DoD-5)", async () => {
     await renderListed({ sessions: [] });
 
     expect(within(region()).getByText(EMPTY_LINE)).toBeInTheDocument();
@@ -519,145 +490,8 @@ describe("a failed sessions load reports inline with a Retry (D18)", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("Start session with No setup starts and navigates (US-026.AC-1, US-024.AC-1, UC-023, D1, D15)", () => {
-  it("POSTs setup_id null, lands on /sessions/<the response's id> and applies the row to the workspace state — DoD-4", async () => {
-    const user = newUser();
-    const { calls, workspace } = await renderListed({
-      sessions: [WITH_SETUP],
-      setupsResponses: [[TAVERN]],
-    });
-    expect(locationPath()).toBe(SCREEN_PATH);
-
-    await user.click(startButton());
-    await flush();
-
-    const posts = matching(calls, "POST", SESSIONS_PATH);
-    expect(posts).toHaveLength(1);
-    expect(posts[0].body).toEqual({ setup_id: null });
-    expect(locationPath()).toBe(`/sessions/${CREATED_ID}`);
-    expect(workspace.sessions.map((session) => session.id)).toContain(CREATED_ID);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("no setup list is ever a precondition for starting (US-024.AC-3, R2, D18)", () => {
-  it("with an empty setups listing Start session is enabled and starts with setup_id null — DoD-5", async () => {
-    const user = newUser();
-    const { calls } = await renderListed({ sessions: [], setupsResponses: [[]] });
-
-    expect(startButton()).toBeEnabled();
-    expect(setupSelectText()).toBe(NO_SETUP_OPTION);
-
-    await user.click(startButton());
-    await flush();
-
-    const posts = matching(calls, "POST", SESSIONS_PATH);
-    expect(posts).toHaveLength(1);
-    expect(posts[0].body).toEqual({ setup_id: null });
-  });
-
-  it("with a failed setups listing Start session is enabled, starts with setup_id null and the region says why — DoD-5", async () => {
-    const user = newUser();
-    const { calls } = await renderListed({ sessions: [], failSetups: true });
-
-    expect(within(region()).getByText(SETUPS_FAILED_TEXT)).toBeInTheDocument();
-    expect(startButton()).toBeEnabled();
-
-    await user.click(startButton());
-    await flush();
-
-    const posts = matching(calls, "POST", SESSIONS_PATH);
-    expect(posts).toHaveLength(1);
-    expect(posts[0].body).toEqual({ setup_id: null });
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("the Setup select offers the working setups (US-023.AC-2, US-025.AC-1, UC-021)", () => {
-  it("lists No setup first, then the setups in the payload's order, and asked for them without include_archived — DoD-6", async () => {
-    const user = newUser();
-    const { calls } = await renderListed({
-      sessions: [],
-      setupsResponses: [[HARBOUR, TAVERN]],
-    });
-
-    await openSelect(user);
-
-    expect(optionTexts()).toEqual([NO_SETUP_OPTION, HARBOUR.name, TAVERN.name]);
-
-    const choiceRequests = setupsRequests(calls);
-    expect(choiceRequests.length).toBeGreaterThan(0);
-    for (const call of choiceRequests) {
-      expect(call.search).toBe("");
-    }
-  });
-
-  it("choosing a setup and pressing Start session POSTs that setup's id — DoD-6", async () => {
-    const user = newUser();
-    const { calls } = await renderListed({
-      sessions: [],
-      setupsResponses: [[HARBOUR, TAVERN]],
-    });
-
-    await openSelect(user);
-    await chooseOption(user, TAVERN.name);
-    expect(setupSelectText()).toBe(TAVERN.name);
-
-    await user.click(startButton());
-    await flush();
-
-    const posts = matching(calls, "POST", SESSIONS_PATH);
-    expect(posts).toHaveLength(1);
-    expect(posts[0].body).toEqual({ setup_id: TAVERN.id });
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("the choices reload each time the select opens (US-023.AC-2, D19)", () => {
-  it("a setup the earlier response lacked is offered on the second opening — DoD-7", async () => {
-    const user = newUser();
-    // The mount load and the first opening see only TAVERN; every later request also sees
-    // HARBOUR, created elsewhere on the page meanwhile.
-    const { calls } = await renderListed({
-      sessions: [],
-      setupsResponses: [[TAVERN], [TAVERN], [TAVERN, HARBOUR]],
-    });
-    const afterMount = setupsRequests(calls).length;
-
-    await openSelect(user);
-    expect(optionTexts()).toEqual([NO_SETUP_OPTION, TAVERN.name]);
-    const afterFirstOpen = setupsRequests(calls).length;
-    expect(afterFirstOpen).toBeGreaterThan(afterMount);
-
-    await closeSelect(user);
-    await openSelect(user);
-
-    expect(setupsRequests(calls).length).toBeGreaterThan(afterFirstOpen);
-    expect(optionTexts()).toEqual([NO_SETUP_OPTION, TAVERN.name, HARBOUR.name]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-describe("a failed start reports inline and stays where it is (D18)", () => {
-  it("shows Could not start the session., keeps the location and raises no notification — DoD-8", async () => {
-    const user = newUser();
-    const { calls } = await renderListed({ sessions: [WITH_SETUP], failStart: true });
-
-    await user.click(startButton());
-    await flush();
-
-    expect(matching(calls, "POST", SESSIONS_PATH)).toHaveLength(1);
-    await waitFor(() => {
-      expect(within(region()).getByText(START_FAILED_TEXT)).toBeInTheDocument();
-    });
-    expect(locationPath()).toBe(SCREEN_PATH);
-    expect(notificationsShown()).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
 describe("Archive from a row's menu and the Show archived sessions switch (US-027.AC-1, D5)", () => {
-  it("POSTs the archive, drops the row, and the switch brings it back badged with Restore and no confirm — DoD-9", async () => {
+  it("POSTs the archive, drops the row, and the switch brings it back badged with Restore and no confirm — DoD-9 (and 033 step 005 DoD-5)", async () => {
     const user = newUser();
     const { calls } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
 
@@ -686,7 +520,7 @@ describe("Archive from a row's menu and the Show archived sessions switch (US-02
 
 // ---------------------------------------------------------------------------
 describe("Restore brings an archived session back to the working list (US-027.AC-2)", () => {
-  it("POSTs the restore, drops the Archived badge, and the row is still listed with the switch off — DoD-10", async () => {
+  it("POSTs the restore, drops the Archived badge, and the row is still listed with the switch off — DoD-10 (and 033 step 005 DoD-5)", async () => {
     const user = newUser();
     const { calls } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
 
@@ -731,5 +565,127 @@ describe("a failed row action reports inline in the section (D18)", () => {
     });
     expect(queryRow(WITH_SETUP)).not.toBeNull();
     expect(notificationsShown()).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Feature 033, step 005 — the message-less start is gone (D9) and the list header carries the
+// icon-only Import session (D8).
+// ===========================================================================
+describe("033 step 005: no message-less start control in the section (D9)", () => {
+  it("renders no Setup select, no No setup choice and no Start session button — 033 step 005 DoD-1", async () => {
+    await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    expect(querySetupSelect()).toBeNull();
+    expect(within(region()).queryByText(NO_SETUP_OPTION)).toBeNull();
+    expect(within(region()).queryByRole("button", { name: START_NAME, hidden: true })).toBeNull();
+    expect(screen.queryByRole("button", { name: START_NAME, hidden: true })).toBeNull();
+  });
+
+  it("renders no start control for an empty listing either — 033 step 005 DoD-1", async () => {
+    await renderListed({ sessions: [] });
+
+    expect(within(region()).getByText(EMPTY_LINE)).toBeInTheDocument();
+    expect(querySetupSelect()).toBeNull();
+    expect(within(region()).queryByRole("button", { name: START_NAME, hidden: true })).toBeNull();
+  });
+
+  it("never shows Could not load setups to choose from., even when every setups listing would fail — 033 step 005 DoD-1", async () => {
+    const { calls } = await renderListed({ sessions: [WITH_SETUP], failSetups: true });
+
+    expect(listedHrefs()).toEqual([sessionHref(WITH_SETUP)]);
+    expect(screen.queryByText(SETUPS_FAILED_TEXT)).toBeNull();
+    expect(setupsRequests(calls)).toEqual([]);
+  });
+
+  it("asks for no setups even after the archived switch reloads the list — 033 step 005 DoD-1", async () => {
+    const user = newUser();
+    const { calls } = await renderListed({ sessions: [WITH_SETUP] });
+
+    await toggleArchivedSwitch(user);
+
+    expect(listings(calls).map((call) => call.search)).toEqual(["", INCLUDE_ARCHIVED_SEARCH]);
+    expect(setupsRequests(calls)).toEqual([]);
+    expect(screen.queryByText(SETUPS_FAILED_TEXT)).toBeNull();
+  });
+});
+
+describe("033 step 005: mounting and using the section creates no session (D9)", () => {
+  it("mounting issues no session create and stays on the character page — 033 step 005 DoD-4", async () => {
+    const { calls, workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+    await flush();
+
+    expect(sessionCreates(calls)).toEqual([]);
+    expect(locationPath()).toBe(SCREEN_PATH);
+    expect(workspace.sessions.map((session) => session.id)).not.toContain(CREATED_ID);
+  });
+
+  it("toggling the archived switch, retrying and archiving a row issue no session create — 033 step 005 DoD-4", async () => {
+    const user = newUser();
+    const { calls } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP], failSessions: 1 });
+
+    await user.click(within(region()).getByRole("button", { name: RETRY_NAME }));
+    await flush();
+    await toggleArchivedSwitch(user);
+    await openRowMenu(user, WITHOUT_SETUP);
+    await chooseMenuItem(user, ARCHIVE_ITEM);
+
+    expect(matching(calls, "POST", `/api/sessions/${WITHOUT_SETUP.id}/archive`)).toHaveLength(1);
+    expect(sessionCreates(calls)).toEqual([]);
+    expect(locationPath()).toBe(SCREEN_PATH);
+  });
+});
+
+describe("033 step 005: the list header (D8)", () => {
+  it("holds the Sessions heading, the Show archived sessions switch and the Import session button, above the list — 033 step 005 DoD-2", async () => {
+    await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    const title = heading();
+    const toggle = archivedSwitch();
+    const upload = importButton();
+    const header = commonAncestor([title, toggle, upload]);
+
+    expect(region().contains(header)).toBe(true);
+    expect(header).not.toBe(region());
+    expect(header.contains(table())).toBe(false);
+    expect(precedes(title, toggle)).toBe(true);
+    expect(precedes(title, upload)).toBe(true);
+    expect(precedes(upload, table())).toBe(true);
+    expect(precedes(toggle, table())).toBe(true);
+  });
+
+  it("the header sits above the No sessions yet. line too — 033 step 005 DoD-2", async () => {
+    await renderListed({ sessions: [] });
+
+    const line = within(region()).getByText(EMPTY_LINE);
+    const header = commonAncestor([heading(), archivedSwitch(), importButton()]);
+
+    expect(header.contains(line)).toBe(false);
+    expect(precedes(importButton(), line)).toBe(true);
+  });
+
+  it("Import session is a single icon-only button: named by its accessible name, showing no text — 033 step 005 DoD-2", async () => {
+    await renderListed({ sessions: [WITH_SETUP] });
+
+    expect(within(region()).getAllByRole("button", { name: IMPORT_SESSION })).toHaveLength(1);
+    expect((importButton().textContent ?? "").trim()).toBe("");
+    const labelled = within(region())
+      .getAllByRole("button")
+      .filter((control) => (control.textContent ?? "").includes("Import session"));
+    expect(labelled).toEqual([]);
+  });
+});
+
+describe("033 step 005: the row menu still offers Export (D8)", () => {
+  it("an active row's menu offers Archive and Export, with no confirm on opening — 033 step 005 DoD-5", async () => {
+    const user = newUser();
+    await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    await openRowMenu(user, WITHOUT_SETUP);
+
+    expect(await screen.findByRole("menuitem", { name: ARCHIVE_ITEM })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: EXPORT_ITEM })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: RESTORE_ITEM })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

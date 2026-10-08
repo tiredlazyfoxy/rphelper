@@ -10,6 +10,22 @@
 // Rendered inside AppProviders and a MemoryRouter at /characters/<C>, with the composer route
 // and a /sessions/:id probe route, so the location after Send and after Back is observable.
 // Navigation is observed through the location only, never by spying on useNavigate.
+//
+// Amended by feature 033, step 001 (DoD-13, D8): the composer's section heading — and so its
+// region's accessible name — is now "New session" (was "Start a session"). Nothing else about
+// the component changes in that step, so every other clause is untouched.
+//
+// Amended by feature 033, step 004 (D8, D10): the composer now carries a "Setup" select and
+// lists the character's setups (`GET /api/characters/<C>/setups`) on mount. D10 supersedes 018
+// D1's "no setup choice" for this composer, so the DoD-7 absence clause no longer names the
+// Setup select (its presence is 033 step 004 DoD-2, asserted here and in
+// CharacterComposer.setup.test.tsx). Every stub answers the setups listing with an empty list,
+// and request assertions now look at the sessions POST only, never at the whole call log.
+//
+// Amended by fast feature 011 (composer-send-icon-and-shortcut, DoD-13): the character page's
+// composer is full width and starts at 10 lines — its "Composer" textarea has rows >= 10, no
+// ancestor carries the composer's 720px max-width, and the "Setup" select still follows the
+// textarea. jsdom has no layout, so these are asserted on attributes and inline styles only.
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
@@ -36,6 +52,8 @@ const MESSAGE_ID = "7280000000000000101";
 
 const CHARACTER_PATH = `/characters/${CHARACTER_ID}`;
 const START_PATH = `/api/characters/${CHARACTER_ID}/sessions`;
+/** 033 step 004: the composer lists the character's setups on mount. */
+const SETUPS_PATH = `/api/characters/${CHARACTER_ID}/setups`;
 const STAMP = "2026-10-03T09:26:53.000000+00:00";
 const PASTE_ID = "paste-context-cost";
 const OVER_THRESHOLD = "a".repeat(128_001);
@@ -121,23 +139,39 @@ function unexpected(input: RequestInfo | URL, init?: RequestInit): Promise<Respo
   );
 }
 
+function isSetupsListing(input: RequestInfo | URL, init?: RequestInit): boolean {
+  return requestMethod(input, init) === "GET" && requestUrl(input).pathname === SETUPS_PATH;
+}
+
+/** 033 step 004: answers the composer's setups listing with no setups, else delegates. */
+function withSetups(impl: FetchFn): FetchFn {
+  return (input, init) =>
+    isSetupsListing(input, init) ? Promise.resolve(jsonResponse({ setups: [] }, 200)) : impl(input, init);
+}
+
 function serveStart(body: unknown, status: number) {
-  return stubFetch((input, init) =>
-    isStart(input, init) ? Promise.resolve(jsonResponse(body, status)) : unexpected(input, init),
+  return stubFetch(
+    withSetups((input, init) =>
+      isStart(input, init) ? Promise.resolve(jsonResponse(body, status)) : unexpected(input, init),
+    ),
   );
 }
 
 type Seen = { method: string; path: string; search: string };
 
+/** Every request the stub saw except the composer's setups listing (033 step 004). */
 function seen(mock: ReturnType<typeof stubFetch>): Seen[] {
-  return mock.mock.calls.map(([input, init]) => {
-    const url = requestUrl(input);
-    return { method: requestMethod(input, init), path: url.pathname, search: url.search };
-  });
+  return mock.mock.calls
+    .filter(([input, init]) => !isSetupsListing(input, init))
+    .map(([input, init]) => {
+      const url = requestUrl(input);
+      return { method: requestMethod(input, init), path: url.pathname, search: url.search };
+    });
 }
 
+/** The JSON body of the n-th sessions POST, or undefined when none was sent. */
 function sentBody(mock: ReturnType<typeof stubFetch>, index = 0): unknown {
-  const raw = mock.mock.calls[index]?.[1]?.body;
+  const raw = mock.mock.calls.filter(([input, init]) => isStart(input, init))[index]?.[1]?.body;
   if (raw === undefined || raw === null) return undefined;
   return typeof raw === "string" ? (JSON.parse(raw) as unknown) : raw;
 }
@@ -186,8 +220,11 @@ function locationPath(): string {
   return screen.getByTestId("location").textContent ?? "";
 }
 
+/** 033 step 001 (DoD-13): the composer's region is named "New session". */
+const COMPOSER_REGION = "New session";
+
 function region(): HTMLElement {
-  return screen.getByRole("region", { name: "Start a session" });
+  return screen.getByRole("region", { name: COMPOSER_REGION });
 }
 
 function composer(): HTMLElement {
@@ -204,18 +241,21 @@ function newUser(): ReturnType<typeof userEvent.setup> {
 
 // ---------------------------------------------------------------- DoD-7
 describe("CharacterComposer — the core alone (US-117.AC-4, D1)", () => {
-  it('renders a "Start a session" region headed "Start a session" holding a textbox "Composer" and a "Send" button — DoD-7', () => {
-    stubFetch(unexpected);
+  it('(amended by 033 DoD-13) renders a "New session" region headed "New session" holding a textbox "Composer" and a "Send" button — DoD-7', () => {
+    stubFetch(withSetups(unexpected));
     renderComposer();
 
     const startRegion = region();
-    expect(within(startRegion).getByRole("heading", { name: "Start a session" })).toBeInTheDocument();
+    expect(within(startRegion).getByRole("heading", { name: COMPOSER_REGION })).toBeInTheDocument();
+    // 033 DoD-13: the old name is gone.
+    expect(screen.queryByRole("region", { name: "Start a session" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Start a session" })).toBeNull();
     expect(composer()).toBeInTheDocument();
     expect(sendButton()).toBeInTheDocument();
   });
 
-  it('renders no "Entry kind" group, no "Partner" / "My turn" radio, no "Setup" combobox, no "Settle" and no "Discard empty zone" — DoD-7', () => {
-    stubFetch(unexpected);
+  it('(amended by 033 step 004 DoD-2, DoD-9) renders no "Entry kind" group, no "Partner" / "My turn" radio, no "Settle" and no "Discard empty zone" — but a "Setup" select reading "No setup" — DoD-7', async () => {
+    stubFetch(withSetups(unexpected));
     renderComposer();
 
     expect(screen.queryByRole("radiogroup", { name: "Entry kind" })).toBeNull();
@@ -223,14 +263,21 @@ describe("CharacterComposer — the core alone (US-117.AC-4, D1)", () => {
     expect(screen.queryByText("Entry kind")).toBeNull();
     expect(screen.queryByRole("radio", { name: "Partner" })).toBeNull();
     expect(screen.queryByRole("radio", { name: "My turn" })).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "Setup" })).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "Setup" })).toBeNull();
+    // 033 step 004 (D8, D10): the composer now offers a "Setup" select, "No setup" on open.
+    const setupField =
+      within(region()).queryByRole("combobox", { name: /^setup$/i }) ??
+      within(region()).queryByRole("textbox", { name: /^setup$/i }) ??
+      within(region()).getByLabelText(/^setup$/i);
+    expect(setupField).toBeInTheDocument();
+    await waitFor(() => {
+      expect((setupField as HTMLInputElement).value).toBe("No setup");
+    });
     expect(screen.queryByRole("button", { name: "Settle" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Discard empty zone" })).toBeNull();
   });
 
   it('"Send" is disabled while the composer is empty or blank, and enabled once non-blank text is typed — DoD-7', async () => {
-    stubFetch(unexpected);
+    stubFetch(withSetups(unexpected));
     const user = newUser();
     renderComposer();
 
@@ -308,10 +355,55 @@ describe("CharacterComposer — a failed send keeps everything (R10, D5)", () =>
   });
 });
 
+// ---------------------------------------------------------------- fast/011 DoD-13
+function precedes(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+const CAP_720 = /(^|[^\d.])(720px|45rem)/;
+
+/** Whether the element carries a 720px max-width (inline style, as Mantine emits `maw`). */
+function carries720MaxWidth(el: HTMLElement): boolean {
+  const raw = el.getAttribute("style") ?? "";
+  const declared = [...raw.matchAll(/(?:^|;)\s*max-width\s*:\s*([^;]+)/g)].map((match) => match[1] ?? "");
+  const candidates = [...declared, el.style.maxWidth, el.style.getPropertyValue("--maw")];
+  return candidates.some((value) => CAP_720.test(value));
+}
+
+function ancestors(node: HTMLElement): HTMLElement[] {
+  const found: HTMLElement[] = [];
+  for (let el = node.parentElement; el !== null && el !== document.body; el = el.parentElement) {
+    found.push(el);
+  }
+  return found;
+}
+
+describe("fast/011 — the character page composer is full width and at least 10 lines", () => {
+  it('the "Composer" textarea has rows >= 10, no 720px max-width ancestor, and the "Setup" select follows it — fast/011 DoD-13', async () => {
+    stubFetch(withSetups(unexpected));
+    renderComposer();
+
+    const textbox = composer();
+    expect(Number(textbox.getAttribute("rows"))).toBeGreaterThanOrEqual(10);
+    expect(ancestors(textbox).filter(carries720MaxWidth)).toEqual([]);
+
+    const setupField =
+      within(region()).queryByRole("combobox", { name: /^setup$/i }) ??
+      within(region()).queryByRole("textbox", { name: /^setup$/i }) ??
+      within(region()).getByLabelText(/^setup$/i);
+    expect(precedes(textbox, setupField)).toBe(true);
+    await waitFor(() => {
+      expect((setupField as HTMLInputElement).value).toBe("No setup");
+    });
+  });
+});
+
 // ---------------------------------------------------------------- DoD-10
 describe("CharacterComposer — the core's paste warning on the second host (US-035.AC-1)", () => {
   it("pasting a 128,001-character text raises the paste warning, makes no request and does not prevent the insertion — DoD-10", () => {
-    const mock = stubFetch(unexpected);
+    // 033 step 004: the composer's setups listing on mount is not the paste's request, so
+    // `seen` (which skips it) is what must stay empty.
+    const mock = stubFetch(withSetups(unexpected));
     renderComposer();
 
     const notPrevented = fireEvent.paste(composer(), {
@@ -321,6 +413,6 @@ describe("CharacterComposer — the core's paste warning on the second host (US-
     expect(notifyWarningSpy).toHaveBeenCalledTimes(1);
     expect(notifyWarningSpy).toHaveBeenCalledWith(PASTE_ID);
     expect(notPrevented).toBe(true);
-    expect(mock).not.toHaveBeenCalled();
+    expect(seen(mock)).toEqual([]);
   });
 });

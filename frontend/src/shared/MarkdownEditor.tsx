@@ -25,6 +25,17 @@ export type MarkdownEditorProps = {
   readOnly?: boolean;
   /** When true: focus moves into the editable body once the editor is ready after mounting. Defaults to false. */
   autoFocus?: boolean;
+  /**
+   * 033 001: the minimum height of the editable content area, in pixels. Omitted, the
+   * editor renders exactly as before (no minimum height applied).
+   */
+  contentMinHeight?: number;
+  /**
+   * Fast 012: extra content rendered as one trailing controls group at the right end of the
+   * toolbar. Omitted, the toolbar is exactly as before; with `readOnly` (no toolbar) it does
+   * not render.
+   */
+  toolbarActions?: React.ReactNode;
 };
 
 /** The editor's current content, serialised back to markdown. */
@@ -33,7 +44,15 @@ function toMarkdown(editor: Editor): string {
 }
 
 export function MarkdownEditor(props: MarkdownEditorProps): React.JSX.Element {
-  const { label, value, onChange, readOnly = false, autoFocus = false } = props;
+  const {
+    label,
+    value,
+    onChange,
+    readOnly = false,
+    autoFocus = false,
+    contentMinHeight,
+    toolbarActions,
+  } = props;
 
   // The editor is created once; `onChange` is reached through a ref so a new callback
   // identity neither recreates it nor leaves `onUpdate` calling a stale function.
@@ -59,6 +78,9 @@ export function MarkdownEditor(props: MarkdownEditorProps): React.JSX.Element {
         "aria-label": label,
         "aria-labelledby": labelId,
         "aria-multiline": "true",
+        // 033 001: an inline minimum height on the editable surface itself, so the whole
+        // tall area is clickable; omitted, no style attribute is added at all.
+        ...(contentMinHeight === undefined ? {} : { style: `min-height: ${contentMinHeight}px` }),
       },
     },
     // Never echo: this is the only path to `onChange`, and nothing but a user edit
@@ -116,6 +138,9 @@ export function MarkdownEditor(props: MarkdownEditorProps): React.JSX.Element {
               <RichTextEditor.Link />
               <RichTextEditor.Unlink />
             </RichTextEditor.ControlsGroup>
+            {toolbarActions === undefined || toolbarActions === null ? null : (
+              <RichTextEditor.ControlsGroup ml="auto">{toolbarActions}</RichTextEditor.ControlsGroup>
+            )}
           </RichTextEditor.Toolbar>
         )}
         <RichTextEditor.Content />

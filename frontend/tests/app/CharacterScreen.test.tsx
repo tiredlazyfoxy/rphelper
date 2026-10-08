@@ -92,11 +92,30 @@
 //   precedes Setups). Each amended title ends with the 018 "— DoD-N" that amends it;
 // - every other 009 / 010 / 011 / 015 assertion is unchanged. 018 step 009's own clauses are the
 //   blocks at the bottom of this file.
+//
+// Amended by feature 033, step 001 (DoD-1..DoD-13; D1–D5, D8): the ready page is now a page
+// header (saved-name Title, "Archived" badge, icon-only "Archive"/"Restore" and "Export") above a
+// Mantine `Tabs` with five tabs — "Sessions" (selected on open), "Main info", "Configuration",
+// "Notes", "Setups" — kept mounted (D2), so every section still loads once on open. Inactive tab
+// panels are mounted but hidden, and role queries skip hidden elements by default. Consequences:
+// - helpers `tab`, `tabPanel`, `openTab` were added; a clause that reads or types into Name /
+//   Persona first opens "Main info", and a clause that interacts inside the Notes / Setups /
+//   Configuration region first opens that tab. Moving to another character starts on "Sessions"
+//   again (D1), so such clauses reopen the tab after navigating. Presence-only checks of a region
+//   in an inactive tab query with `{ hidden: true }`; every "renders no X region" clause now also
+//   queries with `{ hidden: true }`, which is strictly stronger;
+// - replaced (superseded by the tabs): 010 DoD-10's "Setups between Persona and Sessions", 011
+//   DoD-12's "Sessions after Persona and Setups", 015 DoD-4 / 018 DoD-6's body order
+//   (`precedes` across the five regions) and the bug-fix clauses' order check — each now asserts
+//   the region's tab panel instead. The composer region is "New session" (was "Start a session",
+//   033 DoD-13);
+// - no other assertion changed. 033 step 001's own clauses are the blocks at the bottom of this
+//   file, each tagged "033 DoD-N".
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { CharacterRoute, CharacterScreen } from "../../src/app/CharacterScreen";
 import type { Character } from "../../src/app/charactersApi";
 import type { CharacterConfiguration } from "../../src/app/configurationApi";
@@ -116,6 +135,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
     value: string;
     onChange: (markdown: string) => void;
     readOnly?: boolean;
+    toolbarActions?: ReactNode;
   };
   return {
     MarkdownEditor: (props: StubProps) => {
@@ -130,6 +150,10 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
           readOnly: props.readOnly ?? false,
           onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
         }),
+        // fast 012: the toolbar-actions prop (a saved note's flags) renders inside the root.
+        props.toolbarActions === undefined || props.toolbarActions === null
+          ? null
+          : createElement("div", { "data-testid": "stub-toolbar-actions" }, props.toolbarActions),
       );
     },
   };
@@ -161,6 +185,8 @@ const NOTIFICATION = ".mantine-Notification-root";
 // ------------------------------------- 010 step 006: the Setups section's own names (D1, D4)
 const SETUPS_REGION = /^setups$/i;
 const NEW_SETUP_NAME = /^new setup$/i;
+// 033 step 003 (D7): the inline create form's Save icon button.
+const SAVE_SETUP_NAME = /^save setup$/i;
 const SHOW_ARCHIVED_SETUPS_NAME = /^show archived setups$/i;
 
 // ------------------------------------- 011 step 008: the Sessions section's own names (D1, D5)
@@ -426,6 +452,8 @@ function Probe(props: { to: string }) {
   return (
     <div>
       <span data-testid="location">{location.pathname}</span>
+      {/* 033 step 001 (DoD-3): the whole URL, so a tab change showing in search or hash is seen. */}
+      <span data-testid="location-full">{`${location.pathname}${location.search}${location.hash}`}</span>
       <button type="button" onClick={() => void navigate(props.to)}>
         probe navigate
       </button>
@@ -477,6 +505,11 @@ function locationPath(): string {
   return screen.getByTestId("location").textContent ?? "";
 }
 
+/** 033 step 001 (DoD-3): pathname + search + hash. */
+function fullLocation(): string {
+  return screen.getByTestId("location-full").textContent ?? "";
+}
+
 function nameInput(): HTMLInputElement {
   const element = within(mainRegion()).getByRole("textbox", { name: NAME_LABEL });
   if (!(element instanceof HTMLInputElement)) throw new Error('the "Name" textbox is not an input');
@@ -520,8 +553,9 @@ function setupsRegion(): HTMLElement {
   return screen.getByRole("region", { name: SETUPS_REGION });
 }
 
+/** 033 step 001: hidden included, so "no Setups region" also means "not even in a hidden tab". */
 function querySetupsRegion(): HTMLElement | null {
-  return screen.queryByRole("region", { name: SETUPS_REGION });
+  return screen.queryByRole("region", { name: SETUPS_REGION, hidden: true });
 }
 
 function setupsSwitch(): HTMLElement {
@@ -537,8 +571,9 @@ function sessionsRegion(): HTMLElement {
   return screen.getByRole("region", { name: SESSIONS_REGION });
 }
 
+/** 033 step 001: hidden included, so "no Sessions region" also means "not even in a hidden tab". */
 function querySessionsRegion(): HTMLElement | null {
-  return screen.queryByRole("region", { name: SESSIONS_REGION });
+  return screen.queryByRole("region", { name: SESSIONS_REGION, hidden: true });
 }
 
 function sessionsSwitch(): HTMLElement {
@@ -573,6 +608,62 @@ async function renderLoaded(character: Character, extra: Character[] = []) {
 async function typeInto(user: User, element: HTMLElement, text: string): Promise<void> {
   await user.clear(element);
   await user.type(element, text);
+}
+
+// ------------------------------------- 033 step 001: the page's tabs (D1, D2)
+const SESSIONS_TAB = "Sessions";
+const MAIN_INFO_TAB = "Main info";
+const CONFIGURATION_TAB = "Configuration";
+const NOTES_TAB = "Notes";
+const SETUPS_TAB = "Setups";
+
+/** The five tabs, in the order 033 D1 requires. */
+const TAB_NAMES = [SESSIONS_TAB, MAIN_INFO_TAB, CONFIGURATION_TAB, NOTES_TAB, SETUPS_TAB];
+
+function tablist(): HTMLElement {
+  return within(mainRegion()).getByRole("tablist");
+}
+
+function queryTablistAnywhere(): HTMLElement | null {
+  return screen.queryByRole("tablist", { hidden: true });
+}
+
+function tab(name: string): HTMLElement {
+  return within(mainRegion()).getByRole("tab", { name });
+}
+
+/**
+ * A tab's panel, found whether or not its tab is active. Inactive panels are `display: none`, for
+ * which the accessible-name computation yields "", so the panel is matched through the WAI-ARIA
+ * tabs pairing instead: the tab's `aria-controls` names the panel's id, and the panel's
+ * `aria-labelledby` names the tab's id.
+ */
+function tabPanel(name: string): HTMLElement {
+  const owner = tab(name);
+  const controls = owner.getAttribute("aria-controls");
+  const panels = within(mainRegion()).getAllByRole("tabpanel", { hidden: true });
+  const match = panels.find(
+    (panel) =>
+      (controls !== null && controls !== "" && panel.id === controls) ||
+      (owner.id !== "" && panel.getAttribute("aria-labelledby") === owner.id),
+  );
+  if (match === undefined) throw new Error(`no tab panel paired with the "${name}" tab`);
+  return match;
+}
+
+/** Activates a tab the way a user does: a click on it. */
+function openTab(name: string): void {
+  fireEvent.click(tab(name));
+}
+
+/** 033 DoD-1: exactly five tabs in the page's one tab list, named in the D1 order. */
+function expectFiveTabsInOrder(): void {
+  expect(within(mainRegion()).getAllByRole("tablist")).toHaveLength(1);
+  const tabs = within(tablist()).getAllByRole("tab");
+  expect(tabs).toHaveLength(TAB_NAMES.length);
+  tabs.forEach((element, index) => {
+    expect(element).toHaveAccessibleName(TAB_NAMES[index]);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -704,20 +795,23 @@ describe("existing mode at /characters/:id", () => {
       expect(loaders()).toEqual([]);
     });
     expect(heading(CHAR_A.name)).toBeInTheDocument();
-    expect(nameInput()).toHaveValue(CHAR_A.name);
-    expect(personaInput()).toHaveValue(CHAR_A.sheet);
     // 018 step 009 (D7): Save is gone; name and persona save on focus loss.
     expect(queryButton(SAVE_NAME)).toBeNull();
     expect(button(ARCHIVE_NAME)).toBeInTheDocument();
     expect(within(mainRegion()).queryByText(ARCHIVED_BADGE)).toBeNull();
+    // 033 step 001 (D1): the Sessions tab is open on arrival, so its region's heading shows.
     expect(heading(SESSIONS_HEADING)).toBeInTheDocument();
+    // 033 step 001 (D4): Name and Persona live in "Main info".
+    openTab(MAIN_INFO_TAB);
+    expect(nameInput()).toHaveValue(CHAR_A.name);
+    expect(personaInput()).toHaveValue(CHAR_A.sheet);
   });
 
   // 009 DoD-6 ("editing enables Save, which PATCHes name and sheet and re-renders from the
   // response") was removed by 018 step 009: Save is gone (018 D7), and the per-field saves on
   // focus loss are 018 DoD-5's clauses at the bottom of this file.
 
-  it("Archive and Restore round-trip through their own routes — DoD-7", async () => {
+  it("Archive and Restore round-trip through their own routes — DoD-7 (and 033 DoD-9)", async () => {
     const user = newUser();
     const { calls } = stubBackend((request) => {
       if (request.method === "GET" && request.path === itemPath(ID_A)) {
@@ -761,6 +855,8 @@ describe("existing mode at /characters/:id", () => {
     expect(button(RESTORE_NAME)).toBeInTheDocument();
     expect(queryButton(ARCHIVE_NAME)).toBeNull();
 
+    // 033 step 001 (D4): Name and Persona live in "Main info".
+    openTab(MAIN_INFO_TAB);
     expect(nameInput()).toBeEnabled();
     expect(personaInput()).toBeEnabled();
 
@@ -829,6 +925,8 @@ describe("existing mode at /characters/:id", () => {
 
     expect(matching(calls, "GET", itemPath(ID_A))).toHaveLength(2);
     expect(heading(CHAR_A.name)).toBeInTheDocument();
+    // 033 step 001 (D4): Name lives in "Main info".
+    openTab(MAIN_INFO_TAB);
     expect(nameInput()).toHaveValue(CHAR_A.name);
     expect(within(mainRegion()).queryByText(LOAD_FAILED_TEXT)).toBeNull();
   });
@@ -849,7 +947,8 @@ describe("existing mode at /characters/:id", () => {
     renderScreen(`/characters/${ID_A}`);
     await flush();
 
-    // 018 step 009 (D7): each field saves when it loses focus.
+    // 018 step 009 (D7): each field saves when it loses focus. 033 (D4): both are in "Main info".
+    openTab(MAIN_INFO_TAB);
     await typeInto(user, nameInput(), EDITED_NAME);
     await typeInto(user, personaInput(), EDITED_SHEET);
     await user.tab();
@@ -870,6 +969,8 @@ describe("moving between characters builds a fresh screen (CharacterRoute is key
     renderScreen(`/characters/${ID_A}`);
     await flush();
 
+    // 033 step 001 (D4): Name and Persona live in "Main info".
+    openTab(MAIN_INFO_TAB);
     await typeInto(user, nameInput(), DRAFT_ONLY);
     expect(nameInput()).toHaveValue(DRAFT_ONLY);
 
@@ -879,6 +980,8 @@ describe("moving between characters builds a fresh screen (CharacterRoute is key
     expect(locationPath()).toBe(`/characters/${ID_B}`);
     expect(matching(calls, "GET", itemPath(ID_B))).toHaveLength(1);
     expect(heading(CHAR_B.name)).toBeInTheDocument();
+    // 033 step 001 (D1): the new character's page starts on "Sessions" again.
+    openTab(MAIN_INFO_TAB);
     expect(nameInput()).toHaveValue(CHAR_B.name);
     expect(personaInput()).toHaveValue(CHAR_B.sheet);
     expect(within(mainRegion()).queryByDisplayValue(DRAFT_ONLY)).toBeNull();
@@ -924,14 +1027,14 @@ const CREATED_SETUP: Setup = {
 const TYPED_SETUP_NAME = "Night market";
 
 describe("the Setups section's place on the character screen (010 D1)", () => {
-  it("renders the Setups region between the Persona editor and the Sessions heading — DoD-10", async () => {
+  it("(010 DoD-10, amended by 033 DoD-6: the Setups tab replaces the body position) renders the Setups region, with its heading, inside the Setups tab panel — DoD-10", async () => {
     await renderLoaded(CHAR_A);
 
+    openTab(SETUPS_TAB);
     const section = setupsRegion();
     expect(section).toBeInTheDocument();
     expect(within(section).getByRole("heading", { name: SETUPS_REGION })).toBeInTheDocument();
-    expect(precedes(personaInput(), section)).toBe(true);
-    expect(precedes(section, heading(SESSIONS_HEADING))).toBe(true);
+    expect(tabPanel(SETUPS_TAB).contains(section)).toBe(true);
   });
 
   it("new mode at /characters/new renders no Setups region — DoD-10", async () => {
@@ -963,7 +1066,7 @@ describe("the Setups section's place on the character screen (010 D1)", () => {
 });
 
 describe("an archived character still carries the Setups section (010 D5)", () => {
-  it("renders the region and creates a setup under that character — DoD-11", async () => {
+  it("renders the region and creates a setup under that character through the inline form — DoD-11 (and 033 step 003 DoD-4)", async () => {
     const user = newUser();
     const { calls } = stubBackend((request) => {
       if (request.method === "GET" && request.path === itemPath(ID_A)) {
@@ -982,18 +1085,25 @@ describe("an archived character still carries the Setups section (010 D5)", () =
 
     expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
     expect(button(RESTORE_NAME)).toBeInTheDocument();
+    // 033 step 001 (D1): the section lives in the "Setups" tab.
+    openTab(SETUPS_TAB);
     expect(setupsRegion()).toBeInTheDocument();
 
-    // The modal is a Mantine portal, so it is reached through `screen` (010 context.md).
+    // 033 step 003 (D7): the header '+' "New setup" opens an inline create form inside the
+    // section (no modal); "Save setup" sends the create.
     await user.click(within(setupsRegion()).getByRole("button", { name: NEW_SETUP_NAME }));
-    const dialog = await screen.findByRole("dialog");
-    await user.type(within(dialog).getByRole("textbox", { name: NAME_LABEL }), TYPED_SETUP_NAME);
-    await user.click(within(dialog).getByRole("button", { name: CREATE_NAME }));
+    const nameField = await within(setupsRegion()).findByRole("textbox", { name: NAME_LABEL });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await user.type(nameField, TYPED_SETUP_NAME);
+    await user.click(within(setupsRegion()).getByRole("button", { name: SAVE_SETUP_NAME }));
     await flush();
 
     const posts = matching(calls, "POST", setupsPath(ID_A));
     expect(posts).toHaveLength(1);
     expect(posts[0].body).toMatchObject({ name: TYPED_SETUP_NAME });
+    // 033 step 003 DoD-4: the created setup is listed and the form closed.
+    expect(within(setupsRegion()).getByText(CREATED_SETUP.name)).toBeInTheDocument();
+    expect(within(setupsRegion()).queryByRole("button", { name: SAVE_SETUP_NAME })).toBeNull();
   });
 });
 
@@ -1031,6 +1141,8 @@ describe("moving between characters builds a fresh Setups section (010 D11)", ()
     });
     renderScreen(`/characters/${ID_A}`);
     await flush();
+    // 033 step 001 (D1): the section lives in the "Setups" tab.
+    openTab(SETUPS_TAB);
     expect(within(setupsRegion()).getByText(SETUP_OF_A.name)).toBeInTheDocument();
 
     await user.click(setupsSwitch());
@@ -1041,6 +1153,8 @@ describe("moving between characters builds a fresh Setups section (010 D11)", ()
     await flush();
 
     expect(locationPath()).toBe(`/characters/${ID_B}`);
+    // 033 step 001 (D1): the other character's page starts on "Sessions" again.
+    openTab(SETUPS_TAB);
     // 011 step 008: this path is now requested by both sections on the screen (010's listing
     // and 011's Select choices), so the clause asserts what it means — B's setups were
     // requested, and never with `include_archived` — instead of counting one request.
@@ -1100,14 +1214,13 @@ const STARTED_UNDER_A: Session = {
 };
 
 describe("the Sessions section's place on the character screen (011 D1)", () => {
-  it("renders the Sessions region after the Persona editor and the Setups region — DoD-12", async () => {
+  it("(011 DoD-12, amended by 033 DoD-5: the Sessions tab replaces the body position) renders the Sessions region, with its heading, inside the Sessions tab panel shown on arrival — DoD-12", async () => {
     await renderLoaded(CHAR_A);
 
     const section = sessionsRegion();
     expect(section).toBeInTheDocument();
     expect(within(section).getByRole("heading", { name: SESSIONS_REGION })).toBeInTheDocument();
-    expect(precedes(personaInput(), section)).toBe(true);
-    expect(precedes(setupsRegion(), section)).toBe(true);
+    expect(tabPanel(SESSIONS_TAB).contains(section)).toBe(true);
   });
 
   it("new mode at /characters/new renders no Sessions region or heading — DoD-12", async () => {
@@ -1142,7 +1255,9 @@ describe("the Sessions section's place on the character screen (011 D1)", () => 
 });
 
 describe("an archived character still carries the Sessions section (011 D2)", () => {
-  it("renders the region and starts a session under that character — DoD-13", async () => {
+  // Amended by 033 step 005 (D9): the section has no "Start session" button any more; a session
+  // starts only through the "New session" composer's send, with its opening message.
+  it("renders the region and starts a session under that character — DoD-13 (and 033 step 005 DoD-1, DoD-4)", async () => {
     const user = newUser();
     const { calls } = stubBackend((request) => {
       if (request.method === "GET" && request.path === itemPath(ID_A)) {
@@ -1161,13 +1276,19 @@ describe("an archived character still carries the Sessions section (011 D2)", ()
     expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
     expect(button(RESTORE_NAME)).toBeInTheDocument();
     expect(sessionsRegion()).toBeInTheDocument();
+    expect(
+      within(sessionsRegion()).queryByRole("button", { name: START_SESSION_NAME, hidden: true }),
+    ).toBeNull();
+    expect(matching(calls, "POST", sessionsPath(ID_A))).toEqual([]);
 
-    await user.click(within(sessionsRegion()).getByRole("button", { name: START_SESSION_NAME }));
+    const composer = within(region(START_REGION));
+    await user.type(composer.getByRole("textbox", { name: COMPOSER_LABEL }), "Hello there");
+    await user.click(composer.getByRole("button", { name: SEND_NAME }));
     await flush();
 
     const posts = matching(calls, "POST", sessionsPath(ID_A));
     expect(posts).toHaveLength(1);
-    expect(posts[0].body).toEqual({ setup_id: null });
+    expect(posts[0].body).toEqual({ opening_message: "Hello there" });
     expect(locationPath()).toBe(`/sessions/${STARTED_ID}`);
   });
 });
@@ -1233,6 +1354,8 @@ describe("moving between characters builds a fresh Sessions section (011 D15)", 
 const NOTES_REGION = "Notes";
 const NOTE_LABEL = "Note";
 const NEW_NOTE_NAME = "New note";
+/** 033 step 002's draft save button — removed by fast 012 (DoD-5); asserted absent below. */
+const SAVE_NEW_NOTE_NAME = "Save new note";
 const NO_NOTES_TEXT = "No notes yet.";
 
 const NOTE_STAMP = "2026-10-02T09:26:53.000000+00:00";
@@ -1265,8 +1388,9 @@ function notesRegion(): HTMLElement {
   return screen.getByRole("region", { name: NOTES_REGION });
 }
 
+/** 033 step 001: hidden included, so "no Notes region" also means "not even in a hidden tab". */
 function queryNotesRegion(): HTMLElement | null {
-  return screen.queryByRole("region", { name: NOTES_REGION });
+  return screen.queryByRole("region", { name: NOTES_REGION, hidden: true });
 }
 
 /** Each note's text in the Notes region, in document order (each note's "Note" editor value). */
@@ -1285,18 +1409,20 @@ function headingLevel(element: HTMLElement): number {
 }
 
 describe("015 step 009 — the Notes region's place on the character screen (D1)", () => {
-  it("(015 009 DoD-4, amended: Notes now precedes Setups and Sessions) once loaded, the Notes region is present with its heading, ahead of the Setups and Sessions regions — DoD-6", async () => {
+  it("(015 009 DoD-4, amended by 033 DoD-6: the Notes tab replaces the body order) once loaded, the Notes region is present with its heading inside the Notes tab panel — DoD-6", async () => {
     const { calls } = await renderLoaded(CHAR_A);
 
+    // 033 step 001 (D1): the section lives in the "Notes" tab.
+    openTab(NOTES_TAB);
     const notes = await screen.findByRole("region", { name: NOTES_REGION });
     const notesHeading = within(notes).getByRole("heading", { name: NOTES_REGION });
     expect(notesHeading).toBeInTheDocument();
     expect(within(mainRegion()).getByRole("region", { name: NOTES_REGION })).toBe(notes);
-    // 018 D10 amends "Notes follows Sessions": the grid now sits ahead of both sections.
-    expect(precedes(notes, setupsRegion())).toBe(true);
-    expect(precedes(notes, sessionsRegion())).toBe(true);
-    // The same heading order as the page's "Setups" and "Sessions" headings.
-    const sessionsHeading = within(sessionsRegion()).getByRole("heading", { name: SESSIONS_REGION });
+    expect(tabPanel(NOTES_TAB).contains(notes)).toBe(true);
+    // The same heading order as the page's "Sessions" heading (now in a hidden panel).
+    const sessionsHeading = within(
+      screen.getByRole("region", { name: SESSIONS_REGION, hidden: true }),
+    ).getByRole("heading", { name: SESSIONS_REGION, hidden: true });
     expect(headingLevel(notesHeading)).toBe(headingLevel(sessionsHeading));
 
     const reads = memoRequests(calls);
@@ -1335,7 +1461,7 @@ describe("015 step 009 — the Notes region's place on the character screen (D1)
 });
 
 describe("015 step 009 — an archived character still carries the Notes region (D8)", () => {
-  it("renders the region and a new note there POSTs with that character's id — DoD-5", async () => {
+  it("renders the region and a new note there (header '+', then focus leaving the draft) POSTs with that character's id — DoD-5 (and fast 012 DoD-3, DoD-5, DoD-6)", async () => {
     const typed = "Voice: dry";
     const { calls } = stubBackend((request) => {
       if (request.method === "GET" && request.path === itemPath(ID_A)) {
@@ -1352,16 +1478,27 @@ describe("015 step 009 — an archived character still carries the Notes region 
     await flush();
 
     expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
+    // 033 step 001 (D1): the section lives in the "Notes" tab.
+    openTab(NOTES_TAB);
     await waitFor(() => {
       expect(within(notesRegion()).queryByText(NO_NOTES_TEXT)).not.toBeNull();
     });
 
-    await newUser().click(within(notesRegion()).getByRole("button", { name: NEW_NOTE_NAME }));
+    // fast 012 DoD-3/DoD-6: "New note" is the header icon button (one, beside the heading), and
+    // the draft is saved when focus leaves it — there is no "Save new note" button (DoD-5).
+    const user = newUser();
+    const plusButtons = within(notesRegion()).getAllByRole("button", { name: NEW_NOTE_NAME });
+    expect(plusButtons).toHaveLength(1);
+    expect(plusButtons[0].textContent ?? "").not.toContain(NEW_NOTE_NAME);
+    const notesHeading = within(notesRegion()).getByRole("heading", { name: NOTES_REGION });
+    expect(notesHeading.parentElement?.contains(plusButtons[0])).toBe(true);
+    await user.click(plusButtons[0]);
     await waitFor(() => {
       expect(within(notesRegion()).queryAllByRole("textbox", { name: NOTE_LABEL })).toHaveLength(1);
     });
     const editor = within(notesRegion()).getByRole("textbox", { name: NOTE_LABEL });
     fireEvent.change(editor, { target: { value: typed } });
+    expect(within(notesRegion()).queryByRole("button", { name: SAVE_NEW_NOTE_NAME })).toBeNull();
     fireEvent.blur(editor);
 
     await waitFor(() => {
@@ -1395,6 +1532,8 @@ describe("015 step 009 — moving between characters builds a fresh Notes region
     });
     renderScreen(`/characters/${ID_A}`);
     await flush();
+    // 033 step 001 (D1): the section lives in the "Notes" tab.
+    openTab(NOTES_TAB);
     await waitFor(() => {
       expect(noteBodies()).toEqual([NOTE_OF_A_1.body, NOTE_OF_A_2.body]);
     });
@@ -1403,6 +1542,8 @@ describe("015 step 009 — moving between characters builds a fresh Notes region
     await flush();
 
     expect(locationPath()).toBe(`/characters/${ID_B}`);
+    // 033 step 001 (D1): the other character's page starts on "Sessions" again.
+    openTab(NOTES_TAB);
     await waitFor(() => {
       expect(noteBodies()).toEqual([NOTE_OF_B.body]);
     });
@@ -1425,7 +1566,8 @@ const DRAFT_LINE = "Nothing is saved until you enter a name.";
 const NAME_REQUIRED_TEXT = "A character needs a name.";
 const SEND_NAME = /^send$/i;
 const CONFIGURATION_REGION = "Configuration";
-const START_REGION = "Start a session";
+// 033 step 001 (DoD-13, D8): the composer region is "New session" (was "Start a session").
+const START_REGION = "New session";
 const COMPOSER_LABEL = "Composer";
 const MODEL_UNSET_LINE = "Not set: new sessions take the first enabled model.";
 const WALL_LABEL = "Note wall";
@@ -1433,8 +1575,21 @@ const OPEN_NOTES_NAME = "Open notes";
 const YOUR_NOTES = "Your notes";
 const SESSION_NOTES = "Session notes";
 
-/** The five body regions, in the order 018 D10 requires. */
+/**
+ * The five section regions of the ready page. 033 step 001 supersedes 018 D10's single-scroll
+ * order: each now lives in its own tab panel (see `REGION_TAB`), so no clause asserts an order
+ * across them any more.
+ */
 const BODY_REGIONS = [NOTES_REGION, "Setups", CONFIGURATION_REGION, "Sessions", START_REGION];
+
+/** 033 step 001 (D1, D8, DoD-5, DoD-6): the tab panel each section region belongs to. */
+const REGION_TAB: Record<string, string> = {
+  [NOTES_REGION]: NOTES_TAB,
+  Setups: SETUPS_TAB,
+  [CONFIGURATION_REGION]: CONFIGURATION_TAB,
+  Sessions: SESSIONS_TAB,
+  [START_REGION]: SESSIONS_TAB,
+};
 
 const ID_C = "7250000000000000021";
 const C_STAMP = "2026-07-01T09:00:00.000000+00:00";
@@ -1498,8 +1653,9 @@ function serveRows(
   });
 }
 
+/** 033 step 001: hidden included, because most section regions sit in an inactive tab panel. */
 function region(name: string): HTMLElement {
-  return within(mainRegion()).getByRole("region", { name });
+  return within(mainRegion()).getByRole("region", { name, hidden: true });
 }
 
 function queryRegionAnywhere(name: string): HTMLElement | null {
@@ -1594,7 +1750,7 @@ describe("018 step 009 — the draft page at /characters/new (D6)", () => {
 });
 
 describe("018 step 009 — name and persona save on focus loss at /characters/<id> (D7)", () => {
-  it("there is no Save button, and changing Name to Aria Vale and blurring sends exactly PATCH {name} and the heading reads Aria Vale — DoD-5", async () => {
+  it("there is no Save button, and changing Name to Aria Vale and blurring sends exactly PATCH {name} and the heading reads Aria Vale — DoD-5 (and 033 DoD-7)", async () => {
     const user = newUser();
     const { calls } = serveRows([CHAR_C]);
     renderScreen(`/characters/${ID_C}`);
@@ -1603,6 +1759,8 @@ describe("018 step 009 — name and persona save on focus loss at /characters/<i
     expect(heading(CHAR_C.name)).toBeInTheDocument();
     expect(queryButton(SAVE_NAME)).toBeNull();
 
+    // 033 step 001 (D4): Name lives in "Main info".
+    openTab(MAIN_INFO_TAB);
     await typeInto(user, nameInput(), "Aria Vale");
     await user.tab();
     await flush();
@@ -1612,12 +1770,14 @@ describe("018 step 009 — name and persona save on focus loss at /characters/<i
     expect(heading("Aria Vale")).toBeInTheDocument();
   });
 
-  it("clearing Name and blurring sends nothing, shows A character needs a name. on the Name field and keeps the saved name as the heading — DoD-5", async () => {
+  it("clearing Name and blurring sends nothing, shows A character needs a name. on the Name field and keeps the saved name as the heading — DoD-5 (and 033 DoD-7)", async () => {
     const user = newUser();
     const { calls } = serveRows([CHAR_C]);
     renderScreen(`/characters/${ID_C}`);
     await flush();
 
+    // 033 step 001 (D4): Name lives in "Main info".
+    openTab(MAIN_INFO_TAB);
     await user.clear(nameInput());
     await user.tab();
     await flush();
@@ -1629,13 +1789,15 @@ describe("018 step 009 — name and persona save on focus loss at /characters/<i
     expect(heading(CHAR_C.name)).toBeInTheDocument();
   });
 
-  it("changing the persona and blurring its editor sends exactly PATCH {sheet} — DoD-5", async () => {
+  it("changing the persona and blurring its editor sends exactly PATCH {sheet} — DoD-5 (and 033 DoD-7)", async () => {
     const user = newUser();
     const changed = "A duelist with a borrowed name.";
     const { calls } = serveRows([CHAR_C]);
     renderScreen(`/characters/${ID_C}`);
     await flush();
 
+    // 033 step 001 (D4): Persona lives in "Main info".
+    openTab(MAIN_INFO_TAB);
     await typeInto(user, personaInput(), changed);
     await user.tab();
     await flush();
@@ -1650,6 +1812,8 @@ describe("018 step 009 — name and persona save on focus loss at /characters/<i
     renderScreen(`/characters/${ID_C}`);
     await flush();
 
+    // 033 step 001 (D4): Persona lives in "Main info".
+    openTab(MAIN_INFO_TAB);
     // A change event alone: focus never enters the editor, so it never leaves it either.
     fireEvent.change(personaInput(), { target: { value: changed } });
     expect(matching(calls, "PATCH", itemPath(ID_C))).toEqual([]);
@@ -1664,21 +1828,21 @@ describe("018 step 009 — name and persona save on focus loss at /characters/<i
   });
 });
 
-describe("018 step 009 — the body's order, the notes grid and no wall (D10)", () => {
-  it("once loaded the regions run Notes, Setups, Configuration, Sessions, Start a session, and the notes are focusable cards named Note <n> of <total> — DoD-6", async () => {
+describe("018 step 009 — the page's sections, the notes cards and no wall (D10, amended by 033 D1)", () => {
+  it("(018 DoD-6, amended by 033 DoD-6: tab panels replace the body order) once loaded each section region sits in its own tab panel, and the notes are focusable cards named Note <n> of <total> — DoD-6", async () => {
     serveRows([CHAR_C], { notes: [NOTE_OF_C_1, NOTE_OF_C_2] });
     renderScreen(`/characters/${ID_C}`);
     await flush();
 
+    for (const name of BODY_REGIONS) {
+      expect(tabPanel(REGION_TAB[name]).contains(region(name))).toBe(true);
+    }
+
+    openTab(NOTES_TAB);
     const notes = await within(mainRegion()).findByRole("region", { name: NOTES_REGION });
     await waitFor(() => {
       expect(within(notes).getByRole("listitem", { name: "Note 2 of 2" })).toBeInTheDocument();
     });
-
-    const ordered = BODY_REGIONS.map((name) => region(name));
-    for (let index = 0; index + 1 < ordered.length; index += 1) {
-      expect(precedes(ordered[index], ordered[index + 1])).toBe(true);
-    }
 
     const first = within(notes).getByRole("listitem", { name: "Note 1 of 2" });
     const second = within(notes).getByRole("listitem", { name: "Note 2 of 2" });
@@ -1691,7 +1855,8 @@ describe("018 step 009 — the body's order, the notes grid and no wall (D10)", 
     const { calls } = serveRows([CHAR_C], { notes: [NOTE_OF_C_1] });
     renderScreen(`/characters/${ID_C}`);
     await flush();
-    await within(mainRegion()).findByRole("region", { name: NOTES_REGION });
+    // 033 step 001: the Notes region sits in a (hidden) tab panel on arrival.
+    await within(mainRegion()).findByRole("region", { name: NOTES_REGION, hidden: true });
 
     expect(
       screen
@@ -1707,7 +1872,7 @@ describe("018 step 009 — the body's order, the notes grid and no wall (D10)", 
     expect(calls.filter((call) => call.path.endsWith("/memo-chain"))).toEqual([]);
   });
 
-  it("an archived character still renders every section, the configuration block and the composer included, with Restore in place of Archive — DoD-10", async () => {
+  it("an archived character still renders every section, the configuration block and the composer included, with Restore in place of Archive — DoD-10 (and 033 DoD-11)", async () => {
     serveRows([ARCHIVED_C]);
     renderScreen(`/characters/${ID_C}`);
     await flush();
@@ -1716,8 +1881,11 @@ describe("018 step 009 — the body's order, the notes grid and no wall (D10)", 
     expect(button(RESTORE_NAME)).toBeInTheDocument();
     expect(queryButton(ARCHIVE_NAME)).toBeNull();
 
+    // 033 step 001 (DoD-11): all five tabs, each section in its own tab panel.
+    expectFiveTabsInOrder();
     for (const name of BODY_REGIONS) {
       expect(region(name)).toBeInTheDocument();
+      expect(tabPanel(REGION_TAB[name]).contains(region(name))).toBe(true);
     }
     expect(await within(region(CONFIGURATION_REGION)).findByText(MODEL_UNSET_LINE)).toBeInTheDocument();
     expect(within(region(START_REGION)).getByRole("textbox", { name: COMPOSER_LABEL })).toBeInTheDocument();
@@ -1744,25 +1912,27 @@ describe("018 step 009 — the body's order, the notes grid and no wall (D10)", 
 // the body's structure. The stubbed editor calls `onChange` on every keystroke, so each typed
 // character re-renders the screen.
 
-/** Asserts each of the five body regions occurs exactly once inside main, in 018 D10 order. */
+/**
+ * Asserts each of the five section regions occurs exactly once on the whole page — hidden tab
+ * panels included — and sits in its own tab panel. 033 step 001 (DoD-10) replaces 018 D10's
+ * order check with the tab-panel check; the exactly-once guarantee (commit 8f86926) is kept.
+ */
 function expectEachBodyRegionOnce(): void {
-  const main = within(mainRegion());
   for (const name of BODY_REGIONS) {
-    expect(main.getAllByRole("region", { name })).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name, hidden: true })).toHaveLength(1);
+    expect(tabPanel(REGION_TAB[name]).contains(region(name))).toBe(true);
   }
-  const ordered = BODY_REGIONS.map((name) => region(name));
-  for (let index = 0; index + 1 < ordered.length; index += 1) {
-    expect(precedes(ordered[index], ordered[index + 1])).toBe(true);
-  }
+  expect(screen.getAllByRole("tablist", { hidden: true })).toHaveLength(1);
 }
 
-describe("bug fix — editing the persona or name keeps one copy of each body region (018 D10)", () => {
-  it("typing abc keystroke by keystroke into Persona without blurring leaves Notes, Setups, Configuration, Sessions and Start a session exactly once each — DoD-6", async () => {
+describe("bug fix — editing the persona or name keeps one copy of each body region (018 D10, amended by 033 D1)", () => {
+  it("typing abc keystroke by keystroke into Persona without blurring leaves Notes, Setups, Configuration, Sessions and New session exactly once each — DoD-6 (and 033 DoD-10)", async () => {
     const user = newUser();
     await renderLoaded(CHAR_A);
-    await within(mainRegion()).findByRole("region", { name: NOTES_REGION });
+    await within(mainRegion()).findByRole("region", { name: NOTES_REGION, hidden: true });
     expectEachBodyRegionOnce();
 
+    openTab(MAIN_INFO_TAB);
     await user.type(personaInput(), "abc");
     await flush();
 
@@ -1770,16 +1940,404 @@ describe("bug fix — editing the persona or name keeps one copy of each body re
     expectEachBodyRegionOnce();
   });
 
-  it("typing xyz keystroke by keystroke into Name without blurring leaves each body region exactly once — DoD-6", async () => {
+  it("typing xyz keystroke by keystroke into Name without blurring leaves each body region exactly once — DoD-6 (and 033 DoD-10)", async () => {
     const user = newUser();
     await renderLoaded(CHAR_A);
-    await within(mainRegion()).findByRole("region", { name: NOTES_REGION });
+    await within(mainRegion()).findByRole("region", { name: NOTES_REGION, hidden: true });
     expectEachBodyRegionOnce();
 
+    openTab(MAIN_INFO_TAB);
     await user.type(nameInput(), "xyz");
     await flush();
 
     expect(nameInput()).toHaveValue(`${CHAR_A.name}xyz`);
     expectEachBodyRegionOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 033, step 001 — the tabbed character page (033 DoD-1..DoD-13; DoD-14 and DoD-15 are
+// [manual/live]). Expected values come from 033's step file and context.md: D1 (five tabs in the
+// order Sessions, Main info, Configuration, Notes, Setups; Sessions selected on open; the active
+// tab is local state, not in the URL), D2 (keepMounted: every section mounts and loads once on
+// open; the draft page has no tabs and no sections), D3 (page header: saved name, "Archived"
+// badge, icon-only Archive/Restore and Export), D4 (Name + Persona in Main info), D5
+// (Configuration moved as-is) and D8 (the Sessions tab: "New session" composer, a divider, then
+// the sessions list). Tab structure is asserted through `tab` / `tabpanel` roles and
+// `aria-selected` (context.md "Tests — feature-wide notes").
+const DIVIDER = ".mantine-Divider-root";
+const EXPORT_NAME = /^export$/i;
+const HEADER_ACTION_NAMES = [ARCHIVE_NAME, RESTORE_NAME, EXPORT_NAME];
+
+/** True when `element` sits in the page header: before the tab list and in no tab panel. */
+function isInPageHeader(element: HTMLElement): boolean {
+  return precedes(element, tablist()) && element.closest('[role="tabpanel"]') === null;
+}
+
+function expectSelectedTab(name: string): void {
+  for (const candidate of TAB_NAMES) {
+    expect(tab(candidate)).toHaveAttribute("aria-selected", candidate === name ? "true" : "false");
+  }
+}
+
+describe("033 step 001 — the five tabs (D1)", () => {
+  it("a saved character's page shows one tab list with exactly five tabs: Sessions, Main info, Configuration, Notes, Setups — 033 DoD-1", async () => {
+    serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    expectFiveTabsInOrder();
+  });
+
+  it("on opening /characters/<id> the Sessions tab is selected and its panel is the one shown — 033 DoD-2", async () => {
+    serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    expectSelectedTab(SESSIONS_TAB);
+    const shown = within(mainRegion()).getAllByRole("tabpanel");
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toBe(tabPanel(SESSIONS_TAB));
+  });
+
+  it("selecting each other tab selects it and leaves the URL unchanged — 033 DoD-3", async () => {
+    serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+    const before = fullLocation();
+    expect(before).toBe(`/characters/${ID_C}`);
+
+    for (const name of [MAIN_INFO_TAB, CONFIGURATION_TAB, NOTES_TAB, SETUPS_TAB, SESSIONS_TAB]) {
+      openTab(name);
+      await flush(2);
+      expectSelectedTab(name);
+      expect(fullLocation()).toBe(before);
+    }
+  });
+
+  it("navigating to a different character's page lands on its Sessions tab again — 033 DoD-3", async () => {
+    const user = newUser();
+    serveRows([CHAR_C, CHAR_B]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    openTab(MAIN_INFO_TAB);
+    expectSelectedTab(MAIN_INFO_TAB);
+
+    await user.click(screen.getByRole("button", { name: PROBE_NAVIGATE }));
+    await flush();
+
+    expect(locationPath()).toBe(`/characters/${ID_B}`);
+    expect(heading(CHAR_B.name)).toBeInTheDocument();
+    expectSelectedTab(SESSIONS_TAB);
+  });
+});
+
+describe("033 step 001 — every section mounts and loads once at page open (D2)", () => {
+  it("every section region is in the document at open, each initial load is issued once (one notes memos GET), and switching through every tab issues no further request — 033 DoD-4", async () => {
+    const { calls } = serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    // Inactive tabs included: every section is mounted on arrival.
+    for (const name of BODY_REGIONS) {
+      expect(screen.getAllByRole("region", { name, hidden: true })).toHaveLength(1);
+    }
+
+    expect(matching(calls, "GET", itemPath(ID_C))).toHaveLength(1);
+    // Notes: exactly one memos request, and it is the character's notes listing.
+    expect(memoRequests(calls)).toHaveLength(1);
+    expect(calls.filter((call) => isNotesListing(call, ID_C))).toHaveLength(1);
+    // Configuration: its own read and the enabled-models read, once each.
+    expect(matching(calls, "GET", configurationPath(ID_C))).toHaveLength(1);
+    expect(matching(calls, "GET", MODELS_PATH)).toHaveLength(1);
+    // Sessions: its listing, once.
+    expect(matching(calls, "GET", sessionsPath(ID_C))).toHaveLength(1);
+    // Setups: its listing was requested at open (the same path may also serve another section).
+    expect(matching(calls, "GET", setupsPath(ID_C)).length).toBeGreaterThan(0);
+
+    const requestsAtOpen = calls.length;
+    for (const name of [MAIN_INFO_TAB, CONFIGURATION_TAB, NOTES_TAB, SETUPS_TAB, SESSIONS_TAB]) {
+      openTab(name);
+      await flush(2);
+    }
+    // And once more round, so a tab revisited is covered too.
+    for (const name of [NOTES_TAB, SETUPS_TAB, CONFIGURATION_TAB, MAIN_INFO_TAB, SESSIONS_TAB]) {
+      openTab(name);
+      await flush(2);
+    }
+    await flush();
+
+    expect(calls).toHaveLength(requestsAtOpen);
+  });
+});
+
+describe("033 step 001 — what each tab panel holds (D4, D5, D8, US-096)", () => {
+  it("the Sessions panel holds the New session region, then a divider, then the Sessions region — 033 DoD-5", async () => {
+    serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    const panel = tabPanel(SESSIONS_TAB);
+    const composerRegion = within(panel).getByRole("region", { name: START_REGION });
+    const listRegion = within(panel).getByRole("region", { name: "Sessions" });
+    expect(precedes(composerRegion, listRegion)).toBe(true);
+
+    const separating = Array.from(panel.querySelectorAll<HTMLElement>(DIVIDER)).filter(
+      (divider) =>
+        !composerRegion.contains(divider) &&
+        !listRegion.contains(divider) &&
+        precedes(composerRegion, divider) &&
+        precedes(divider, listRegion),
+    );
+    expect(separating.length).toBeGreaterThan(0);
+  });
+
+  it("the Main info panel holds the Name input and the Persona editor; the Configuration, Notes and Setups panels hold their regions — 033 DoD-6", async () => {
+    serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    const mainInfo = within(tabPanel(MAIN_INFO_TAB));
+    expect(mainInfo.getByRole("textbox", { name: NAME_LABEL, hidden: true })).toHaveValue(CHAR_C.name);
+    expect(mainInfo.getByRole("textbox", { name: PERSONA_LABEL, hidden: true })).toHaveValue(
+      CHAR_C.sheet,
+    );
+    // Name and Persona are not in the Sessions panel shown on arrival.
+    expect(within(tabPanel(SESSIONS_TAB)).queryByRole("textbox", { name: NAME_LABEL, hidden: true })).toBeNull();
+    expect(
+      within(tabPanel(SESSIONS_TAB)).queryByRole("textbox", { name: PERSONA_LABEL, hidden: true }),
+    ).toBeNull();
+
+    for (const [tabName, regionName] of [
+      [CONFIGURATION_TAB, CONFIGURATION_REGION],
+      [NOTES_TAB, NOTES_REGION],
+      [SETUPS_TAB, "Setups"],
+    ] as const) {
+      expect(
+        within(tabPanel(tabName)).getByRole("region", { name: regionName, hidden: true }),
+      ).toBeInTheDocument();
+    }
+
+    // Opening each tab shows its contents.
+    openTab(MAIN_INFO_TAB);
+    expect(nameInput()).toHaveValue(CHAR_C.name);
+    expect(personaInput()).toHaveValue(CHAR_C.sheet);
+    for (const [tabName, regionName] of [
+      [CONFIGURATION_TAB, CONFIGURATION_REGION],
+      [NOTES_TAB, NOTES_REGION],
+      [SETUPS_TAB, "Setups"],
+    ] as const) {
+      openTab(tabName);
+      const shown = within(mainRegion()).getByRole("region", { name: regionName });
+      expect(tabPanel(tabName).contains(shown)).toBe(true);
+    }
+  });
+
+  it("the composer region is named New session, and no Start a session region remains — 033 DoD-13", async () => {
+    serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    const composerRegion = within(mainRegion()).getByRole("region", { name: "New session" });
+    expect(within(composerRegion).getByRole("heading", { name: "New session" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Start a session", hidden: true })).toBeNull();
+  });
+});
+
+describe("033 step 001 — name and persona still save on focus loss from Main info (D4, UC-073)", () => {
+  it("in Main info, a changed name and a changed persona each PATCH on focus loss, and a blank name is refused with no request — 033 DoD-7", async () => {
+    const user = newUser();
+    const { calls } = serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+    openTab(MAIN_INFO_TAB);
+
+    await user.clear(nameInput());
+    await user.tab();
+    await flush();
+    expect(matching(calls, "PATCH", itemPath(ID_C))).toEqual([]);
+    expect(within(mainRegion()).getByText(NAME_REQUIRED_TEXT)).toBeInTheDocument();
+
+    await user.type(nameInput(), "Aria Vale");
+    await user.tab();
+    await flush();
+    // Rework (verifier TEST fault): serveRows answers each PATCH statelessly (loaded row + that
+    // request's fields), and the header shows the name as last reported (018 D7). So the renamed
+    // heading is asserted right after the name update, before the persona update.
+    expect(heading("Aria Vale")).toBeInTheDocument();
+
+    await typeInto(user, personaInput(), "Shorter.");
+    await user.tab();
+    await flush();
+
+    const patches = matching(calls, "PATCH", itemPath(ID_C));
+    expect(patches.map((call) => call.body)).toEqual([{ name: "Aria Vale" }, { sheet: "Shorter." }]);
+  });
+});
+
+describe("033 step 001 — the page header (D3)", () => {
+  it("the header shows the saved name and icon-only Archive and Export, above the tabs, and no labelled Archive/Restore/Export text remains — 033 DoD-8", async () => {
+    serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    const title = heading(CHAR_C.name);
+    expect(isInPageHeader(title)).toBe(true);
+    expect(within(mainRegion()).queryByText(ARCHIVED_BADGE)).toBeNull();
+
+    for (const name of [ARCHIVE_NAME, EXPORT_NAME]) {
+      // Exactly one such control on the whole page, hidden tab panels included.
+      const all = within(mainRegion()).getAllByRole("button", { name, hidden: true });
+      expect(all).toHaveLength(1);
+      expect(all[0]).toBe(button(name));
+      expect(isInPageHeader(all[0])).toBe(true);
+      expect((all[0].textContent ?? "").trim()).toBe("");
+    }
+    expect(within(mainRegion()).queryByRole("button", { name: RESTORE_NAME, hidden: true })).toBeNull();
+    // No text label reading Archive / Restore / Export anywhere in the page, hidden panels included.
+    expect(within(mainRegion()).queryAllByText(/^(archive|restore|export)$/i)).toEqual([]);
+  });
+
+  it("an archived character's header shows the saved name, the Archived badge and icon-only Restore and Export — 033 DoD-8", async () => {
+    serveRows([ARCHIVED_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    expect(isInPageHeader(heading(ARCHIVED_C.name))).toBe(true);
+    const badge = within(mainRegion()).getByText(ARCHIVED_BADGE);
+    expect(isInPageHeader(badge)).toBe(true);
+
+    for (const name of [RESTORE_NAME, EXPORT_NAME]) {
+      const all = within(mainRegion()).getAllByRole("button", { name, hidden: true });
+      expect(all).toHaveLength(1);
+      expect(isInPageHeader(all[0])).toBe(true);
+      expect((all[0].textContent ?? "").trim()).toBe("");
+    }
+    expect(within(mainRegion()).queryByRole("button", { name: ARCHIVE_NAME, hidden: true })).toBeNull();
+    expect(within(mainRegion()).queryAllByText(/^(archive|restore|export)$/i)).toEqual([]);
+  });
+});
+
+describe("033 step 001 — the header's Archive and Restore still work (D3)", () => {
+  it("clicking the header's Archive archives the character (badge, Restore in its place); clicking Restore restores it — 033 DoD-9", async () => {
+    const user = newUser();
+    const { calls } = stubBackend((request) => {
+      if (request.method === "GET" && request.path === itemPath(ID_C)) {
+        return jsonResponse(CHAR_C, 200);
+      }
+      if (request.method === "POST" && request.path === `${itemPath(ID_C)}/archive`) {
+        return jsonResponse(ARCHIVED_C, 200);
+      }
+      if (request.method === "POST" && request.path === `${itemPath(ID_C)}/restore`) {
+        return jsonResponse(CHAR_C, 200);
+      }
+      const listing = sectionListing(request, ID_C);
+      if (listing !== null) return listing;
+      return notFoundResponse();
+    });
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    await user.click(button(ARCHIVE_NAME));
+    await flush();
+
+    expect(matching(calls, "POST", `${itemPath(ID_C)}/archive`)).toHaveLength(1);
+    expect(isInPageHeader(within(mainRegion()).getByText(ARCHIVED_BADGE))).toBe(true);
+    expect(isInPageHeader(button(RESTORE_NAME))).toBe(true);
+    expect(queryButton(ARCHIVE_NAME)).toBeNull();
+    // The tabs survive the archive.
+    expectFiveTabsInOrder();
+
+    await user.click(button(RESTORE_NAME));
+    await flush();
+
+    expect(matching(calls, "POST", `${itemPath(ID_C)}/restore`)).toHaveLength(1);
+    expect(within(mainRegion()).queryByText(ARCHIVED_BADGE)).toBeNull();
+    expect(isInPageHeader(button(ARCHIVE_NAME))).toBe(true);
+  });
+});
+
+describe("033 step 001 — the draft page has no tabs (D2, US-097)", () => {
+  it("/characters/new renders no tab list, no tab, no section region and no header icon action — 033 DoD-12", async () => {
+    const { calls } = stubBackend(() => notFoundResponse());
+    renderScreen(NEW_PATH);
+    await flush();
+
+    expect(heading(NEW_HEADING)).toBeInTheDocument();
+    expect(nameInput()).toBeInTheDocument();
+    expect(personaInput()).toBeInTheDocument();
+
+    expect(queryTablistAnywhere()).toBeNull();
+    expect(screen.queryAllByRole("tab", { hidden: true })).toEqual([]);
+    expect(screen.queryAllByRole("tabpanel", { hidden: true })).toEqual([]);
+    for (const name of [...BODY_REGIONS, "Start a session"]) {
+      expect(queryRegionAnywhere(name)).toBeNull();
+    }
+    for (const name of HEADER_ACTION_NAMES) {
+      expect(screen.queryByRole("button", { name, hidden: true })).toBeNull();
+    }
+    expect(calls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 033, step 004 — the composer's Setup select on the page (D8). The composer lists the
+// character's setups on mount; `sectionListing` already answers that path with no setups, so the
+// existing clauses keep their meaning (setups listings are never counted as exactly one here).
+describe("033 step 004 — the New session composer carries a Setup select (D8)", () => {
+  it('the Sessions tab\'s "New session" composer shows a "Setup" select reading "No setup" on open — 033 step 004 DoD-2', async () => {
+    const { calls } = serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    const composerRegion = within(tabPanel(SESSIONS_TAB)).getByRole("region", { name: START_REGION });
+    const scope = within(composerRegion);
+    const setupField =
+      scope.queryByRole("combobox", { name: /^setup$/i }) ??
+      scope.queryByRole("textbox", { name: /^setup$/i }) ??
+      scope.getByLabelText(/^setup$/i);
+    expect((setupField as HTMLInputElement).value).toBe("No setup");
+    expect(matching(calls, "GET", setupsPath(ID_C)).length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 033, step 005 — the sessions list loses its message-less start (D9) and carries the
+// icon-only "Import session" in its header (D8). The section's own behaviour is
+// SessionsSection.test.tsx's; these clauses assert what the page shows on open.
+describe("033 step 005 — the Sessions tab's list has no start control of its own (D8, D9)", () => {
+  it("the Sessions region holds no Setup select and no Start session button; the only Setup select is the composer's — 033 step 005 DoD-1", async () => {
+    serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    const sessions = within(region("Sessions"));
+    expect(sessions.queryByRole("button", { name: START_SESSION_NAME, hidden: true })).toBeNull();
+    expect(sessions.queryByRole("combobox", { name: /^setup$/i, hidden: true })).toBeNull();
+    expect(sessions.queryByRole("textbox", { name: /^setup$/i, hidden: true })).toBeNull();
+    expect(sessions.queryByLabelText(/^setup$/i)).toBeNull();
+    expect(sessions.queryByText("Could not load setups to choose from.")).toBeNull();
+    // The page's one start control is the "New session" composer's.
+    expect(screen.queryAllByRole("button", { name: START_SESSION_NAME, hidden: true })).toEqual([]);
+  });
+
+  it("the Sessions region's header carries an Import session button — 033 step 005 DoD-2", async () => {
+    serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+
+    const sessions = within(region("Sessions"));
+    expect(sessions.getAllByRole("button", { name: /^import session$/i })).toHaveLength(1);
+  });
+
+  it("opening the page sends no session create at all — 033 step 005 DoD-4", async () => {
+    const { calls } = serveRows([CHAR_C]);
+    renderScreen(`/characters/${ID_C}`);
+    await flush();
+    await within(mainRegion()).findByRole("region", { name: NOTES_REGION, hidden: true });
+    await flush();
+
+    expect(matching(calls, "POST", sessionsPath(ID_C))).toEqual([]);
   });
 });

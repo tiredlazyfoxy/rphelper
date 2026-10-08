@@ -125,20 +125,23 @@ function toSession(started: Session): Session {
 }
 
 /**
- * `POST /api/characters/<characterId>/sessions` with the JSON body exactly
- * `{ opening_message: <text verbatim> }` (018 D5): create-and-seed. Resolves to the served
- * `StartedSession` unchanged.
+ * `POST /api/characters/<characterId>/sessions` (018 D5, 033 D8): create-and-seed. With no
+ * setup id (null, the default) the JSON body is exactly `{ opening_message: <text verbatim> }`;
+ * with one it is `{ opening_message, setup_id }`. Resolves to the served `StartedSession`
+ * unchanged.
  */
 export async function startSessionWithMessage(
   characterId: string,
   openingText: string,
+  setupId: string | null = null,
   signal?: AbortSignal,
 ): Promise<StartedSession> {
-  return apiPost<StartedSession>(
-    characterSessionsPath(characterId),
-    { opening_message: openingText },
-    signal,
-  );
+  // No setup: the body stays exactly `{ opening_message }`, never `setup_id: null`.
+  const body =
+    setupId === null
+      ? { opening_message: openingText }
+      : { opening_message: openingText, setup_id: setupId };
+  return apiPost<StartedSession>(characterSessionsPath(characterId), body, signal);
 }
 
 /** `POST /api/sessions/<sessionId>/archive` — resolves to the session. */

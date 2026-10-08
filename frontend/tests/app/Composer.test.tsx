@@ -809,8 +809,21 @@ function precedes(first: Node, second: Node): boolean {
   return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 }
 
+/**
+ * fast/011: the Mantine input root/wrapper containing the "Composer" textarea — Send now sits
+ * inside it (an icon at the box's bottom-right) rather than in the row under the box.
+ */
+function inputBox(textarea: HTMLElement): HTMLElement {
+  const box =
+    textarea.closest<HTMLElement>(".mantine-InputWrapper-root, .mantine-Textarea-root") ??
+    textarea.closest<HTMLElement>(".mantine-Input-wrapper, .mantine-Textarea-wrapper");
+  if (box === null) throw new Error("the Composer textarea has no Mantine input wrapper");
+  return box;
+}
+
 describe("018 step 003 — Composer rebuilt on the core keeps its public behaviour (D4)", () => {
-  it('with a blank draft and an empty zone: textbox "Composer", then "Send", then "Settle", then "Discard empty zone" — DoD-5', () => {
+  // Amended by fast/011 (DoD-14): Send is inside the text box now; Settle and Discard still follow.
+  it('with a blank draft and an empty zone: textbox "Composer" holding "Send" in its box, then "Settle", then "Discard empty zone" — DoD-5 (fast/011 DoD-14)', () => {
     stubFetch(() => undefined);
     renderComposer(seeded());
 
@@ -819,18 +832,23 @@ describe("018 step 003 — Composer rebuilt on the core keeps its public behavio
     const settle = settleButton();
     const discard = screen.getByRole("button", { name: DISCARD_NAME });
 
-    expect(precedes(textbox, send)).toBe(true);
+    expect(inputBox(textbox).contains(send)).toBe(true);
+    expect(inputBox(textbox).contains(settle)).toBe(false);
+    expect(precedes(textbox, settle)).toBe(true);
     expect(precedes(send, settle)).toBe(true);
     expect(precedes(settle, discard)).toBe(true);
   });
 
-  it('with draft "She walks." on my turn, the preview line sits after the text area and before "Send" — DoD-5', () => {
+  // Amended by fast/011 (DoD-14): the preview (under-area) no longer precedes Send, which moved
+  // into the box; it still follows the text area and precedes Settle.
+  it('with draft "She walks." on my turn, the preview line sits after the text area and before "Settle"; "Send" is inside the box — DoD-5 (fast/011 DoD-14)', () => {
     stubFetch(() => undefined);
     renderComposer(seeded({ draft: "She walks." }));
 
     const preview = screen.getByText(PREVIEW_TURN);
     expect(precedes(composer(), preview)).toBe(true);
-    expect(precedes(preview, sendButton())).toBe(true);
+    expect(precedes(preview, settleButton())).toBe(true);
+    expect(inputBox(composer()).contains(sendButton())).toBe(true);
     expect(precedes(sendButton(), settleButton())).toBe(true);
   });
 

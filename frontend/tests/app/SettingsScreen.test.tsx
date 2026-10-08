@@ -25,7 +25,7 @@
 //   with the parsed JSON body.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsScreen } from "../../src/app/SettingsScreen";
@@ -43,13 +43,14 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
     value: string;
     onChange: (markdown: string) => void;
     readOnly?: boolean;
+    toolbarActions?: ReactNode;
   };
   return {
     MarkdownEditor: (props: StubProps) => {
       const id = `markdown-editor-${useId()}`;
       return createElement(
         "div",
-        null,
+        { "data-testid": "markdown-editor-stub" },
         createElement("label", { htmlFor: id }, props.label),
         createElement("textarea", {
           id,
@@ -57,6 +58,10 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
           readOnly: props.readOnly ?? false,
           onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
         }),
+        // fast 012: the toolbar-actions prop (a saved note's flags) renders inside the root.
+        props.toolbarActions === undefined || props.toolbarActions === null
+          ? null
+          : createElement("div", { "data-testid": "stub-toolbar-actions" }, props.toolbarActions),
       );
     },
   };
@@ -563,5 +568,61 @@ describe('"Your notes" is the user level, not reorderable (US-092.AC-1, D15)', (
       expect(noteItems()).toHaveLength(USER_NOTES.length + 1);
     });
     expect(within(notesRegion()).queryAllByRole("listitem", { name: POSITION_NAME })).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Fast feature 012 — "Your notes" inherits the one note behaviour (012 plan.md Interface intent
+// "MemoLevelGroup"; DoD-3, DoD-5, DoD-10). The stub renders the `toolbarActions` prop inside its
+// root as `[data-testid="stub-toolbar-actions"]`.
+describe('fast 012 — "Your notes" header \'+\', no Save / Cancel, flags in the editor', () => {
+  it('exactly one "New note" button renders, in the group header beside the "Your notes" title and before the list — fast 012 DoD-3', async () => {
+    serveBackend();
+    renderScreen();
+    await waitForReady();
+
+    const buttons = within(notesRegion()).getAllByRole("button", { name: NEW_NOTE });
+    expect(buttons).toHaveLength(1);
+    const plus = buttons[0];
+    const heading = within(notesRegion()).getByRole("heading", { name: YOUR_NOTES });
+    expect(heading.parentElement?.contains(plus)).toBe(true);
+    const list = noteItems()[0].closest("ul");
+    expect(list).not.toBeNull();
+    expect(follows(heading, plus)).toBe(true);
+    expect(follows(plus, list as HTMLElement)).toBe(true);
+    for (const item of noteItems()) {
+      expect(item.contains(plus)).toBe(false);
+    }
+  });
+
+  it('no "Save new note" or "Cancel new note" renders, before or with a draft open — fast 012 DoD-5', async () => {
+    serveBackend();
+    renderScreen();
+    await waitForReady();
+
+    expect(screen.queryByRole("button", { name: "Save new note" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel new note" })).toBeNull();
+    await newUser().click(within(notesRegion()).getByRole("button", { name: NEW_NOTE }));
+    await waitFor(() => {
+      expect(noteItems()).toHaveLength(USER_NOTES.length + 1);
+    });
+    expect(within(notesRegion()).getByRole("button", { name: NEW_NOTE })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save new note" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel new note" })).toBeNull();
+  });
+
+  it("each saved note's flag buttons render inside its editor root — fast 012 DoD-10", async () => {
+    serveBackend();
+    renderScreen();
+    await waitForReady();
+
+    for (const item of noteItems()) {
+      const root = item.querySelector('[data-testid="markdown-editor-stub"]');
+      expect(root).not.toBeNull();
+      const disable = within(item).getByRole("button", { name: DISABLE_NOTE });
+      const force = within(item).getByRole("button", { name: "Force note" });
+      expect((root as HTMLElement).contains(disable)).toBe(true);
+      expect((root as HTMLElement).contains(force)).toBe(true);
+    }
   });
 });

@@ -149,11 +149,22 @@
 // with the tree expanded renders the box in the centre (029 U4, D9). A collapse is a stored
 // `navCollapsed: true` layout record, WorkspaceShell.test.tsx's own mechanism. No other existing
 // assertion is dropped, and `WorkspaceShell.test.tsx` is not amended.
+//
+// Amended by feature 033, step 001 (DoD-4, DoD-6, DoD-7, DoD-13; D1, D2, D4, D8): the ready
+// character page is a header above five kept-mounted tabs — "Sessions" (selected on open), "Main
+// info", "Configuration", "Notes", "Setups" — and inactive tab panels are hidden, so default role
+// queries skip them. Consequences: a clause that reads or types into Name / Persona first opens
+// "Main info" (`openCharacterTab`); 015 step 009 DoD-4's region-order clause is replaced by "each
+// region sits in its own tab panel" (the 018 D10 order is superseded by the tabs); the composer
+// region is "New session" (was "Start a session"); a presence check of the Notes region on
+// arrival queries with `{ hidden: true }`. Header controls (Archive / Restore) and the Sessions
+// tab's regions are visible on arrival, so those clauses are unchanged. No other assertion
+// changes.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import { App } from "../../src/app/App";
 import type { Character } from "../../src/app/charactersApi";
 import type { Session } from "../../src/app/sessionsApi";
@@ -168,6 +179,7 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
     value: string;
     onChange: (markdown: string) => void;
     readOnly?: boolean;
+    toolbarActions?: ReactNode;
   };
   return {
     MarkdownEditor: (props: StubProps) => {
@@ -182,6 +194,10 @@ vi.mock("../../src/shared/MarkdownEditor", async () => {
           readOnly: props.readOnly ?? false,
           onChange: (event: ChangeEvent<HTMLTextAreaElement>) => props.onChange(event.target.value),
         }),
+        // fast 012: the toolbar-actions prop (a saved note's flags) renders inside the root.
+        props.toolbarActions === undefined || props.toolbarActions === null
+          ? null
+          : createElement("div", { "data-testid": "stub-toolbar-actions" }, props.toolbarActions),
       );
     },
   };
@@ -364,6 +380,8 @@ const SESSION_ONE_ROUTE = "/sessions/1";
 const SESSION_ONE_ID = "1";
 
 const SESSIONS_REGION = /^sessions$/i;
+// 033 step 005 (D9): the section's "Start session" button is gone; the name is kept only to
+// assert its absence.
 const START_SESSION_NAME = /^start session$/i;
 const ROW_TRIGGER_NAME = /^actions for /i;
 const ARCHIVE_ITEM = /^archive$/i;
@@ -770,6 +788,30 @@ function screenPersonaField(): HTMLElement {
   return within(mainElement()).getByRole("textbox", { name: /^persona$/i });
 }
 
+/** 033 step 001 (D1): opens one of the character page's tabs with a click, as a user does. */
+async function openCharacterTab(user: User, name: string): Promise<void> {
+  await user.click(within(mainElement()).getByRole("tab", { name }));
+}
+
+/**
+ * 033 step 001: the tab panel paired with a tab (the tab's `aria-controls` / the panel's
+ * `aria-labelledby`), found whether or not it is active — an inactive panel is `display: none`,
+ * which leaves it no computable accessible name.
+ */
+function characterTabPanel(name: string): HTMLElement {
+  const owner = within(mainElement()).getByRole("tab", { name });
+  const controls = owner.getAttribute("aria-controls");
+  const panel = within(mainElement())
+    .getAllByRole("tabpanel", { hidden: true })
+    .find(
+      (candidate) =>
+        (controls !== null && controls !== "" && candidate.id === controls) ||
+        (owner.id !== "" && candidate.getAttribute("aria-labelledby") === owner.id),
+    );
+  if (panel === undefined) throw new Error(`no tab panel paired with the "${name}" tab`);
+  return panel;
+}
+
 // ---------------------------------------------------------------------------
 // 009 step 008: every route mounts the tree, so each clause below stubs the listing.
 describe("every declared route is the same shell around an empty centre (D5)", () => {
@@ -831,6 +873,7 @@ describe("the character routes render the character screen in the same shell (00
   });
 
   it("renders the requested character in the main region at /characters/1 — DoD-13", async () => {
+    const user = newUser();
     stubFetch((input) => {
       const path = requestPath(input);
       // 015 step 009: the ready screen mounts the Notes section, which lists the character's
@@ -874,6 +917,8 @@ describe("the character routes render the character screen in the same shell (00
     expect(navElement()).toBeInTheDocument();
     const main = within(mainElement());
     expect(main.getByRole("heading", { name: CHARACTER.name })).toBeInTheDocument();
+    // 033 step 001 (D4): Name and Persona live in the "Main info" tab.
+    await openCharacterTab(user, "Main info");
     expect(main.getByRole("textbox", { name: /^name$/i })).toHaveValue(CHARACTER.name);
     expect(main.getByRole("textbox", { name: /^persona$/i })).toHaveValue(CHARACTER.sheet);
   });
@@ -944,6 +989,8 @@ describe("saving a new name shows it in the tree (US-021.AC-1)", () => {
     await flush();
     expect(queryTreeRow(CHAR_A.name)).not.toBeNull();
 
+    // 033 step 001 (D4): Name lives in the "Main info" tab.
+    await openCharacterTab(user, "Main info");
     await user.clear(screenNameField());
     await user.type(screenNameField(), EDITED_NAME);
     // 018 step 009 (D7): no Save button; the name saves when the field loses focus.
@@ -1001,8 +1048,22 @@ function sessionsRegion(): HTMLElement {
   return screen.getByRole("region", { name: SESSIONS_REGION });
 }
 
-function startSessionButton(): HTMLElement {
-  return within(sessionsRegion()).getByRole("button", { name: START_SESSION_NAME });
+/** 033 step 005 (D9): the section's message-less "Start session" button, if any is rendered. */
+function queryStartSessionButton(): HTMLElement | null {
+  return screen.queryByRole("button", { name: START_SESSION_NAME, hidden: true });
+}
+
+/** Every session create under one character — `POST /api/characters/<id>/sessions`. */
+function sessionCreates(calls: Seen[], characterId: string): Seen[] {
+  return calls.filter(
+    (call) => call.method === "POST" && call.path === characterSessionsPath(characterId),
+  );
+}
+
+/** A create whose body carries no non-blank `opening_message` — the D9 message-less start. */
+function isMessageLess(call: Seen): boolean {
+  const body = (call.body ?? {}) as { opening_message?: unknown };
+  return typeof body.opening_message !== "string" || body.opening_message.trim() === "";
 }
 
 /** The nested session list under one character in the tree (011 step 006). */
@@ -1037,15 +1098,25 @@ function sessionsListRequests(calls: Seen[]): Seen[] {
 }
 
 describe("starting a session from the character screen lands on it and shows it in the tree (US-026.AC-1, D15)", () => {
-  it("navigates to /sessions/<new id>, marks that tree row current and issues no second GET /api/sessions — DoD-15", async () => {
+  // Amended by 033 step 005 (D9): the section's "Start session" button is gone; the page's only
+  // way to start a session is the "New session" composer's send, so the clause starts there.
+  it("navigates to /sessions/<new id>, marks that tree row current and issues no second GET /api/sessions — DoD-15 (and 033 step 005 DoD-1, DoD-4)", async () => {
     const user = newUser();
     const { calls } = stubWorkspace([CHAR_A]);
     renderApp(`/characters/${ID_A}`);
     await flush();
     expect(sessionsListRequests(calls)).toHaveLength(1);
+    expect(queryStartSessionButton()).toBeNull();
+    expect(sessionCreates(calls, ID_A)).toEqual([]);
 
-    await user.click(startSessionButton());
+    const composer = within(startRegion());
+    await user.type(composer.getByRole("textbox", { name: COMPOSER_NAME }), "Hello there");
+    await user.click(composer.getByRole("button", { name: "Send" }));
     await flush();
+
+    const creates = sessionCreates(calls, ID_A);
+    expect(creates).toHaveLength(1);
+    expect(creates.filter(isMessageLess)).toEqual([]);
 
     expect(currentPath()).toBe(`/sessions/${STARTED_SESSION_ID}`);
     const started = queryTreeSessionRow(STARTED_SESSION_ID);
@@ -1216,31 +1287,39 @@ describe("015 step 008 — /sessions/1 renders the Notes section in the main reg
 // "Notes" section after the "Sessions" region (D1). The section's own behaviour is
 // CharacterNotesSection.test.tsx's and its place on the screen CharacterScreen.test.tsx's; this
 // clause is the route-level proof inside the shell. "— DoD-4" is 015 step 009's.
-describe("015 step 009 — /characters/<id> renders the Notes section (order amended by 018 D10)", () => {
-  it("(015 009 DoD-4, amended: Notes now precedes Setups, Configuration, Sessions and Start a session) the main region holds the Notes region, from one character notes listing — DoD-6", async () => {
+describe("015 step 009 — /characters/<id> renders the Notes section (placement amended by 033 D1)", () => {
+  it("(015 009 DoD-4, amended by 033 DoD-6/DoD-4: each region in its own tab panel, every section mounted on arrival) the main region holds the Notes region, from one character notes listing — DoD-6", async () => {
+    const user = newUser();
     const { calls } = stubWorkspace([CHAR_A]);
     renderApp(`/characters/${ID_A}`);
     await flush();
 
     const main = within(mainElement());
-    const notes = await main.findByRole("region", { name: NOTES_REGION_NAME });
-    expect(within(notes).getByRole("heading", { name: NOTES_REGION_NAME })).toBeInTheDocument();
-    // 018 D10: Notes → Setups → Configuration → Sessions → Start a session.
-    const ordered = [
-      notes,
-      main.getByRole("region", { name: "Setups" }),
-      main.getByRole("region", { name: "Configuration" }),
-      sessionsRegion(),
-      main.getByRole("region", { name: "Start a session" }),
+    // 033 D2: every section is mounted on arrival, inactive tabs included.
+    const notes = await main.findByRole("region", { name: NOTES_REGION_NAME, hidden: true });
+    expect(
+      within(notes).getByRole("heading", { name: NOTES_REGION_NAME, hidden: true }),
+    ).toBeInTheDocument();
+    // 033 D1 / D8: each region sits in its own tab panel (supersedes 018 D10's body order).
+    const placement: [string, HTMLElement][] = [
+      ["Notes", notes],
+      ["Setups", main.getByRole("region", { name: "Setups", hidden: true })],
+      ["Configuration", main.getByRole("region", { name: "Configuration", hidden: true })],
+      ["Sessions", sessionsRegion()],
+      ["Sessions", main.getByRole("region", { name: START_REGION_NAME })],
     ];
-    for (let index = 0; index + 1 < ordered.length; index += 1) {
-      expect(
-        ordered[index].compareDocumentPosition(ordered[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).not.toBe(0);
+    for (const [tabName, region] of placement) {
+      expect(characterTabPanel(tabName).contains(region)).toBe(true);
     }
     const listings = calls.filter((call) => call.method === "GET" && call.path === MEMOS_PATH);
     expect(listings).toHaveLength(1);
     expect(listings[0].search).toBe(characterNotesSearch(ID_A));
+
+    // 033 DoD-4: opening the Notes tab issues no further notes listing.
+    await openCharacterTab(user, "Notes");
+    await flush();
+    expect(main.getByRole("region", { name: NOTES_REGION_NAME })).toBe(notes);
+    expect(calls.filter((call) => call.method === "GET" && call.path === MEMOS_PATH)).toHaveLength(1);
   });
 });
 
@@ -1391,7 +1470,8 @@ describe("017 step 011 — /sessions/1 renders the session configuration bar", (
 // the location), D7 (save on focus loss), D10 (no wall) and the UI strings table. Push versus
 // replace is observed through the MemoryRouter's history (a Back probe), never a navigate spy.
 const PROBE_BACK_NAME = /^probe back$/i;
-const START_REGION_NAME = "Start a session";
+// 033 step 001 (DoD-13, D8): the composer region is "New session" (was "Start a session").
+const START_REGION_NAME = "New session";
 
 function BackProbe() {
   const navigate = useNavigate();
@@ -1471,6 +1551,8 @@ describe("018 step 009 — a renamed character reads the new name in the heading
     expect(main.getByRole("heading", { name: "Aria" })).toBeInTheDocument();
     expect(main.queryByRole("button", { name: SAVE_NAME })).toBeNull();
 
+    // 033 step 001 (D4, DoD-7): Name lives in the "Main info" tab and still saves on focus loss.
+    await openCharacterTab(user, "Main info");
     await user.clear(screenNameField());
     await user.type(screenNameField(), "Aria Vale");
     await user.tab();
@@ -1490,7 +1572,8 @@ describe("018 step 009 — the character page renders no note wall (D10, US-095.
     const { calls } = stubWorkspace([CHAR_A], [SESSION_ONE]);
     renderApp(`/characters/${ID_A}`, pinnedStorage());
     await flush();
-    await within(mainElement()).findByRole("region", { name: NOTES_REGION_NAME });
+    // 033 step 001 (D2): the Notes region is mounted on arrival, in a hidden tab panel.
+    await within(mainElement()).findByRole("region", { name: NOTES_REGION_NAME, hidden: true });
 
     expect(screen.queryAllByRole("complementary", { hidden: true })).toHaveLength(0);
     expect(document.querySelector(`[aria-label="${WALL_NAME}"]`)).toBeNull();
@@ -1504,7 +1587,9 @@ describe("018 step 009 — the character page renders no note wall (D10, US-095.
 });
 
 describe("018 step 009 — the page composer starts a session with its opening message (D5, US-117)", () => {
-  it("the composer offers no Entry kind group and no Setup choice; Hello there + Send posts exactly {opening_message}, lands on /sessions/<served id> and the tree lists it under the character — DoD-8", async () => {
+  // Amended by 033 step 004 (D8, D10): the composer now carries a "Setup" select reading
+  // "No setup" on open; sending with it untouched still posts exactly {opening_message}.
+  it("the composer offers no Entry kind group and a Setup select reading No setup; Hello there + Send posts exactly {opening_message}, lands on /sessions/<served id> and the tree lists it under the character — DoD-8 (and 033 step 004 DoD-2, DoD-4, DoD-9)", async () => {
     const user = newUser();
     const { calls } = stubWorkspace([CHAR_A]);
     renderApp(`/characters/${ID_A}`);
@@ -1514,9 +1599,11 @@ describe("018 step 009 — the page composer starts a session with its opening m
     const scope = within(composerRegion);
     expect(scope.queryByRole("radiogroup", { name: /entry kind/i })).toBeNull();
     expect(scope.queryByRole("group", { name: /entry kind/i })).toBeNull();
-    expect(scope.queryByRole("combobox", { name: /^setup$/i })).toBeNull();
-    expect(scope.queryByRole("textbox", { name: /^setup$/i })).toBeNull();
-    expect(scope.queryByRole("listbox", { name: /^setup$/i })).toBeNull();
+    const setupField =
+      scope.queryByRole("combobox", { name: /^setup$/i }) ??
+      scope.queryByRole("textbox", { name: /^setup$/i }) ??
+      scope.getByLabelText(/^setup$/i);
+    expect((setupField as HTMLInputElement).value).toBe("No setup");
 
     await user.type(scope.getByRole("textbox", { name: COMPOSER_NAME }), "Hello there");
     await user.click(scope.getByRole("button", { name: "Send" }));
@@ -1527,6 +1614,7 @@ describe("018 step 009 — the page composer starts a session with its opening m
     );
     expect(posts).toHaveLength(1);
     expect(posts[0].body).toEqual({ opening_message: "Hello there" });
+    expect(Object.keys(posts[0].body as object)).toEqual(["opening_message"]);
     expect(currentPath()).toBe(`/sessions/${STARTED_SESSION_ID}`);
     expect(
       within(treeSessionsListFor(CHAR_A.name))
