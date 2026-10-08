@@ -52,6 +52,3 @@ docs/.cache/
 # Deploy artifacts
 /data/
 *.7z
-
-# Dev log file sink (BOOKWRITER_LOG_DIR, set by start.ps1 -app)
-/logs/

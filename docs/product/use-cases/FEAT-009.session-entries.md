@@ -69,9 +69,9 @@
   2. Roleplayer moves focus away from the entry.
   3. Instance saves the edit, and search thereafter reflects the new text.
 - **Exception flows:**
-  - No embedding model is configured — the edit still saves; the roleplayer is told search coverage is incomplete.
-- **Postconditions:** Search reflects the new text; a partner block's edit discards its cached translation (FEAT-011).
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 12, round 13.
+  - An embedding cannot be produced — no model is designated, the server cannot be reached, or its credentials cannot be used — the edit still saves and the roleplayer is told search coverage is incomplete. Any vectors the entry already had are cleared rather than left behind.
+- **Postconditions:** Search reflects the new text; editing any settled entry discards its cached translation (FEAT-011). An entry that could not be re-embedded is absent from semantic search until the index is rebuilt (UC-016) rather than matched on text it no longer holds.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 12, round 13; finalization 2026-10-06, C48, C51.
 
 ### UC-081 — Record a decision in the session
 - **Actor:** ACT-002

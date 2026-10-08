@@ -35,8 +35,8 @@
   1. Administrator selects an account.
   2. Administrator sets a new password for it.
   3. Instance applies the new password.
-- **Postconditions:** The old password no longer works; the user must use the new one to log in.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
+- **Postconditions:** The old password no longer works; the user must use the new one to log in. The user's live sessions continue after a reset; only disabling (UC-007) ends them at once.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 7; finalization 2026-10-01, C35.
 
 ### UC-009 — List accounts without reaching any content
 - **Actor:** ACT-001
@@ -48,4 +48,18 @@
   3. Administrator sees no character, session, setup or memo belonging to any account.
 - **Postconditions:** Account list shown; no RP content exposed (FEAT-019).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 7.
+
+### UC-087 — Change an account's role
+- **Actor:** ACT-001
+- **Feature:** FEAT-003
+- **Preconditions:** Administrator is authenticated; target account exists.
+- **Main flow:**
+  1. Administrator selects an account.
+  2. Administrator chooses the other role (roleplayer ↔ administrator).
+  3. Instance applies the new role.
+  4. The account list shows the new role.
+- **Exception flows:**
+  - Target account is the acting administrator's own account — refused, role unchanged.
+- **Postconditions:** The new role governs the account from its next action, with no re-login needed.
+- **Source:** `[confirmed: user]` finalization 2026-10-01, C31; shipped in docs/plans/005.admin-shell-and-users/.
 <!-- product-spec:end -->

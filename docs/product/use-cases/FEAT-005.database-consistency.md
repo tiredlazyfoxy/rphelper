@@ -20,8 +20,11 @@
   2. Administrator requests remediation.
   3. Instance creates missing tables and brings drifted structures into sync.
   4. Drift report reflects the corrected state.
+- **Exception flows:**
+  - Remediating a drifted table would drop columns the instance no longer declares — the administrator is told which columns and their data will be lost and must confirm; unconfirmed, nothing changes. Data in every surviving column is kept.
+  - Remediation cannot be applied — the table is left exactly as it was and the administrator is shown that it failed.
 - **Postconditions:** Reported drift resolved.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 7; finalization 2026-10-01, C36.
 
 ### UC-016 — Rebuild the vector index
 - **Actor:** ACT-001

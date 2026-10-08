@@ -10,9 +10,9 @@
   2. Roleplayer and assistant exchange messages in the discussion.
   3. Discussion stays open until the roleplayer settles the answer.
 - **Exception flows:**
-  - The LLM is unreachable mid-discussion — nothing the roleplayer typed is lost, the entry and discussion survive intact, the failure is visible, retry is possible.
+  - The LLM is unreachable mid-discussion — nothing the roleplayer typed is lost, the entry and discussion survive intact, the failure is visible, and a fresh candidate can be produced; the same control asks for a different candidate on any exchange, failed or not.
 - **Postconditions:** Discussion attached to the answer entry; nothing lost on failure.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4, round 9.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4, round 9; finalization 2026-10-06, C45.
 
 ### UC-033 — Discuss in any language, the assistant mirrors each message
 - **Actor:** ACT-002 (+ ACT-004)
@@ -121,10 +121,10 @@
   2. Instance ends the work.
   3. Instance keeps whatever text was produced so far as a usable candidate.
 - **Alternate flows:**
-  - A tool call is stopped — the discussion continues without that tool's result, as it does for a failed tool.
-  - A translation is stopped — the original text stands, nothing is cached.
+  - A tool call is stopped — the exchange ends and whatever text was produced is kept. Deliberately unlike a *failed* tool, which the assistant is told about and carries on without (UC-051, UC-053): a failed tool leaves the exchange alive, a stop does not.
+  - A translation is stopped — the original text stands and the translation is not cached. Best-effort rather than guaranteed, unlike a *failed* translation, which caches nothing at all (UC-039).
 - **Postconditions:** Nothing is waiting on the model; partial output is kept and usable.
-- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
+- **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round; finalization 2026-10-06, C38.
 
 ### UC-086 — Abandon a current zone without settling
 - **Actor:** ACT-002

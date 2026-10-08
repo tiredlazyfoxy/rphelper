@@ -52,7 +52,9 @@
 - **Acceptance criteria:**
   - **US-094.AC-1** — Given a session is open, when the roleplayer opens the note wall, then it appears over the stream.
   - **US-094.AC-2** — Given the roleplayer pins the note wall, when they reload the page, then the wall is still pinned open.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 14.
+  - **US-094.AC-3** — Given a pinned note wall on a window too narrow to hold its column, when the roleplayer dismisses the wall, then it closes and the pin is kept.
+  - **US-094.AC-4** — Given the pin was kept while the window was too narrow, when the window widens past the threshold, then the wall is shown as a pinned column again.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 14; finalization 2026-10-06, C50.
 
 ### US-095 — With no session open, the note wall is not shown at all
 - **Actor:** ACT-002 · **Feature:** FEAT-020 · **Exercises:** UC-072

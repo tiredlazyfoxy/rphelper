@@ -78,4 +78,28 @@
   - **US-139.AC-1** — Given a session was created while its character had no model configured, when the character is afterwards configured with a model, then the session keeps the model it captured at creation.
   - **US-139.AC-2** — Given the same character, when a new session is created under it, then that session captures the character's configured model.
 - **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round, challenge C25, challenge C26.
+
+### US-142 — With no language configured anywhere, the instance falls back to English
+- **Actor:** ACT-002 · **Feature:** FEAT-013 · **Exercises:** UC-050, UC-039
+- **Story:** As a roleplayer, I want the instance to keep working before I have set my languages, so that an unconfigured setting never breaks a translation or a reply.
+- **Acceptance criteria:**
+  - **US-142.AC-1** — Given no preferred language is configured at any level, when the roleplayer flicks a partner entry, then the translation is in English.
+  - **US-142.AC-2** — Given no RP language is configured at any level, when the assistant produces a candidate reply, then the candidate is in English.
+- **Source:** `[confirmed: user]` finalization 2026-10-06, challenge C43 (plan 023 decision D3, plan 020 decision U4).
+
+### US-143 — A session is created even when no model is enabled
+- **Actor:** ACT-002 · **Feature:** FEAT-013 · **Exercises:** UC-050
+- **Story:** As a roleplayer, I want to start a session before any model is available, so that an unconfigured instance never stops me setting my roleplay up.
+- **Acceptance criteria:**
+  - **US-143.AC-1** — Given no model is enabled anywhere on the instance, when the roleplayer starts a session, then the session is created with no model captured for it.
+  - **US-143.AC-2** — Given a session was created with no model captured, when a model is afterwards enabled on the instance, then the session still has no model captured until the roleplayer chooses one.
+- **Source:** `[confirmed: user]` finalization 2026-10-06, challenge C44 (plan 017 decision D1 case 3).
+
+### US-144 — A session holding no chosen model says so when it refuses the send
+- **Actor:** ACT-002 · **Feature:** FEAT-013 · **Exercises:** UC-077
+- **Story:** As a roleplayer, I want to be told that I have not picked a model yet rather than that none exists, so that I know the fix is mine to make.
+- **Acceptance criteria:**
+  - **US-144.AC-1** — Given a session has no model captured and at least one model is enabled on the instance, when the roleplayer tries to send a message, then the instance refuses to send it.
+  - **US-144.AC-2** — Given the send was refused because the session has no model captured, when the roleplayer reads the refusal, then it states that no model has been chosen for this session.
+- **Source:** `[confirmed: user]` finalization 2026-10-06, challenge C44 (plan 017 decision D2).
 <!-- product-spec:end -->

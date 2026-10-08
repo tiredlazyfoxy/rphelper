@@ -37,4 +37,11 @@
   - **US-137.AC-1** — Given memos exist that are disabled or not forced, when the roleplayer searches, then they are returned like any other memo — note state never filters results.
   - **US-137.AC-2** — Given a returned memo is currently disabled, when the roleplayer views the results, then it is shown as disabled.
 - **Source:** `[confirmed: user]` interview 2026-09-28, gap-closure round.
+
+### US-147 — Name matching is case-insensitive in any script
+- **Actor:** ACT-002 · **Feature:** FEAT-017 · **Exercises:** UC-058
+- **Story:** As a roleplayer, I want to find a character or setup whatever case I type it in, in the script my roleplay uses, so that search works in my own language and not only in English.
+- **Acceptance criteria:**
+  - **US-147.AC-1** — Given a character or setup whose name is written in a script other than Latin, when the roleplayer searches for it in a different case from the stored one, then it appears in the results.
+- **Source:** `[confirmed: user]` finalization 2026-10-06, challenge C52 (against plan 029 decision D3).
 <!-- product-spec:end -->

@@ -54,8 +54,9 @@
   5. Roleplayer dismisses the wall.
 - **Alternate flows:**
   - No session is open — the note wall is not shown at all; user-level notes are reached through the user menu's settings instead (UC-071).
-- **Postconditions:** A pinned wall's state survives a reload.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 14.
+  - The window is too narrow to hold the wall's column — a pinned wall is shown floating when opened, and dismissing it there closes it without clearing the pin, so widening the window brings the pinned column back (US-094.AC-3, US-094.AC-4).
+- **Postconditions:** A pinned wall's state survives a reload. Dismissing a pinned wall also unpins it, except at a width too narrow to hold its column.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 14; finalization 2026-10-06, C50.
 
 ### UC-073 — Work on a character's page — persona, notes, setups, settings, sessions
 - **Actor:** ACT-002

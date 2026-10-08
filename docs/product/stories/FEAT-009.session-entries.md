@@ -61,21 +61,23 @@
   - **US-110.AC-2** — Given any settled entry (partner block, turn, or decision) was edited, when the assistant later calls `session_search`, then the search reflects the new text, not the original.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 12, round 13; 2026-09-28, round 17.
 
-### US-111 — Editing a partner block discards its cached translation
+### US-111 — Editing any settled entry discards its cached translation
 - **Actor:** ACT-002 · **Feature:** FEAT-009 · **Exercises:** UC-078
-- **Story:** As a roleplayer, I want an edited partner block's translation to be re-done, so that I never see a stale translation of text that no longer exists.
+- **Story:** As a roleplayer, I want an edited entry's translation to be re-done, so that I never see a stale translation of text that no longer exists.
 - **Acceptance criteria:**
   - **US-111.AC-1** — Given a partner block has a cached translation, when the roleplayer edits the block's text, then the cached translation is discarded.
   - **US-111.AC-2** — Given the cached translation was discarded, when the roleplayer next flicks the block, then the instance translates the new text.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 12, round 13.
+  - **US-111.AC-3** — Given a settled entry that is not a partner block and holds a cached translation, when the roleplayer edits its text, then the cached translation is discarded.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 12, round 13; finalization 2026-10-06, C51.
 
-### US-112 — With no embedding model configured, an edit still saves, and the roleplayer is told search coverage is incomplete
+### US-112 — Whatever stops an embedding being produced, an edit still saves, and the roleplayer is told search coverage is incomplete
 - **Actor:** ACT-002 · **Feature:** FEAT-009 · **Exercises:** UC-078
-- **Story:** As a roleplayer, I want my edit to succeed even when there is no embedding model, so that a platform gap never blocks my own record-keeping.
+- **Story:** As a roleplayer, I want my edit to succeed whatever is wrong on the embedding side, so that a platform gap never blocks my own record-keeping.
 - **Acceptance criteria:**
-  - **US-112.AC-1** — Given no embedding model is configured, when the roleplayer edits a settled entry, then the edit saves.
-  - **US-112.AC-2** — Given no embedding model is configured, when the roleplayer's edit saves, then the roleplayer is told search coverage is incomplete.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 13.
+  - **US-112.AC-1** — Given an embedding cannot be produced — no model is designated, the server cannot be reached, or its credentials cannot be used — when the roleplayer edits a settled entry, then the edit saves.
+  - **US-112.AC-2** — Given an embedding could not be produced, when the roleplayer's edit saves, then the roleplayer is told search coverage is incomplete.
+  - **US-112.AC-3** — Given material whose embedding could not be produced, when the write commits, then any vectors the material already had are cleared.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 13; finalization 2026-10-06, C48.
 
 ### US-120 — The current zone's kind switch has two positions with an alternating default
 - **Actor:** ACT-002 · **Feature:** FEAT-009 · **Exercises:** UC-081, UC-083
@@ -114,5 +116,6 @@
 - **Story:** As a roleplayer, I want a copied turn in plain text, so that it pastes cleanly into an RP site that can't render markdown.
 - **Acceptance criteria:**
   - **US-124.AC-1** — Given a settled turn contains markdown formatting, when the roleplayer copies it, then the clipboard holds plain text with no markdown syntax.
-- **Source:** `[confirmed: user]` interview 2026-09-28, round 17.
+  - **US-124.AC-2** — Given a settled turn whose text marks actions with asterisks, when the roleplayer copies it, then the copied text carries the action words without the asterisk markers.
+- **Source:** `[confirmed: user]` interview 2026-09-28, round 17; finalization 2026-10-06, C51.
 <!-- product-spec:end -->

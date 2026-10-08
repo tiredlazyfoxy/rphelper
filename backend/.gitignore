@@ -1,0 +1,16 @@
+# Virtualenv
+.venv/
+
+# Python caches
+__pycache__/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local environment file (uv.lock is committed — do not ignore it)
+.env
+
+# Container venv (docker-compose.yml)
+.venv-docker/

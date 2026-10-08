@@ -14,11 +14,21 @@ clipboard.
 
 ## Build & Test Commands
 
+`<py>` is the backend venv's interpreter, which depends on the OS you are running on:
+
+- **If you are running on Windows:** `<py>` = `.venv/Scripts/python`
+- **If you are running on Linux (incl. WSL):** `<py>` = `.venv/bin/python`
+
+The venv and `node_modules` hold OS-native binaries — they are not portable
+between Windows and Linux. If they were installed on the other OS, recreate
+them (`uv sync` in `backend/`, `npm ci` in `frontend/`).
+
 ```
 Backend  (run from backend/)
-  test       .venv/Scripts/python -m pytest
-  typecheck  .venv/Scripts/python -m mypy app
-  lint       .venv/Scripts/python -m ruff check .
+  test       <py> -m pytest            # parallel (-n auto), 60s per-test limit, no network
+  live       <py> -m pytest -m live    # opt-in: real llama-swap at $LLAMA_SWITCH_URL
+  typecheck  <py> -m mypy app
+  lint       <py> -m ruff check .
 Frontend (run from frontend/)
   build      npm run build
   test       npm test
@@ -36,8 +46,8 @@ Every downstream agent reads its commands from this section and nowhere else.
 | Vectors | `sqlite-vec` (`vec0` virtual tables, exact brute-force KNN) |
 | Full text | SQLite FTS5 (BM25), fused with vectors by reciprocal-rank fusion |
 | Schema DDL | Alembic **batch operations only** — the executor behind the admin drift page's `Sync`/`Create`. Not a migration framework: no `versions/`, no version table, no startup upgrade; `db/schema.py` is the source of truth |
-| Frontend | React 19 + TypeScript + Vite, **multi-entry** build (4 entries) |
-| Components | Mantine 7 (`@mantine/core`, `/form`, `/hooks`, `/tiptap`) |
+| Frontend | React 19 + TypeScript + Vite, **multi-entry** build (4 entries); **TypeScript only — no JavaScript** |
+| Components | Mantine 7 (`@mantine/core`, `/hooks`, `/notifications`, `/tiptap`) |
 | State | MobX 6 + `mobx-react-lite`; `react-router-dom` 7 |
 | Icons | `@tabler/icons-react` `^3.40` |
 | Markdown | TipTap + `tiptap-markdown` (editor), `react-markdown` (render) |
@@ -77,7 +87,7 @@ RPHelper/
 | Vite dev server | **8193** |
 | nginx published by compose | **8193** → container `:80` |
 
-The host-run Vite dev server and the dev-compose nginx publish **the same port**.
+The host-run dev servers (`start.sh`, `start.ps1`) and the dev compose publish **the same port**.
 Run one or the other, never both. Ports are hardcoded literals in `start.ps1`,
 `vite.config.ts`, the Dockerfile and compose — not environment variables. The
 frontend never receives a backend base URL; it always calls same-origin
@@ -91,7 +101,10 @@ frontend never receives a backend base URL; it always calls same-origin
 - Wrap full paths in quotes or backticks: `"D:/Folder"`, not bare `D:/Folder`.
 - Use **relative** paths when running Python or TypeScript inside the project.
 - Use **absolute** paths with `-C` for git commands.
-- Python is invoked as `.venv/Scripts/python <args>` from the package root.
+- Python is invoked from the package root as `.venv/Scripts/python <args>` if you
+  are running on Windows, or `.venv/bin/python <args>` if you are running on Linux.
+- Windows-only path rules (drive letters) do not apply on Linux; there, use the
+  plain absolute path (e.g. `"/home/<user>/projects/RPHelper"`).
 
 ## Where to look
 
@@ -100,7 +113,7 @@ frontend never receives a backend base URL; it always calls same-origin
   `use-cases/FEAT-*.md`, `stories/FEAT-*.md` (with `US-###.AC-#` criteria).
   **`docs/product/quick-reference.md` is the id registry** — the sole canonical
   list of every id. Verify an id there, never against a range quoted elsewhere.
-  Current as of this writing: FEAT-001..020, UC-001..084, US-001..131.
+  Current as of this writing: FEAT-001..020, UC-001..087, US-001..140.
   Requirements are cited by id, never restated elsewhere.
 - **Design** — `docs/architecture/`. Start at
   `docs/architecture/quick-reference.md`; it indexes the other eleven docs.
@@ -110,6 +123,13 @@ frontend never receives a backend base URL; it always calls same-origin
 ## Conventions every agent must hold
 
 - Backend is fully type-annotated; `mypy app` is a gate, not advice.
+- **Frontend and every Node-side file are TypeScript only — no JavaScript.** Every
+  authored file under `frontend/` (React, MobX stores, tests, `vite.config.ts`,
+  any build script) is `.ts` / `.tsx`. No `.js`, `.jsx`, `.mjs` or `.cjs`; no
+  `allowJs` or `checkJs` in any tsconfig. A tool that generates a JS config gets a
+  `.ts` equivalent or is not added. Only generated output (`node_modules/`,
+  `dist/`, `coverage/`) is exempt. `npm run typecheck` is the gate, and there is
+  no linter.
 - Requirements live in `docs/product/` and are **cited** (`FEAT-###`, `UC-###`,
   `US-###.AC-#`), never copied into architecture docs or plans.
 - Unknowns are marked `_TBD: <reason>_`. Never invent a requirement to close a

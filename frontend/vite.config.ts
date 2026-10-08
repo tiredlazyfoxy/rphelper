@@ -1,0 +1,40 @@
+import path from "node:path";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vitest/config";
+import { configureProxyLogging } from "./dev/proxyLog.ts";
+import { devEntryRoutingPlugin } from "./dev/entryRouting.ts";
+import { devRequestLogPlugin } from "./dev/requestLog.ts";
+
+const frontendDir = import.meta.dirname;
+const srcDir = path.resolve(frontendDir, "src");
+
+export default defineConfig({
+  plugins: [react(), devRequestLogPlugin(), devEntryRoutingPlugin()],
+  root: srcDir,
+  build: {
+    outDir: path.resolve(frontendDir, "dist"),
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        bootstrap: path.resolve(srcDir, "bootstrap/index.html"),
+        login: path.resolve(srcDir, "login/index.html"),
+        admin: path.resolve(srcDir, "admin/index.html"),
+        app: path.resolve(srcDir, "app/index.html"),
+      },
+    },
+  },
+  server: {
+    port: 8193,
+    strictPort: true,
+    proxy: {
+      "/api": { target: "http://localhost:8184", configure: configureProxyLogging },
+    },
+  },
+  test: {
+    root: frontendDir,
+    environment: "jsdom",
+    globals: false,
+    setupFiles: ["./tests/setup.ts"],
+    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+  },
+});

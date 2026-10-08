@@ -30,7 +30,10 @@
 - **Story:** As an administrator, I want to designate which registered connection and model serve as the embedding model, so that the assistant's semantic tools have a model to rely on.
 - **Acceptance criteria:**
   - **US-015.AC-1** — Given a connection exposes a usable model, when the administrator designates it as the embedding model, then the instance saves the designation.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7.
+  - **US-015.AC-2** — Given an embedding model is designated, when the administrator clears the designation and confirms, then no embedding model is designated.
+  - **US-015.AC-3** — Given the chosen model cannot produce an embedding, when the administrator designates it, then an error is shown.
+  - **US-015.AC-4** — Given the chosen model cannot produce an embedding, when the administrator designates it, then no designation is saved and the previous one (if any) stands.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7; finalization 2026-10-01, C32, C33.
 
 ### US-016 — Disabling a model a session is configured to use
 - **Actor:** ACT-001 · **Feature:** FEAT-004 · **Exercises:** UC-012

@@ -11,34 +11,40 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** Bring an unconfigured instance to a usable state: create a new
   database with a first admin, or import an existing database export.
 - **Actors:** ACT-003 · **Priority:** must
-- **Status:** proposed
-- **Realized by:** UC-001, UC-002, UC-003, US-001, US-002, US-003
+- **Status:** partially delivered
+- **Delivered:** docs/plans/003.first-run-bootstrap/ (2026-09-29); US-001.AC-2 by docs/plans/004.authentication-session/ (2026-09-29)
+- **Remaining:** UC-002, US-002 → docs/plans/fast/003.bootstrap-from-export/; US-148 (not yet planned)
+- **Realized by:** UC-001, UC-002, UC-003, US-001, US-002, US-003, US-148
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
 
 ### FEAT-002 — Authentication & session
 - **Purpose:** Let a created user log in, hold a session, and log out; a
   disabled account cannot log in.
 - **Actors:** ACT-001, ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/004.authentication-session/ (2026-09-29); US-007.AC-1 by docs/plans/008.app-shell-frame/ (2026-10-01)
 - **Realized by:** UC-004, UC-005, US-004, US-005, US-006, US-007
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
 
 ### FEAT-003 — User management
 - **Purpose:** Admin-gated account lifecycle: create an account, disable and
-  re-enable it, reset its password, list accounts without reaching content.
+  re-enable it, reset its password, change its role, list accounts without
+  reaching content.
 - **Actors:** ACT-001 · **Priority:** must
-- **Status:** proposed
-- **Realized by:** UC-006, UC-007, UC-008, UC-009, US-008, US-009, US-010,
-  US-011
+- **Status:** delivered
+- **Delivered:** docs/plans/005.admin-shell-and-users/ (2026-09-29)
+- **Realized by:** UC-006, UC-007, UC-008, UC-009, UC-087, US-008, US-009,
+  US-010, US-011, US-140
 - **Note:** Disabling an account ends that user's sessions. The account list
   shows accounts only, never a user's RP content — see FEAT-019.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 7.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 7; finalization 2026-10-01, C31.
 
 ### FEAT-004 — LLM server connections
 - **Purpose:** Register and test LLM server connections (llamaswap or
   OpenAI); enable specific models; designate the embedding server and model.
 - **Actors:** ACT-001 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/006.llm-server-connections/ (2026-09-30); US-014 + US-016.AC-3 by docs/plans/017.session-configuration/ (2026-10-03); US-016.AC-2 by docs/plans/011.rp-sessions/ (2026-10-02) and docs/plans/019.streaming-transport-and-stop/ (2026-10-04)
 - **Realized by:** UC-010, UC-011, UC-012, UC-013, US-012, US-013, US-014,
   US-015, US-016
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7.
@@ -47,7 +53,9 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** Report per-table schema drift and let an admin remediate it
   (create missing tables, rebuild the vector index).
 - **Actors:** ACT-001 · **Priority:** must
-- **Status:** proposed
+- **Status:** partially delivered
+- **Delivered:** docs/plans/007.schema-drift-and-remediation/ (2026-09-30)
+- **Remaining:** UC-016, US-019 → docs/plans/fast/002.vector-index-rebuild/
 - **Realized by:** UC-014, UC-015, UC-016, US-017, US-018, US-019
 - **Note:** Owns drift, remediation and vector-index rebuild — see the
   Relationships boundary below against FEAT-018, which owns export/import.
@@ -57,7 +65,8 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** A roleplayer's persona — a character sheet reused across many
   setups and partners, that the assistant composes replies as.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/009.characters/ (2026-10-02); US-021.AC-2 by docs/plans/020.context-assembly/ (2026-10-04)
 - **Realized by:** UC-017, UC-018, UC-019, UC-067, US-020, US-021, US-022,
   US-086
 - **Note:** Archives and restores — out of the working list, nothing
@@ -71,7 +80,8 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** An optional reusable object under a character, carrying its
   own memos and acting as a search anchor for a situation.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/010.setups/ (2026-10-02); US-023.AC-2 / US-024.AC-1 / US-024.AC-3 / US-025.AC-1 by docs/plans/011.rp-sessions/ (2026-10-02); US-024.AC-2 by docs/plans/012.messages-and-settle/ (2026-10-02); US-025.AC-2 by docs/plans/015.memos/ (2026-10-03), docs/plans/026.memo-search-tool/ (2026-10-05) and docs/plans/027.session-search-tool/ (2026-10-05)
 - **Realized by:** UC-020, UC-021, UC-022, UC-068, US-023, US-024, US-025,
   US-087
 - **Note:** Setup is optional — a genuine absence, not a default that is
@@ -88,23 +98,31 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** A roleplay run under a character, optionally with a setup;
   always resumable, ordered by last use.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** partially delivered
+- **Delivered:** docs/plans/011.rp-sessions/ (2026-10-02); US-027.AC-3 by docs/plans/012.messages-and-settle/ (2026-10-02); UC-080 / US-117.AC-1 / AC-2 / AC-4 by docs/plans/018.character-page/ (2026-10-03); US-145 by docs/plans/011.rp-sessions/ (2026-10-02) and docs/plans/029.my-search/ (2026-10-05)
+- **Remaining:** US-117.AC-3 (UC-080 step 5) — specified, not built, no
+  plan owns it
 - **Realized by:** UC-023, UC-024, UC-025, UC-026, UC-080, US-026, US-027,
-  US-028, US-029, US-117
+  US-028, US-029, US-117, US-145
 - **Note:** No "finished" state — a session stays open indefinitely.
   Archiving removes it from the working list and is restorable, same rule as
   FEAT-006 and FEAT-007. A session can also start by writing the first
   message on its character's page (FEAT-020): the message creates the
   session with a turn being drafted and opens that message's discussion.
+  A session carries no title: it is identified by its start time, which is
+  what listings, the tree and search results show (US-145).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 3,
-  round 7, round 15.
+  round 7, round 15; finalization 2026-10-06, C51.
 
 ### FEAT-009 — Session entries & the RP flow
 - **Purpose:** The independent entries that make up a session — partner
   blocks, the roleplayer's own turns, and decisions — three kinds, still
   independent and still addable in any order.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** partially delivered
+- **Delivered:** docs/plans/012.messages-and-settle/ (2026-10-02); docs/plans/013.stream-and-zone-ui/ (2026-10-02); docs/plans/014.entry-editing-and-copy-out/ (2026-10-02); US-111 by docs/plans/023.partner-translation/ (2026-10-04); US-112 by docs/plans/024.embedding-lifecycle/ (2026-10-04); US-122.AC-2 by docs/plans/027.session-search-tool/ (2026-10-05)
+- **Remaining:** US-112.AC-1 (widened half), US-112.AC-3 — shipped
+  behaviour does not satisfy them → docs/plans/defects.md
 - **Realized by:** UC-027, UC-028, UC-029, UC-030, UC-031, UC-078, UC-081,
   UC-082, US-030, US-031, US-032, US-033, US-034, US-035, US-109, US-110,
   US-111, US-112, US-120, US-121, US-122, US-123, US-124
@@ -124,27 +142,36 @@ dependency graph below, not from priority (challenge C4, rejected).
   the old way. A decision reaches the assistant as context from that point
   on and is found by session search, but offers no copy-out. Any settled
   entry — partner block, turn or decision — is edited in place and saved,
-  with search reflecting the new text; editing a partner block discards its
-  cached translation, so the next flick re-translates the new text. With no
-  embedding model configured, an edit still saves and the roleplayer is told
-  search coverage is incomplete, never refused. Copying a settled turn
-  yields plain text, never markdown. Context is unbounded by choice — nothing
+  with search reflecting the new text; editing any settled entry discards
+  its cached translation, so the next flick re-translates the new text.
+  Whatever stops an embedding being produced — no designated model, an
+  unreachable server, or credentials the instance cannot use — the edit
+  still saves and the roleplayer is told search coverage is incomplete,
+  never refused; material that could not be embedded has its existing
+  vectors cleared rather than left behind, so search never matches on text
+  the entry no longer holds, and the material is simply absent from
+  semantic search until the index is rebuilt (UC-016). Copying a settled
+  turn yields plain text, never markdown, with asterisk-marked action
+  markers stripped too. Context is unbounded by choice — nothing
   warns the roleplayer as a session's own size grows; see `vision.md`'s "No
   context compaction" non-goal and FEAT-010.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 4, round 6,
   round 7, round 9, round 12, round 13; 2026-09-28, round 17, gap-closure
-  round.
+  round; finalization 2026-10-06, C48, C51.
 
 ### FEAT-010 — Compose discussion
 - **Purpose:** The discussion attached to an answer entry, where the
   roleplayer and the assistant work out the settled reply.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
-- **Status:** proposed
+- **Status:** partially delivered
+- **Delivered:** docs/plans/012.messages-and-settle/ (2026-10-02); docs/plans/013.stream-and-zone-ui/ (2026-10-02); docs/plans/019.streaming-transport-and-stop/ (2026-10-04); docs/plans/020.context-assembly/ (2026-10-04); docs/plans/021.compose-loop-and-tools/ (2026-10-04); docs/plans/022.discussion-ui/ (2026-10-04)
+- **Remaining:** US-115.AC-1's streaming half — a reply still streaming is
+  not editable → docs/plans/defects.md
 - **Realized by:** UC-032, UC-033, UC-034, UC-035, UC-036, UC-037, UC-038,
   UC-079, UC-083, UC-084, UC-085, UC-086, US-036, US-037, US-038, US-039,
   US-040, US-041, US-042, US-043, US-044, US-113, US-114, US-115, US-116,
   US-125, US-126, US-127, US-128, US-129, US-130, US-131, US-132, US-133,
-  US-134, US-135
+  US-134, US-135, US-146
 - **Note:** Three paths into one current-zone message: the assistant
   produces a candidate, the roleplayer writes from scratch, or edits a
   candidate. Settle takes the last message in the current zone, whoever
@@ -183,43 +210,58 @@ dependency graph below, not from priority (challenge C4, rejected).
   in flight — a discussion generation, a tool call being waited on, or a
   partner-text translation — and whatever text was produced stays as a
   usable candidate; there is no cap on tool iterations, the stop is what
-  bounds a runaway loop (UC-085). FEAT-010 owns the stop even where it
+  bounds a runaway loop (UC-085). Stopping while the assistant waits on a
+  tool call ends that exchange, keeping whatever text was produced — unlike
+  a *failed* tool, which it is told about and carries on without; the two
+  differ deliberately. FEAT-010 owns the stop even where it
   interrupts a FEAT-011 translation or a FEAT-014/015/016 tool call.
   Exception flows: the LLM going away mid-discussion loses none of the
   roleplayer's text — the entry and discussion survive intact, the failure
-  is visible, retry is possible; a failed tool does not end the discussion —
+  is visible, and a fresh candidate can be produced — the same control asks
+  for a different candidate on any exchange, failed or not; a failed tool
+  does not end the discussion —
   the assistant is told the tool failed and carries on without it; a failed
   generation of any kind shows its reason, and the reason does not persist
-  once the notice has gone.
+  once the notice has gone. The assistant's thinking never enters the
+  settled record, so a candidate that was nothing but thinking settles as
+  empty text. A tool's own record is not a message anyone wrote and is not
+  editable, unlike the roleplayer's and the assistant's own messages.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 4,
   round 7, round 8, round 9, round 11, round 12, round 14; 2026-09-28,
-  round 17, gap-closure round.
+  round 17, gap-closure round; finalization 2026-10-06, C38, C45, C46, C51.
 
 ### FEAT-011 — Partner-text translation
 - **Purpose:** A read-only flicker that translates a pasted partner entry
   into the roleplayer's preferred language, on demand.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/023.partner-translation/ (2026-10-04)
 - **Realized by:** UC-039, UC-040, UC-041, US-045, US-046, US-047, US-048
 - **Note:** Nothing is translated until the roleplayer flicks it; the result
   is cached after first use so the second look is instant and costs nothing.
   A translation never enters session context — context holds only the RP
   language. Exception flow: a failed translation falls back to the original
   text with a visible error, and nothing is cached. A translation in flight
-  can be stopped (FEAT-010) — the original text stands and nothing is
-  cached, the same as a failed translation.
+  can be stopped (FEAT-010) — the original text stands and the result is not
+  cached, best-effort rather than guaranteed, because a stop arriving as the
+  result is written may not reach it in time. A *failed* translation caches
+  nothing at all, which is a guarantee. With no preferred language
+  configured at any level, a translation is into English (US-142).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 2,
-  round 4, round 9; 2026-09-28, gap-closure round.
+  round 4, round 9; 2026-09-28, gap-closure round; finalization 2026-10-06,
+  C38, C43.
 
 ### FEAT-012 — Memos
 - **Purpose:** Standing memos (the roleplayer's word: notes) at four levels
   — user, character, setup, session — each independently forced or not, and
   enabled or disabled.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/015.memos/ (2026-10-03); docs/plans/016.note-wall/ (2026-10-03); US-054 / US-055.AC-1 / US-098 / US-102.AC-1 / US-103.AC-1 by docs/plans/020.context-assembly/ (2026-10-04); US-055.AC-2 by docs/plans/026.memo-search-tool/ (2026-10-05)
 - **Realized by:** UC-042, UC-043, UC-044, UC-045, UC-046, UC-075, UC-076,
-  US-049, US-050, US-051, US-052, US-053, US-054, US-055, US-056, US-057,
-  US-098, US-099, US-100, US-101, US-102, US-103, US-104, US-119
+  UC-088, US-049, US-050, US-051, US-052, US-053, US-054, US-055, US-056,
+  US-057, US-098, US-099, US-100, US-101, US-102, US-103, US-104, US-119,
+  US-141
 - **Note:** Two axes, not one setting with three values — forced/not-forced
   and enabled/disabled. Disabled wins: a disabled note reaches the assistant
   by no path whatever its forced flag says. The forced flag is remembered
@@ -237,8 +279,14 @@ dependency graph below, not from priority (challenge C4, rejected).
   user + character + session with no gap when a setup is absent (FEAT-007).
   Because a note has no title, `memo_search` (FEAT-014) and my-search
   (FEAT-017) identify a note by a snippet of its text and its level.
+  A note is removed by emptying it: clearing all of a saved note's text
+  removes the note, and a new note left without text is never persisted.
+  That is the only removal path — there is no separate delete action, which
+  is consistent with notes having no archived state. A newly created note
+  takes the first position in its level, so forcing it puts it ahead of that
+  level's older forced notes until the roleplayer reorders it.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 5,
-  round 6, round 11, round 12, round 16.
+  round 6, round 11, round 12, round 16; finalization 2026-10-06, C40, C49.
 
 ### FEAT-013 — Session configuration & inheritance
 - **Purpose:** The model is captured once, when a session is created, and
@@ -246,9 +294,11 @@ dependency graph below, not from priority (challenge C4, rejected).
   `character → session`; the RP language and the preferred language resolve
   live `user → session`.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/017.session-configuration/ (2026-10-03); UC-048 / US-059 by docs/plans/018.character-page/ (2026-10-03); US-107 by docs/plans/021.compose-loop-and-tools/ (2026-10-04)
 - **Realized by:** UC-047, UC-048, UC-049, UC-050, UC-077, US-058, US-059,
-  US-060, US-061, US-062, US-105, US-106, US-107, US-108, US-139
+  US-060, US-061, US-062, US-105, US-106, US-107, US-108, US-139, US-142,
+  US-143, US-144
 - **Note:** Two languages: the **RP language** is what the roleplay is
   conducted in — the partner's text arrives in it, the final answer is
   written in it, and it is the only language the session's model context
@@ -273,15 +323,25 @@ dependency graph below, not from priority (challenge C4, rejected).
   session that already exists (US-139). The SYSTEM PROMPT and ENABLED TOOLS
   keep resolving live through `character → session` for every session, old
   or new, whatever the character is configured with today.
+  The RP language and the preferred language each have **English as the
+  instance's last resort**, not as a privileged setting: where no language
+  resolves at any level the instance uses English rather than failing
+  (US-142). This does not make English a default anyone configured — the
+  note above stands. Session creation is never refused for want of an
+  enabled model: a session created when nothing is enabled captures no model
+  and keeps none until the roleplayer chooses one from the header (US-143).
+  A session holding no chosen model refuses the send saying so, which is a
+  different refusal from US-107's "no model is enabled" (US-144).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 2, round 5,
   round 10, round 11, round 13, round 14, round 15; 2026-09-28, gap-closure
-  round.
+  round; finalization 2026-10-06, C43, C44.
 
 ### FEAT-014 — `memo_search` tool
 - **Purpose:** The assistant searches searchable memos across the session's
   memo chain.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/026.memo-search-tool/ (2026-10-05)
 - **Realized by:** UC-051, UC-052, US-063, US-064, US-065, US-066
 - **Note:** Forced memos are excluded because they are already in context;
   disabled memos are excluded because they reach the assistant by no path.
@@ -297,7 +357,8 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** The assistant finds past sessions under the same character by
   meaning.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/027.session-search-tool/ (2026-10-05)
 - **Realized by:** UC-053, UC-054, US-067, US-068, US-069, US-138
 - **Note:** Semantic only — no structured matching on partner name or setup,
   because the partner is free text and the setup is optional (challenge C5).
@@ -315,7 +376,8 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** The assistant looks up real-world information on the
   roleplayer's behalf.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/028.web-search-tool/ (2026-10-05)
 - **Realized by:** UC-055, UC-056, UC-057, US-070, US-071, US-072, US-073
 - **Note:** Three justified uses (challenge C2): a real-world fact (a place,
   a weapon, a procedure, a period detail); an idiom or naturalness check
@@ -323,16 +385,23 @@ dependency graph below, not from priority (challenge C4, rejected).
   Disabled by the configuration chain (FEAT-013) like any other tool. A tool
   call being waited on can be stopped (FEAT-010); there is no limit on how
   many times the assistant may call tools before answering.
+  The session header's web-search indicator reflects what the configuration
+  chain resolved, not whether the instance holds the credentials to search —
+  an instance with the switch on but no credentials still shows it on
+  (US-073.AC-2).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 5, round 6,
-  challenge C2; 2026-09-28, gap-closure round.
+  challenge C2; 2026-09-28, gap-closure round; finalization 2026-10-06, C53.
 
 ### FEAT-017 — My search
 - **Purpose:** One search box reaching everything the roleplayer owns, from
   any screen.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** partially delivered
+- **Delivered:** docs/plans/029.my-search/ (2026-10-05)
+- **Remaining:** US-147 — name matching folds case ASCII-only →
+  docs/plans/defects.md
 - **Realized by:** UC-058, UC-059, UC-060, US-074, US-075, US-076, US-118,
-  US-137
+  US-137, US-147
 - **Note:** Distinct from FEAT-014/FEAT-015, not an overlap (challenge C7,
   rejected by the user: "tool search is the content search, my search is on
   user level UI to find the sessions i did. Totally different
@@ -343,14 +412,18 @@ dependency graph below, not from priority (challenge C4, rejected).
   is expanded or collapsed. My-search returns memos regardless of their
   enabled or forced state — note state never filters a result out — and a
   result that is currently disabled is shown as disabled.
+  Character and setup names are matched regardless of case in whatever
+  script they are written in, not only in Latin (US-147).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7, round 8,
-  round 14, challenge C7; 2026-09-28, gap-closure round.
+  round 14, challenge C7; 2026-09-28, gap-closure round; finalization
+  2026-10-06, C52.
 
 ### FEAT-018 — Export & import
 - **Purpose:** Move or restore data at four granularities — whole database,
   per-user, per-character, per-session — each carrying its own memos.
 - **Actors:** ACT-001, ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** export halves by docs/plans/030.export-granularities/ (2026-10-05); import halves by docs/plans/031.import-and-id-remapping/ (2026-10-05)
 - **Realized by:** UC-061, UC-062, UC-063, UC-064, US-077, US-078, US-079,
   US-080, US-081, US-082, US-136
 - **Note:** Owns export/import at every granularity — see the Relationships
@@ -359,30 +432,51 @@ dependency graph below, not from priority (challenge C4, rejected).
   administrator: the product offers no viewer, no search, no rendering of
   another user's content; the export exists to move or restore an instance.
   This is how challenge C1's conflict with FEAT-019's privacy guarantee was
-  settled. Import merges as new items alongside what is already there and
-  never reuses an id — imported material always arrives under fresh
-  identity, and can never overwrite or merge into an existing row. Importing
-  the same export twice yields duplicates, and nothing warns about it.
+  settled. A roleplayer's own import merges as new items alongside what is
+  already there and never reuses an id — imported material always arrives
+  under fresh identity, and can never overwrite or merge into an existing
+  row. Importing the same export twice yields duplicates, and nothing warns
+  about it. Merge-as-new and fresh identity describe the **roleplayer's
+  three granularities** — user, character and session. The administrator's
+  whole-database import is a different operation: a restore that replaces
+  the instance's contents and preserves the export's own ids, which is what
+  lets the restored users sign in; it is refused onto a database that
+  already holds content (UC-061, US-077). An imported single session is
+  placed under a character the roleplayer chooses and takes that
+  character's persona, never the source's.
 - **_TBD:** a single-session export carries only that session's own memos
-  (challenge C12), so an imported session arrives without the character
-  persona and setup that gave it meaning. Accepted knowingly, recorded here
-  as a known consequence, not a defect.
+  (challenge C12), so none of the source's character persona or setup
+  travels with it. Narrowed at finalization (2026-10-06): the roleplayer
+  chooses the character the session is imported into, so it does arrive with
+  *a* persona — just not the one it was written against, and with no setup
+  at all. Accepted knowingly, recorded here as a known consequence, not a
+  defect.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 2,
-  challenge C12; 2026-09-28, gap-closure round, challenge C29.
+  challenge C12; 2026-09-28, gap-closure round, challenge C29; finalization
+  2026-10-06, C39, C41.
 
 ### FEAT-019 — Privacy & isolation
 - **Purpose:** No screen, search, tool or export view ever shows another
   user's material.
 - **Actors:** ACT-001, ACT-002 · **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/032.privacy-isolation-audit/ (2026-10-06)
 - **Realized by:** UC-065, UC-066, US-083, US-084, US-085
 - **Note:** Absolute — every listing, search and tool is scoped to the
   owning user; administrative surfaces expose no user content. This is how
   challenge C1's conflict with FEAT-018's whole-database export was settled:
   privacy is a product guarantee, and the export is opaque to the
   administrator by FEAT-018's own rule.
+  **Boundary, recorded so nobody widens it later (challenge C47,
+  rejected).** "Absolute" means no logged-in user sees another logged-in
+  user's records anywhere in the product — listings, search, tools and
+  administrative surfaces. It is not a claim about host-level logs,
+  operational output or anything outside the product's own surfaces; the
+  instance runs on a private server. The user's reasoning, verbatim: *"Not a
+  big requirement, it just run on private server. THe privacy means that one
+  logged user don't see records of other logged user, nothing more."*
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 1,
-  round 2.
+  round 2; finalization 2026-10-06, C47.
 
 ### FEAT-020 — Workspace shell & navigation
 - **Purpose:** The single shell the roleplayer works in — navigation, the
@@ -390,7 +484,8 @@ dependency graph below, not from priority (challenge C4, rejected).
   when it is collapsed.
 - **Actors:** ACT-002 (primary), ACT-001 (admin entry point only) ·
   **Priority:** must
-- **Status:** proposed
+- **Status:** delivered
+- **Delivered:** docs/plans/008.app-shell-frame/ (2026-10-01); UC-069 / US-088 / US-089 by docs/plans/011.rp-sessions/ (2026-10-02); UC-072 / US-094 / US-095 by docs/plans/016.note-wall/ (2026-10-03); US-092 by docs/plans/017.session-configuration/ (2026-10-03); UC-073 / UC-074 / US-096 / US-097 by docs/plans/018.character-page/ (2026-10-03); US-118 by docs/plans/029.my-search/ (2026-10-05)
 - **Realized by:** UC-069, UC-070, UC-071, UC-072, UC-073, UC-074, US-088,
   US-089, US-090, US-091, US-092, US-093, US-094, US-095, US-096, US-097
 - **Note:** Left column lists characters with their sessions (setup shown as
@@ -437,9 +532,15 @@ FEAT-012, FEAT-017. No cycles.
   tool wait in progress; the tool features own what each tool does and what
   a failed tool means. A stopped tool is the roleplayer's choice; a failed
   tool is the tool's own.
+- FEAT-001 × FEAT-002 — the sign-in address belongs to FEAT-002, but what it
+  shows on an unconfigured instance is FEAT-001's (US-148). FEAT-002's own
+  criteria assume a configured instance.
 
 **Boundary:** FEAT-018 owns export/import at every granularity; FEAT-005
-owns drift, remediation and vector-index rebuild.
+owns drift, remediation and vector-index rebuild. FEAT-019's privacy
+guarantee is user-vs-user visibility across the product's own surfaces;
+host-level logs and operational output are outside it (challenge C47,
+rejected).
 
 **Distinction (not an overlap — challenge C7 rejected):** FEAT-014/FEAT-015
 are content retrieval performed by the assistant mid-discussion; FEAT-017 is
@@ -462,8 +563,26 @@ session`, skipping the character. The two chains now share no level at all.
   (UC-016) is run.
 - Importing the same export twice yields duplicates, with no warning.
 
+**Accepted consequences (finalization, 2026-10-06):**
+- Material whose embedding could not be produced has its vectors cleared,
+  so it is absent from semantic search until the rebuild (UC-016) runs.
+  Chosen over leaving a stale vector that would match text the material no
+  longer holds.
+- A newly created note, once forced, enters the system prompt ahead of its
+  level's older forced notes until the roleplayer reorders it
+  (US-102.AC-2).
+- A whole-database restore preserves the export's own ids; only the
+  roleplayer's three granularities mint fresh ones (US-136's Constraint).
+- Stopping the assistant while it waits on a tool call ends the exchange
+  rather than continuing without the tool's result (US-133.AC-1) — the stop
+  and a failed tool differ, deliberately.
+
 **Conflicts:** None open in `docs/product/`. Dependency edges and the build
-order are unchanged by this round. Five items conflict with
-`docs/architecture/` and are routed to `/architect` — they are architecture
-decisions, not product conflicts.
+order are unchanged by this round. Three `docs/architecture/` items raised
+for this layer are answered by this round — the `user → character → session`
+wording (UC-012), what session creation does with no enabled model (US-143),
+and whether the character page's first message draws a reply (US-117.AC-3
+stands, and is recorded as a defect in `docs/plans/defects.md`). A fourth, on
+discarding a translation when a non-partner settled row is edited, is answered
+by US-111.AC-3.
 <!-- product-spec:end -->

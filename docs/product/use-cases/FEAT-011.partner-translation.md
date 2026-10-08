@@ -11,8 +11,9 @@
   3. Translated text is shown in place of the original.
 - **Exception flows:**
   - Translation fails — the flicker falls back to the original text with a visible error, and nothing is cached.
+  - No preferred language is configured at any level — the translation is into English (US-142).
 - **Postconditions:** Translated text never enters session context; on failure, nothing is cached.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 2, round 9.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 2, round 9; finalization 2026-10-06, C43.
 
 ### UC-040 — Flick back to the original
 - **Actor:** ACT-002

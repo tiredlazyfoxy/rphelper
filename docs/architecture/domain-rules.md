@@ -1,11 +1,12 @@
 # Domain rules — the cross-cutting invariants
 
 **Realizes:** FEAT-004, FEAT-006, FEAT-007, FEAT-008, FEAT-009, FEAT-010,
-FEAT-011, FEAT-012, FEAT-013, FEAT-014, FEAT-015, FEAT-016, FEAT-019, UC-012,
-UC-021, UC-025, UC-029, UC-032, UC-035, UC-036, UC-037, UC-038, UC-039, UC-040,
-UC-041, UC-042, UC-044, UC-045, UC-046, UC-047, UC-048, UC-049, UC-050, UC-052,
-UC-065, UC-066, UC-067, UC-068, UC-075, UC-076, UC-077, UC-078, UC-081, UC-083,
-UC-084, UC-086
+FEAT-011, FEAT-012, FEAT-013, FEAT-014, FEAT-015, FEAT-016, FEAT-018, FEAT-019,
+UC-012, UC-021, UC-025, UC-029, UC-032, UC-035, UC-036, UC-037, UC-038, UC-039,
+UC-040, UC-041, UC-042, UC-044, UC-045, UC-046, UC-047, UC-048, UC-049, UC-050,
+UC-052, UC-061, UC-065, UC-066, UC-067, UC-068, UC-075, UC-076, UC-077, UC-078,
+UC-081, UC-083, UC-084, UC-086, UC-088, US-040, US-044, US-102, US-107, US-114,
+US-116, US-136, US-141, US-143, US-144, US-146
 
 Every feature in RPHelper binds to the rules below. They are collected in one
 place because each one is violated by the *obvious* implementation, and because
@@ -88,7 +89,14 @@ Architectural consequences that must hold:
   two languages (UC-047 step 2).
 - The resolver exposes two functions, not one parameterised one, so a caller
   cannot accidentally ask for a language through the character level, or a model
-  through the user level.
+  through the user level. **As built** (017 D8) they are
+  `resolve_assistant_chain(character, session)` and
+  `resolve_language_chain(user, session)` in `services/configuration.py`, and the
+  **per-level input shapes enforce the chains structurally**: the character input
+  carries no model-free-of-prompt confusion and **no language fields at all**,
+  and the user input carries **only the two languages**. So a resolver cannot
+  read a level a chain does not have, because the value is not in the argument it
+  was given. That is a stronger guarantee than two function names.
 - UC-050's postcondition — the two chains share no level — is a testable claim
   about the schema on both sides. It is not satisfied by a null column on either.
 
@@ -97,6 +105,18 @@ value wins**; a level that has no value is transparent, not a value of "empty".
 So a session that sets nothing resolves exactly to what the user-level default
 resolves to, and clearing a session override restores inheritance rather than
 setting a blank.
+
+**The tool switches are three independent nullable booleans per level, and the
+floor is ENABLED** (017 D5). Each of `memo_search`, `session_search` and
+`web_search` has its own column at the character and session levels; NULL is
+transparent exactly as elsewhere in this chain; and **a tool that no level sets
+resolves to enabled**, reported at level `default`. Enabled rather than disabled
+because FEAT-012's and FEAT-014's whole purpose is that the assistant can reach
+material the roleplayer did not hand it in the current turn — a default-off
+switch would make that capability something every roleplayer has to discover and
+turn on. `web_search` carries one further condition that is **not** part of this
+chain: the instance must hold search credentials, or the tool is never offered at
+all (`llm-and-streaming.md`).
 
 ---
 
@@ -142,6 +162,34 @@ Consequences:
 - A **sentinel "default setup" row is forbidden.** It would make the absence
   unobservable and would silently give the no-setup case a fourth scope to carry
   through export (FEAT-018) and drift reporting (FEAT-005).
+
+**As built, and tested as a negative** (plans 010, 011):
+
+- **Nothing creates a setup except an explicit create.** Creating a character
+  writes **no** setup row (010).
+- **A session starts with `setup_id` NULL** unless one of the caller's **working**
+  setups under that character is chosen (011). The start control defaults to "No
+  setup", and it starts a session perfectly well with an **empty or failed** setup
+  list — a list that could not load must not become a precondition. Nothing
+  creates a setup or a sentinel at session start.
+- An **archived** setup is not offered to a new session (`setup_archived`,
+  UC-021), while an existing session whose setup was archived keeps showing its
+  label (R6 does not cascade).
+
+**The chain predicate has one home, and it is named** (026 D2). The disjunction
+above is a **public clause builder in `services/memo_chain.py`, beside
+`resolve_chain`** — it takes a relation and the level ids and omits the setup term
+when there is no setup. **Both consumers use it**: `resolve_chain`'s own concern
+(the note wall, context assembly's forced selection) and **`memo_search`**, which
+ANDs R3's reach predicate onto it (`search-and-retrieval.md`).
+
+One home because this rule is one rule. Two hand-written disjunctions would be two
+chances to disagree about what "this session's chain" means — and the disagreement
+would be invisible, because each would look correct on its own and the symptom
+would be a note the prompt includes and the tool cannot find, or the reverse.
+It is also where the no-setup degradation lives exactly once, so the "same query
+with one fewer OR-term" claim above is a property of the code and not an
+aspiration.
 
 ---
 
@@ -192,6 +240,17 @@ Rules that follow:
   afterwards.** An assembler that selects on `is_forced` alone puts a disabled
   forced note straight into the system prompt, and that is the exact bug the two
   booleans make possible and the ordering rules out.
+  **The one derivation to reuse, named** (015 D7): `memo_reach` exists twice —
+  `services/memo_chain.py`'s and `app/memoReach.ts`'s — and **both test
+  `is_enabled` first**. **Its two backend consumers are named too**:
+  **`services/context.py`**, which selects forced notes for the system prompt by
+  filtering `resolve_chain` on `memo_reach(...) == "forced"` and writes **no
+  hand-rolled conjunction of its own** (020 D6, pinned by a source test), and
+  **`services/search/memo_search.py`**, which ANDs the searchable reach onto the
+  chain clause. Both consume the derivation rather than re-deriving the
+  predicate. Two copies rather than one shared module because the two run in
+  different languages, and all of this is named together so that a change to the
+  rule is visibly a change to every place it is read.
 - **Re-enabling restores the prior mode** (US-101). The UI does not ask, and no
   path may clear `is_forced` on disable "to be tidy" — that would silently
   re-implement the rule this section reverses.
@@ -229,16 +288,14 @@ The product rule, in three parts:
 2. There is **no silent fallback** up the configuration chain. A session never
    quietly changes model.
 
-   > **Flagged, not resolved here.** UC-012's exception flow states this as "no
-   > silent fallback up the `user → character → session` chain", which names a
-   > **user level for the model that UC-050 and UC-047 say does not exist**.
-   > `docs/product/` is inconsistent between those use cases. This doc follows
-   > **UC-050**, which is the use case that owns resolution and whose
-   > postcondition is explicit ("there is no user-level default for model, system
-   > prompt or tools"), and reads UC-012's phrasing as stale wording of the same
-   > prohibition rather than as a third level. **The prohibition itself is
-   > identical either way** — nothing walks up anything — so no behaviour turns on
-   > which reading is right. Raised for `/product-spec` to reconcile.
+   > **The product inconsistency this rule used to flag is closed.** UC-012's
+   > exception flow once stated the prohibition as "no silent fallback up the
+   > `user → character → session` chain", naming a user level for the model that
+   > UC-050 and UC-047 say does not exist. `/product-spec` reconciled the wording
+   > (challenge C42), so UC-012 no longer contradicts UC-050/UC-047 and this doc
+   > no longer has to choose between them. Nothing about the prohibition changed —
+   > it never did turn on which reading was right, because nothing walks up
+   > anything either way.
 3. The next time that session tries to use the model, it **shows an error**, and
    the roleplayer resolves it by choosing another model through FEAT-013's chain.
 
@@ -271,9 +328,10 @@ violates this rule from the other end: an administrator enabling a model that
 sorts earlier would silently change the model a never-configured session has been
 using — no error, no notice, a different voice in the next reply. "First enabled"
 is a *bootstrap* answer, not a standing one. So the resolved reference is
-**materialised onto `sessions.model_ref`** (`data-model.md`), after which the
-enabled-model set can change all it likes without moving an existing session's
-model. Validation still happens at use time, so a materialised reference that is
+**materialised onto `sessions.model_server_id` / `model_name`**
+(`data-model.md` — two columns with a both-or-neither CHECK and no FK, never a
+single `model_ref` column), after which the enabled-model set can change all it
+likes without moving an existing session's model. Validation still happens at use time, so a materialised reference that is
 later disabled produces the same loud typed error as any other.
 
 ### The model is captured at session CREATION, and the capture applies to the model alone
@@ -287,7 +345,7 @@ The rule, in two halves that behave differently:
 
 | What | When it resolves | Against what |
 |---|---|---|
-| **MODEL** | **once, at session creation** — captured onto `sessions.model_ref` | the character's model *as configured at that instant*; if the character has none, the **first enabled model** (US-106's floor, now a creation-time answer rather than a per-request one) |
+| **MODEL** | **once, at session creation** — captured onto `sessions.model_server_id` / `model_name` | the character's model *as configured at that instant*; if the character has none, the **first enabled model** (US-106's floor, now a creation-time answer rather than a per-request one — ordered by `llm_servers.id` then `models.id`, the LLM Servers page's order); if nothing is enabled, **NULL** (US-143) |
 | **SYSTEM PROMPT**, **ENABLED TOOLS** | **live, on every request** | whatever the character holds *today*, through `character → session` |
 
 Consequences of the model half, each stated because the obvious implementation
@@ -327,20 +385,63 @@ materialised value if the character is configured with a model afterwards.
 US-139 answers it: **nothing happens — the session keeps its captured model.**
 `data-model.md` carried the same question and it is closed there too.
 
-**A new consequence, and it is open.** Materialising at creation means **session
-creation is now the moment that can fail when no model is enabled at all**.
-Previously the null window meant a session could exist before any model question
-arose; now creation is the first thing that has to answer it.
+### Creation with nothing enabled — settled, and the `_TBD:` is closed
 
-`_TBD: docs/product/ does not state what session creation does when the enabled-
-model set is empty. FEAT-013/US-107 says the roleplayer "cannot send a message
-and is told why" — that is about SENDING, not about CREATING, and the two are now
-different moments. The open question is precisely: is session creation REFUSED,
-or is the session created with a NULL model_ref that is filled on the first
-successful resolution? Nothing here chooses, because either answer is a product
-decision with a visible behavioural consequence — the first blocks UC-080's
-start-a-session-by-writing outright, the second reintroduces a window in which
-the capture has not happened. Raised for /product-spec._
+The question this rule carried was precisely: when the enabled-model set is
+empty, is session creation **refused**, or is the session created with no
+captured model that is **filled on the first successful resolution**?
+
+**`US-143` answers it, and the answer is neither of those exactly:** a session is
+**created** even when no model is enabled, and it **captures none until the
+roleplayer picks one**. So creation never fails for want of a model — which is
+what keeps UC-080's start-a-session-by-writing reachable on a fresh instance —
+and **nothing fills the columns later on its own**. The only writer after
+creation is the roleplayer's choice in the stream header (UC-077, US-105). The
+second branch of the old question is explicitly rejected: a background fill would
+be the system choosing a model for a session the roleplayer never configured,
+which is this rule's own prohibition wearing a different hat. For the same
+reason, **sessions created before the columns existed hold NULL and are not
+backfilled** (017 D1).
+
+A character that *does* have a model configured is captured **as-is even when
+nothing on the instance is enabled** (`US-139.AC-2`) — the capture is a reference,
+not an approval, and validation stays at use time.
+
+### The use-time check order, and the three refusals it distinguishes
+
+`resolve_model_for_use` (017 D2) runs in this order, and the order is the whole
+of the design:
+
+1. **No model is enabled on the instance at all** → `no_model_enabled`
+   (`US-107`). An instance-level condition the roleplayer cannot fix.
+2. **The session has no captured model** (both columns NULL) → `model_not_chosen`
+   (`US-144`, UC-077). A session-level condition the roleplayer fixes in the
+   header picker.
+3. **The captured model is not enabled** → `model_not_enabled`. A reference that
+   was valid and is not any more.
+
+Instance before session before reference, because that is the order in which the
+roleplayer can act: being told to pick a model on an instance with none to pick
+is worse than being told there is none. `US-144` makes the second refusal
+**distinct from the first by requirement**, not merely by preference.
+
+**A captured session model reports `level: "session"`** in `model_not_enabled`,
+even though the value was copied from the character at creation (017 D3). That is
+deliberate and reads wrong at first glance: the reference *came from* the
+character, but the **only remedy is the header picker**, which sets the session
+level. Reporting `character` would point the roleplayer at a screen that cannot
+reach this session. `character` is reported by exactly one path — the character
+configuration route's own set-time check.
+
+**Validation happens at set time as well as at use time** (017 D10). A session or
+character model override is checked when it is **set** — a 409 with **nothing
+written** — and again at use. Set-time validation is not a weakening of
+"validation happens at use time": it is a courtesy that fails fast on a choice
+the roleplayer is making right now, and it cannot replace the use-time check
+because a model can be disabled after it was set. **The session's model is never
+cleared, only replaced** — there is no "inherit again" state for a captured
+value, because a cleared capture would re-open the unstable-default window this
+rule exists to close.
 
 Why the product accepts a loud failure over a helpful substitution: refusing the
 admin's disable would require telling the administrator that *other users'
@@ -390,6 +491,56 @@ Enforcement, expressed as design constraints rather than good intentions:
   being **opaque to the administrator**: the product offers no viewer, no search
   and no rendering of it. The architecture must therefore not grow an
   export-preview, export-diff or export-browse surface.
+  **As built, in both directions** (plans 030, 031): there is no viewer, preview,
+  search, diff or count surface on either side. After an export the admin page
+  renders **a byte size and nothing else** — no content, no table name, no row
+  count — and the **import shows nothing of the file at all**, before or after:
+  no preview, no counts, no table list. No error `detail` carries payload
+  content either; `export_invalid`'s `detail` is a single `reason` token, and a
+  database-import constraint refusal never forwards the driver's message, which
+  can embed a column *value* (`backend-structure.md`, `transfer.md`).
+  Consequently `export_database` and `import_database` are the only service
+  operations in the backend that take no `user_id`; they are compatible with this
+  rule **through opacity, not through scoping**, and the exception is named in
+  `backend-structure.md` so a reviewer finds it stated.
+
+### An admin calling a user-content route is an ordinary owner
+
+**Admins are not super-readers.** An administrator reaching
+`GET /api/characters`, a session, an entry or a memo sees **only their own
+content**, scoped by their own `user_id` like any other account. The role ladder
+grants rungs on **admin routes**; it grants nothing on a roleplayer route.
+
+Asserted by plan 032's audit; previously implicit, which is why it is written
+down. `backend-structure.md` carries the matching as-built note at the enforcement
+point (`require_user` yields the caller's own id and every service takes it as a
+required positional argument). Nothing further is needed here — this is the rule
+of record and the enforcement is one line of code in one place.
+
+### Enforcement — R5 is proved, not reviewed (plan 032)
+
+R5 is a **query-level** property, so it is invisible to any single reviewer's
+reading. Three mechanisms make it checkable instead:
+
+- **A route-classification guard.** Every API route must be classified `public` /
+  `self` / `registry` / `owner` / `admin`, and **an unclassified route fails the
+  build** (`backend/tests/test_privacy_audit_routes.py`). The enumeration it
+  checks against is `docs/plans/032.privacy-isolation-audit/context.md`.
+  `backend-structure.md` records it as the build-time contract it is.
+- **The admin-invariance test.** Admin responses are **identical before and after
+  roleplayer content exists**. That is the positive form of "no count derived from
+  user content": not "we looked and found none", but "creating content changes
+  nothing an administrator can see" (`admin-surfaces.md`).
+- **Cross-user proof for the search layer**
+  (`backend/tests/test_privacy_audit_search_tools.py`), covering my-search, the
+  hybrid port, the three tools and the vector/FTS write paths — where the derived
+  tables carry **no user column**, so every write must resolve its row ids through
+  an owner-scoped query first (`search-and-retrieval.md`).
+
+**Refusal identity is the companion property** the guard also pins: a **foreign id
+produces a response identical to an unknown id** — same code, same status, same
+body. Every `*_not_found` code depends on it, and it is what keeps a guessable
+snowflake from leaking existence.
 
 ---
 
@@ -412,13 +563,56 @@ path at all** for these three entities. Listing endpoints filter
 Stated as an invariant because the tempting shortcut — a hard delete behind a
 "permanently remove" affordance — would contradict "always recoverable", and
 because FEAT-018's per-character and per-session exports must be able to carry an
-archived object.
+archived object. **They do, as built** (plan 030): a character export includes its
+archived sessions, and an archived character or session exports regardless of the
+entity getters' archive filtering, because the export fetches its root row with
+its own select rather than reusing a getter (`transfer.md`).
+
+### As built across all three entities
+
+- **The flag is named `include_archived=true`**, on every list that has one
+  (009 D9, 011): `GET /api/characters`, `GET /api/characters/{id}/setups`,
+  `GET /api/sessions` and `GET /api/characters/{id}/sessions`. One name rather
+  than three, so a reader of one router can predict the next.
+- **A by-id read answers archived rows**, for all three, and for a session
+  **whatever its character's state** (011 D5). The archive hides something from a
+  list; it does not make a URL stop working.
+- **Archive and restore are idempotent, and a no-op writes nothing** — the
+  postures are recorded with their reasons in `data-model.md`.
+- **Archive never moves `last_used_at`** (011 D2). Putting a session away is not
+  using it.
+- **Archiving a setup that sessions reference is always silent and always
+  succeeds** (010 D3): no warning, no refusal, **no reference count**. Archive
+  does not cascade, so referencing sessions keep their `setup_id` and keep
+  working — and keeping the count out of the UI also keeps R5's forbidden
+  reverse-lookup pattern off that screen, which is the second reason and not a
+  coincidence.
+- **Where archived rows surface is deliberately narrow** (011 D5, D13): archived
+  sessions appear only in the character page's Sessions section, **never in the
+  tree**. The tree is the working list, and R6's whole statement is that
+  archiving removes something from the working list.
 
 Note the contrast with R3, deliberately: **memos do not archive.** They have two
 reach flags and no archived state, and `is_enabled = false` is not an archive —
 it is an exclusion from the assistant that leaves the note fully visible to its
 owner. Applying the archive rule to memos, or R3's flags to sessions, is a design
 error in either direction.
+
+**A memo's removal is an explicit hard delete, and that does not contradict this
+rule** (015 D2). R6 governs the three archivable entities; memos are outside it
+by R6's own contrast, so "no delete path at all" is a statement about characters,
+setups and sessions and was never a statement about notes. The roleplayer reaches
+the delete by **emptying a saved note** (`UC-088`, `US-141`). It is worth saying
+out loud because the first delete path in the product sits immediately beside a
+rule that reads "no delete path at all".
+
+**One whole-instance delete exists, and it is not a per-entity delete path**
+(plan 031). The whole-database import **replaces** every row — including archived
+characters, setups and sessions, and including the administrator's own account.
+It is admin-only, allowed only on an instance with no users or exactly one admin,
+and it is a **restore**, not a removal of a chosen object. R6's "no delete path"
+still reads as true for the three entities, because nothing can destroy *one* of
+them; `transfer.md` has the guard and the reasoning.
 
 ---
 
@@ -457,7 +651,15 @@ The rules, each separately testable:
   the roleplayer supplied.
 - **A buried group stays readable** (UC-036). Burial is not deletion and not
   archival; every message remains retrievable for display, and is not editable
-  once buried (US-116).
+  once buried (US-116). **The mechanism, as built** (022 D1, D11, D12): a **lazy
+  read of `GET /api/messages/{id}/discussion`** over the `buried_messages`
+  selectable, fetched on the first expand of a settled entry's Discussion group
+  and rendered **with no edit control**. The server half of "not editable" is the
+  `PATCH` refusal (`message_not_editable`, plan 012), so the rule is enforced at
+  both boundaries rather than trusted to the client — which is what makes
+  US-116's guarantee a property of the system and not of the UI.
+  `US-040.AC-2` / `US-040.AC-3` add that **no message shows before the group is
+  opened**, which the lazy read satisfies by construction.
 - **Re-open is allowed only while the current zone below is empty** (UC-037,
   US-128). It is an undo for a mis-click, not a workflow. Once anything new
   exists in the zone, re-open is refused and the group is permanently read-only.
@@ -528,6 +730,32 @@ access of its own, so every tool implementation is a scoped read path and the se
 of paths is closed at three. Adding a fourth tool is an architecture change, not a
 feature detail.
 
+**The enforcement lives in exactly one place, and it is named** (021 D6):
+**`ToolScope`** — `(user_id, session_id, character_id, setup_id)` — is built
+**only** by `services/tools/seam.py`, from an **owner-scoped session read**. A
+tool receives that scope and nothing else, and **tool arguments never carry
+ids**. So a tool cannot widen its own scope even in principle: there is no id in
+the model's arguments for it to widen it with. That is why R5's isolation is a
+property of the seam rather than of three separate implementations, and why a
+fourth tool would have to come through the same door. `session-stream.md` holds
+the seam's shapes; the loop that calls it is `llm-and-streaming.md`'s.
+
+**`web_search` is the one tool that is not a scoped read, and the exception is
+deliberate** (028 D6, D8). It **reads no user data**, **receives no scope ids**,
+and its **only outbound content is the query**. So the sentence above — every tool
+implementation is a scoped read path — is true of two of the three, and the third
+is bounded a different way: by having nothing to scope and nothing to leak but the
+query the model composed (`overview.md`'s outbound surface,
+`deployment.md`'s redaction rule).
+
+**Its availability carries one further condition that is not part of R1's chain:
+the instance must hold search credentials**, or the tool is never offered at all.
+So `web_search` is offered iff the resolved switch is on **and** an implementation
+is registered **and** the credentials are present (`llm-and-streaming.md`). The
+other two tools need only the first two. Named here because R9 is where a reader
+counts the assistant's reach, and on an unconfigured instance that reach is two
+tools, not three.
+
 A **failed tool does not end the discussion** (UC-051, UC-053 exception flows,
 FEAT-010): the assistant is told the tool failed and carries on without it. The
 loop treats a tool failure as a tool *result*, not as a stream error. See
@@ -546,11 +774,44 @@ in the current zone survive intact, the failure is visible, and retry is possibl
 The ordering rule that makes this true: **the roleplayer's text is persisted
 before any model call is issued**, and a model failure never rolls back that
 write. The stream carries an `error` frame; the transcript keeps everything it
-already had. Equally, an enormous paste is warned about but **never refused**
+already had.
+
+**The rule now extends to the assistant's side of the exchange, and past a stop**
+(019 D4, accepted at finalization). The streaming harness persists the
+accumulated token text **whenever no `done` frame passed through** — so a client
+disconnect, a domain error, a synthesized error and a terminal-less exhaustion
+all keep whatever the model produced, written **before** the error frame.
+Whitespace-only text writes no row. The reason this is right rather than merely
+wider: the rule exists so nothing produced for the roleplayer is thrown away, and
+a failure discards exactly as much as a stop does. `session-stream.md` has the
+mechanism.
+
+**The failure arrives after the text is safe, including a model-resolution
+failure** (021 D3). `no_model_enabled`, `model_not_chosen`, `model_not_enabled`
+and `secret_ref_missing` are raised **inside** the stream, after `accepted`, not
+as a pre-flight check — so the roleplayer's message is already committed when
+they surface.
+
+**Retry re-runs generation without re-inserting anything** (021 D2). A
+**textless** `POST …/zone/compose` composes over the zone as it stands, inserting
+no row, and re-reads the model at use time so that changing the session's model
+before retrying takes effect. `US-044.AC-3`'s widened form and `US-044.AC-5` make
+this available on **any** exchange, failed or not.
+
+Equally, an enormous paste is warned about but **never refused**
 (US-035.AC-1, US-035.AC-2) — the warning is a client-side context-cost notice, and
 no layer of the stack may turn it into a rejection. See `deployment.md`'s
 `client_max_body_size` note, where nginx's default would otherwise convert a
 product guarantee into a 413.
+
+**The warning's threshold, as built** (014 D3, user decision): a **client-side
+estimate of characters ÷ 4 compared against 32,000 tokens** — so roughly 128,000
+characters — held as **two named constants in `app/pasteCost.ts`**. It is
+**advisory only**, which is what makes its imprecision harmless: nothing is
+refused, delayed or altered, so a wrong estimate costs a notice and nothing else.
+That is also why no tokenizer is shipped to the client for it. **Flip condition:**
+a real tokenizer reaches the client, or the threshold proves too eager or too
+late in use.
 
 ---
 
@@ -574,11 +835,24 @@ A session is a **stream**: settled record above a ruler, and below it exactly on
   **whoever wrote it**"), so this is a confirmation that the rule already reads
   correctly, not a new clause. The only refusal settle has is an **empty** zone
   (`zone_empty`).
+  **"Whoever wrote it" excludes `role='tool'` rows, and the exclusion is
+  deliberate** (021 D8). The head is the last **non-tool** zone row, tool rows are
+  buried with the group as scaffolding, and **a zone holding only tool rows counts
+  as empty** (`zone_empty`). A tool row is a record the server wrote of a call the
+  model made — not text anyone composed — so letting one become the head would
+  file a tool's own summary as the turn and bury the roleplayer's candidate
+  underneath it. The client's settle preview counts non-tool rows the same way
+  (`workspace-shell.md`), so client and server agree on the head by construction.
 - **Abandoning an empty current zone is frontend-only, and this rule is
   unchanged by it** (UC-086, US-134). An empty zone has **no rows** — it is the
   empty set of the predicate above — so there is nothing for the server to
-  discard: abandoning clears the client's unsent composer draft and the kind
-  switch and touches no table. **No discard route exists and none may be added.**
+  discard: abandoning **resets the kind switch and clears a whitespace-only
+  composer**, and touches no table. **It is not offered at all while the composer
+  holds text** (013 D3, user decision), so it never discards anything the
+  roleplayer wrote — which is UC-086's postcondition read literally, and
+  `US-134.AC-2`. The earlier wording here said it "clears the client's unsent
+  composer draft", which that postcondition forbids.
+  **No discard route exists and none may be added.**
   That is why this option was chosen: a discard endpoint would make raw
   `messages` writable from a third operation, weakening the two-operation
   invariant below, in exchange for deleting rows that by definition are not
@@ -596,26 +870,51 @@ A session is a **stream**: settled record above a ruler, and below it exactly on
   clears `related_to` on the group and `settled_at` and `kind` on the head. Ids do
   not move, so a settle/re-open round trip leaves the stream in the state it
   started in — which is what makes it safe as an undo.
-- **A pasted partner block is therefore never re-openable, and the refusal is
-  this rule rather than a backend guard.** UC-037 re-opens *a collapsed
-  discussion*; a partner block is born settled with nothing buried behind it
-  (US-121), so there is no discussion to re-open and nothing the inverse could
-  restore. Read literally, the bullet above would clear `settled_at` and `kind`
-  on that head and silently demote a filed partner block back into the current
-  zone — record turning back into draft, which no requirement permits. The
-  operation is **refused**, and the refusal is the named error
-  **`nothing_to_reopen`** (`backend-structure.md`'s error model). Stated here
-  because a condition written down only in the backend reads as an implementation
-  precaution, and an implementation precaution is what gets deleted by the next
-  person simplifying the settle module.
-- **The predicate lives in one place.** The merge of `entries` and
-  `discussion_messages` cost the old structural guarantee that context assembly
-  had *no join* to discussion rows; two views, `settled_entries` and
-  `current_zone`, restore it one level down (`data-model.md`). Every reader —
-  context assembly, `session_vec` composition, my-search — goes through a view.
-  **Raw `messages` is touched by exactly two operations, settle and re-open.** A
-  query naming `messages` directly anywhere else is a defect, and it is the
-  specific thing to look for when reviewing a plan that touches the stream.
+- **Re-open applies only where the last settled row HAS a buried group, and that
+  covers three cases, not one** (user decision at plan 012, 012 D10). A **pasted
+  partner block**, a **lone directly-settled turn** and a **lone decision** are
+  each a settled head with nothing behind it, so none of the three is
+  re-openable; so is any earlier group once a later row is settled. Previously
+  only the partner case was written down and the other two were implied.
+  **The refusal is this rule rather than a backend guard.** UC-037 re-opens *a
+  collapsed discussion*; a head with nothing buried never had one, so there is no
+  discussion to re-open and nothing the inverse could restore. Read literally, the
+  bullet above would clear `settled_at` and `kind` on that head and silently
+  demote record back into draft, which no requirement permits. The operation is
+  **refused**, and the refusal is the named error **`nothing_to_reopen`**
+  (`backend-structure.md`'s error model). Stated here because a condition written
+  down only in the backend reads as an implementation precaution, and an
+  implementation precaution is what gets deleted by the next person simplifying
+  the settle module — and because the lone-turn case is exactly the one somebody
+  would "fix" into a demotion.
+- **The predicates live in one place each, and there are four of them.** The merge
+  of `entries` and `discussion_messages` cost the old structural guarantee that
+  context assembly had *no join* to discussion rows; **four named SQLAlchemy Core
+  selectables** in `db/schema.py` restore it one level down (`data-model.md`) —
+  `settled_entries`, `current_zone`, the text-free `message_states`, and
+  `buried_messages`, which is **read-only** and whose one consumer is the
+  discussion read. **They are not SQL views**, and no SQL view exists anywhere in
+  this schema (012 D1): a view would be invisible to `create_all`, to the drift
+  walk and to the drift page's `Create` / `Sync`, and a Sync rebuild of
+  `messages` would break a real one at the rename step.
+  What that buys, stated as the four facts it actually is (012 D16, 014 D1,
+  022 D2) rather than as the older single sentence, which contradicted the route
+  table:
+  - **every read outside settle and re-open goes through a selectable** — a
+    `select()` naming `messages` directly anywhere else is a defect, and it is
+    the specific thing to look for when reviewing a plan that touches the stream;
+  - **the burial and settle columns** (`related_to`, `kind`, `settled_at` on an
+    existing row) **are written only by settle and re-open**;
+  - **inserts** are the zone append, the partner filing, the assistant row and
+    the character page's opening message;
+  - **`text` and `updated_at`** are written by the edit route, on a zone row and
+    on a settled row alike.
+- **The character page's opening message is a zone row, so the two doors are
+  unchanged** (plan 018). It is inserted through the **same transaction-neutral
+  zone-insert helper** as the stream's append, and it is **never settled** — so
+  the one route in the product not addressed through a session is still not a
+  third door into the record. The only exception to "settle is the only door"
+  remains the pasted partner block.
 
 ---
 
@@ -635,6 +934,23 @@ at the moment of settling:
   row's text in place, in the same transaction**, so it never appears in the
   settled turn.
 
+**"Wholly parenthesised" has an exact definition, and it is the contract the
+client's preview must match** (012 D8, user decision on the classifier):
+**a message is a decision iff, after trimming outer whitespace, its text starts
+with `((` and ends with `))`** — and it is then filed **verbatim**. One accepted
+consequence follows from choosing a cheap definition over a parser: `((a)) prose
+((b))` is a **decision**, carrying the prose between the fragments. That was
+examined and accepted rather than overlooked; the alternative is a balanced-span
+parser whose disagreements with the client preview would be far harder to
+predict than this one case. Everything else is a **turn**, in which every
+fragment — the shortest `((`…`))` span — is removed together with the spaces and
+tabs before it, runs of three or more line breaks collapse to one blank line, and
+the ends are trimmed. **A fragment-free turn is filed byte-for-byte**, and **a
+turn can never strip to empty**: text that would strip to nothing necessarily
+starts with `((` and ends with `))` once trimmed, so it is a decision instead,
+and an unbalanced `((` or a stray parenthesis survives stripping unchanged.
+`session-stream.md` holds the same rules beside the parser they live in.
+
 **The pre-strip text is not preserved.** The fragment was an instruction, not
 prose — there is no roleplay content in it to lose — and `docs/product/` asks for
 no revision history anywhere (`data-model.md` records that there is no revision
@@ -651,14 +967,46 @@ Split of responsibility, so three layers do not each grow their own parser:
 
 | Layer | Does |
 |---|---|
-| Server, at settle | **Decides.** Classifies wholly-parenthesised → `decision`, strips fragments, writes the result once. |
-| System prompt | Tells the model how to *read* the convention while text is still in the current zone (`llm-and-streaming.md`). |
-| Client | **Previews** what will happen. Never authoritative. |
+| Server, at settle | **Decides.** Classifies wholly-parenthesised → `decision`, strips fragments, writes the result once. `services/parens.py` is the parser. |
+| System prompt | Tells the model how to *read* the convention while text is still in the current zone. As built this is the prompt's own **double-parentheses instruction section** and its **two lead-ins** — one per reading, the wholly-parenthesised one and the fragment one — rendered by `services/context.py` and recorded in `llm-and-streaming.md`'s prompt-layout contract (020 D10). Tests bind to the section markers, never to the instruction prose. |
+| Client | **Previews** what will happen, and **paints `(( ))` in the current zone**. Never authoritative. The one client port is the pure module **`app/parens.ts`**, used by the preview and the zone painting **only** (013 D1, D5) — nothing above the ruler is painted from parentheses, because that would mean re-parsing stored text (`workspace-shell.md`). |
 
 The invariant: **parse once, at settle; never re-parse stored text.** A settled
 row's text is the text, and an edit to it (UC-029, US-110) is taken literally —
 re-running the parser on a later edit would silently delete a roleplayer's
 deliberately parenthesised prose long after they wrote it.
+
+**The consequence an edit therefore cannot have** (014 D1): the server keeps
+`kind` and `settled_at` on an edited row — the edit writes `text` and
+`updated_at` and nothing else — and the client renders by `kind`. So **an edit
+can never turn a turn into a decision or back**, however the new text is
+parenthesised. That is the visible half of "never re-parse", and it is what makes
+`kind` a record of what was settled rather than a derived property of the current
+text.
+
+### The parallel `<think>` rule — stripped once, at the same two moments
+
+**Realizes:** US-114, US-146
+
+Provider reasoning is a second convention that is resolved at settle, and it is
+recorded beside R12 because the two are read together and "harmonising" them is a
+live risk (021 D4, user decision U2):
+
+- **Reasoning streams as ordinary `token` frames wrapped in `<think>` …
+  `</think>`** and is **persisted** on the current-zone assistant row
+  (`data-model.md`). No new frame type; inline `<think>` content from the model
+  passes through unchanged.
+- **It is stripped from an `assistant` head at settle**, before `(( ))`
+  classification, and **from current-zone assistant rows in context**. So the
+  record never carries reasoning — which is `US-146` — and neither does copy-out.
+- **User text and settled text are never think-stripped.** A roleplayer who
+  writes `<think>` in their own prose keeps it, and a settled row is already
+  clean, so re-stripping it could only remove something the roleplayer put there
+  deliberately. This is the same reasoning as "never re-parse stored text", one
+  convention over.
+- **A head whose stripped text is empty still settles.** No refusal was invented
+  for it; surfacing it before settle is a candidate refinement in
+  `workspace-shell.md`, not a server rule.
 
 ### The assumption R12 rests on — a recorded constraint, no longer a `_TBD:`
 

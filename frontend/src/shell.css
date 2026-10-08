@@ -1,0 +1,114 @@
+/*
+ * shell.css — the `app` workspace's layout stylesheet, and nothing else.
+ *
+ * Imported by src/app/main.tsx alone; no other entry reaches it.
+ * Holds the workspace grid and nothing but layout: the two-track grid, the 1px
+ * gap that draws the column dividers, the --navw custom property with the
+ * collapsed-rail class that re-points it, and the 820px media query with the
+ * narrow-width overlay.
+ *
+ * Column backgrounds, padding, typography, shadow and every colour other than
+ * the divider variable are Mantine style props, never rules here. A rule that
+ * is neither a reset (global.css) nor workspace layout belongs in neither file —
+ * reach for a Mantine theme token (shared/theme.ts) instead.
+ */
+
+/* The grid element. The 1px gap over a line-coloured background draws the
+ * dividers, so no column owns a border. minmax(0, 1fr) is load-bearing: without
+ * the 0 minimum a long unbroken line in the centre sets the track's minimum
+ * width and pushes the left column off-screen. */
+.app {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: var(--navw, 252px) minmax(0, 1fr);
+  height: 100vh;
+  background: var(--mantine-color-default-border);
+  transition: grid-template-columns 150ms ease;
+}
+
+/* Collapse is one class re-pointing one custom property. */
+.app.nav-collapsed {
+  --navw: 48px;
+}
+
+/* The two columns: each scrolls on its own. */
+.app-nav {
+  min-width: 0;
+  overflow: auto;
+}
+
+/* Placed explicitly in the second track, so it keeps its track when the nav
+ * column is lifted out of flow by the overlay below 820px. */
+.app-main {
+  grid-column: 2;
+  min-width: 0;
+  overflow: auto;
+}
+
+@media (width < 820px) {
+  /* Below the threshold the left track is always the rail, whatever the
+   * persisted collapse says. */
+  .app {
+    --navw: 48px;
+  }
+
+  /* Expand lifts the same nav column out of the track, above the centre
+   * column, at the expanded width. */
+  .app.nav-overlay-open .app-nav {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 252px;
+    z-index: 100;
+  }
+}
+
+/* The session screen's root (016): the wall's positioning context. One column
+ * while the wall floats; fills the centre column's height and clips, so a
+ * closed wall slid off to the right adds no scrollbar. */
+.app-session {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Pinned: the wall becomes a real second column. */
+.app-session.wall-pinned {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* The stream column scrolls on its own. */
+.app-stream {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Floating: anchored to the stream's right edge, slid out until opened. */
+.app-wall {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 84vw);
+  overflow: auto;
+  transform: translateX(100%);
+  transition: transform 150ms ease;
+  z-index: 10;
+}
+
+.app-wall.wall-open {
+  transform: translateX(0);
+}
+
+/* Pinned: an in-flow 320px column; the switch does not animate. */
+.app-session.wall-pinned .app-wall {
+  position: relative;
+  width: 320px;
+  transform: none;
+  transition: none;
+}

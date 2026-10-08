@@ -104,10 +104,31 @@ user's material.
 | `fast/003.bootstrap-from-export` | fast | S | FEAT-001 | `031.import-and-id-remapping`, `003.first-run-bootstrap` |
 | `032.privacy-isolation-audit` | multi-step | M | FEAT-019 | `026.memo-search-tool`, `027.session-search-tool`, `029.my-search`, `030.export-granularities`, `031.import-and-id-remapping`, `005.admin-shell-and-users` |
 
+## Stage 006.repair
+**Goal:** v1 does what its specification says it does.
+**Exit criteria:** US-117.AC-3 (UC-080 step 5), US-112.AC-1's widened half,
+US-112.AC-3 and US-147 are satisfied; satisfying them closes the defects
+`docs/plans/defects.md` records.
+**Not in it:** D-02 (US-115.AC-1's streaming half), ruled an AC amendment and
+not a defect — US-115.AC-1 is conditioned on a message sitting in the current
+zone, and an in-flight reply has no persisted row yet; that is `/product-spec`
+work with no code, and `019` D11's write race stays closed.
+`fast/001.dev-and-container-harness`, `fast/002.vector-index-rebuild` and
+`fast/003.bootstrap-from-export`, already roadmapped in their own stages and
+not re-staged. Any new capability — every feature here closes a criterion that
+already exists.
+
+| Feature | Track | Size | Delivers | Depends on |
+|---|---|---|---|---|
+| `fast/005.degraded-embedding-path` | fast | S | FEAT-009 | `024.embedding-lifecycle`, `032.privacy-isolation-audit` |
+| `fast/004.character-page-first-reply` | fast | S | FEAT-008 | `018.character-page`, `021.compose-loop-and-tools`, `022.discussion-ui` |
+| `fast/006.unicode-name-matching` | fast | S | FEAT-017 | `029.my-search` |
+
 ## Build order
 
 `001` → `002` → `fast/001` → `003` → `004` → `005` → `006` → `007` → `008` →
 `009` → `010` → `011` → `012` → `013` → `014` → `015` → `016` → `017` →
 `018` → `019` → `020` → `021` → `022` → `023` → `024` → `025` → `026` →
-`027` → `028` → `029` → `fast/002` → `030` → `031` → `fast/003` → `032`
+`027` → `028` → `029` → `fast/002` → `030` → `031` → `fast/003` → `032` →
+`fast/005` → `fast/004` → `fast/006`
 <!-- roadmap:end -->

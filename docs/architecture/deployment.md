@@ -1,7 +1,8 @@
 # Deployment
 
-**Realizes:** FEAT-001, FEAT-002, FEAT-005, FEAT-009, FEAT-010, FEAT-018,
-FEAT-019, UC-003, UC-016, UC-027, UC-061, US-035.AC-1, US-035.AC-2
+**Realizes:** FEAT-001, FEAT-002, FEAT-005, FEAT-009, FEAT-010, FEAT-011,
+FEAT-016, FEAT-018, FEAT-019, UC-001, UC-003, UC-016, UC-027, UC-061, UC-065,
+UC-066, US-035.AC-1, US-035.AC-2
 
 Ports, the dev and prod topologies, every nginx directive with its reason, the
 configuration conventions, and the logging posture. Build and test commands live
@@ -39,36 +40,94 @@ handling and no certificate mount anywhere in the sibling project, and RPHelper
 inherits that.
 
 `_TBD: if this instance is ever exposed beyond a trusted LAN, TLS must be
-designed — termination point, certificate lifecycle, and the session cookie's
-`Secure` flag, which is not set today (FEAT-002). Nothing in docs/product/ states
-an exposure model, so nothing is assumed here. Until then the deployment target is
-a trusted local network._`
+designed — termination point and certificate lifecycle. Nothing in docs/product/
+states an exposure model, so nothing is assumed here. Until then the deployment
+target is a trusted local network._`
+
+**The cookie half of that `_TBD:` is now a concrete change surface, not a gap.**
+FEAT-002 (plan 004) has shipped the session cookie with **`Secure` off** and the
+flip condition attached: TLS termination anywhere in front of the application
+makes `Secure` mandatory (`backend-structure.md`'s cookie-flag table). The change
+is **one function** — the cookie setter in `app/dependencies.py` — so the TLS
+work has a checklist entry rather than a memory.
+
+### The HTTP-only posture's first visible feature consequence — copy-out
+
+**`navigator.clipboard` does not exist on a non-secure origin**, and every LAN
+address this instance is reached at today is a non-secure origin. So the one
+operation that crosses the product's outbound boundary — copying a settled turn
+out (UC-030, UC-082, US-033.AC-1) — cannot rely on the modern clipboard API at
+all: `app/copyOut.ts` falls back to **`execCommand("copy")`** whenever
+`navigator.clipboard` is absent (014 D9, `workspace-shell.md`).
+
+Recorded here rather than only beside the control, because it is the **first
+place the HTTP-only posture above shows up as a feature decision** rather than as
+an operational note. Two consequences follow:
+
+- `execCommand("copy")` is deprecated and is carried deliberately, not by
+  oversight. A plan that removes it on the strength of the deprecation breaks
+  copy-out on every LAN deployment, and the symptom is a silent clipboard
+  failure on the product's main flow. The failure path is visible —
+  `notifyFailure` on a clipboard error (`ui-conventions.md`) — but a removed
+  fallback would fail on *every* copy, not occasionally.
+- **When TLS lands, the fallback becomes dead code.** On a secure origin
+  `navigator.clipboard` is always present, so the `execCommand` branch stops
+  being reachable and can be deleted. That makes it a checklist entry for the TLS
+  work above, beside the cookie's `Secure` flag: two things to change, in two
+  named places, rather than a search.
 
 ---
 
 ## Dev topology
 
-```
-terminal 1:  start.ps1 -app        (or -api)   → uvicorn --port 8184 --reload
-terminal 2:  start.ps1 -ui         (or -web)   → npx vite --port 8193
+**Three launch paths, one shape.** Each runs the same pair — uvicorn with
+`--reload` on 8184 and the Vite dev server on 8193 — and differs only in how the
+pair is started:
 
+| Launch path | How the pair runs |
+|---|---|
+| `start.ps1 -app` (or `-api`) + `start.ps1 -ui` (or `-web`) | two invocations in **two terminals** |
+| `start.sh` | **one terminal**, both servers |
+| `docker-compose.dev.yml` | the `start.sh` pair in stock images — `api` in `ghcr.io/astral-sh/uv`, `ui` in `node:22` — with the repo bind-mounted |
+
+```
 browser ──► Vite :8193 ──/api──► uvicorn :8184 ──► ./data/rphelper.sqlite
                          proxy
 ```
 
-`start.ps1` takes `-app`/`-api` and `-ui`/`-web` as **separate invocations in
-separate terminals**, not one command that spawns both. Reason: each process has
-its own reload behaviour and its own log stream, and a single supervising script
-makes a backend traceback and a Vite compile error compete for the same console.
+`start.ps1` keeps its two flags as **separate invocations in separate
+terminals**: each process has its own reload behaviour and its own log stream,
+and separate consoles keep a backend traceback and a Vite compile error apart.
+`start.sh` is the one-terminal alternative for when that separation is not
+wanted.
+
+**Dev-compose runs no nginx** (as of commit `06baac6`). It runs the `start.sh`
+pair, so its routing is Vite's, exactly as on the host. The `ui` service **shares
+`api`'s network namespace**, which is why the `/api` → `localhost:8184` proxy
+below works unchanged inside the containers, and why **8193 is published on
+`api`**, not on `ui`.
+
+**Port 8193 is shared by all three paths.** Run one launch path at a time; the
+second to start fails to bind (`strictPort`, below).
+
+**The app answers at `http://localhost:8193/` in all three paths**, and every
+other entry at `/<entry>/`, through the serve-only Vite routing plugin described
+in "The app document at `/` — prod and dev" below. Dev and prod share one URL
+space.
 
 Vite proxy configuration — **one prefix only**:
 
 ```ts
 server: {
   port: 8193,
+  strictPort: true,
   proxy: { "/api": "http://localhost:8184" },
 }
 ```
+
+**`strictPort` is on**, so a busy 8193 fails loudly rather than moving to 8194.
+The `/api` proxy is the only thing connecting the frontend to the backend in dev,
+and a silently relocated dev server appears to work until the first API call.
 
 The result is that **the browser sees one origin in dev**, so the cookie and CORS
 story is *identical* to production: no CORS middleware, no `credentials: "include"`
@@ -116,7 +175,11 @@ way to reach the API without passing the directives below.
 1. **Build stage** — `npm ci` and `npm run build` in `frontend/`, producing `dist/`
    with all four entries.
 2. **Runtime stage** — Python base, backend installed, `dist/` copied to
-   `/usr/share/nginx/html`, nginx and supervisord configs installed.
+   `/usr/share/nginx/html`, nginx and supervisord configs installed. **The backend
+   dependencies are installed from the committed `backend/uv.lock`**, never
+   resolved at build time — a consequence of the uv packaging decision
+   (`overview.md`): the lock is what makes the image and a developer machine run
+   the same tree. Forward-looking; no feature has built an image yet.
 
 Two stages so Node and the frontend's `node_modules` never reach the runtime
 image.
@@ -141,6 +204,20 @@ restart:    unless-stopped
   deliberately does not contain actually lives.
 - The healthcheck targets `/api/health`, which goes **through nginx to uvicorn** —
   so a healthy result means the whole chain answers, not just that nginx is up.
+- **The healthcheck asserts the HTTP status code and never the body — deliberate
+  and load-bearing, not an implementation detail** (plan 003). `curl -f` fails
+  only on an HTTP error status. `/api/health` answers **200 whatever its roll-up
+  says** (`backend-structure.md`), so a fresh pre-bootstrap instance reporting
+  `status: "degraded"`, `configured: false`, `schema: "missing"` still becomes
+  **healthy** and stays reachable. **Do not "harden" it** into a check that
+  inspects the body for `"status":"ok"`: a fresh instance would then be
+  **permanently unhealthy**, and the rule below — an orchestrator that waits on
+  health never routes a user into the window — would mean **nobody can ever reach
+  the bootstrap page to configure the instance**. FEAT-001 would be made
+  unreachable by the mechanism meant to protect it, and the symptom would present
+  as a container fault rather than a bootstrap one. Stated here, and not only in
+  `backend-structure.md`, because `fast/001.dev-and-container-harness` writes this
+  healthcheck, and the invariant is visible only once `users` is in the registry.
 
 **`supervisord` has no wait-for ordering.** nginx will accept connections before
 uvicorn is listening, so early requests get a 502. This is not worked around; it is
@@ -167,7 +244,9 @@ Consequences, stated so neither is mistaken for a bug:
   5xx is **neither**, and must not redirect to `/login` — that would bounce an
   administrator out of the admin area for the two seconds after a container start,
   and the redirect would land on a login page whose own API calls fail too.
-  It is rendered as a not-ready-yet state, consistent with FEAT-001's handling.
+  It is rendered as a not-ready-yet state, consistent with FEAT-001's handling —
+  the condition is classified by the one shared predicate, `shared/notReady.ts`
+  (`frontend-structure.md`).
 - **The window is bounded by the same healthcheck** the rest of the stack uses:
   compose's `/api/health` probe reports unhealthy until the whole chain answers, so
   an orchestrator that waits on health never routes a user into the window at all.
@@ -234,6 +313,125 @@ entry is its own document with its own router: a deep link into `/admin/users`
 must land on the **admin** document, not on the roleplayer's app document which
 would then 404 the route client-side. The catch-all handles the root and anything
 unmatched.
+
+#### The app document at `/` — prod and dev
+
+**Decided (user-confirmed 2026-10-07).** The `app` entry's document answers at
+the **origin root `/`** and on every one of its client routes (`/sessions/:id`,
+`/characters/:id`, …), in **both dev and prod**. **`/app/` is not a user-facing
+URL.** The other three entries are reached at `/bootstrap/`, `/login/` and
+`/admin/`, deep links included. Slash-less `/bootstrap`, `/login` and `/admin`
+get a **relative 302** to the slash form. **Dev routing mirrors prod nginx
+routing exactly.**
+
+Why: there is **one URL space** in dev and prod. The `app` entry is root-mounted
+with no basename (`overview.md`, `frontend-structure.md`), so a reload, a deep
+link, or the client's 401 navigation to `/login` must behave the same on :8193 in
+dev as it does in prod. A dev server that answers a different URL space is a dev
+server that cannot reproduce a routing bug.
+
+**The routing contract both environments satisfy** (HTML navigations only):
+
+| Request | Answer |
+|---|---|
+| `/bootstrap`, `/login`, `/admin` (exact, no slash) | **302**, relative `Location` to the slash form |
+| `/bootstrap/…` not resolving to a file | `bootstrap/index.html` |
+| `/login/…` not resolving to a file | `login/index.html` |
+| `/admin/…` not resolving to a file | `admin/index.html` |
+| any other navigation — `/`, `/sessions/:id`, `/characters/:id`, … | the **app** document (`app/index.html`) |
+| `/api/…` | the backend — untouched by this routing |
+| a module or asset request, or a file that exists | served as-is — untouched by this routing |
+
+**Prod mechanism — as built by `fast/001.dev-and-container-harness`.** The
+build still emits exactly four documents (`frontend-structure.md`'s emitted
+layout). The Docker frontend stage **fails the build if any of the four
+`dist/<entry>/index.html` is missing**, then **copies `dist/app/index.html` to
+`dist/index.html`**, and the catch-all `location / { try_files $uri $uri/
+/index.html; }` above serves it for `/` and for every app client route. The copy
+is an image-build step, not a fifth build input: plan 002 deliberately created no
+root HTML document, and that still holds. The build-time presence check exists
+so a missing entry fails the image rather than a page load.
+
+**Dev mechanism — decided, to be built by an upcoming fast feature.** It applies
+to the Vite dev server on :8193 under all three dev launch paths (`start.sh`,
+`start.ps1 -ui`, `docker-compose.dev.yml`; "Dev topology" above).
+
+- A **dev-only Vite plugin** (`apply: "serve"`), whose `configureServer`
+  registers a middleware **directly** — not in a returned post-hook — so it runs
+  **before Vite's internal middlewares**.
+- The middleware **rewrites the request URL** of HTML navigations, per the table
+  above: an exact slash-less `/bootstrap|/login|/admin` gets the 302; a
+  `/bootstrap/…`, `/login/…` or `/admin/…` path that does not resolve to a file is
+  rewritten to that entry's `/<entry>/index.html`; any other navigation is
+  rewritten to `/app/index.html`.
+- It **never touches** `/api` (that is the proxy), Vite-internal URLs (`/@…`,
+  `/__…`, `/node_modules/…`), or module and asset requests. **The exact
+  predicate is the plan's to fix**; the architectural contract is "same URL space
+  as nginx, and module and asset requests pass through untouched".
+- **Rewrite, not redirect.** The browser URL stays `/` (or the deep link), and
+  Vite's own HTML transform still runs on the rewritten document and injects the
+  HMR client. A redirect to `/app/` would put the root-mounted, basename-less app
+  router at a path it does not mount, which is a client-side 404.
+- **The same plugin owns a `transformIndexHtml` hook that makes each entry
+  document's relative module-script `src` absolute**, resolved against the
+  served document's directory: `./main.tsx` in `/app/index.html` becomes
+  `/app/main.tsx`. Vite's own transform does not do this for us — in Vite 8.3.1
+  it adjusts a relative `src` only for `/index.html`, so the entry's
+  `<script type="module" src="./main.tsx">` reaches the browser verbatim. Without
+  the hook, the browser resolves it against the URL it navigated to: `/` requests
+  `/main.tsx`, `/sessions/5` requests `/sessions/main.tsx`, and the document
+  served at `/` or at a deep link loads its module from the wrong path. Because
+  the plugin is serve-only, the entry HTML files keep their relative `src` and
+  `vite build` is unaffected — the build already emits absolute hashed
+  `/assets/…` URLs.
+
+**Unchanged by the dev mechanism, deliberately:** Vite's `root` stays `src/`;
+the four build inputs stay as they are; there is **no fifth input** and **no
+`src/index.html` or `frontend/index.html`**. `frontend/tests/build-config.test.ts`
+asserts the root and the four inputs. **The plugin must not affect
+`vite build`** — `apply: "serve"` is what guarantees that, and the emitted layout
+above is the build's only contract with nginx.
+
+**This supersedes the dev-side note in `fast/001`'s outcome.** That outcome
+(not yet finalized) proposed restating that host Vite does not serve `/`; it is
+replaced by the dev mechanism above. How the earlier reading arose is recorded in
+"Decision history" at the bottom of this doc.
+
+**The `location /app/` block conflicts with the same fact, under the same
+owner.** The `app` entry is mounted at the **origin root** with no basename
+(`frontend-structure.md`): its routes are `/`, `/sessions/:id`,
+`/characters/:id` and so on, and every cross-entry link into it is
+`<a href="/">`. Nothing navigates to `/app/`, so the block above serves a URL
+space the entry does not use, while the URL space it does use falls to the
+catch-all. Whatever closes the `/` seam must also decide this block's fate
+(drop it, or make it the source the root is bridged from). Owned by
+`fast/001.dev-and-container-harness` with the seam above; **this doc does not
+pick.**
+
+_Forward pointer: the `/` seam is now decided ("The app document at `/`" above —
+`/app/` is not a user-facing URL); this block's fate is recorded at
+`fast/001`'s finalization._
+
+#### Open seam — `/login` without a trailing slash
+
+**`/login` (no trailing slash) is a load-bearing path, not a convenience**
+(plan 004). The shared API client navigates to exactly `/login` on any 401
+(`frontend-structure.md`), and FEAT-001's bootstrap refusal links to exactly
+`/login`. The configured block is `location /login/ { ... }`, which does **not**
+match the slash-less path — it falls to the catch-all, which is the unbridged
+root seam above. The failure mode is a session expiry that lands on the wrong
+document, which presents as "logging out breaks the app" and is diagnosed nowhere
+near nginx.
+
+`_TBD: the mechanism that resolves "/login" to the login document — a redirect,
+a second "location = /login", or whatever the root fix turns out to be — is
+unchosen. Owned by fast/001.dev-and-container-harness, with the "/" fallback
+seam._`
+
+_Forward pointer: the routing contract in "The app document at `/`" above now
+fixes the required behaviour — slash-less `/login` gets a relative 302 to
+`/login/`, in dev and prod alike; the prod directive that delivers it is recorded
+at `fast/001`'s finalization._
 
 ### `/api/` proxy
 
@@ -303,6 +501,14 @@ per-user export is an upload, and it is not small. Set generously and deliberate
 bound, only that a paste is never refused. Raise it if a real import exceeds it;
 never lower it below what US-035.AC-2 implies._`
 
+**The import is built now, and this limit is its practical bound** (plan 031).
+The upload is a **JSON body, not multipart**, and it is **held fully parsed in
+memory** (`transfer.md`), so `client_max_body_size` is the only ceiling an import
+meets — there is no streaming parse underneath it that would tolerate more.
+**Flip condition:** an export that exceeds 64m in practice means either raising
+the limit or moving to a streamed upload, and the second is the real fix if the
+memory posture becomes the binding constraint rather than nginx.
+
 **4. SSE directives on the dev-compose nginx too.**
 BookWriter added its streaming directives only to the **prod** config, so its
 dev-compose nginx path has never been hardened for streaming — meaning a developer
@@ -355,6 +561,33 @@ requesting an asset bundle that no longer exists after a deploy. `no-cache`
   (`backend-structure.md`). The operational consequence, stated in
   `data-model.md`: a restored whole-database export needs its environment supplied
   separately, because the export deliberately carries no credentials.
+  **The web-search API key is a second secret that is not a pointer either**, for
+  the opposite reason: it never goes near the database at all, so it lives only in
+  the environment (next bullet, and `backend-structure.md`'s `$ENV_VAR` section).
+- **Web search takes two environment variables, and they do NOT carry the
+  `RPHELPER_` prefix** (plan 028, D2, D3):
+
+  | Variable | Holds |
+  |---|---|
+  | `SEARCH_CSE_KEY` | the Google Custom Search API key — a secret-string type, **masked in `repr`** |
+  | `SEARCH_CSE_ID` | the custom search engine id (`cx`) |
+
+  Both are **optional with no default**, read from the environment like every
+  other setting (`env_file` in prod, the backend's `.env` in dev). **When either
+  is missing or blank, web search is simply not offered** — no error, no startup
+  failure, no degraded mode: the tool is absent from the registry the request
+  builds (`llm-and-streaming.md`). An instance that never configures them behaves
+  exactly as one whose roleplayers all switched the tool off.
+
+  **The missing `RPHELPER_` prefix is a named deliberate exception, not an
+  oversight** (028 U2, user-confirmed). These are **the user's existing
+  environment variable names**, already set on the machines this runs on. The
+  explicit-alias rule still holds — each field names its variable, so the
+  environment contract stays greppable — and **only the prefix differs**. Written
+  down so that nobody "fixes" the two aliases to `RPHELPER_SEARCH_CSE_KEY` and
+  `RPHELPER_SEARCH_CSE_ID`: that change breaks nothing loudly, it **silently
+  unconfigures web search** on every instance that was working, and the symptom
+  is a tool quietly no longer being offered.
 
 ---
 
@@ -454,10 +687,17 @@ rather than a guideline because it is enforceable only as one.
 - memo bodies;
 - character persona / sheet text;
 - setup text;
-- session titles or partner labels;
+- session titles or partner labels — **columns `sessions` does not have**
+  (011 D4, `US-145`: a session is identified by its start time), so the
+  prohibition has no call site today and is kept deliberately: if a title or a
+  partner-label column ever lands, it is already covered rather than needing
+  this list to be remembered and extended;
 - translations;
 - LLM prompt payloads;
 - LLM completions;
+- **web-search queries** — they are composed from message text, so a query is
+  message text by another name (plan 028);
+- **web-search results**;
 - API keys or resolved secret values.
 
 **Allowed, and sufficient to debug with:**
@@ -483,8 +723,16 @@ Concrete shapes, so a coder can pattern-match. **Allowed:**
 compose start session=7250416938275332095 model=llamaswap/qwen3-30b
 tool_failed tool=memo_search code=no_embedding_model session=7250416938275332095
 settle session=7250416938275332095 rows=3 kind=turn
-translate cached=false message=7250416938275332096 status=200 ms=812
+translate cached=false message=7250416938275332096 ms=812
+translate cached=false message=7250416938275332096 ms=812 written=false
+translate failed message=7250416938275332096 code=translation_failed
 ```
+
+**The translate line as built has no `status=` field** (023 D4): the translation
+service has no HTTP status to report — it is a service, not a handler — and the
+earlier example here carried one. It gains **` written=false`** when the
+disconnect check skipped the cache write (`llm-and-streaming.md`), which is the
+one thing that distinguishes a skipped write from a cache miss in the log.
 
 **Forbidden**, each an instance of the list above:
 
@@ -502,14 +750,80 @@ the same kind of outbound surface and is bound the same way — more strictly, i
 fact, since the list above forbids *all* memo bodies rather than only disabled
 ones.
 
-### loguru's `diagnose` / backtrace must be off for the file sink
+#### Third-party request logs are in scope, and a URL can carry message text
+
+**The rule binds records this codebase never wrote.** `configure_logging`
+installs an `InterceptHandler` as the stdlib root handler (above), so **every
+library's records land in both sinks** — including an HTTP client's own request
+log, which logs a URL.
+
+That became concrete with plan 028: it is the first feature to put message text
+in a **query string** (`q=<the roleplayer's query>`), and `httpx`'s own request
+record was carrying it at `DEBUG`. The mechanism that holds the line is named in
+`backend-structure.md`: **`app/logging.py` owns third-party logger suppression**
+(`_SILENCED_LOGGERS` beside `_PROPAGATING_LOGGERS`) and **no service module may
+touch a third-party logger** — otherwise the redaction surface would depend on
+import order.
+
+#### Access-log lines record the path without its query string
+
+**A filter on the `uvicorn.access` logger strips the query string** (plan 032,
+step 001), because a query string can carry user text — `GET /api/search?q=…` is
+the live example (029). The path is kept, because the path is what an operator
+needs; the arguments are what they must not have.
+
+This was the **first leak plan 032 found**, and it is worth seeing why it is easy
+to miss: nobody writes an access log line, so nobody reviews one against this
+section's forbidden list.
+
+`_TBD: nginx's OWN access_log still records full request URIs including query
+strings, so GET /api/search?q=<user text> lands in the nginx access log even
+though the application's does not. The fix — a log_format without $args /
+$request_uri, or access_log off for /api/ — belongs to the deployment surface and
+is owned by fast/001.dev-and-container-harness. It was found during 032's
+planning and is explicitly out of 032's scope; the application-side filter above
+does not cover it._
+
+#### SQL parameters never reach a log line — defence in depth
+
+Two settings rather than one, because a bound value can escape by two routes:
+
+- **The engine is built with bound parameters hidden**, so a rendered statement
+  in an exception message carries placeholders rather than values.
+- **The `sqlalchemy` loggers stay at WARNING or above**, so statement echoing
+  never turns itself on.
+
+Either alone would be enough on a good day; both are set because a SQLite error
+text can embed a column **value** (`backend-structure.md`'s 500 posture makes the
+same point for `schema_apply_failed`'s `detail`), and a value here is the
+roleplayer's prose.
+
+#### The rule is proved, not only stated
+
+Two enforcement tests, named so a change to this section comes with a check:
+**`backend/tests/test_logging_redaction.py`** and
+**`backend/tests/test_privacy_audit_logs.py`**, the second a **dynamic sentinel
+sweep at level 0** — it drives the application with recognisable content and
+asserts the sentinels appear in no record at any level. A prohibition that is only
+written down is a prohibition that drifts; this one fails a build.
+
+### loguru's `diagnose` and `backtrace` must be off on **every** sink
 
 loguru's exception formatting can print **local variable values** alongside a
 traceback. That would defeat the rule above the moment an exception is raised
 inside a function holding message text, a memo body or a resolved API key —
-which is most of the compose path. **`diagnose=False` on the file sink**, and the
-`backtrace` frame expansion is not what makes a traceback useful here anyway; the
-frames are.
+which is most of the compose path.
+
+**So `diagnose=False` and `backtrace=False` on both sinks — the rotating file
+*and* the console/stderr.** The `backtrace` frame expansion is not what makes a
+traceback useful here anyway; the frames are.
+
+**This was broadened from the file sink alone, and the reason is a real leak**
+(plan 032, step 001). The console sink kept loguru's default `diagnose=True` and
+was printing traceback locals into console output — which in prod is
+`supervisord`'s captured stream, i.e. a durable operator-facing log. "The file
+sink is the durable one" was the assumption behind the narrower rule, and it was
+wrong.
 
 Named explicitly because `diagnose=True` is loguru's own default in several
 configurations and reads as a debugging convenience rather than as a data-leak
@@ -537,3 +851,43 @@ path.
   so that one surface owns the operation rather than two that can diverge. The
   consequence is worth stating because it is exactly backwards from when you
   want it: the remedy is unavailable precisely when the app will not start.
+- **A restored export needs the search credentials supplied with the rest of the
+  environment**, if web search is wanted: `SEARCH_CSE_KEY` and `SEARCH_CSE_ID`
+  live only in the environment and are in no export, exactly like the
+  `"$ENV_VAR"` targets. A restored instance with the database back and these two
+  unset is working correctly and simply does not offer `web_search`.
+- **Watch item with a date: Google's Custom Search JSON API transition,
+  `2027-01-01`.** The API is closed to new customers and existing customers must
+  transition by that date. The code-side flip condition is recorded in
+  `llm-and-streaming.md` — one provider class plus a factory — but the **first
+  symptom is operational**: `web_search` starts failing as `tool_failed` for every
+  call while everything else keeps working. Listed here so the date is in the
+  operator's notes and not only in a design doc.
+
+---
+
+## Decision history
+
+### 2026-10-07 — dev serves the app at `/`, mirroring prod
+
+**Before:** this doc recorded that the Vite dev server did not resolve
+`http://localhost:8193/` and that entries were reached at `/<entry>/index.html`
+in dev. **After:** dev and prod share one URL space, and dev answers `/` through
+a serve-only Vite routing plugin ("The app document at `/` — prod and dev").
+
+How the earlier reading arose — **no requirement ever said dev should differ from
+prod; the dev half of the gap was simply never owned**:
+
+1. **Plan 002.frontend-foundation, D13 / seam S1** rooted the Vite build at
+   `src/`, refused a fifth root document, deferred the `/` bridge to `fast/001`,
+   and recorded "`http://localhost:8193/` does not resolve … entries reached at
+   `/<entry>/index.html`" as a **known wart**.
+2. Commit `75c7166` applied that outcome here as "Dev-side consequence while it
+   is unbridged", and the wart then read as documented dev behaviour.
+3. **`fast/001.dev-and-container-harness`** closed only the prod half, with the
+   image-only copy. Its DoD-19 scoped Vite dev to `/<entry>/` and promised `/`
+   only through the nginx dev-compose; its not-yet-finalized outcome proposed
+   restating that host Vite still does not serve `/`. **That dev-side note is
+   superseded by this decision.**
+4. **`fast/008.vite-dev-request-log`**, DoD-16, then encoded `GET / 404` as
+   expected dev output.
