@@ -61,12 +61,19 @@ export function App(props: AppProps): React.JSX.Element {
         <Route
           path="/characters/new"
           element={
-            <CharacterScreen characters={characters} characterId={null} sessions={sessions} />
+            <CharacterScreen
+              characters={characters}
+              characterId={null}
+              sessions={sessions}
+              storage={storage}
+            />
           }
         />
         <Route
           path="/characters/:id"
-          element={<CharacterRoute characters={characters} sessions={sessions} />}
+          element={
+            <CharacterRoute characters={characters} sessions={sessions} storage={storage} />
+          }
         />
         <Route path="/settings" element={<SettingsScreen />} />
         <Route path="/search" element={<SearchScreen />} />

@@ -225,7 +225,8 @@ frontend/src/shared/importFile.ts             readExportFile (parses client-side
 frontend/src/admin/                           gate, not-ready screen, shell state, nav table, shell, 404,
                                               app, page store, drafts — all beside main.tsx
 frontend/src/app/appBootState.ts              the app entry's boot state (named for the case-collision rule)
-frontend/src/app/{shellState,workspaceLayout,treeCollapse}.ts        the shell + the two PURE persistence modules
+frontend/src/app/{shellState,workspaceLayout,treeCollapse}.ts        the shell + two of the three PURE persistence modules
+frontend/src/app/composerHeights.ts           PURE — the third persistence module (suggested name; NOT YET BUILT, 2026-10-08)
 frontend/src/app/{charactersState,sessionsState}.ts                  the two workspace-level list stores
 frontend/src/app/{sessionScreenState,sessionsSectionState}.ts
 frontend/src/app/{streamState,streamApi}.ts   the stream's store (one per SessionStream mount) + its seven calls
@@ -260,27 +261,33 @@ docs/plans/defects.md                         the five defects' file of record (
 **`ComposerCore` is the shared composer** (018 D4) — the text area, the geometry,
 the labelled Send, the enormous-paste warning and the send-blocked reason — with
 the stream's `Composer` and the character page's `CharacterComposer` as its two
-hosts, adding their own controls through slots. No second composer exists.
+hosts, adding their own controls through slots. No second composer exists. The
+per-host default line count (3 / 10) and persisted-height field (`chat` /
+`start`) are a **parameter** of `ComposerCore` (2026-10-08; prop shape is the
+building plan's call).
 
-localStorage keys — **three keys, three scopes, never consolidated**:
+localStorage keys — **four keys, never consolidated**:
 
 | Key | Module | Scope |
 |---|---|---|
 | **`rphelper.workspace-layout`** | `app/workspaceLayout.ts` | the `app` entry only — `{ navCollapsed, wallPinned }`, two booleans and no numbers |
 | **`rphelper.tree-collapsed`** | `app/treeCollapse.ts` | the `app` entry only — a JSON array of collapsed character ids (strings) |
+| **`rphelper.composer-heights`** | `app/composerHeights.ts` (suggested; **not yet built**) | the `app` entry only — `{ chat: number \| null, start: number \| null }`, pixel heights, `null` = default rows; written on drag end; no upper clamp |
 | **`rphelper.color-scheme`** | Mantine's `localStorageColorSchemeManager` (`overview.md`) | all four entries; both schemes, dark default |
 
-**The first two are two keys deliberately** (011 D7): the layout reader **drops
-unknown keys on write**, so a client version that had not grown a `treeCollapsed`
-field would silently delete another version's collapsed set. A reader that drops
-unknowns is safe only while it owns everything in its own key.
-Folding the colour scheme into either would make the login page's scheme depend
-on a workspace record.
+**The three `app` records are three keys deliberately** (011 D7, extended
+2026-10-08): the layout reader **drops unknown keys on write**, so a client
+version that had not grown a `treeCollapsed` field — or the composer heights —
+would silently delete another version's data. A reader that drops unknowns is
+safe only while it owns everything in its own key.
+Folding the colour scheme into any of them would make the login page's scheme
+depend on a workspace record.
 
-Both `app` modules are **pure and DOM-free — the storage is passed in as a
+All three `app` modules are **pure and DOM-free — the storage is passed in as a
 parameter** (008 D8), a minimal `getItem`/`setItem` interface or `null`. Read is
 **total and never throws** (a throwing `getItem` is a per-field fallback case, not
-an exception); write is **best-effort** over a fresh total read, on the toggle.
+an exception); write is **best-effort** over a fresh total read — on the toggle
+for the first two, on drag end for the composer heights.
 
 ## Ids — the one rule that fails silently
 
@@ -964,10 +971,12 @@ do something *different*. As built: the stream branches on none of `zone_empty` 
 
 ## UI geometry constants — `workspace-shell.md`
 
-**Nothing in the workspace resizes.** The two hand-rolled splitters and the
-fixed-height answer box are **deleted**, with a reversal record and a flip
-condition. `docs/product/` asks for no resizable column anywhere; the only drag it
-requires is note reordering.
+**No column and no splitter in the workspace resizes.** The two hand-rolled
+splitters and the fixed-height answer box are **deleted**, with a reversal record
+and a flip condition. `docs/product/` asks for no resizable column anywhere; the
+only drag it requires is note reordering. **The one exception is the composer's
+text area**, via the browser's native vertical handle (2026-10-08) — not a
+splitter, and its stored height sizes nothing else.
 
 | Thing | Value |
 |---|---|
@@ -976,7 +985,7 @@ requires is note reordering.
 | Wall, floating (absolute overlay + shadow) | `min(320px, 84vw)` |
 | Wall, pinned (a real grid column) | `320px` |
 | Stream column | `max-width: 720px`, centred, `padding-inline: 18px` |
-| Composer | same 720px / 18px; text area `min-height: 42px`, **no max**, no handle |
+| Composer | same 720px / 18px; text area starts at `rows` **3** (session) / **10** (character page start composer), **native vertical handle**, **no auto-grow**, internal scroll, dragged height persisted |
 | Responsive threshold | `820px` (= 252 + 720 + 320; **not** a Mantine token) |
 
 - The shell is a **hand-written CSS grid, not `AppShell`**, and **two tracks, not
@@ -996,8 +1005,19 @@ requires is note reordering.
   overlay's open state is **not persisted** and `navCollapsed` is **neither read
   nor written** at that width; dismissal is the collapse control, any in-entry
   navigation, or crossing back — **no click-outside and no backdrop**.
-- **The composer grows with its content** — a deliberate reversal whose only
-  reason was the deleted answer box.
+- **The composer does not grow with its content; the roleplayer drags it**
+  (user decision 2026-10-08, superseding the "grows with its content" reversal —
+  do not re-add Mantine `autosize`, which re-sets the height on every keystroke
+  and so cannot coexist with a dragged one). Default `rows` 3 in `Composer`, 10 in
+  `CharacterComposer`, both through `ComposerCore` with the default and the
+  persistence field as a parameter. Height persisted **on drag end** under
+  **`rphelper.composer-heights`** = `{ chat: number | null, start: number | null }`
+  (`null` = default rows), its own pure module (suggested `app/composerHeights.ts`):
+  total read, per-field fallback to `null` on absent/bad JSON/wrong type/
+  non-finite/non-positive, **no upper clamp**, storage passed as a parameter. A
+  third key, not a field of `rphelper.workspace-layout`, because that reader drops
+  unknown keys on write (011 D7's reasoning). **Not yet built** — 013/006 D9 and
+  018/003 shipped the old rule; a follow-up fast feature delivers it.
 - With **no session open the wall is not shown at all** (US-095).
 
 **`shell.css` holds eleven selectors and one media query, and nothing else.**
@@ -1259,7 +1279,7 @@ be wrong. The doc named beside it owns the reasoning.
 | **Moving off the stdlib `sqlite3` driver, or a release making transactional DDL the default** | the explicit transactional-DDL setting; `test_db_engine.py`'s DDL-rollback test is the check | `backend-structure.md` |
 | **A third raw-dict route appearing** | the two named pydantic-boundary exceptions. Plan 030's original flip — extract the serializer into `models/` — is **already discharged**: the shared mechanism turned out to be the id-column predicate | `backend-structure.md`, `transfer.md` |
 | **One request per zone-empty transition being judged worth it** | re-open's accepted imprecision (the control also shows on a lone settled turn, where the server refuses `nothing_to_reopen`). The route it would use **exists** — plan 022 built it and deliberately did not use it for this | `workspace-shell.md` |
-| **The roleplayer asking to widen the wall or the tree** | nothing resizes → splitter (A) returns on that one boundary, and `WorkspaceLayout` regains a number plus its clamp. **(B) and (C) do not return**; their subject no longer exists | `workspace-shell.md` |
+| **The roleplayer asking to widen the wall or the tree** | no column resizes → splitter (A) returns on that one boundary, and `WorkspaceLayout` regains a number plus its clamp. **(B) does not return**; its subject no longer exists. **(C) has already returned in modified form** (2026-10-08): no auto-grow, internal scroll, but a native vertical handle rather than `resize: "none"` | `workspace-shell.md` |
 
 ## Deferred / non-goals
 
@@ -1362,6 +1382,13 @@ serve-only Vite plugin rewrites navigation URLs to the same URL space as nginx
 (to be built by an upcoming fast feature); `root: src/` and the four inputs are
 unchanged. The old "host Vite does not serve `/`" reading is superseded — see
 `deployment.md`'s Decision history.
+
+**Revised (decision revision, 2026-10-08): the composer's text area.** "The
+composer grows with its content" is **superseded**: no auto-grow, a native
+vertical handle, default `rows` 3 (session) / 10 (character page start
+composer), dragged height persisted under `rphelper.composer-heights`. Code
+pending a follow-up fast feature — see `workspace-shell.md`'s "Geometry" and the
+reversal record's decision history for (C).
 
 ## Defects — specified but unsatisfied, and NOT `_TBD:` items
 

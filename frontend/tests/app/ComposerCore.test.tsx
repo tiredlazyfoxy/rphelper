@@ -29,13 +29,19 @@
 // "fast/011 DoD-14". New fast/011 cases (DoD-6..DoD-12) are in the block at the end; the
 // Ctrl/Cmd+Enter cases (DoD-1..DoD-5) live in ComposerCore.keyboard.test.tsx. jsdom has no
 // layout, so layout is asserted on attributes and inline styles / CSS variables only.
-import { fireEvent, render, screen } from "@testing-library/react";
+//
+// Amended by a bug fix against fast/011 (bug-fix: architecture 2026-10-08 composer rule): the
+// optional `heightField` + `storage` props persist a dragged height per place. The default
+// `minRows` of ComposerCore itself is unchanged (2), so the DoD-11 defaults case stays.
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { useState, type ClipboardEvent, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerCore, type ComposerCoreProps } from "../../src/app/ComposerCore";
+import { COMPOSER_HEIGHTS_KEY, readComposerHeights } from "../../src/app/composerHeights";
+import type { LayoutStorage } from "../../src/app/workspaceLayout";
 import { AppProviders } from "../../src/shared/AppProviders";
 
 const notifyWarningSpy = vi.hoisted(() => vi.fn<(id: "paste-context-cost") => void>());
@@ -651,6 +657,132 @@ describe("fast/011 — resize and layout props (Interface intent: Text box, full
     expect(ancestors(composer()).some(carries720MaxWidth)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bug fix against fast/011 — bug-fix: architecture 2026-10-08 composer rule (workspace-shell.md,
+// Geometry "The composer's text area is user-resizable" + Layout persistence "ComposerHeights").
+// ComposerCore gained `heightField` and `storage`: with both, a stored height for that field is
+// applied as the textarea's inline height on mount, and on drag end (mouseup / pointerup on the
+// textarea) a positive px inline height is written under that field. Never on typing. Without
+// both props nothing is read or written. jsdom has no native resize: the browser's handle writes
+// inline style.height, so a drag is simulated by setting it and firing the up event.
+function fakeHeightStorage(seed?: Record<string, unknown>) {
+  const entries = new Map<string, string>();
+  if (seed !== undefined) entries.set(COMPOSER_HEIGHTS_KEY, JSON.stringify(seed));
+  const getItem = vi.fn<(key: string) => string | null>((key) => entries.get(key) ?? null);
+  const setItem = vi.fn<(key: string, value: string) => void>((key, value) => {
+    entries.set(key, value);
+  });
+  const storage: LayoutStorage = { getItem, setItem };
+  return { storage, getItem, setItem, entries };
+}
+
+describe("bug-fix (architecture 2026-10-08) — ComposerCore persists a dragged height per field", () => {
+  it("with heightField chat and a stored chat height, the textarea starts at that height — fast/011 DoD-16", () => {
+    const { storage } = fakeHeightStorage({ chat: 260, start: 400 });
+    renderCore(baseProps({ draft: "Hello", heightField: "chat", storage }));
+
+    expect((composer() as HTMLTextAreaElement).style.height).toBe("260px");
+  });
+
+  it("with heightField start, the start height is applied, not chat — fast/011 DoD-16", () => {
+    const { storage } = fakeHeightStorage({ chat: 260, start: 400 });
+    renderCore(baseProps({ draft: "Hello", heightField: "start", storage, minRows: 10 }));
+
+    expect((composer() as HTMLTextAreaElement).style.height).toBe("400px");
+  });
+
+  it("with nothing stored for the field, no inline height is applied and rows still holds — fast/011 DoD-11, DoD-16", () => {
+    const { storage } = fakeHeightStorage({ start: 400 });
+    renderCore(baseProps({ draft: "Hello", heightField: "chat", storage, minRows: 3 }));
+
+    const textbox = composer() as HTMLTextAreaElement;
+    expect(textbox.style.height).toBe("");
+    expect(textbox).toHaveAttribute("rows", "3");
+  });
+
+  it("a drag ending in mouseup writes the inline height under the field and keeps the other field — fast/011 DoD-16", () => {
+    const { storage, setItem } = fakeHeightStorage({ chat: 260, start: 400 });
+    renderCore(baseProps({ draft: "Hello", heightField: "chat", storage }));
+
+    const textbox = composer() as HTMLTextAreaElement;
+    textbox.style.height = "300px";
+    fireEvent.mouseUp(textbox);
+
+    expect(setItem).toHaveBeenCalled();
+    expect(setItem.mock.calls.every(([key]) => key === COMPOSER_HEIGHTS_KEY)).toBe(true);
+    expect(readComposerHeights(storage)).toEqual({ chat: 300, start: 400 });
+  });
+
+  it("a drag ending in pointerup writes the inline height under the field — fast/011 DoD-16", () => {
+    const { storage } = fakeHeightStorage({ chat: 260 });
+    renderCore(baseProps({ draft: "Hello", heightField: "start", storage, minRows: 10 }));
+
+    const textbox = composer() as HTMLTextAreaElement;
+    textbox.style.height = "480px";
+    fireEvent.pointerUp(textbox);
+
+    expect(readComposerHeights(storage)).toEqual({ chat: 260, start: 480 });
+  });
+
+  it("typing into the textarea writes nothing — fast/011 DoD-16", async () => {
+    const { storage, setItem } = fakeHeightStorage({ chat: 260 });
+    const user = newUser();
+    render(
+      <AppProviders>
+        <HeightHost storage={storage} />
+      </AppProviders>,
+    );
+
+    // Keyboard only: a click is a mouseup (a possible drag end), typing is not.
+    act(() => {
+      composer().focus();
+    });
+    await user.type(composer(), "Hello there", { skipClick: true });
+
+    expect(composer()).toHaveValue("Hello there");
+    expect(setItem).not.toHaveBeenCalled();
+    expect((composer() as HTMLTextAreaElement).style.height).toBe("260px");
+  });
+
+  it("with storage but no heightField, nothing is read or written — fast/011 DoD-16", () => {
+    const { storage, getItem, setItem } = fakeHeightStorage({ chat: 260, start: 400 });
+    renderCore(baseProps({ draft: "Hello", storage }));
+
+    const textbox = composer() as HTMLTextAreaElement;
+    expect(textbox.style.height).toBe("");
+    textbox.style.height = "300px";
+    fireEvent.mouseUp(textbox);
+
+    expect(getItem).not.toHaveBeenCalled();
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it("the textarea stays vertically resizable with the height props given — fast/011 DoD-10", () => {
+    const { storage } = fakeHeightStorage({ chat: 260 });
+    renderCore(baseProps({ draft: "Hello", heightField: "chat", storage }));
+
+    const values = resizeValues(composer());
+    expect(values).toContain("vertical");
+    expect(values).not.toContain("both");
+    expect(values).not.toContain("horizontal");
+  });
+});
+
+/** A stateful host with height persistence, so typing re-renders like a real host. */
+function HeightHost(props: { storage: LayoutStorage }): ReactNode {
+  const [draft, setDraft] = useState("");
+  return (
+    <ComposerCore
+      draft={draft}
+      onDraftChange={setDraft}
+      onSend={() => undefined}
+      sendEnabled={true}
+      heightField="chat"
+      storage={props.storage}
+    />
+  );
+}
 
 // ---------------------------------------------------------------- DoD-6
 const FRONTEND_ROOT = path.resolve(__dirname, "..", "..");

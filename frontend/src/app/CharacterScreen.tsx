@@ -49,6 +49,7 @@ import { CharacterNotesSection } from "./CharacterNotesSection";
 import { CharacterConfigSection } from "./CharacterConfigSection";
 import { CharacterComposer } from "./CharacterComposer";
 import type { SessionsState } from "./sessionsState";
+import type { LayoutStorage } from "./workspaceLayout";
 
 /** 033 D4: the Main info persona editor's minimum content height, in pixels. */
 const PERSONA_MIN_HEIGHT = 360;
@@ -64,6 +65,8 @@ export type CharacterScreenProps = {
    * refetch. Required in both modes even though the draft renders no section.
    */
   sessions: SessionsState;
+  /** The persisted-layout storage, passed to the page composer. Defaults to null. */
+  storage?: LayoutStorage | null;
 };
 
 /**
@@ -78,7 +81,7 @@ export type CharacterScreenProps = {
 export const CharacterScreen = observer(function CharacterScreen(
   props: CharacterScreenProps,
 ): React.JSX.Element {
-  const { characters, characterId, sessions } = props;
+  const { characters, characterId, sessions, storage = null } = props;
   // Created once, never with `useMemo`; the route keys this component by the id, so a
   // different character mounts a fresh screen rather than reusing this draft.
   const [state] = useState(() => new CharacterScreenState(characterId));
@@ -313,7 +316,12 @@ export const CharacterScreen = observer(function CharacterScreen(
             </Tabs.List>
             <Tabs.Panel value="sessions" pt="md">
               <Stack gap="md">
-                <CharacterComposer key={`composer-${id}`} characterId={id} sessions={sessions} />
+                <CharacterComposer
+                  key={`composer-${id}`}
+                  characterId={id}
+                  sessions={sessions}
+                  storage={storage}
+                />
                 <Divider />
                 <SessionsSection key={`sessions-${id}`} characterId={id} sessions={sessions} />
               </Stack>
@@ -361,6 +369,8 @@ export type CharacterRouteProps = {
   characters: CharactersState;
   /** Passed straight through to `CharacterScreen` (011 D15). */
   sessions: SessionsState;
+  /** Passed straight through to `CharacterScreen`. Defaults to null. */
+  storage?: LayoutStorage | null;
 };
 
 /**
@@ -369,7 +379,7 @@ export type CharacterRouteProps = {
  * fresh screen state rather than reusing the previous character's draft.
  */
 export function CharacterRoute(props: CharacterRouteProps): React.JSX.Element {
-  const { characters, sessions } = props;
+  const { characters, sessions, storage = null } = props;
   const params = useParams();
   const characterId = params.id ?? "";
 
@@ -379,6 +389,7 @@ export function CharacterRoute(props: CharacterRouteProps): React.JSX.Element {
       characters={characters}
       characterId={characterId}
       sessions={sessions}
+      storage={storage}
     />
   );
 }

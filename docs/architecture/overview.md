@@ -266,8 +266,9 @@ and re-read one row (`frontend-structure.md`, `workspace-shell.md`).
 **No benchmark is claimed, and the one measurement-shaped argument this decision
 used to carry is gone with its subject** — it cited a per-keystroke answer box and
 an aside width driven into a CSS custom property by one `autorun`. The product has
-**no answer box** and nothing in the workspace resizes (`workspace-shell.md`'s
-reversal record); `frontend-structure.md` re-argued MobX on the three grounds
+**no answer box** and no column or splitter in the workspace resizes
+(`workspace-shell.md`'s reversal record) — the composer's text area has the
+browser's native vertical handle (2026-10-08), which no store drives; `frontend-structure.md` re-argued MobX on the three grounds
 above and invented no replacement measurement. Neither does this line.
 
 **`react-router-dom` 7** inside each entry, for in-entry navigation only.

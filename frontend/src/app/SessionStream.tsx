@@ -18,6 +18,7 @@ import { StreamRecord } from "./StreamRecord";
 import { ZoneList } from "./ZoneList";
 import { StreamState, composeFirstReply, loadStream } from "./streamState";
 import { TranslationState, disposeTranslations } from "./translationState";
+import type { LayoutStorage } from "./workspaceLayout";
 
 export type SessionStreamProps = {
   sessionId: string;
@@ -36,6 +37,8 @@ export type SessionStreamProps = {
    * load resolves ready the stream starts `composeFirstReply` with its own signal.
    */
   firstReply?: boolean;
+  /** The persisted-layout storage, passed unchanged to `Composer`. Defaults to null. */
+  storage?: LayoutStorage | null;
 };
 
 /** The ruler's visible label and accessible name — the stream's only separator (D12). */
@@ -139,6 +142,7 @@ export const SessionStream = observer(function SessionStream(
           state={state}
           signal={signal}
           sendBlockedReason={props.sendBlockedReason ?? null}
+          storage={props.storage ?? null}
         />
       </Stack>
     </Box>

@@ -20,6 +20,7 @@ import {
 import { ComposerCore } from "./ComposerCore";
 import { firstReplyState } from "./firstReply";
 import type { SessionsState } from "./sessionsState";
+import type { LayoutStorage } from "./workspaceLayout";
 
 /**
  * The "No setup" option's fixed value. Mantine's `Select` speaks strings and treats `null` as
@@ -33,12 +34,14 @@ export type CharacterComposerProps = {
   characterId: string;
   /** The workspace sessions store the started session is applied to. */
   sessions: SessionsState;
+  /** The persisted-layout storage the dragged text-area height (`start`) is kept in. */
+  storage?: LayoutStorage | null;
 };
 
 export const CharacterComposer = observer(function CharacterComposer(
   props: CharacterComposerProps,
 ): React.JSX.Element {
-  const { characterId, sessions } = props;
+  const { characterId, sessions, storage = null } = props;
   // Created once; the page keys this component by the character id.
   const [state] = useState(() => new CharacterComposerState(characterId));
   const navigate = useNavigate();
@@ -98,6 +101,8 @@ export const CharacterComposer = observer(function CharacterComposer(
           onSend={() => void sendCharacterComposer(state, sessions, onStarted)}
           fullWidth
           minRows={10}
+          heightField="start"
+          storage={storage}
           underArea={
             <Group gap="xs" align="flex-end">
               <Select

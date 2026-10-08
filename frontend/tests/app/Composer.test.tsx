@@ -26,11 +26,17 @@
 // compose path; 013 DoD-13's pending case moves to *partner* (the branch that keeps `busy`), since
 // a my-turn compose leaves Settle enabled mid-stream (019 D13). Settle still appends via
 // …/zone/messages, so every Settle case is unchanged.
+//
+// Amended by a bug fix against fast/011 (bug-fix: architecture 2026-10-08 composer rule): the
+// session composer starts at rows 3, is vertically resizable and persists its dragged height
+// (field `chat`) through an optional `storage` prop — cases in the last block.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "../../src/app/Composer";
+import { COMPOSER_HEIGHTS_KEY, readComposerHeights } from "../../src/app/composerHeights";
+import type { LayoutStorage } from "../../src/app/workspaceLayout";
 import { KindSwitch } from "../../src/app/KindSwitch";
 import type { Message, MessageKind, MessageRole } from "../../src/app/streamApi";
 import { StreamState, effectiveKind } from "../../src/app/streamState";
@@ -858,5 +864,103 @@ describe("018 step 003 — Composer rebuilt on the core keeps its public behavio
 
     expect(screen.queryByRole("radio", { name: "My turn" })).toBeNull();
     expect(screen.queryByRole("radio", { name: "Partner" })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Bug fix against fast/011 — bug-fix: architecture 2026-10-08 composer rule (workspace-shell.md,
+// Geometry "The composer's text area is user-resizable"; Layout persistence "ComposerHeights").
+// Reproduces: the composer's text area was not user-resizable / did not keep its size. The
+// session composer starts at rows 3 (supersedes fast/011's 2 for this host), keeps the native
+// vertical handle, and persists a dragged height under `rphelper.composer-heights` field `chat`.
+// The storage is an in-memory fake passed as `Composer`'s `storage` prop.
+function fakeHeightStorage(seed?: Record<string, unknown>) {
+  const entries = new Map<string, string>();
+  if (seed !== undefined) entries.set(COMPOSER_HEIGHTS_KEY, JSON.stringify(seed));
+  const getItem = vi.fn<(key: string) => string | null>((key) => entries.get(key) ?? null);
+  const setItem = vi.fn<(key: string, value: string) => void>((key, value) => {
+    entries.set(key, value);
+  });
+  const storage: LayoutStorage = { getItem, setItem };
+  return { storage, getItem, setItem, entries };
+}
+
+function renderStoredComposer(state: StreamState, storage: LayoutStorage): void {
+  render(
+    <AppProviders>
+      <Composer state={state} storage={storage} />
+    </AppProviders>,
+  );
+}
+
+/** Every resize value set inline on the textarea or its ancestors (fast/011 DoD-10). */
+function resizeValues(textarea: HTMLElement): string[] {
+  const values: string[] = [];
+  for (let el: HTMLElement | null = textarea; el !== null && el !== document.body; el = el.parentElement) {
+    const raw = el.getAttribute("style") ?? "";
+    for (const match of raw.matchAll(/(?:^|;)\s*(?:--input-resize|resize)\s*:\s*([a-z-]+)/g)) {
+      if (match[1] !== undefined) values.push(match[1]);
+    }
+    const variable = el.style.getPropertyValue("--input-resize").trim();
+    if (variable !== "") values.push(variable);
+    if (el.style.resize !== "") values.push(el.style.resize);
+  }
+  return values;
+}
+
+describe("bug-fix (architecture 2026-10-08) — the session composer is resizable, starts at 3 lines, persists field chat", () => {
+  it('the "Composer" textarea has rows 3 and is resizable vertically only — fast/011 DoD-10, DoD-11', () => {
+    stubFetch(() => undefined);
+    renderComposer(seeded());
+
+    const textbox = composer();
+    expect(textbox).toHaveAttribute("rows", "3");
+    const values = resizeValues(textbox);
+    expect(values).toContain("vertical");
+    expect(values).not.toContain("both");
+    expect(values).not.toContain("horizontal");
+  });
+
+  it("with an empty fake storage the textarea still has rows 3 and no inline height — fast/011 DoD-11", () => {
+    stubFetch(() => undefined);
+    const { storage } = fakeHeightStorage();
+    renderStoredComposer(seeded(), storage);
+
+    expect(composer()).toHaveAttribute("rows", "3");
+    expect((composer() as HTMLTextAreaElement).style.height).toBe("");
+  });
+
+  it('with {"chat":260,"start":400} stored, the textarea starts at 260px; a drag to 300px stores chat 300 and keeps start 400 — fast/011 DoD-16', () => {
+    stubFetch(() => undefined);
+    const { storage, setItem } = fakeHeightStorage({ chat: 260, start: 400 });
+    renderStoredComposer(seeded(), storage);
+
+    const textbox = composer() as HTMLTextAreaElement;
+    expect(textbox.style.height).toBe("260px");
+
+    textbox.style.height = "300px";
+    fireEvent.mouseUp(textbox);
+
+    expect(setItem).toHaveBeenCalled();
+    expect(setItem.mock.calls.every(([key]) => key === COMPOSER_HEIGHTS_KEY)).toBe(true);
+    expect(readComposerHeights(storage)).toEqual({ chat: 300, start: 400 });
+  });
+
+  it("typing into the composer writes nothing to the storage — fast/011 DoD-16", async () => {
+    stubFetch(() => undefined);
+    const { storage, setItem } = fakeHeightStorage({ chat: 260, start: 400 });
+    const user = newUser();
+    const state = seeded();
+    renderStoredComposer(state, storage);
+
+    // Keyboard only: a click is a mouseup (a possible drag end), typing is not.
+    act(() => {
+      composer().focus();
+    });
+    await user.type(composer(), "Hello there", { skipClick: true });
+
+    expect(state.draft).toBe("Hello there");
+    expect(setItem).not.toHaveBeenCalled();
+    expect((composer() as HTMLTextAreaElement).style.height).toBe("260px");
   });
 });

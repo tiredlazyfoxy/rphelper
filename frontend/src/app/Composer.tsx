@@ -1,5 +1,5 @@
-// The composer (feature 013, step 006, D1, D2, D3, D6, D7, D9): the auto-growing "Composer"
-// text area, the settle preview line, "Send" and "Settle", partner-paste filing, and the
+// The composer (feature 013, step 006, D1, D2, D3, D6, D7, D9): the "Composer"
+// text area (resizable, default 3 lines, height persisted as `chat`), the settle preview line, "Send" and "Settle", partner-paste filing, and the
 // "Discard empty zone" control present only for an empty zone with a blank composer.
 // 018 D4: rendered on the shared `ComposerCore`, which owns the text area, "Send", the
 // enormous-paste warning and the send-blocked reason; this host adds only the stream pieces.
@@ -26,6 +26,7 @@ import {
   stopCompose,
 } from "./streamState";
 import type { StreamState } from "./streamState";
+import type { LayoutStorage } from "./workspaceLayout";
 
 export type ComposerProps = {
   state: StreamState;
@@ -36,6 +37,8 @@ export type ComposerProps = {
    * Ignored on *partner*. Defaults to null.
    */
   sendBlockedReason?: string | null;
+  /** The persisted-layout storage the dragged text-area height (`chat`) is kept in. */
+  storage?: LayoutStorage | null;
 };
 
 /** The fixed preview sentence for a settle preview (D1). */
@@ -52,7 +55,7 @@ function previewSentence(preview: SettlePreview): string {
 export const Composer = observer(function Composer(
   props: ComposerProps,
 ): React.JSX.Element {
-  const { state, signal, sendBlockedReason = null } = props;
+  const { state, signal, sendBlockedReason = null, storage = null } = props;
   const preview = settlePreviewOf(state);
   // 017 D17: on *my turn* a non-null reason disables Send and is shown; Settle is never gated.
   const streaming = isStreaming(state);
@@ -92,6 +95,9 @@ export const Composer = observer(function Composer(
         void sendComposer(state, signal);
       }}
       sendBlockedReason={blockedReason}
+      minRows={3}
+      heightField="chat"
+      storage={storage}
       sendSlot={sendSlot}
       onPaste={handlePaste}
       underArea={

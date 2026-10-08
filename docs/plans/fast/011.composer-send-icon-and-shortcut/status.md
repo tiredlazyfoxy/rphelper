@@ -9,6 +9,16 @@
 - `frontend/src/app/ComposerCore.tsx` — Ctrl/Cmd+Enter send, in-box `IconSend` Send / `sendSlot` in the Textarea right section, vertical resize with `rows`/min-height from `minRows`, `fullWidth` drops the 720px column
 - `frontend/src/app/CharacterComposer.tsx` — passes `fullWidth` and `minRows={10}` (landed with the skeleton; no further change)
 
+## Bug Fixes
+
+### Composer text box not resizable; heights not persisted (2026-10-08)
+- `frontend/src/app/ComposerCore.tsx` — right section now `rightSectionPointerEvents="none"` with only the Send/Stop control re-enabled (`pointerEvents: auto` wrapper) and lifted clear of the corner (`paddingBottom` 18), so the native bottom-right resize grip is grabbable; new optional `heightField` / `storage` props restore a stored height as inline `style.height` on mount and save the inline px height on textarea `mouseup` / `pointerup` (drag end), never while typing
+- `frontend/src/app/composerHeights.ts` — new pure module: `COMPOSER_HEIGHTS_KEY` "rphelper.composer-heights", total `readComposerHeights`, best-effort merging `writeComposerHeight`
+- `frontend/src/app/Composer.tsx` — optional `storage` prop; passes `minRows={3}`, `heightField="chat"`, `storage`
+- `frontend/src/app/CharacterComposer.tsx` — optional `storage` prop; passes `heightField="start"`, `storage` (keeps `minRows={10}`, `fullWidth`)
+- `frontend/src/app/SessionStream.tsx`, `frontend/src/app/SessionScreen.tsx` — thread the screen's `storage` to `Composer` (new optional `SessionStreamProps.storage`)
+- `frontend/src/app/CharacterScreen.tsx`, `frontend/src/app/App.tsx` — new optional `storage` on `CharacterScreenProps` / `CharacterRouteProps`, threaded from `App` to `CharacterComposer` (the screen did not previously receive it)
+
 ## Skeleton
 
 ### Frozen interface (2026-10-08)
@@ -37,6 +47,14 @@
 - `frontend/tests/app/ComposerStop.test.tsx` — covers DoD-14 — "Stop where Send sits" now asserts Stop inside the input wrapper, before Settle.
 - Unchanged (role/name "Send" lookups still resolve; DoD-14): `CharacterComposer.setup.test.tsx`, `SessionScreen.test.tsx`, `App.test.tsx`, `sessionFirstReply.test.tsx`.
 - Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓, DoD-9 ✓, DoD-10 ✓, DoD-11 ✓, DoD-12 ✓, DoD-13 ✓, DoD-14 ✓, DoD-15 [manual/live, no test], DoD-16 [manual/live, no test], DoD-17 [manual/live, no test]
+
+### Repro test (2026-10-08)
+- reproduces: "character sessions page main text box of start must be resizable (vertical) but it's not" — bug-fix: architecture 2026-10-08 composer rule (workspace-shell.md Geometry + Layout persistence `ComposerHeights`), superseding this plan's session default 2 / no persistence.
+- `frontend/tests/app/composerHeights.test.ts` — new — covers DoD-16 — key `rphelper.composer-heights`; total read with independent per-field null fallback (null storage, throwing getItem, absent key, bad JSON, non-object, wrong type, non-finite, <= 0), no upper clamp; write merges one field over a fresh read, swallows a throwing setItem, writes nothing for a non-size, no-op on null storage.
+- `frontend/tests/app/ComposerCore.test.tsx` — covers DoD-10, DoD-11, DoD-16 — `heightField` + `storage`: stored height applied as inline px on mount; mouseup / pointerup drag end writes the field and keeps the other; typing (keyboard only) writes nothing; no heightField means nothing read or written; still vertical resize. ComposerCore's own default rows 2 case unchanged.
+- `frontend/tests/app/Composer.test.tsx` — covers DoD-10, DoD-11, DoD-16 — session composer rows 3, vertical resize; stored `{"chat":260,"start":400}` gives 260px, drag to 300px stores chat 300 keeping start 400; typing writes nothing.
+- `frontend/tests/app/CharacterComposer.test.tsx` — covers DoD-10, DoD-13, DoD-16 — start composer rows 10, vertical resize; stored `{"start":400}` gives 400px, drag end writes `start` not `chat`; typing writes nothing.
+- Coverage: DoD-10 ✓, DoD-11 ✓ (session host now rows 3), DoD-13 ✓, DoD-16 ✓ (persistence part now under test; the visual drag stays manual/live)
 
 ## Notes & Issues
 

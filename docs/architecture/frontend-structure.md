@@ -32,9 +32,12 @@ shell nor this doc's subject are split across two files:
 **`ui-conventions.md`** (icons, the shared `IconButton`, the accessibility floor,
 async feedback) and **`forms-and-lists.md`** (tables, the modal rule, the MobX
 draft form, the confirm convention, the never-optimistic rule). **The "two resize
-behaviours" the old pointer also named no longer exist** — nothing in the
-workspace is user-resizable, and `workspace-shell.md`'s reversal record says why
-they were deleted rather than moved. This doc holds the build, the routing, the
+behaviours" the old pointer also named no longer exist** — no column and no
+splitter in the workspace is user-resizable, and `workspace-shell.md`'s reversal
+record says why they were deleted rather than moved. The one resizable thing is
+the composer's text area, through the browser's native vertical handle
+(2026-10-08; `workspace-shell.md`'s "Geometry") — not a splitter, and nothing this
+doc's stores drive. This doc holds the build, the routing, the
 stores, the API client and the SSE consumer.
 
 ## The multi-entry build
@@ -536,7 +539,8 @@ with no class at all:
 | Module | Holds |
 |---|---|
 | `app/appBootState.ts` | the boot state above |
-| `app/shellState.ts`, `app/workspaceLayout.ts`, `app/treeCollapse.ts` | the shell's state and the two pure persistence modules (`workspace-shell.md`) |
+| `app/shellState.ts`, `app/workspaceLayout.ts`, `app/treeCollapse.ts` | the shell's state and two of the three pure persistence modules (`workspace-shell.md`) |
+| `app/composerHeights.ts` (suggested name; **not yet built**, 2026-10-08) | **pure** — the third persistence module: the two composers' dragged heights (`workspace-shell.md`) |
 | `app/charactersState.ts`, `app/sessionsState.ts` | the two workspace-level list stores |
 | `app/sessionScreenState.ts`, `app/sessionsSectionState.ts` | the session screen and the character page's Sessions section |
 | `app/streamState.ts`, `app/streamApi.ts` | the stream's store (one per `SessionStream` mount) and its client — seven calls, ids as strings |
@@ -551,13 +555,14 @@ with no class at all:
 | `app/importUploads.ts` | the three roleplayer import effects (plan 031) |
 | `app/MessageBody.tsx`, `StreamRecord.tsx`, `ZoneList.tsx`, `KindSwitch.tsx`, `Composer.tsx`, `SessionStream.tsx`, `AssistantBody.tsx`, `ThinkingBlock.tsx`, `ToolBlock.tsx`, `LiveMessage.tsx`, `DiscussionGroup.tsx`, `SearchScreen.tsx` | the stream's components |
 
-**Two localStorage keys, two pure modules, and a written reason for not being
-one** (008 D8, 011 D7): `rphelper.workspace-layout` in `app/workspaceLayout.ts`
-and `rphelper.tree-collapsed` in `app/treeCollapse.ts`. The tree's collapsed set
-is **deliberately not a field of the layout record**, because that reader drops
-unknown keys on write. `workspace-shell.md` holds both records' shapes, the
-total-read rules and the storage-as-a-parameter mechanism that keeps the modules
-DOM-free.
+**Three localStorage keys, three pure modules, and a written reason for not being
+one** (008 D8, 011 D7, extended 2026-10-08): `rphelper.workspace-layout` in
+`app/workspaceLayout.ts`, `rphelper.tree-collapsed` in `app/treeCollapse.ts`, and
+`rphelper.composer-heights` in `app/composerHeights.ts` (suggested name; not yet
+built). The tree's collapsed set and the composer heights are **deliberately not
+fields of the layout record**, because that reader drops unknown keys on write.
+`workspace-shell.md` holds all three records' shapes, the total-read rules and the
+storage-as-a-parameter mechanism that keeps the modules DOM-free.
 
 **`app/translationState.ts` carries an accepted limitation** (023 D13): the client
 translation cache is keyed by message id **for one mount**, so a preferred-language
@@ -579,8 +584,10 @@ thing, and **the two must stay in step** or the contradiction simply moves.
 **The original justification no longer applies and is not repaired.** This doc
 used to cite `ui-conventions.md`'s section (A) — the aside width pushed to a CSS
 custom property by one `autorun`, so a pointer-move caused zero re-renders. That
-section is **deleted**: there is no aside, no splitter, and nothing in the
-workspace resizes (`workspace-shell.md`'s reversal record). The citation is
+section is **deleted**: there is no aside, no splitter, and no column in the
+workspace resizes (`workspace-shell.md`'s reversal record). The composer's native
+text-area handle (2026-10-08) does not revive the argument — the browser drags it
+with no store involved, and its height is stored once, on drag end. The citation is
 removed rather than re-pointed, because there is no text at the other end of it.
 Said plainly so nobody hunts for a withdrawn paragraph, and so the deletion is not
 mistaken for an editing slip.

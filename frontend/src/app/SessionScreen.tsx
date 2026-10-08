@@ -251,6 +251,7 @@ export const SessionScreen = observer(function SessionScreen(
           sendBlockedReason={sendBlockedReason(configState)}
           focusEntryId={focusEntryId}
           firstReply={firstReply}
+          storage={storage}
         />
       </Stack>
     </Container>

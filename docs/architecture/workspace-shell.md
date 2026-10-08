@@ -142,7 +142,7 @@ tree becomes an off-canvas overlay":
 
 ---
 
-## Geometry — everything is fixed; nothing resizes
+## Geometry — every column is fixed; only the composer's text area resizes
 
 | Thing | Value | Why this value |
 |---|---|---|
@@ -152,7 +152,7 @@ tree becomes an off-canvas overlay":
 | Wall, pinned | `320px` | no `vw` term — pinned, it is a grid column and the grid already bounds it |
 | Stream column | `max-width: 720px`, centred, `padding-inline: 18px` | a measure for prose, not for the viewport; the stream is read, not scanned |
 | Composer | same 720px / 18px as the stream | the composer is the stream's last item visually and must share its left edge |
-| Composer text area | `min-height: 42px`, **no max**, no handle | about two lines to start |
+| Composer text area | starts at `rows` **3** in the session composer, **10** in the character page's start composer; **native vertical handle** (`resize: vertical`); **no auto-grow**; scrolls internally; a dragged height is persisted per place | the roleplayer sizes the writing area themselves and it stays that size; 10 lines where a session is started, because the user wanted the larger area there especially (2026-10-08 decision, below) |
 | Responsive threshold | `820px` | below it the tree becomes a 48px rail with a lifted overlay, and a pinned wall reverts to floating |
 
 **The tree row holds a start time, not a title** (011 D4, US-145). A session is
@@ -162,18 +162,56 @@ no `title` column (`data-model.md`). The 252px reasoning above used to cite "a
 session title"; the measure is unchanged, because a fixed-width timestamp plus a
 dimmed setup label is about the same width as the title it replaced, and both fit.
 
-**The composer grows with its content.** It has a minimum height and no maximum,
-no drag handle and no internal scroll until the viewport runs out. This is a
-**deliberate reversal** of the old (C) — see the reversal record at the end of this
-doc.
+**The composer's text area is user-resizable, vertically, and does not grow with
+its content** (user decision, 2026-10-08). The rule is the same in both places the
+composer appears, differing only in the default and the persistence field:
+
+| | Session composer (`Composer`, session screen) | Start composer (`CharacterComposer`, character page Sessions tab) |
+|---|---|---|
+| Default height | `rows` 3 | `rows` 10 |
+| Auto-grow | none — Mantine `autosize` is not used | none |
+| Resize | the browser's native vertical handle (`resize: vertical`) | same |
+| Overflow | scrolls internally | same |
+| Persisted height | `rphelper.composer-heights`, field `chat` | same key, field `start` |
+
+Both are rendered through the shared presentational `ComposerCore` (018 D4, below),
+so the default line count and the persistence field are a **parameter of
+`ComposerCore`**, supplied by each host. The exact prop shape is left to the plan
+that builds it. The height is written **on drag end**, not per pixel of the drag;
+the record and its rules are under "Layout persistence" below. The handle is a
+property of the Mantine `Textarea` (its own props / style props), **not** a rule in
+`shell.css`, which holds layout only and is pinned by `tests/stylesheets.test.ts`.
+
+**Why drag and not auto-grow.** Mantine's `autosize` re-sets the text area's
+height inline on every keystroke, so a height the roleplayer dragged to and an
+auto-growing height **cannot coexist** — the next keystroke would undo the drag.
+One of the two had to go, and the user chose drag plus a persisted height: a
+larger, adjustable writing area that stays the size it was set to, rather than one
+that starts small and grows. The start composer defaults larger (10 lines) because
+the user asked for a larger writing area especially when starting a session.
+
+**This is not a splitter, and it does not reopen (A) or (B).** It is the native
+handle of one `<textarea>`; nothing is hand-rolled, there is no clamp function, and
+the stored number sizes that text area and nothing else — no column, no grid track
+and no other layout geometry reads it. The reversal record at the end of this doc
+carries the history, including the earlier "grows with its content" rule this
+replaces, so nobody re-adds `autosize` by citing it.
+
+**As built, the code still follows the old rule.** Plans 013/006 (D9) and 018/003
+were built to "grows with its content" — `autosize`, a 42px minimum, no handle. The
+rule above is the design of record; the code change is delivered by a follow-up
+fast feature, and until it lands the composer in the code is the old one.
 
 `820px` rather than a Mantine breakpoint token: the number is the point at which
 252 + 720 + 320 stops fitting, which is a property of these three constants and not
 of a general breakpoint scale. Recorded so it is not "corrected" to `md` (992px),
 which would collapse the tree while both other columns still fit.
 
-Nothing in the shell is user-resizable. `docs/product/` asks for no resizable
-column anywhere; the only drag it requires is note reordering (US-102, US-103).
+No column and no splitter in the shell is user-resizable. `docs/product/` asks for
+no resizable column anywhere; the only drag it requires is note reordering
+(US-102, US-103). **The composer's text area is the one exception**, through the
+browser's native vertical handle (above) — a user decision about a writing
+surface, not a resizable column.
 
 **Where these rules live — decided: `frontend/src/shell.css`, a second
 hand-written stylesheet beside `global.css`.** The earlier `_TBD:` here is closed
@@ -272,7 +310,10 @@ navigation that brought the roleplayer here, not stored state.
 
 ## Layout persistence
 
-**Two** localStorage records, under two keys, in two pure modules.
+**Three** localStorage records, under three keys, in three pure modules. The third,
+`rphelper.composer-heights`, is the 2026-10-08 decision and is **not yet built**
+(see the composer rule under "Geometry"); the module name is the suggested one and
+the plan that builds it may settle it.
 
 ```ts
 // src/app/workspaceLayout.ts  →  key "rphelper.workspace-layout"
@@ -283,6 +324,12 @@ type WorkspaceLayout = {
 
 // src/app/treeCollapse.ts     →  key "rphelper.tree-collapsed"
 //   a JSON array of collapsed character ids (strings)
+
+// src/app/composerHeights.ts  →  key "rphelper.composer-heights"   (suggested)
+type ComposerHeights = {
+  chat: number | null;   // session composer, pixel height; null = default rows 3
+  start: number | null;  // character page start composer; null = default rows 10
+};
 ```
 
 The `rphelper.` prefix is retained from the previous design, and the reason it was
@@ -297,12 +344,38 @@ had not grown the field yet would silently delete another version's collapsed se
 Separate keys make the two records independent, and a reader that drops unknowns
 is safe precisely because it owns everything in its own key.
 
+**The composer heights take a third key for the same reason** (2026-10-08). They
+could have been fields of `WorkspaceLayout`, and must not be: a client that had not
+grown the fields would delete them on its next pin toggle. A third key also keeps
+`WorkspaceLayout` free of numbers (below), which is what lets its read stay
+clamp-free.
+
+**`ComposerHeights` rules.** The same rules as the other two records, stated
+against this one:
+
+- **Read is total and never throws.** Each field falls back **independently** to
+  `null` — meaning "use the default line count" — on an absent key, unparseable
+  JSON, a `getItem` that throws, a wrong type, or a number that is non-finite or
+  not positive. A bad `chat` never costs the roleplayer their `start`, or the
+  reverse.
+- **No upper clamp.** The value sizes one text area that already scrolls
+  internally and that the roleplayer can drag back; a ceiling would be a guess at
+  their screen. Only the "positive and finite" floor is enforced, because a zero or
+  `NaN` height is not a size.
+- **Write is best-effort** and swallowed, and merges its one field over a **fresh
+  total read**, so writing `chat` cannot clobber `start`.
+- **Written on drag end, never per pixel of the drag** — the stored number is the
+  height the roleplayer settled on, not the path to it.
+- **The storage is passed in as a parameter**, exactly as for the other two
+  modules (below).
+
 **`WorkspaceLayout` is two booleans and no numbers.** `asideWidth` and
 `answerBoxHeight` are **gone** — both described geometry that no longer exists
-(see the reversal record).
+(see the reversal record). The composer heights are numbers, and they live in
+their own record precisely so this one stays two booleans.
 
-Rules, carried over because they were right for reasons that have not changed, and
-now stated against the as-built modules:
+`WorkspaceLayout` rules, carried over because they were right for reasons that
+have not changed, and now stated against the as-built modules:
 
 - **Read is total and never throws.** Absent key, unparseable JSON, wrong types,
   missing fields — each case falls back **per field** to that field's default. The
@@ -325,7 +398,8 @@ now stated against the as-built modules:
   click for. A write merges its patch over a **fresh total read**, so the two
   fields cannot clobber each other.
 - The record is written **on the toggle**, which is now the only time it can
-  change. The old "never mid-drag" rule has nothing left to constrain.
+  change. The old "never mid-drag" rule has nothing left to constrain in this
+  record; its successor is the composer heights' "on drag end" rule above.
 
 **Persistence stays in pure, DOM-free modules**, and the mechanism that makes that
 true is worth naming: **the storage is passed in as a parameter** — a minimal
@@ -334,7 +408,9 @@ true is worth naming: **the storage is passed in as a parameter** — a minimal
 fallback path above is unit-testable with no DOM, which is what the pipeline's
 test-coder needs (`docs/plans/CLAUDE.md`). `App` owns the real storage and threads
 it to the two readers: `WorkspaceShell` and, through `SessionRoute`,
-`SessionScreen` (016 D2).
+`SessionScreen` (016 D2). The composer heights add the two composer hosts as
+readers; how the storage reaches them is the building plan's call, under the same
+rule — a parameter, never a global.
 
 ---
 
@@ -1098,7 +1174,10 @@ true at the file level (018 D4): **`ComposerCore`** holds the text area, the
 geometry above, the labelled Send, the enormous-paste warning and the
 send-blocked reason, and the stream's `Composer` and the page's
 `CharacterComposer` are its **two hosts**, adding only their own controls through
-slots. Stated this way because the obvious implementation writes a second composer
+slots. **The one geometry difference between the hosts is a parameter, not a
+fork**: each host passes its default line count (3 for the stream, 10 here) and its
+persisted-height field (`chat` / `start`) to `ComposerCore` (2026-10-08 decision,
+"Geometry" above). Stated this way because the obvious implementation writes a second composer
 for this page and the two then drift on the first change to either — the same
 failure the note cards above are protected from.
 
@@ -1292,9 +1371,10 @@ control UC-077 puts there, the indicators, and the door to the rest.
 
 ## Reversal record — the two splitters and the fixed-height answer box
 
-`ui-conventions.md` carried three interlocking decisions that are **deleted, not
-moved**. Recorded here with their reasoning, because a deletion with no record
-reads as an oversight and gets restored.
+`ui-conventions.md` carried three interlocking decisions. (A) and (B) are
+**deleted, not moved**; (C) was reversed and has since been **restored in modified
+form** (decision history below). Recorded here with their reasoning, because a
+deletion with no record reads as an oversight and gets restored.
 
 | Deleted | What it was |
 |---|---|
@@ -1310,13 +1390,33 @@ serve a layout the product no longer asks for. (B) went further than obsolete: i
 subject, the answer box, was removed from the product outright — there is no
 dedicated answer box, only the current zone and a composer.
 
-**(C) is reversed, not merely deleted.** The composer grows with its content. The
-old reasoning was sound *given* (B): auto-growth fights an explicitly-set height on
-every keystroke, and a native resize grip would have collided with the (B) handle.
-With (B) gone, both arguments go with it, and the remaining fact is that a
-roleplayer writing a paragraph should not be typing into a two-line box that
-scrolls. Named as a reversal so nobody restores `resize: "none"` by citing the old
-paragraph.
+**(C) is restored in modified form — no auto-grow, but with a native vertical
+handle** (user decision, 2026-10-08). The composer's text area starts at a fixed
+line count (3 in the session composer, 10 in the character page's start composer),
+does **not** auto-grow, scrolls internally, and is resizable through the browser's
+native `resize: vertical` handle, with the dragged height persisted
+(`rphelper.composer-heights`). What returns from the old (C) is "no auto-grow,
+scroll internally"; what does not return is `resize: "none"`. The reason auto-grow
+goes is the one the old (C) itself gave: auto-growth re-sets the height on every
+keystroke and so fights any explicitly-set height — now the roleplayer's dragged
+one rather than (B)'s. The native handle no longer collides with anything, because
+(B) is still gone. The full rule is under "Geometry" above.
+
+#### Decision history — (C)
+
+- **The previous design (`ui-conventions.md`):** (C) as in the table — no
+  auto-grow, `resize: "none"`, height set by (B).
+- **The redesign that deleted (A) and (B):** "(C) is reversed, not merely deleted. The
+  composer grows with its content" — Mantine `autosize`, `min-height: 42px`, no
+  maximum, no handle. Reasoning: both arguments for (C) depended on (B), and a
+  roleplayer writing a paragraph should not type into a two-line box that scrolls.
+  Plans 013/006 (D9) and 018/003 were built to this rule.
+- **2026-10-08 — the reversal paragraph is withdrawn and superseded.** The user
+  wanted a larger, adjustable writing area — especially when starting a session —
+  and chose a dragged, persisted height over auto-grow, since the two cannot
+  coexist. The "grows with its content" rule is **no longer the design**; do not
+  re-add `autosize` by citing it. The code change is delivered by a follow-up fast
+  feature.
 
 **What was genuinely lost.** (A)'s custom-property channel gave a pointer-move
 zero component re-renders, and `frontend-structure.md` cited it as the concrete
@@ -1334,4 +1434,7 @@ doc's one measurement-shaped claim and it is simply gone.
 number plus its clamp and its clamped read. The removed design — handle geometry,
 the pointer-event choices, the `calc()` gotcha, the clamp edge cases — is
 recoverable in full from git history, and should be recovered rather than
-re-derived. (B) and (C) do not return; their subject no longer exists.
+re-derived. **(B) does not return**; its subject, the answer box, no longer exists.
+(C) has already returned in the modified form above, as the composer's native
+handle — which is **not** (B): no hand-rolled splitter, no clamp, and no stored
+number driving layout geometry outside the composer's own text area.
