@@ -12,5 +12,5 @@ __pycache__/
 # Local environment file (uv.lock is committed — do not ignore it)
 .env
 
-# Container venv (docker-compose.dev.yml)
+# Container venv (docker-compose.yml)
 .venv-docker/

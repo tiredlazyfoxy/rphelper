@@ -1,0 +1,19 @@
+# RPHelper prod — one container (nginx + one uvicorn under supervisord), run from the
+# prebuilt image iezious/rphelper:latest: build.sh builds it and stages this file into
+# $DOCKER_STORE/rphelper as docker-compose.yml; deploy.sh loads the image and starts it.
+# See docs/architecture/deployment.md. The healthcheck asserts the HTTP status only and
+# never the body: /api/health answers 200 even on a fresh, unconfigured instance.
+
+services:
+  rphelper:
+    image: iezious/rphelper:latest
+    ports: ["8193:80"]
+    env_file: .env
+    volumes: ["./data:/app/data"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped

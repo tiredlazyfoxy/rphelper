@@ -4,6 +4,11 @@ Every assertion is derived from the plan's Definition of done, its Interface int
 ``docs/architecture/deployment.md`` (authoritative for directive values). The artifacts are
 read as plain text from the repo root; nothing is executed. Live behaviour (DoD-16..19) is
 the verifier's requires-live-run record, and DoD-15 (ruff clean) is a verifier gate.
+
+Retargeted by fast/013.build-and-deploy-scripts (its DoD-22..25, tagged ``f013``): the prod
+compose now lives in ``docker-compose.prod.yml`` (image-based), the dev compose took the
+standard ``docker-compose.yml`` name, and ``build.sh`` / ``deploy.sh`` joined the deployment
+files. The fast/001 compose checks (DoD-10) now run against ``docker-compose.prod.yml``.
 """
 
 import configparser
@@ -18,18 +23,28 @@ from app.config import Settings
 # Repo root = the test file's grandparent's parent (backend/tests/<file> -> repo root).
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
+PROD_COMPOSE = "docker-compose.prod.yml"
+DEV_COMPOSE = "docker-compose.yml"
+# The retired dev compose name, split so a repo-wide grep for it (fast/013 DoD-27) stays clean.
+OLD_DEV_COMPOSE = "docker-compose" + ".dev.yml"
+
 SOURCE_FILES = (
     "start.ps1",
     "Dockerfile",
-    "docker-compose.yml",
-    "docker-compose.dev.yml",
+    DEV_COMPOSE,
+    PROD_COMPOSE,
+    "build.sh",
+    "deploy.sh",
     "docker/nginx.conf",
     "docker/nginx.dev.conf",
     "docker/supervisord.conf",
     ".env.example",
     ".dockerignore",
     ".gitignore",
+    "backend/.gitignore",
 )
+
+SCRIPTS = ("build.sh", "deploy.sh")
 
 PROD_NGINX = "docker/nginx.conf"
 DEV_NGINX = "docker/nginx.dev.conf"
@@ -383,7 +398,8 @@ def test_dod9_nginx_program_in_foreground() -> None:
 
 
 def compose_text() -> str:
-    return strip_hash_comments(read_text("docker-compose.yml"))
+    # fast/013 DoD-22: the prod compose moved to docker-compose.prod.yml.
+    return strip_hash_comments(read_text(PROD_COMPOSE))
 
 
 def healthcheck_block(text: str) -> str:
@@ -398,7 +414,7 @@ def healthcheck_block(text: str) -> str:
                     break
                 block.append(follower)
             return "\n".join(block)
-    raise AssertionError("docker-compose.yml has no healthcheck")
+    raise AssertionError(f"{PROD_COMPOSE} has no healthcheck")
 
 
 def test_dod10_compose_ports_env_volume_restart() -> None:
@@ -556,3 +572,80 @@ def test_dod14_gitignore_drops_bookwriter_sink() -> None:
     text = read_text(".gitignore")
     assert "BOOKWRITER" not in text
     assert "/logs/" not in [line.strip() for line in text.splitlines()]
+
+
+# --- fast/013 DoD-22 -----------------------------------------------------------------
+# The port / env_file / volume / restart / healthcheck checks are the DoD-10 tests above,
+# which now read docker-compose.prod.yml through compose_text().
+
+
+def test_f013_dod22_prod_compose_uses_published_image() -> None:
+    # fast/013 DoD-22: docker-compose.prod.yml references image: iezious/rphelper:latest (and only it).
+    images = re.findall(r"(?m)^\s*image:\s*[\"']?([^\s\"']+)", compose_text())
+    assert images == ["iezious/rphelper:latest"], images
+
+
+def test_f013_dod22_prod_compose_has_no_build_key() -> None:
+    # fast/013 DoD-22: the prod compose is image-based -- no `build:` key anywhere.
+    assert not re.search(r"(?m)^\s*build\s*:", compose_text())
+
+
+# --- fast/013 DoD-23 -----------------------------------------------------------------
+
+
+def test_f013_dod23_old_dev_compose_is_gone() -> None:
+    # fast/013 DoD-23: the old dev compose file no longer exists.
+    assert not (REPO_ROOT / OLD_DEV_COMPOSE).exists()
+
+
+def test_f013_dod23_compose_yml_is_the_dev_compose() -> None:
+    # fast/013 DoD-23: docker-compose.yml has the `api` and `ui` services and no iezious/rphelper image.
+    raw = read_text(DEV_COMPOSE)
+    body = strip_hash_comments(raw)
+    assert re.search(r"(?m)^\s+api:\s*$", body), "docker-compose.yml has no `api` service"
+    assert re.search(r"(?m)^\s+ui:\s*$", body), "docker-compose.yml has no `ui` service"
+    assert "iezious/rphelper" not in raw
+
+
+def test_f013_dod23_dev_compose_usage_comment_has_no_file_flag() -> None:
+    # fast/013 DoD-23: the usage comment is `docker compose up`, without `-f`.
+    comments = [line for line in read_text(DEV_COMPOSE).splitlines() if line.lstrip().startswith("#")]
+    assert any(re.search(r"\bdocker compose up\b", line) for line in comments), comments
+    assert not any(re.search(r"\bdocker[ -]compose\s+-f\b", line) for line in comments), comments
+
+
+# --- fast/013 DoD-24 -----------------------------------------------------------------
+
+
+def test_f013_dod24_source_files_cover_new_layout() -> None:
+    # fast/013 DoD-24: SOURCE_FILES covers the prod compose and both scripts, and drops the old dev compose.
+    for relative in (PROD_COMPOSE, "build.sh", "deploy.sh"):
+        assert relative in SOURCE_FILES
+    assert OLD_DEV_COMPOSE not in SOURCE_FILES
+
+
+@pytest.mark.parametrize("relative", SOURCE_FILES)
+def test_f013_dod24_no_source_file_mentions_old_dev_compose(relative: str) -> None:
+    # fast/013 DoD-24: no deployment source file (incl. .env.example, backend/.gitignore) names the old file.
+    assert OLD_DEV_COMPOSE not in read_text(relative)
+
+
+def test_f013_dod24_env_example_names_prod_compose() -> None:
+    # fast/013 DoD-24: .env.example names docker-compose.prod.yml.
+    assert PROD_COMPOSE in read_text(".env.example")
+
+
+# --- fast/013 DoD-25 -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("relative", SCRIPTS)
+def test_f013_dod25_script_has_bash_shebang(relative: str) -> None:
+    # fast/013 DoD-25: both scripts start with a bash shebang.
+    first_line = read_text(relative).splitlines()[0]
+    assert re.fullmatch(r"#!\s*(?:/usr/bin/env\s+bash|/bin/bash|/usr/bin/bash)\s*", first_line), first_line
+
+
+@pytest.mark.parametrize("relative", SCRIPTS)
+def test_f013_dod25_script_enables_strict_mode(relative: str) -> None:
+    # fast/013 DoD-25: both scripts enable `set -euo pipefail`.
+    assert re.search(r"(?m)^\s*set\s+-euo\s+pipefail\s*$", read_text(relative))

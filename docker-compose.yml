@@ -1,19 +1,51 @@
-# RPHelper prod — one container (nginx + one uvicorn under supervisord).
-# See docs/architecture/deployment.md. The healthcheck asserts the HTTP status only and
-# never the body: /api/health answers 200 even on a fresh, unconfigured instance.
+# RPHelper dev-compose — the start.sh pair (uvicorn --reload + Vite) in stock
+# images, nothing built. The repo is bind-mounted, so edits reload exactly as on the host.
+#   docker compose up      # Ctrl-C stops both
+#
+# - The backend keeps its own venv in backend/.venv-docker (the host .venv symlinks a host
+#   interpreter that does not exist in the container); `uv sync` fills it on first start.
+# - The frontend reuses the host frontend/node_modules (Linux-native, same glibc/x64) —
+#   run `npm ci` in frontend/ on the host first.
+# - `ui` shares `api`'s network namespace, so vite.config.ts's /api -> localhost:8184 proxy
+#   works unchanged; port 8193 is therefore published on `api`.
+# - Port 8193 is shared with start.sh and start.ps1 -ui: run one or the other, never both.
+# - Runs as your uid so data/ and the venv stay host-owned (export GID if yours is not 1000).
 
 services:
-  rphelper:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports: ["8193:80"]
-    env_file: .env
-    volumes: ["./data:/app/data"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/api/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    restart: unless-stopped
+  api:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    init: true
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /repo/backend
+    environment:
+      HOME: /tmp
+      UV_PROJECT_ENVIRONMENT: /repo/backend/.venv-docker
+      UV_CACHE_DIR: /tmp/uv-cache
+      UV_PYTHON_DOWNLOADS: never
+      UV_LINK_MODE: copy
+      # passed through from the invoking shell; left unset in the container when unset there
+      LLAMA_SWITCH_URL:
+      OPENAI_API_KEY:
+      SEARCH_CSE_ID:
+      SEARCH_CSE_KEY:
+    volumes: ["./:/repo"]
+    ports: ["8193:8193"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    command:
+      - sh
+      - -c
+      - >-
+        uv sync --frozen && exec uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8184 --reload --reload-exclude '.venv*' --log-level debug --use-colors
+
+  ui:
+    image: node:22-bookworm-slim
+    init: true
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /repo/frontend
+    environment:
+      HOME: /tmp
+      FORCE_COLOR: "1"
+    volumes: ["./:/repo"]
+    network_mode: "service:api"
+    depends_on: [api]
+    command: npx vite --host 0.0.0.0 --port 8193
