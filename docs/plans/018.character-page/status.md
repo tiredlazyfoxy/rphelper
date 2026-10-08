@@ -51,6 +51,12 @@
 - `frontend/src/app/CharacterScreen.tsx` — rebuilt: new mode is the draft page ("New character" + "Draft" badge + dimmed marker line + error `Alert` + Name with blur → `submitCreate` and Persona, both read-only while creating; nothing else); `onCreated` navigates `replace` only while mounted (mounted ref); existing ready mode = header → `Alert` → Name (blur → `commitName`, `error={nameError}`) → Persona in a `Box` whose focus-leave (relatedTarget outside the wrapper) runs `commitPersona` → Archive/Restore (no Save) → `CharacterNotesSection` → `SetupsSection` → `CharacterConfigSection headingOrder={3}` → `SessionsSection` → `CharacterComposer` (all keyed by id); unmount effect runs `flushCharacterEdits` in both modes; Create/Save buttons and `IconDeviceFloppy` / `IconPlus` / `canSubmit` / `submitSave` imports removed
 - `frontend/src/app/characterScreenState.ts` — (authorized sequencing extension, `## Ultra phase`) deprecated `canSubmit` and `submitSave` deleted now that nothing imports them; `SAVE_FAILED` kept (the commits use it)
 
+## Bug Fixes
+
+### Step 009 — regions duplicated per keystroke; Persona editor had no visible label (2026-10-08)
+- `frontend/src/app/CharacterScreen.tsx` — the five body sections had the same sibling `key={id}`, so each re-render (Name/Persona keystroke) duplicated them; each now has a distinct id-based key (`notes-${id}`, `setups-${id}`, `config-${id}`, `sessions-${id}`, `composer-${id}`).
+- `frontend/src/shared/MarkdownEditor.tsx` — renders its `label` as visible Mantine `Input.Label` (`labelElement="div"`, `useId` id) above the editor; the contenteditable keeps `aria-label` and gains `aria-labelledby` to that id. Props unchanged.
+
 ## Skeleton
 
 ### Step 001 — frozen interface (2026-10-03)
@@ -256,6 +262,10 @@
 - TEST-fault round 1 (2026-10-03), App.test.tsx DoD-5 "a renamed character reads the new name…":
   - Fault: the `CHAR_ARIA` fixture's `updated_at` (2026-07-01) was later than the stamp `stubWorkspace` puts on its PATCH answer (`LATER_STAMP`, 2026-04-11). The "not older" rule (008 DoD-8 / D7) then correctly rejected the answer.
   - Fix: the fixture is now stamped 2026-04-01 for both `created_at` and `updated_at`, which is older than the save answer. Every assertion is unchanged, including the PATCH body, the heading and the tree row.
+
+### Step 009 — repro test (2026-10-08)
+- `frontend/tests/app/CharacterScreen.test.tsx` (appended describe "bug fix — editing the persona or name keeps one copy of each body region (018 D10)") — covers DoD-6 (and DoD-5's edit-in-place) — reproduces: typing into Persona on a loaded `/characters/<id>` duplicates Notes / Setups / Configuration / Sessions / Start a session on every keystroke. Loaded `CHAR_A`, "abc" typed keystroke by keystroke into Persona with no blur, flush: each of the five regions occurs exactly once inside main (`getAllByRole("region", {name})` length 1), still in D10 order, and Persona holds sheet + "abc". A companion case types "xyz" into Name with no blur and asserts the same (guard; not the reported symptom, so it may pass pre-fix).
+- `frontend/tests/shared/MarkdownEditor.test.tsx` (one case appended to "the editable surface is labelled") — covers 018 009 DoD-1 ("a 'Persona' textbox") — reproduces: the Persona editor shows no visible label. With `label="Persona"`: exactly one textbox named "Persona", and `getByText("Persona")` finds a visible element that is not inside the editable surface.
 
 ## Notes & Issues
 

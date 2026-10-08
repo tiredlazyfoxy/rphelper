@@ -1735,3 +1735,51 @@ describe("018 step 009 — the body's order, the notes grid and no wall (D10)", 
     expect(matching(calls, "GET", MODELS_PATH)).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bug fix (018 step 009) — repro: typing into the Persona editor on a loaded character's page
+// duplicated everything below Archive / Export (Notes, Setups, Configuration, Sessions, Start a
+// session) on every keystroke. Spec: 018 DoD-6 (the five regions, once each, in that order) and
+// DoD-5 (name and persona are edited in place and saved on focus loss) — editing must not change
+// the body's structure. The stubbed editor calls `onChange` on every keystroke, so each typed
+// character re-renders the screen.
+
+/** Asserts each of the five body regions occurs exactly once inside main, in 018 D10 order. */
+function expectEachBodyRegionOnce(): void {
+  const main = within(mainRegion());
+  for (const name of BODY_REGIONS) {
+    expect(main.getAllByRole("region", { name })).toHaveLength(1);
+  }
+  const ordered = BODY_REGIONS.map((name) => region(name));
+  for (let index = 0; index + 1 < ordered.length; index += 1) {
+    expect(precedes(ordered[index], ordered[index + 1])).toBe(true);
+  }
+}
+
+describe("bug fix — editing the persona or name keeps one copy of each body region (018 D10)", () => {
+  it("typing abc keystroke by keystroke into Persona without blurring leaves Notes, Setups, Configuration, Sessions and Start a session exactly once each — DoD-6", async () => {
+    const user = newUser();
+    await renderLoaded(CHAR_A);
+    await within(mainRegion()).findByRole("region", { name: NOTES_REGION });
+    expectEachBodyRegionOnce();
+
+    await user.type(personaInput(), "abc");
+    await flush();
+
+    expect(personaInput()).toHaveValue(`${CHAR_A.sheet}abc`);
+    expectEachBodyRegionOnce();
+  });
+
+  it("typing xyz keystroke by keystroke into Name without blurring leaves each body region exactly once — DoD-6", async () => {
+    const user = newUser();
+    await renderLoaded(CHAR_A);
+    await within(mainRegion()).findByRole("region", { name: NOTES_REGION });
+    expectEachBodyRegionOnce();
+
+    await user.type(nameInput(), "xyz");
+    await flush();
+
+    expect(nameInput()).toHaveValue(`${CHAR_A.name}xyz`);
+    expectEachBodyRegionOnce();
+  });
+});

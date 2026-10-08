@@ -4,7 +4,8 @@
 // stylesheet itself, so only the entries that bundle the editor pay for it.
 import "@mantine/tiptap/styles.css";
 import type * as React from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
+import { Box, Input } from "@mantine/core";
 import { RichTextEditor } from "@mantine/tiptap";
 import { useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/react";
@@ -37,6 +38,8 @@ export function MarkdownEditor(props: MarkdownEditorProps): React.JSX.Element {
   // The editor is created once; `onChange` is reached through a ref so a new callback
   // identity neither recreates it nor leaves `onUpdate` calling a stale function.
   const onChangeRef = useRef(onChange);
+  // The visible label's id: the editable surface is named by it (`aria-labelledby`).
+  const labelId = useId();
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
@@ -54,6 +57,7 @@ export function MarkdownEditor(props: MarkdownEditorProps): React.JSX.Element {
       attributes: {
         role: "textbox",
         "aria-label": label,
+        "aria-labelledby": labelId,
         "aria-multiline": "true",
       },
     },
@@ -86,29 +90,36 @@ export function MarkdownEditor(props: MarkdownEditorProps): React.JSX.Element {
     editor.setEditable(!readOnly, false);
   }, [editor, readOnly]);
 
+  // The label is visible text tied to the surface by id. A `div`, not a `<label>`: a
+  // contenteditable is not a labelable element, so the name travels by `aria-labelledby`.
   return (
-    <RichTextEditor editor={editor}>
-      {readOnly ? null : (
-        <RichTextEditor.Toolbar>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.Bold />
-            <RichTextEditor.Italic />
-          </RichTextEditor.ControlsGroup>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.H2 />
-            <RichTextEditor.H3 />
-          </RichTextEditor.ControlsGroup>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.BulletList />
-            <RichTextEditor.OrderedList />
-          </RichTextEditor.ControlsGroup>
-          <RichTextEditor.ControlsGroup>
-            <RichTextEditor.Link />
-            <RichTextEditor.Unlink />
-          </RichTextEditor.ControlsGroup>
-        </RichTextEditor.Toolbar>
-      )}
-      <RichTextEditor.Content />
-    </RichTextEditor>
+    <Box>
+      <Input.Label labelElement="div" id={labelId}>
+        {label}
+      </Input.Label>
+      <RichTextEditor editor={editor}>
+        {readOnly ? null : (
+          <RichTextEditor.Toolbar>
+            <RichTextEditor.ControlsGroup>
+              <RichTextEditor.Bold />
+              <RichTextEditor.Italic />
+            </RichTextEditor.ControlsGroup>
+            <RichTextEditor.ControlsGroup>
+              <RichTextEditor.H2 />
+              <RichTextEditor.H3 />
+            </RichTextEditor.ControlsGroup>
+            <RichTextEditor.ControlsGroup>
+              <RichTextEditor.BulletList />
+              <RichTextEditor.OrderedList />
+            </RichTextEditor.ControlsGroup>
+            <RichTextEditor.ControlsGroup>
+              <RichTextEditor.Link />
+              <RichTextEditor.Unlink />
+            </RichTextEditor.ControlsGroup>
+          </RichTextEditor.Toolbar>
+        )}
+        <RichTextEditor.Content />
+      </RichTextEditor>
+    </Box>
   );
 }

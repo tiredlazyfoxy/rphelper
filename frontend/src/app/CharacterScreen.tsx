@@ -322,12 +322,13 @@ export const CharacterScreen = observer(function CharacterScreen(
         {/* 018 D10: the body order — Notes (the page's grid) → Setups → Configuration →
             Sessions → the page composer last. Each section is keyed by the character id
             so a different character builds fresh section state; the id is the route's
-            string, used verbatim. */}
-        {id !== null && <CharacterNotesSection key={id} characterId={id} />}
-        {id !== null && <SetupsSection key={id} characterId={id} />}
-        {id !== null && <CharacterConfigSection key={id} characterId={id} headingOrder={3} />}
-        {id !== null && <SessionsSection key={id} characterId={id} sessions={sessions} />}
-        {id !== null && <CharacterComposer key={id} characterId={id} sessions={sessions} />}
+            string, used verbatim. Sibling keys must be distinct, so each carries its own
+            prefix — a shared key made React duplicate the regions on every re-render. */}
+        {id !== null && <CharacterNotesSection key={`notes-${id}`} characterId={id} />}
+        {id !== null && <SetupsSection key={`setups-${id}`} characterId={id} />}
+        {id !== null && <CharacterConfigSection key={`config-${id}`} characterId={id} headingOrder={3} />}
+        {id !== null && <SessionsSection key={`sessions-${id}`} characterId={id} sessions={sessions} />}
+        {id !== null && <CharacterComposer key={`composer-${id}`} characterId={id} sessions={sessions} />}
       </Stack>
     </Container>
   );

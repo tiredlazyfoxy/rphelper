@@ -77,6 +77,20 @@ describe("the editable surface is labelled", () => {
 
     expect(await screen.findByRole("textbox", { name: LABEL })).toBeInTheDocument();
   });
+
+  // Bug fix (018 step 009 DoD-1, "a 'Persona' textbox"): the label was only an aria-label, so
+  // no visible "Persona" showed above the editor. Every editor shows its label as visible text,
+  // and the editable surface keeps the label as its accessible name.
+  it("shows the label as visible text outside the editable surface, and keeps exactly one textbox named by it — 018 009 DoD-1 (bug fix)", async () => {
+    renderEditor({ label: LABEL, value: "", onChange: vi.fn<(markdown: string) => void>() });
+
+    const editables = await screen.findAllByRole("textbox", { name: LABEL });
+    expect(editables).toHaveLength(1);
+
+    const visibleLabel = screen.getByText(LABEL);
+    expect(visibleLabel).toBeVisible();
+    expect(editables[0].contains(visibleLabel)).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
