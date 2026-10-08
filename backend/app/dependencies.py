@@ -40,6 +40,7 @@ from app.db.engine import get_connection
 from app.errors import InsufficientRoleError, NotAuthenticatedError
 from app.roles import Role, role_at_least
 from app.services.auth import resolve_session
+from app.services.bootstrap import any_user_exists
 from app.services.llm.client import LlmClient
 from app.services.llm_registry import LlmClientFactory
 
@@ -53,6 +54,15 @@ class CurrentUser:
     role: Role
 
 
+def _refuse_unconfigured(connection: Connection) -> None:
+    """Raise `NotAuthenticatedError` when no user exists yet (fast/010 D4, amended).
+
+    Runs only on the cookie-present path, before `resolve_session`; leaves no transaction open.
+    """
+    if not any_user_exists(connection):
+        raise NotAuthenticatedError()
+
+
 def require_user(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -60,7 +70,10 @@ def require_user(
 ) -> CurrentUser:
     """Resolve the session cookie to a live caller, or raise `NotAuthenticatedError`."""
     token = request.cookies.get(settings.session_cookie_name)
-    resolved = resolve_session(connection, token) if token else None
+    if not token:
+        raise NotAuthenticatedError()
+    _refuse_unconfigured(connection)
+    resolved = resolve_session(connection, token)
     if resolved is None:
         raise NotAuthenticatedError()
     return CurrentUser(id=resolved.id, username=resolved.username, role=resolved.role)

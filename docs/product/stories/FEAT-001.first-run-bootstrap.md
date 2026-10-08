@@ -24,4 +24,15 @@
   - **US-003.AC-1** — Given the instance already has a database and at least one administrator, when someone reaches the bootstrap entry point, then the instance refuses to create a new database or import an export.
   - **US-003.AC-2** — Given bootstrap was refused, when the refusal is shown, then the person is directed to sign in instead.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
+
+### US-148 — Unconfigured instance leads to setup
+- **Actor:** ACT-003 · **Feature:** FEAT-001 · **Exercises:** UC-001, UC-002
+- **Story:** As a first-run operator, I want opening an unconfigured instance to take me to setup, so that I am never stuck at a sign-in form that cannot succeed.
+- **Acceptance criteria:**
+  - **US-148.AC-1** — Given no database exists, when someone opens the instance's main address, then they are shown the bootstrap offer, not a sign-in form.
+  - **US-148.AC-2** — Given no database exists, when someone opens the sign-in address or the administration address, then they are shown the bootstrap offer.
+  - **US-148.AC-3** — Given no database exists and the browser still holds a sign-in from a previous database, when someone opens any of those addresses, then they are shown the bootstrap offer, not a sign-in form or an endless waiting state.
+  - **US-148.AC-4** — Given the instance is configured, when someone opens those addresses, then no bootstrap offer is shown and they behave as before (UC-003).
+- **Note:** Out of scope: a database lost while someone is mid-use. Main-app deep links other than the root are not specified.
+- **Source:** `[confirmed: user]` interview 2026-10-07, challenge C54.
 <!-- product-spec:end -->

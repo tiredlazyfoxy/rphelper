@@ -19,7 +19,7 @@ renumbered, never reused; gaps stay if a number is ever withdrawn or skipped.
 | `actors.md` | ACT-001..ACT-004 blocks, plus 2 named non-actors |
 | `features.md` | FEAT-001..FEAT-020 blocks + `## Relationships` (dependency graph, overlaps, boundary, conflicts). Never a registry, never splits. |
 | `use-cases/<FEAT-###>.<slug>.md` | UC-001..UC-088, one file per feature |
-| `stories/<FEAT-###>.<slug>.md` | US-001..US-140 plus US-141..US-147, with `US-###.AC-#` criteria, one file per feature |
+| `stories/<FEAT-###>.<slug>.md` | US-001..US-140 plus US-141..US-148, with `US-###.AC-#` criteria, one file per feature |
 | `glossary.md` | Domain terms, one line each |
 | `quick-reference.md` (this file) | The id registry |
 
@@ -75,7 +75,7 @@ value.
 
 | FEAT | Name | Actors | Realized by (UC) | Realized by (US) | Status |
 |---|---|---|---|---|---|
-| FEAT-001 | First-run bootstrap | ACT-003 | UC-001–003 | US-001–003 | partially delivered |
+| FEAT-001 | First-run bootstrap | ACT-003 | UC-001–003 | US-001–003, US-148 | partially delivered |
 | FEAT-002 | Authentication & session | ACT-001, ACT-002 | UC-004–005 | US-004–007 | delivered |
 | FEAT-003 | User management | ACT-001 | UC-006–009, UC-087 | US-008–011, US-140 | delivered |
 | FEAT-004 | LLM server connections | ACT-001 | UC-010–013 | US-012–016 | delivered |
@@ -248,10 +248,10 @@ Total: 88, UC-001..UC-088, no gaps.
 
 ## Stories
 
-US-001..US-147, grouped by owning feature, id order. `ACs` is the count of
+US-001..US-148, grouped by owning feature, id order. `ACs` is the count of
 `US-###.AC-#` criteria on that story. One-liners are the story's own heading
 text, verbatim. Every US below is `Status: delivered` except the ones tagged
-inline: US-002, US-019 are `deferred`; US-112 (AC-1's widened half and AC-3),
+inline: US-148 is `proposed` (not yet planned); US-002, US-019 are `deferred`; US-112 (AC-1's widened half and AC-3),
 US-115 (AC-1's streaming half), US-117 (AC-3) and US-147 (name matching folds
 case ASCII-only) are `partially delivered` — each points at
 `docs/plans/defects.md`.
@@ -260,6 +260,7 @@ case ASCII-only) are `partially delivered` — each points at
 - US-001 — Fresh instance with a first admin (ACs: 2) · **Status:** delivered
 - US-002 — Instance from an export (ACs: 2) · **Status:** deferred → docs/plans/fast/003.bootstrap-from-export/
 - US-003 — Bootstrap refused once configured (ACs: 2) · **Status:** delivered
+- US-148 — Unconfigured instance leads to setup (ACs: 4) · **Status:** proposed → not yet planned
 
 **FEAT-002**
 - US-004 — Log in with correct credentials (ACs: 2) · **Status:** delivered
@@ -443,8 +444,8 @@ case ASCII-only) are `partially delivered` — each points at
 - US-096 — A character's page shows its persona, its notes, its setups, its configuration and its sessions in one place (ACs: 1)
 - US-097 — Creating a character opens a draft page; nothing is persisted until the roleplayer enters something (ACs: 2)
 
-Total: 147, US-001..US-147, no gaps. Total numbered ACs across all stories:
-267, of which 266 are active and 1 (`US-131.AC-1`) is withdrawn.
+Total: 148, US-001..US-148, no gaps. Total numbered ACs across all stories:
+271, of which 270 are active and 1 (`US-131.AC-1`) is withdrawn.
 
 ## Open `_TBD:` items
 
@@ -466,5 +467,5 @@ carries no inferred requirement.
 - `ACT-005`
 - `FEAT-021`
 - `UC-089`
-- `US-148`
+- `US-149`
 <!-- product-spec:end -->

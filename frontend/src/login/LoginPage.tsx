@@ -12,6 +12,7 @@ import {
   type LoginDraft,
   type LoginField,
 } from "./loginDraft";
+import { LoginGate, probeLoginGate } from "./loginGate";
 
 export type LoginPageProps = {
   draft: LoginDraft;
@@ -29,6 +30,16 @@ export const LoginPage = observer(function LoginPage(props: LoginPageProps): Rea
   const handOff = props.handOff ?? assignDocument;
   const [touched, setTouched] = useState<Partial<Record<LoginField, true>>>({});
   const controllerRef = useRef<AbortController | null>(null);
+  const [gate] = useState(() => new LoginGate());
+
+  // The mount probe (fast/010): runs once per mount; a changed `handOff` does not re-probe.
+  useEffect(() => {
+    const controller = new AbortController();
+    void probeLoginGate(gate, controller.signal, handOff);
+    return () => {
+      controller.abort();
+    };
+  }, [gate]);
 
   useEffect(() => {
     return () => {
@@ -69,50 +80,52 @@ export const LoginPage = observer(function LoginPage(props: LoginPageProps): Rea
 
   return (
     <div data-entry="login">
-      <Container size="xs" py="xl">
-        <form onSubmit={onSubmit} noValidate>
-          <Stack gap="sm">
-            <Title order={1}>Welcome back</Title>
-            {draft.serverErrors.general !== undefined && (
-              <Alert color="red" title="Could not sign in">
-                {draft.serverErrors.general}
-              </Alert>
-            )}
-            <TextInput
-              label="Username"
-              autoComplete="username"
-              value={draft.username}
-              error={shownClientError("username") ?? draft.serverErrors.username}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                runInAction(() => {
-                  draft.username = value;
-                });
-              }}
-              onBlur={() => markTouched("username")}
-            />
-            <TextInput
-              type="password"
-              label="Password"
-              autoComplete="current-password"
-              value={draft.password}
-              error={shownClientError("password") ?? draft.serverErrors.password}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                runInAction(() => {
-                  draft.password = value;
-                });
-              }}
-              onBlur={() => markTouched("password")}
-            />
-            <Group>
-              <Button type="submit" disabled={!canSubmit} loading={draft.submitting}>
-                Sign in
-              </Button>
-            </Group>
-          </Stack>
-        </form>
-      </Container>
+      {gate.phase === "form" && (
+        <Container size="xs" py="xl">
+          <form onSubmit={onSubmit} noValidate>
+            <Stack gap="sm">
+              <Title order={1}>Welcome back</Title>
+              {draft.serverErrors.general !== undefined && (
+                <Alert color="red" title="Could not sign in">
+                  {draft.serverErrors.general}
+                </Alert>
+              )}
+              <TextInput
+                label="Username"
+                autoComplete="username"
+                value={draft.username}
+                error={shownClientError("username") ?? draft.serverErrors.username}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  runInAction(() => {
+                    draft.username = value;
+                  });
+                }}
+                onBlur={() => markTouched("username")}
+              />
+              <TextInput
+                type="password"
+                label="Password"
+                autoComplete="current-password"
+                value={draft.password}
+                error={shownClientError("password") ?? draft.serverErrors.password}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  runInAction(() => {
+                    draft.password = value;
+                  });
+                }}
+                onBlur={() => markTouched("password")}
+              />
+              <Group>
+                <Button type="submit" disabled={!canSubmit} loading={draft.submitting}>
+                  Sign in
+                </Button>
+              </Group>
+            </Stack>
+          </form>
+        </Container>
+      )}
     </div>
   );
 });

@@ -13,8 +13,8 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Actors:** ACT-003 · **Priority:** must
 - **Status:** partially delivered
 - **Delivered:** docs/plans/003.first-run-bootstrap/ (2026-09-29); US-001.AC-2 by docs/plans/004.authentication-session/ (2026-09-29)
-- **Remaining:** UC-002, US-002 → docs/plans/fast/003.bootstrap-from-export/
-- **Realized by:** UC-001, UC-002, UC-003, US-001, US-002, US-003
+- **Remaining:** UC-002, US-002 → docs/plans/fast/003.bootstrap-from-export/; US-148 (not yet planned)
+- **Realized by:** UC-001, UC-002, UC-003, US-001, US-002, US-003, US-148
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
 
 ### FEAT-002 — Authentication & session
@@ -532,6 +532,9 @@ FEAT-012, FEAT-017. No cycles.
   tool wait in progress; the tool features own what each tool does and what
   a failed tool means. A stopped tool is the roleplayer's choice; a failed
   tool is the tool's own.
+- FEAT-001 × FEAT-002 — the sign-in address belongs to FEAT-002, but what it
+  shows on an unconfigured instance is FEAT-001's (US-148). FEAT-002's own
+  criteria assume a configured instance.
 
 **Boundary:** FEAT-018 owns export/import at every granularity; FEAT-005
 owns drift, remediation and vector-index rebuild. FEAT-019's privacy

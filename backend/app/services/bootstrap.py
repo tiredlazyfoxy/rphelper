@@ -74,6 +74,29 @@ def is_configured(connection: Connection) -> bool:
             connection.rollback()
 
 
+def any_user_exists(connection: Connection) -> bool:
+    """Answer whether a `users` table exists and holds at least one row, whatever its role.
+
+    Safe on a schema-less database (answers False). Opens no transaction and leaves none
+    open; writes nothing (fast/010 D4 amendment).
+    """
+    # Same posture as `is_configured`: end the implicit read-only transaction a read
+    # autobegins, so a later `with connection.begin():` on this connection still works.
+    opened_here = not connection.in_transaction()
+    try:
+        present = connection.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :name LIMIT 1"),
+            {"name": users.name},
+        ).first()
+        if present is None:
+            return False
+        row = connection.execute(select(users.c.id).limit(1)).first()
+        return row is not None
+    finally:
+        if opened_here and connection.in_transaction():
+            connection.rollback()
+
+
 def create_first_administrator(
     connection: Connection,
     generator: SnowflakeGenerator,

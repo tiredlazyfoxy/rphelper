@@ -7,6 +7,8 @@ database fixture (decision D4), which could not land before ``app/db/engine.py``
 import ipaddress
 import os
 import socket
+import sqlite3
+import sqlite3.dbapi2
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -104,6 +106,33 @@ def isolated_settings_environment(monkeypatch: pytest.MonkeyPatch) -> Iterator[N
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+#: The developer's real database folder (``Settings.data_dir``'s default, from ``backend/``).
+REAL_DATA_DIR = (Path(__file__).resolve().parent.parent / "data").resolve()
+_real_sqlite_connect = sqlite3.dbapi2.connect
+
+
+def _guarded_sqlite_connect(database: Any, *args: Any, **kwargs: Any) -> sqlite3.Connection:
+    target = str(database)
+    if target.startswith("file:"):
+        target = target[len("file:"):].split("?", 1)[0]
+    if target and target != ":memory:" and Path(target).resolve().is_relative_to(REAL_DATA_DIR):
+        raise RuntimeError(
+            f"test opened the real database {target!r}; use the db_settings / db_engine fixtures"
+        )
+    return _real_sqlite_connect(database, *args, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def no_real_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail any test that opens a SQLite file under ``backend/data/`` — the dev database.
+
+    Patched on ``sqlite3.dbapi2`` (what SQLAlchemy's pysqlite dialect calls) and on
+    ``sqlite3`` itself (what a test calling the driver directly would use).
+    """
+    monkeypatch.setattr(sqlite3.dbapi2, "connect", _guarded_sqlite_connect)
+    monkeypatch.setattr(sqlite3, "connect", _guarded_sqlite_connect)
 
 
 # --- Step 005: the temp-file database fixture (decision D4) -------------------------
