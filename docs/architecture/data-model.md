@@ -347,7 +347,7 @@ export (FEAT-018/UC-061) does not exfiltrate credentials, and a drift report
 | `id` | PK |
 | `server_id` | → `llm_servers` |
 | `model_name` | as the server names it |
-| `is_enabled` | UC-012; the authority behind R4's use-time validation |
+| `is_enabled` | UC-012; membership in the **chat** model set — the authority behind R4's chat use-time validation; **not consulted for embeddings** |
 | `is_embedding_designated` | UC-013; at most one row true across the whole table |
 | `embedding_dim` | dimensionality of the designated embedding model |
 | `created_at`, `updated_at` | |
@@ -365,11 +365,21 @@ index or view from `models` to `sessions` exists, and none may be added.
   makes the models modal's `available ∪ already-enabled` union work
   (`admin-surfaces.md`).
 - **Designation is independent of `is_enabled`** (user decision, plan 006,
-  resolving the brief's first open question). Disabling a model **never** clears a
-  designation and is never refused; designating does **not** enable. The
-  use-time embedding validator requires the designated model to be **both
-  designated and enabled**, raising `no_embedding_model` otherwise. There is **no
-  cross-table cascade** between the two flags.
+  resolving the brief's first open question; **revised 2026-10-08**, see "Decision
+  history" at the bottom). `is_enabled` means **only** "in the chat model set" —
+  the chat selector and R4's chat model resolution — and has nothing to do with
+  embeddings. Disabling a model **never** clears a designation and is never
+  refused; designating does **not** enable, so a row created by designation has
+  `is_enabled` false. The use-time embedding validator (`validate_embedding_model`
+  in `services/llm_registry.py`) requires only that **a designated row exists, it
+  has a measured `embedding_dim`, and its server exists**; it does **not** consult
+  `is_enabled`. It raises `no_embedding_model` for no designation, a designation
+  gone or cleared, no dimension, and (plan 024) a dimension mismatch against the
+  live `vec0` table. There is **no cross-flag cascade** between the two flags. We
+  chose this because an embedding model is not a chat model and must never appear
+  in the chat selector; requiring enablement forced the admin to pollute the chat
+  model list. _Code pending: the validator still checks `is_enabled`; a bug fix
+  against plan 006 step 004 will align it._
 - **`embedding_dim` is measured, not read from metadata**: designating embeds one
   short fixed string against the chosen model and records the returned vector's
   length (`admin-surfaces.md`, US-015.AC-3/AC-4).
@@ -1285,3 +1295,16 @@ rather than of the envelope:
   `translations` row — each is re-creatable, and a vector is only valid for the
   embedding model that produced it, which the importing instance may not have
   designated. `auth_sessions` is excluded too, as live credentials.
+
+## Decision history
+
+- **2026-10-08 — the embedding validator no longer requires `is_enabled`.** Plan
+  006 shipped a use-time embedding validator that required the designated model
+  to be **both designated and enabled**. Reversed by user decision: `is_enabled`
+  is the chat model set only, and the validator now needs only the designation
+  with its measured dimension (and an existing server) — see `models` above.
+  Reason: an embedding model is not a chat model, so requiring enablement forced
+  it into the chat selector, and it produced an index rebuild refusing with
+  `no_embedding_model` while a model was designated with dimension 1024. FEAT-004
+  (US-015, UC-013) never required enablement, so no product change. _Code pending
+  a bug fix against plan 006 step 004._

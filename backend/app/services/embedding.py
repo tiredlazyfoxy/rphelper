@@ -29,7 +29,7 @@ caller's `begin()` block is already open — and it issues no KNN query and no F
 which belong to `025`.
 
 Error posture (D8): both failures leave this module unchanged and untranslated.
-`NoEmbeddingModelError` (409) comes out of `open_embedding_model` for a missing or disabled
+`NoEmbeddingModelError` (409) comes out of `open_embedding_model` for a missing or unusable
 designation and out of `embed_texts` for a returned vector of the wrong length, with
 `detail` exactly `{"reason": "dimension_mismatch"}`. `LlmUnreachableError` (502) propagates
 from `embed` as raised. Deciding which to swallow is the caller's: an authoring write lets
@@ -87,7 +87,7 @@ def open_embedding_model(
     """Resolve the designated embedding model into a ready `EmbeddingModelHandle`.
 
     Calls `validate_embedding_model(connection)`, whose `NoEmbeddingModelError` propagates
-    unchanged (no designation, the designated model disabled, or no `embedding_dim`). Then
+    unchanged (no designation, no `embedding_dim`, or its server gone). Then
     re-selects that server's `api_key_ref` from `llm_servers` by `server.id` — `LlmServer`
     does not carry the pointer — resolves it through `resolve_secret`, whose
     `SecretRefError` propagates, and calls `client_factory(base_url, api_key,

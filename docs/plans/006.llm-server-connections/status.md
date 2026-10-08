@@ -59,6 +59,12 @@
 - `frontend/src/admin/LlmServersPage.tsx` — added an "Embedding model" column (name + "N dimensions", em dash when none) so the designation is visible after re-load; row-menu "Set Embedding" and conditional "Clear Embedding" (only when `embedding_model_name !== null`); component-local `useState` for the embedding open flag / target / per-open `ModelPicker` + `EmbeddingDraft` and for the clear target; `EmbeddingModal` conditionally mounted (`onSaved` closes + re-loads, no toast); Clear routed through `ConfirmModal` with a count-free consequence, confirm → `clearEmbeddingDesignation`
 - Fix round 1 (DoD-5): `frontend/src/admin/embeddingDraft.ts` — the 502 `llm_unreachable` refusal (still selected by code/status, never by prose) now renders the error's own message on `serverErrors.general`; the fixed client-written refusal copy is used only when that message is empty
 
+## Bug Fixes
+
+### Step 004 — embedding validator rejected a designated but not-enabled model (2026-10-08)
+- `backend/app/services/llm_registry.py` — `validate_embedding_model` no longer selects or consults `is_enabled` (spec revision 2026-10-08: designated row + non-null `embedding_dim` + server exists); docstring and `NoEmbeddingModelError` message ("No embedding model is designated.") aligned, code/detail unchanged
+- `backend/app/services/embedding.py` — module and `open_embedding_model` docstrings no longer list "disabled" as a failure cause
+
 ## Skeleton
 
 ### Step 001 — frozen interface (2026-09-29)
@@ -299,6 +305,10 @@ All appended to `backend/app/services/llm_registry.py` (step 003's symbols untou
 
 ### Step 006 — repro test (2026-09-30)
 - `frontend/tests/admin/llmServersPage.test.tsx` — covers DoD-18 (superseded in part by 007/005 DoD-13) — reproduces: a stale DoD-18 case still expected `/database` (MemoryRouter) to render the 404 after feature 007 step 005 built the Database page (no code defect; stale-test correction). `/database` is dropped from the "%s still renders the 404 element" list, which keeps `/nope`. Added one light case: `/database` is not the LLM Servers page, meaning no request goes to the LLM list path `/api/admin/llm-servers`. It asserts none of the Database page's internals, and the route block's existing fetch stub leaves any `/api/admin/database/...` request unsettled. Every other assertion is unchanged, including the flat-`<Routes>` source scan for the four paths `*`, `/`, `/database`, `/llm-servers`, and so are its tags and expected values.
+
+### Step 004 — repro test (2026-10-08)
+- `backend/tests/test_llm_registry_models.py` — covers DoD-18, DoD-19, DoD-20 (as revised 2026-10-08: the embedding validator needs only a designated row with a measured `embedding_dim` whose server exists; `is_enabled` is not consulted) — reproduces: "no embedding model configured" when recreating the index with a designated, not-enabled model (`bge-large-en-v1.5.i1-Q6_K`, dim 1024). New: `test_embedding_validator_returns_a_designated_model_that_is_not_enabled__S006_004_DoD18` (the repro), `test_embedding_validator_answers_the_disabled_designation_not_an_enabled_substitute__S006_004_DoD18`, `test_designating_without_enabling_passes_the_embedding_validator__S006_004_DoD18`, `test_embedding_validator_raises_when_the_designation_has_no_dimension__S006_004_DoD19`. Replaced (old rule): `..._raises_when_the_designated_model_is_disabled__S006_004_DoD19` (removed; its success counterpart is the repro) and `test_disabling_the_designated_model_fails_the_embedding_validator__S006_004_DoD19` -> `test_disabling_the_designated_model_keeps_the_embedding_validator_passing__S006_004_DoD19` (designation kept and validator answers it). `test_no_embedding_model_detail_carries_nothing_user_scoped__S006_004_DoD20`: second failing case switched from designated-but-disabled to designated-with-no-dimension. DoD-11 tests unchanged.
+- `backend/tests/test_embedding_service.py` — covers DoD-18 (revised) through `open_embedding_model` — new `test_open_builds_a_handle_for_a_designated_but_disabled_model__S006_004_DoD18` (one client built with base URL / resolved key / timeout, handle has the designated name and dim); the `test_an_unusable_designation_is_no_embedding_model_and_builds_nothing__S024_002_DoD2` parametrization's `designated_but_disabled` case is replaced by `designated_without_dimension` (`no_designation` kept).
 
 ## Notes & Issues
 

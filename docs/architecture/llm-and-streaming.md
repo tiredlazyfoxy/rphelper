@@ -137,8 +137,11 @@ model (UC-013) is validated at use time and a missing or changed designation rai
 **`no_embedding_model`** rather than falling back to another model — because
 vectors produced by a different embedding model are **not comparable** with the
 stored ones, so a silent substitution would return confidently wrong search
-results rather than an error. See `search-and-retrieval.md`. The designated model
-must be **both designated and enabled** (`data-model.md`'s `models`).
+results rather than an error. See `search-and-retrieval.md`. The validator needs
+**only the designation** — a designated row with a measured `embedding_dim` on a
+server that exists; **`is_enabled` is not consulted**, because it means only "in
+the chat model set" and an embedding model never belongs there (`data-model.md`'s
+`models`, revised 2026-10-08; code pending a bug fix against plan 006 step 004).
 
 **Both use-time validators shipped with no call site, and both have callers
 now.** They live in `services/llm_registry.py` and were built by FEAT-004 (plan

@@ -643,21 +643,22 @@ def open_chat_client(
 
 
 def validate_embedding_model(connection: Connection) -> DesignatedEmbeddingModel:
-    """Use-time check: a designation exists and that model is enabled — no substitute, ever.
+    """Use-time check: a designation exists with a measured `embedding_dim` and its server
+    exists — no substitute, ever. `is_enabled` (chat-set membership) is not consulted.
 
     Otherwise raises `NoEmbeddingModelError` whose `detail` carries nothing user-scoped.
     """
     with _reading(connection):
         designated = connection.execute(
-            select(models.c.server_id, models.c.model_name, models.c.is_enabled, models.c.embedding_dim).where(
+            select(models.c.server_id, models.c.model_name, models.c.embedding_dim).where(
                 models.c.is_embedding_designated
             )
         ).first()
         server = None
-        if designated is not None and designated.is_enabled and designated.embedding_dim is not None:
+        if designated is not None and designated.embedding_dim is not None:
             server = _fetch_server(connection, designated.server_id)
     if designated is None or server is None or designated.embedding_dim is None:
-        raise NoEmbeddingModelError("No enabled embedding model is designated.")
+        raise NoEmbeddingModelError("No embedding model is designated.")
     return DesignatedEmbeddingModel(
         server=server, model_name=designated.model_name, embedding_dim=int(designated.embedding_dim)
     )

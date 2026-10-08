@@ -264,18 +264,22 @@ def test_the_default_timeout_is_the_settings_field_default__S024_002_DoD1(
 # =========================================================================== DoD-2
 
 
-@pytest.mark.parametrize("case", ["no_designation", "designated_but_disabled"])
+@pytest.mark.parametrize("case", ["no_designation", "designated_without_dimension"])
 def test_an_unusable_designation_is_no_embedding_model_and_builds_nothing__S024_002_DoD2(
     engine: Engine, key_present: None, case: str
 ) -> None:
-    """DoD-2 — no designated model, and a designated-but-disabled model, each raise
+    """DoD-2 — no designated model, and a designation with no measured dimension, each raise
     `NoEmbeddingModelError` and construct **zero** clients: no substitution, and the refusal
     precedes any client (R4, the no-substitution rule).
+
+    Revised 2026-10-08 (plan 006 step 004 DoD-18/19 spec revision): a designated-but-disabled
+    model is no longer unusable — `is_enabled` is chat-set membership only — so that case moved
+    to the success test below.
     """
     if case == "no_designation":
         _seed_designation(engine, is_designated=False)
     else:
-        _seed_designation(engine, is_enabled=False)
+        _seed_designation(engine, dim=None)
     factory = fake_factory(dim=DIMENSION)
 
     with engine.connect() as connection:
@@ -285,6 +289,26 @@ def test_an_unusable_designation_is_no_embedding_model_and_builds_nothing__S024_
     assert excinfo.value.code == "no_embedding_model"
     assert factory.call_count == 0
     assert factory.embed_calls == []
+
+
+def test_open_builds_a_handle_for_a_designated_but_disabled_model__S006_004_DoD18(
+    engine: Engine, key_present: None
+) -> None:
+    """Bug fix 2026-10-08 repro — plan 006 step 004 DoD-18/DoD-19 as revised 2026-10-08
+    (`is_enabled` is chat-set membership only; the embedding validator does not consult it).
+    A designated, NOT enabled model with a measured dimension opens: one client is built and the
+    handle carries the designated name and dimension (also S024_002 DoD-1).
+    """
+    _seed_designation(engine, is_enabled=False)
+    factory = fake_factory(dim=DIMENSION)
+
+    handle = _open(engine, factory, timeout=PASSED_TIMEOUT)
+
+    assert handle.model_name == MODEL_NAME
+    assert handle.embedding_dim == DIMENSION
+    assert factory.call_count == 1
+    assert factory.calls == [(BASE_URL, RESOLVED_KEY, PASSED_TIMEOUT)]
+    assert handle.client is factory.clients[0]
 
 
 def test_an_empty_registry_is_no_embedding_model_and_builds_nothing__S024_002_DoD2(

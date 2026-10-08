@@ -564,7 +564,9 @@ path prefix**.
   `reachable` / `unreachable` / `auth_failed` / `model_list_empty`; ok =
   `reachable` only. **No "active" column.** Designation **measures** the dimension
   with one real embeddings call and is **independent of `is_enabled`**; the
-  use-time validator needs both. API key never returned; empty/untouched = leave,
+  use-time validator needs **only the designation with its dimension** —
+  `is_enabled` is the chat set only, and an embedding model need not (should not)
+  be enabled (revised 2026-10-08; code pending a plan-006 bug fix). API key never returned; empty/untouched = leave,
   explicit empty string = clear; a non-`$` value is FastAPI's 422. The models
   modal renders `available ∪ already-enabled`, and **a failed probe must not
   disturb the selection** — structurally, because the enabled set rides on the

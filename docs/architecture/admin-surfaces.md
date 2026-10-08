@@ -476,7 +476,10 @@ no-op: with no designation, every semantic path fails as `no_embedding_model`
 rather than substituting a model (R4), because vectors from a different model
 are not comparable with the stored ones (`search-and-retrieval.md`) — and
 re-designating requires a fresh measuring call. Designation is independent of
-`is_enabled` (`data-model.md`'s `models`).
+`is_enabled` (`data-model.md`'s `models`): the embedding model **need not be in
+the enabled (chat) set** and should not be, since `is_enabled` puts a model in the
+chat selector; the use-time validator consults only the designation and its
+measured dimension (revised 2026-10-08).
 
 **DEVIATION — Test connection is its own endpoint and its own action.** See
 decision 5 in `overview.md`. BookWriter tests a connection by reusing the

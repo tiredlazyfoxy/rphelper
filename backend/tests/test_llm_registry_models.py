@@ -1362,33 +1362,90 @@ def test_embedding_validator_raises_with_an_empty_registry__S006_004_DoD19(engin
         _validate_embedding(engine)
 
 
-def test_embedding_validator_raises_when_the_designated_model_is_disabled__S006_004_DoD19(engine: Engine) -> None:
-    """DoD-19 — designated but not enabled raises `no_embedding_model`, even when another enabled
-    model with a dimension exists (the use-time half of D4)."""
-    _new(engine, 1902)
-    _new(engine, 1903)
-    _insert_model(
-        engine, model_id=19021, server_id=1902, name="designated-off", enabled=False, designated=True, dim=768
-    )
-    _insert_model(engine, model_id=19031, server_id=1903, name="enabled-embed", enabled=True, dim=768)
+def test_embedding_validator_raises_when_the_designation_has_no_dimension__S006_004_DoD19(engine: Engine) -> None:
+    """DoD-19 (revised 2026-10-08) — a designated row with no measured `embedding_dim` raises
+    `no_embedding_model`, even when another model carries a dimension (no substitution)."""
+    _new(engine, 1905)
+    _insert_model(engine, model_id=19051, server_id=1905, name="designated-no-dim", enabled=True, designated=True)
+    _insert_model(engine, model_id=19052, server_id=1905, name="measured-other", enabled=True, dim=768)
     with pytest.raises(NoEmbeddingModelError) as caught:
         _validate_embedding(engine)
     assert caught.value.code == "no_embedding_model"
 
 
-def test_disabling_the_designated_model_fails_the_embedding_validator__S006_004_DoD19(
+# Bug fix 2026-10-08 — "no embedding model configured" with a designated, not-enabled model.
+# Spec revision 2026-10-08 (data-model.md `models` designation bullet + "Decision history"):
+# `is_enabled` is chat-set membership only; the embedding validator does not consult it. This
+# supersedes the step's DoD-18 "and that model is enabled" and DoD-19's "designated but not
+# enabled" failure clause.
+
+
+def test_embedding_validator_returns_a_designated_model_that_is_not_enabled__S006_004_DoD18(
+    engine: Engine,
+) -> None:
+    """DoD-18 (revised 2026-10-08) — repro: a designated, NOT enabled model with a measured
+    dimension validates and answers its server, name and dimension."""
+    _new(engine, 1902)
+    _insert_model(
+        engine, model_id=19021, server_id=1902, name="bge-large-en-v1.5.i1-Q6_K",
+        enabled=False, designated=True, dim=1024,
+    )
+
+    result = _validate_embedding(engine)
+
+    assert isinstance(result, DesignatedEmbeddingModel)
+    assert result.model_name == "bge-large-en-v1.5.i1-Q6_K"
+    assert result.embedding_dim == 1024
+    assert result.server.id == 1902
+    assert result.server == _get(engine, 1902)
+
+
+def test_embedding_validator_answers_the_disabled_designation_not_an_enabled_substitute__S006_004_DoD18(
+    engine: Engine,
+) -> None:
+    """DoD-18/DoD-19 (revised 2026-10-08) — designated-but-disabled validates as itself even when
+    another enabled model with a dimension exists elsewhere (no substitution, R4)."""
+    _new(engine, 1906)
+    _new(engine, 1903, name="other host", base_url=OTHER_BASE_URL)
+    _insert_model(
+        engine, model_id=19061, server_id=1906, name="designated-off", enabled=False, designated=True, dim=768
+    )
+    _insert_model(engine, model_id=19031, server_id=1903, name="enabled-embed", enabled=True, dim=384)
+
+    result = _validate_embedding(engine)
+
+    assert (result.server.id, result.model_name, result.embedding_dim) == (1906, "designated-off", 768)
+
+
+def test_designating_without_enabling_passes_the_embedding_validator__S006_004_DoD18(
     engine: Engine, db_settings: Settings
 ) -> None:
-    """DoD-19 — enable, designate, then disable: the designation stays (DoD-7) but use fails."""
+    """DoD-18 + DoD-11 (revised 2026-10-08) — designate a model that was never enabled through the
+    service: it stays not enabled, and the validator answers it with the measured dimension."""
+    _new(engine, 1907)
+    generator = CountingIdGenerator(1_000_201)
+    _designate(engine, generator, 1907, "embed-only", db_settings, dim_factory(1024))
+
+    row = _row(engine, 1907, "embed-only")
+    assert row is not None and row["is_enabled"] is False
+    result = _validate_embedding(engine)
+    assert (result.server.id, result.model_name, result.embedding_dim) == (1907, "embed-only", 1024)
+
+
+def test_disabling_the_designated_model_keeps_the_embedding_validator_passing__S006_004_DoD19(
+    engine: Engine, db_settings: Settings
+) -> None:
+    """DoD-19 (revised 2026-10-08) — enable, designate, then disable: the designation stays
+    (DoD-7) and the validator still answers it, since `is_enabled` is not consulted."""
     _new(engine, 1904)
     generator = CountingIdGenerator(1_000_001)
     _set(engine, generator, 1904, ["embedder", "chat"])
     _designate(engine, generator, 1904, "embedder", db_settings, dim_factory(256))
     assert _validate_embedding(engine).model_name == "embedder"
     _set(engine, generator, 1904, ["chat"])
-    with pytest.raises(NoEmbeddingModelError):
-        _validate_embedding(engine)
     assert _designated_rows(engine) == [(1904, "embedder")]
+    result = _validate_embedding(engine)
+    assert (result.server.id, result.model_name, result.embedding_dim) == (1904, "embedder", 256)
 
 
 # ============================================================================ DoD-20
@@ -1402,17 +1459,19 @@ def _assert_nothing_user_scoped(detail: Any) -> None:
 
 
 def test_no_embedding_model_detail_carries_nothing_user_scoped__S006_004_DoD20(engine: Engine) -> None:
-    """DoD-20 — in both failing cases, `detail` names no user, session, character, memo or count."""
+    """DoD-20 — in both failing cases, `detail` names no user, session, character, memo or count.
+    (Revised 2026-10-08: designated-but-disabled no longer fails, so the second failing case is a
+    designation with no measured dimension.)"""
     with pytest.raises(NoEmbeddingModelError) as no_designation:
         _validate_embedding(engine)
     _assert_nothing_user_scoped(no_designation.value.detail)
 
     _new(engine, 2001)
-    _insert_model(engine, model_id=20011, server_id=2001, name="designated-off", enabled=False, designated=True, dim=8)
-    with pytest.raises(NoEmbeddingModelError) as disabled:
+    _insert_model(engine, model_id=20011, server_id=2001, name="designated-no-dim", enabled=True, designated=True)
+    with pytest.raises(NoEmbeddingModelError) as no_dim:
         _validate_embedding(engine)
-    _assert_nothing_user_scoped(disabled.value.detail)
-    wire = disabled.value.to_wire()
+    _assert_nothing_user_scoped(no_dim.value.detail)
+    wire = no_dim.value.to_wire()
     assert wire is not None
     assert "session" not in json.dumps(wire).lower()
 
