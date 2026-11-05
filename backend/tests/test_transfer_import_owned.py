@@ -1497,3 +1497,152 @@ def test_another_granularity_is_refused_as_wrong__S031_002_DoD11(
     _assert_refusal(REASON_WRONG_GRANULARITY, lambda: _import(engine, USER_C, envelope))
 
     assert _row_counts(engine) == before, "a refusal stores nothing"
+
+
+# =====================================================================================
+# Feature 034, step 001 — session names through the user and character imports.
+#
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# DoD-6 (a renamed session keeps its name through the roleplayer import, US-150.AC-5), DoD-7
+# (a version-1 file whose session rows lack `name` imports with every `name` NULL), DoD-8 /
+# DoD-9 (everything else is still `malformed_payload`), DEC-034-7 and `transfer.md` §
+# "Session names travel". Names are written straight into `sessions.name` in test setup;
+# old → new session ids are paired by ascending id, as this file's correspondence helpers
+# already do. Test names end `__S034_001_DoD<n>`.
+# =====================================================================================
+
+#: Two distinct stored names (non-ASCII), checked exactly after the round trip.
+NAME_A1 = "Le phare — chapitre deux"
+NAME_A3 = "Night watch at the lighthouse"
+
+
+def _store_session_name(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly in test setup."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == session_id).values(name=name)
+        )
+
+
+def _as_version_one(envelope: dict[str, Any]) -> dict[str, Any]:
+    """The version-1 shape of a current export: `schema_version` 1, no `sessions.name`."""
+    envelope["schema_version"] = 1
+    for row in _payload(envelope)[schema.sessions.name]:
+        del row["name"]
+    return envelope
+
+
+def _caller_session_names(engine: Engine, user_id: int) -> dict[int, Any]:
+    """`sessions.name` of every session the user owns, by id."""
+    return {
+        session_id: row["name"]
+        for session_id, row in _stored_rows(engine, schema.sessions).items()
+        if int(row["user_id"]) == user_id
+    }
+
+
+@pytest.mark.parametrize("granularity", ["user", "character"])
+def test_a_renamed_session_keeps_its_name_through_the_owned_import__S034_001_DoD6(
+    engine: Engine, granularity: str
+) -> None:
+    """DoD-6 — US-150.AC-5: renamed sessions exported at user or character granularity and
+    imported keep their names; a never-renamed one stays null."""
+    _store_session_name(engine, SESSION_A1, NAME_A1)
+    _store_session_name(engine, SESSION_A3, NAME_A3)
+    source = _user_envelope(engine) if granularity == "user" else _character_envelope(engine)
+    source_sessions = _rows(source, schema.sessions.name)
+    assert source["schema_version"] == 2
+    expected_names = {int(str(row["id"])): row["name"] for row in source_sessions}
+    assert expected_names[SESSION_A1] == NAME_A1
+    assert expected_names[SESSION_A2] is None
+
+    _import(engine, USER_C, source)
+
+    imported = _caller_session_names(engine, USER_C)
+    pairing = _pairing(source_sessions, imported.keys())
+    for old_id, new_id in pairing.items():
+        assert imported[new_id] == expected_names[old_id], f"session {old_id}"
+
+
+@pytest.mark.parametrize("granularity", ["user", "character"])
+def test_a_version_one_owned_file_imports_every_session_with_name_null__S034_001_DoD7(
+    engine: Engine, granularity: str
+) -> None:
+    """DoD-7 — a version-1 user or character file whose session rows lack `name` imports,
+    and every imported session's `name` is NULL (the source's stored names are not in it)."""
+    _store_session_name(engine, SESSION_A1, NAME_A1)
+    _store_session_name(engine, SESSION_A3, NAME_A3)
+    source = _as_version_one(
+        _user_envelope(engine) if granularity == "user" else _character_envelope(engine)
+    )
+    source_sessions = _rows(source, schema.sessions.name)
+    assert source_sessions and all("name" not in row for row in source_sessions)
+
+    result = _import(engine, USER_C, source)
+
+    assert result.granularity == granularity
+    imported = _caller_session_names(engine, USER_C)
+    assert len(imported) == len(source_sessions)
+    assert all(name is None for name in imported.values())
+
+
+def test_a_version_one_user_file_round_trips_every_other_column__S034_001_DoD7(
+    engine: Engine,
+) -> None:
+    """DoD-7 — the upgrade loses nothing else: a version-1 user file imports the same rows
+    with the same values (every value column but `sessions.name`) as its version-2 twin."""
+    source = _user_envelope(engine)
+    source_payload = _payload(source)
+
+    _import(engine, USER_C, _as_version_one(copy.deepcopy(source)))
+
+    imported_payload = _payload(_user_envelope(engine, USER_C))
+    correspondence = _correspondence_from_payloads(source_payload, imported_payload)
+    # Never-renamed sources: the version-2 twin's `name` is null too, so the full comparison
+    # (which includes `sessions.name`) holds.
+    for table_name in OWNED_TABLES:
+        _assert_table_matches(table_name, source_payload, imported_payload, correspondence, USER_C)
+
+
+def _v1_session_row_carrying_name(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    _row_with_id(envelope, schema.sessions.name, SESSION_A1)["name"] = NAME_A1
+
+
+def _v1_memo_missing_a_column(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    del _row_with_id(envelope, schema.memos.name, MEMO_CHAR_1)["sort_key"]
+
+
+def _v1_character_extra_column(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    _row_with_id(envelope, schema.characters.name, CHAR_A1)["unexpected_column"] = "x"
+
+
+def _v2_session_row_without_name(envelope: dict[str, Any]) -> None:
+    del _row_with_id(envelope, schema.sessions.name, SESSION_A1)["name"]
+
+
+@pytest.mark.parametrize("granularity", ["user", "character"])
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(_v1_session_row_carrying_name, id="DoD8-v1-session-row-carrying-name"),
+        pytest.param(_v1_memo_missing_a_column, id="DoD8-v1-memo-missing-a-column"),
+        pytest.param(_v1_character_extra_column, id="DoD8-v1-character-extra-column"),
+        pytest.param(_v2_session_row_without_name, id="DoD9-v2-session-row-without-name"),
+    ],
+)
+def test_a_column_set_violation_is_still_refused_and_stores_nothing__S034_001_DoD8__S034_001_DoD9(
+    engine: Engine, granularity: str, mutate: Callable[[dict[str, Any]], None]
+) -> None:
+    """DoD-8 / DoD-9 — through the owned import: a version-1 session row carrying `name`, a
+    version-1 missing or extra column on another table, and a version-2 session row without
+    `name` are each `malformed_payload`, and nothing is stored."""
+    envelope = _user_envelope(engine) if granularity == "user" else _character_envelope(engine)
+    mutate(envelope)
+    before = _row_counts(engine)
+
+    _assert_refusal(REASON_MALFORMED_PAYLOAD, lambda: _import(engine, USER_C, envelope))
+
+    assert _row_counts(engine) == before, "a refusal stores nothing"

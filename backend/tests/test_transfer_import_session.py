@@ -1205,3 +1205,137 @@ def test_imported_record_text_is_searchable_and_no_vector_row_appears__S031_003_
         "no session_vec row exists for the new session"
     )
     assert _vector_row_count(engine, MEMO_VEC_TABLE) == 0
+
+
+# =====================================================================================
+# Feature 034, step 001 — session names through the session import.
+#
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# DoD-6 (a renamed session exported and re-imported keeps its name, US-150.AC-5), DoD-7 (a
+# version-1 file whose session row lacks `name` imports with `name` NULL), DoD-8 / DoD-9 (the
+# column-set rule still refuses everything else), DEC-034-7 and `transfer.md` § "Accepted
+# schema versions". The name is written straight into `sessions.name` in test setup. Test
+# names end `__S034_001_DoD<n>`.
+# =====================================================================================
+
+#: A stored session name (non-ASCII), checked exactly after the round trip.
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def _store_session_name(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly in test setup."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == session_id).values(name=name)
+        )
+
+
+def _as_version_one(envelope: dict[str, Any]) -> dict[str, Any]:
+    """The version-1 shape of a current export: `schema_version` 1, no `sessions.name`."""
+    envelope["schema_version"] = 1
+    for row in _payload(envelope)[schema.sessions.name]:
+        del row["name"]
+    return envelope
+
+
+def test_a_renamed_session_keeps_its_name_through_export_and_import__S034_001_DoD6(
+    engine: Engine,
+) -> None:
+    """DoD-6 — US-150.AC-5: a session whose name is stored, exported at session granularity
+    and imported into another character, arrives with exactly that name."""
+    _store_session_name(engine, SESSION_X, STORED_SESSION_NAME)
+    envelope = _session_envelope(engine)
+    assert envelope["schema_version"] == 2
+    assert _only_session_row(envelope)["name"] == STORED_SESSION_NAME
+
+    new_id = _import(engine, USER_A, CHAR_C, envelope)
+
+    assert new_id != SESSION_X
+    assert _stored_row(engine, schema.sessions, new_id)["name"] == STORED_SESSION_NAME
+    assert _stored_row(engine, schema.sessions, SESSION_X)["name"] == STORED_SESSION_NAME
+
+
+def test_a_never_renamed_session_imports_with_name_null__S034_001_DoD6(engine: Engine) -> None:
+    """DoD-6 — a NULL name travels as null and is still "never renamed" on the other side."""
+    envelope = _session_envelope(engine)
+    assert _only_session_row(envelope)["name"] is None
+
+    new_id = _import(engine, USER_A, CHAR_C, envelope)
+
+    assert _stored_row(engine, schema.sessions, new_id)["name"] is None
+
+
+def test_a_version_one_session_file_imports_with_name_null__S034_001_DoD7(engine: Engine) -> None:
+    """DoD-7 — a version-1 session file (its session row lacks `name`) imports, and the new
+    session's `name` is NULL even though the source session carries a name today."""
+    _store_session_name(engine, SESSION_X, STORED_SESSION_NAME)
+    envelope = _as_version_one(_session_envelope(engine))
+    assert "name" not in _only_session_row(envelope)
+    exported_messages = _rows(envelope, schema.messages.name)
+
+    new_id = _import(engine, USER_A, CHAR_C, envelope)
+
+    stored = _stored_row(engine, schema.sessions, new_id)
+    assert stored["name"] is None
+    assert stored["character_id"] == CHAR_C
+    assert stored["last_used_at"] == LAST_USED_AT
+    assert len(_session_messages(engine, new_id)) == len(exported_messages)
+
+
+def test_a_version_one_session_row_carrying_name_is_malformed__S034_001_DoD8(
+    engine: Engine,
+) -> None:
+    """DoD-8 — in a version-1 file a session row that carries `name` is `malformed_payload`,
+    and nothing is stored."""
+    envelope = _session_envelope(engine)
+    envelope["schema_version"] = 1
+    assert "name" in _only_session_row(envelope)
+    counts_before = _row_counts(engine)
+
+    _assert_refusal(REASON_MALFORMED_PAYLOAD, lambda: _import(engine, USER_A, CHAR_C, envelope))
+
+    assert _row_counts(engine) == counts_before
+
+
+def test_a_version_one_session_file_missing_another_column_is_malformed__S034_001_DoD8(
+    engine: Engine,
+) -> None:
+    """DoD-8 — version 1 relaxes only `sessions.name`: a message row missing a column is still
+    `malformed_payload`, and nothing is stored."""
+    envelope = _as_version_one(_session_envelope(engine))
+    del _rows(envelope, schema.messages.name)[0]["text"]
+    counts_before = _row_counts(engine)
+
+    _assert_refusal(REASON_MALFORMED_PAYLOAD, lambda: _import(engine, USER_A, CHAR_C, envelope))
+
+    assert _row_counts(engine) == counts_before
+
+
+def test_a_version_two_session_row_without_name_is_malformed__S034_001_DoD9(
+    engine: Engine,
+) -> None:
+    """DoD-9 — in a version-2 session file a session row without `name` is
+    `malformed_payload`, and nothing is stored."""
+    envelope = _session_envelope(engine)
+    assert envelope["schema_version"] == 2
+    del _only_session_row(envelope)["name"]
+    counts_before = _row_counts(engine)
+
+    _assert_refusal(REASON_MALFORMED_PAYLOAD, lambda: _import(engine, USER_A, CHAR_C, envelope))
+
+    assert _row_counts(engine) == counts_before
+
+
+@pytest.mark.parametrize("value", [0, 3, "2", True], ids=["zero", "three", "string", "boolean"])
+def test_another_schema_version_is_refused_by_the_session_import__S034_001_DoD10(
+    engine: Engine, value: Any
+) -> None:
+    """DoD-10 — the session import refuses `schema_version` 0, 3, a string or a boolean as
+    `schema_mismatch`, and nothing is stored."""
+    envelope = _session_envelope(engine)
+    envelope["schema_version"] = value
+    counts_before = _row_counts(engine)
+
+    _assert_refusal(REASON_SCHEMA_MISMATCH, lambda: _import(engine, USER_A, CHAR_C, envelope))
+
+    assert _row_counts(engine) == counts_before

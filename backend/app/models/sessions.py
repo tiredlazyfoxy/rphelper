@@ -62,12 +62,16 @@ OptionalSnowflakeIn = Annotated[int | None, BeforeValidator(_parse_optional_snow
 
 
 class SessionResponse(BaseModel):
-    """One RP session on the wire. Eight keys, never `user_id`."""
+    """One RP session on the wire. Nine keys, never `user_id`.
+
+    `name` is the roleplayer's own label for the session, `null` when it was never renamed.
+    """
 
     id: SnowflakeOut
     character_id: SnowflakeOut
     setup_id: SnowflakeOut | None
     setup_name: str | None
+    name: str | None
     archived_at: str | None
     last_used_at: str
     created_at: str
@@ -75,7 +79,7 @@ class SessionResponse(BaseModel):
 
 
 class StartedSessionResponse(SessionResponse):
-    """The start-session answer: `SessionResponse`'s eight keys plus `opening_message` (018 D3).
+    """The start-session answer: `SessionResponse`'s nine keys plus `opening_message` (018 D3).
 
     `opening_message` is the seeded zone message, or `None` exactly when none was sent.
     """

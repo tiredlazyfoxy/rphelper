@@ -563,7 +563,9 @@ def test_database_envelope_header_carries_the_declared_values__S030_001_DoD1(
     assert type(envelope["version"]) is int
     assert type(envelope["schema_version"]) is int
     assert envelope["version"] == ENVELOPE_VERSION == 1
-    assert envelope["schema_version"] == SCHEMA_VERSION == 1
+    # Amended by feature 034, step 001 (DoD-5): `sessions.name` bumps the schema version to 2;
+    # the envelope version stays 1.
+    assert envelope["schema_version"] == SCHEMA_VERSION == 2
 
 
 def test_database_envelope_created_at_is_utc_iso_8601_text__S030_001_DoD1(
@@ -895,3 +897,62 @@ def test_export_filename_embeds_no_row_content__S030_001_DoD11() -> None:
     name = export_filename(_filename_envelope())  # type: ignore[arg-type]
     assert FILENAME_PROBE not in name
     assert str(USER_A) not in name
+
+
+# =====================================================================================
+# Feature 034, step 001 — `SCHEMA_VERSION` 2 and `sessions.name` in the export.
+#
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# DoD-5 and `transfer.md` § "Session names travel" (the column-agnostic export picks the
+# column up; a NULL name travels as null). Test names end `__S034_001_DoD<n>`.
+# =====================================================================================
+
+#: A stored session name with non-ASCII text, so the exported value is checked exactly.
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def _store_session_name(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly in test setup."""
+    with engine.begin() as connection:
+        connection.execute(
+            update(schema.sessions).where(schema.sessions.c.id == session_id).values(name=name)
+        )
+
+
+def test_schema_version_is_two__S034_001_DoD5() -> None:
+    """DoD-5 — `SCHEMA_VERSION` is 2 (an int, not a bool)."""
+    assert type(SCHEMA_VERSION) is int
+    assert SCHEMA_VERSION == 2
+
+
+def test_database_export_emits_schema_version_two__S034_001_DoD5(engine: Engine) -> None:
+    """DoD-5 — the database granularity's envelope carries `schema_version` 2."""
+    envelope = _database_envelope(engine)
+    assert type(envelope["schema_version"]) is int
+    assert envelope["schema_version"] == 2
+
+
+def test_database_export_session_rows_carry_name__S034_001_DoD5(engine: Engine) -> None:
+    """DoD-5 — every exported session row has a `name` key: the stored value for a named
+    session, null for a never-renamed one."""
+    _store_session_name(engine, SESSION_A1, STORED_SESSION_NAME)
+
+    sessions = {int(row["id"]): row for row in _payload(engine)["sessions"]}  # type: ignore[arg-type]
+
+    assert set(sessions) == {SESSION_A1, SESSION_A2, SESSION_B1}
+    for row in sessions.values():
+        assert "name" in row
+    assert sessions[SESSION_A1]["name"] == STORED_SESSION_NAME
+    assert sessions[SESSION_A2]["name"] is None
+    assert sessions[SESSION_B1]["name"] is None
+
+
+def test_an_exported_session_name_survives_encoding__S034_001_DoD5(engine: Engine) -> None:
+    """DoD-5 — the stored name is the exact value after `encode_envelope` and `json.loads`."""
+    _store_session_name(engine, SESSION_A1, STORED_SESSION_NAME)
+
+    restored = json.loads(encode_envelope(_database_envelope(engine)).decode("utf-8"))  # type: ignore[arg-type]
+
+    assert restored["schema_version"] == 2
+    names = {int(row["id"]): row["name"] for row in restored["payload"]["sessions"]}
+    assert names[SESSION_A1] == STORED_SESSION_NAME

@@ -247,7 +247,9 @@ setups = Table(
 
 
 #: One RP session — a run under one character (`data-model.md` § `sessions`). Feature `011`'s
-#: D8 declares exactly **eight** of the columns that section names. Deliberately absent:
+#: D8 declares exactly **eight** of the columns that section names. Feature `034` adds the
+#: nullable `name` (the roleplayer's own label for the session; NULL means never renamed; no
+#: default, no index). Deliberately absent:
 #: `title` and `partner_label` (D4 — no product id lets the roleplayer set either, and a
 #: column with no writer would be a stored empty string forever; `session_fts` lands with the
 #: feature that gives a session text). Feature `017` adds the session level of both chains
@@ -304,6 +306,7 @@ sessions = Table(
     Column("tool_web_search", Boolean, nullable=True),
     Column("rp_language", Text, nullable=True),
     Column("preferred_language", Text, nullable=True),
+    Column("name", Text, nullable=True),
     Index("ix_sessions_user_id_character_id", "user_id", "character_id"),
     CheckConstraint(
         "(model_server_id IS NULL AND model_name IS NULL)"

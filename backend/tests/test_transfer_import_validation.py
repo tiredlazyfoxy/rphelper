@@ -800,22 +800,20 @@ def _schema_version_one_higher(envelope: dict[str, Any]) -> None:
     envelope["schema_version"] = SCHEMA_VERSION + 1
 
 
-def _schema_version_one_lower(envelope: dict[str, Any]) -> None:
-    envelope["schema_version"] = SCHEMA_VERSION - 1
-
-
 @pytest.mark.parametrize(
     "mutate",
     [
         pytest.param(_schema_version_one_higher, id="schema-version-one-higher"),
-        pytest.param(_schema_version_one_lower, id="schema-version-one-lower"),
     ],
 )
-def test_unequal_schema_version_is_schema_mismatch__S031_001_DoD3(
+def test_unequal_schema_version_is_schema_mismatch__S031_001_DoD3__S034_001_DoD10(
     engine: Engine, mutate: Mutator
 ) -> None:
-    """DoD-3 — only an equal `schema_version` is accepted: newer **and** older are refused,
-    with everything else in the envelope valid."""
+    """DoD-3 — a newer `schema_version` is refused, with everything else in the envelope valid.
+
+    Amended by feature 034, step 001 (DEC-arch-session-names-7, DEC-034-7): the one-lower case
+    (version 1) is no longer refused — it is the named upgrade, covered by the 034 section at
+    the end of this file, which also covers every other refused version (034/001 DoD-10)."""
     _assert_refused(REASON_SCHEMA_MISMATCH, _mutated(engine, "user", mutate), EXPORT_GRANULARITIES)
 
 
@@ -1259,3 +1257,281 @@ def test_database_export_still_serializes_the_two_fk_less_ids_as_strings__S031_0
     rows = validate_envelope(envelope, frozenset({"database"})).rows
     assert _rows_by_id(rows[schema.memos.name])[MEMO_CHARACTER]["scope_id"] == CHAR_A1
     assert _rows_by_id(rows[schema.characters.name])[CHAR_A1]["model_server_id"] == SERVER_ID
+
+
+# =====================================================================================
+# Feature 034, step 001 — accepted schema versions: 2 (current) and 1 (one named upgrade).
+#
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# DoD-7 .. DoD-10, DEC-034-7, DEC-arch-session-names-7 and `transfer.md` § "Accepted schema
+# versions": version 2 is unchanged (a `sessions` row without `name` is `malformed_payload`);
+# version 1's `sessions` rows lack `name` and import with `name` NULL; nothing else is relaxed
+# (a v1 `sessions` row **carrying** `name` is `malformed_payload`); any other version — 0, 3,
+# a string, a boolean — is `schema_mismatch`. Test names end `__S034_001_DoD<n>`.
+#
+# A "version-1 file" is built from 030's own (version-2) export by setting `schema_version`
+# to 1 and deleting `name` from every `sessions` row — exactly the shape a pre-034 exporter
+# wrote, since `name` is the only column 034 adds.
+# =====================================================================================
+
+ALL_GRANULARITIES = ["database", "user", "character", "session"]
+
+#: A stored name for `SESSION_A1`, so a v2 file's `name` cell is non-null.
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def _store_session_name(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly in test setup."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == session_id).values(name=name)
+        )
+
+
+def _as_version_one(envelope: dict[str, Any]) -> None:
+    """Turn a current export into the version-1 shape: `schema_version` 1, no `sessions.name`."""
+    envelope["schema_version"] = 1
+    for row in _payload(envelope)["sessions"]:
+        del row["name"]
+
+
+def _version_one_envelope(engine: Engine, granularity: ExportGranularity) -> dict[str, Any]:
+    return _mutated(engine, granularity, _as_version_one)
+
+
+# --- DoD-7: a version-1 file imports, every session with `name` None -------------------
+
+
+@pytest.mark.parametrize("granularity", ALL_GRANULARITIES)
+def test_a_version_one_file_validates_with_every_session_name_none__S034_001_DoD7(
+    engine: Engine, granularity: ExportGranularity
+) -> None:
+    """DoD-7 — a version-1 envelope whose session rows lack `name` validates at every
+    granularity, and each deserialized session row carries `name` None (never renamed)."""
+    _store_session_name(engine, SESSION_A1, STORED_SESSION_NAME)
+    body = _version_one_envelope(engine, granularity)
+    assert all("name" not in row for row in _payload(body)["sessions"])
+
+    result = validate_envelope(body, frozenset({granularity}))
+
+    assert isinstance(result, ValidatedExport)
+    assert result.granularity == granularity
+    sessions = result.rows[schema.sessions.name]
+    assert sessions != []
+    for row in sessions:
+        assert "name" in row
+        assert row["name"] is None
+
+
+@pytest.mark.parametrize("granularity", ALL_GRANULARITIES)
+def test_a_version_one_file_keeps_every_other_cell__S034_001_DoD7(
+    engine: Engine, granularity: ExportGranularity
+) -> None:
+    """DoD-7 — the upgrade changes nothing but the absent `name`: every table and every other
+    cell deserializes exactly as the same file at version 2 does."""
+    current = validate_envelope(_envelope(engine, granularity), frozenset({granularity})).rows
+    upgraded = validate_envelope(
+        _version_one_envelope(engine, granularity), frozenset({granularity})
+    ).rows
+
+    assert list(upgraded) == list(current)
+    for table_name, rows in current.items():
+        if table_name != schema.sessions.name:
+            assert upgraded[table_name] == rows, table_name
+            continue
+        assert len(upgraded[table_name]) == len(rows)
+        for before, after in zip(rows, upgraded[table_name], strict=True):
+            assert {k: v for k, v in after.items() if k != "name"} == {
+                k: v for k, v in before.items() if k != "name"
+            }
+            assert set(after) == set(before)
+
+
+# --- DoD-8: version 1 relaxes nothing else ---------------------------------------------
+
+
+def _v1_memo_drop_column(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    del _raw_row(envelope, "memos", MEMO_SESSION)["sort_key"]
+
+
+def _v1_memo_extra_column(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    _raw_row(envelope, "memos", MEMO_SESSION)["unexpected_column"] = "x"
+
+
+def _v1_message_drop_column(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    del _raw_row(envelope, "messages", MESSAGE_ZONE)["text"]
+
+
+def _v1_session_drop_another_column(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    del _raw_row(envelope, "sessions", SESSION_A1)["rp_language"]
+
+
+def _v1_session_extra_column(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    _raw_row(envelope, "sessions", SESSION_A1)["title"] = "x"
+
+
+def _v1_session_carrying_name(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    _raw_row(envelope, "sessions", SESSION_A1)["name"] = None
+
+
+def _v1_session_carrying_a_string_name(envelope: dict[str, Any]) -> None:
+    _as_version_one(envelope)
+    _raw_row(envelope, "sessions", SESSION_A1)["name"] = STORED_SESSION_NAME
+
+
+def _v1_with_every_name_kept(envelope: dict[str, Any]) -> None:
+    """Version 1 declared, but the session rows still carry `name` (the v2 shape)."""
+    envelope["schema_version"] = 1
+
+
+@pytest.mark.parametrize("granularity", ALL_GRANULARITIES)
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(_v1_memo_drop_column, id="v1-memo-missing-a-column"),
+        pytest.param(_v1_memo_extra_column, id="v1-memo-extra-column"),
+        pytest.param(_v1_message_drop_column, id="v1-message-missing-a-column"),
+        pytest.param(_v1_session_drop_another_column, id="v1-session-missing-another-column"),
+        pytest.param(_v1_session_extra_column, id="v1-session-extra-column"),
+        pytest.param(_v1_session_carrying_name, id="v1-session-row-carrying-null-name"),
+        pytest.param(_v1_session_carrying_a_string_name, id="v1-session-row-carrying-a-name"),
+        pytest.param(_v1_with_every_name_kept, id="v1-every-session-row-carrying-name"),
+    ],
+)
+def test_version_one_relaxes_nothing_but_the_absent_session_name__S034_001_DoD8(
+    engine: Engine, granularity: ExportGranularity, mutate: Mutator
+) -> None:
+    """DoD-8 — in a version-1 file a missing or extra column on any other table, any other
+    missing or extra `sessions` column, and a `sessions` row that carries `name` are each
+    `malformed_payload`."""
+    _assert_refused(
+        REASON_MALFORMED_PAYLOAD, _mutated(engine, granularity, mutate), frozenset({granularity})
+    )
+
+
+def test_version_one_user_granularity_keeps_the_users_row_allowance__S034_001_DoD8(
+    engine: Engine,
+) -> None:
+    """DoD-8 — the `users`-row allowance is unchanged at version 1: at `user` granularity the
+    `users` row without 030's excluded columns is accepted, exactly as at version 2."""
+    expected = {column.name for column in schema.users.columns} - set(USER_EXCLUDED_COLUMNS)
+    body = _version_one_envelope(engine, "user")
+    assert set(_raw_row(body, "users", USER_A)) == expected
+
+    rows = validate_envelope(body, frozenset({"user"})).rows
+
+    assert set(rows[schema.users.name][0]) == expected
+
+
+def test_version_one_user_granularity_users_row_with_password_hash_is_malformed__S034_001_DoD8(
+    engine: Engine,
+) -> None:
+    """DoD-8 — at version 1 and `user` granularity a `users` row that includes
+    `password_hash` is still `malformed_payload`."""
+
+    def mutate(envelope: dict[str, Any]) -> None:
+        _as_version_one(envelope)
+        _raw_row(envelope, "users", USER_A)["password_hash"] = PASSWORD_HASH
+
+    _assert_refused(REASON_MALFORMED_PAYLOAD, _mutated(engine, "user", mutate), frozenset({"user"}))
+
+
+def test_version_one_database_users_row_without_password_hash_is_malformed__S034_001_DoD8(
+    engine: Engine,
+) -> None:
+    """DoD-8 — at version 1 and `database` granularity nothing may be omitted from `users`."""
+
+    def mutate(envelope: dict[str, Any]) -> None:
+        _as_version_one(envelope)
+        del _raw_row(envelope, "users", USER_A)["password_hash"]
+
+    _assert_refused(
+        REASON_MALFORMED_PAYLOAD, _mutated(engine, "database", mutate), frozenset({"database"})
+    )
+
+
+# --- DoD-9: version 2 requires `name` ---------------------------------------------------
+
+
+def _v2_session_without_name(envelope: dict[str, Any]) -> None:
+    del _raw_row(envelope, "sessions", SESSION_A1)["name"]
+
+
+def _v2_every_session_without_name(envelope: dict[str, Any]) -> None:
+    for row in _payload(envelope)["sessions"]:
+        del row["name"]
+
+
+@pytest.mark.parametrize("granularity", ALL_GRANULARITIES)
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(_v2_session_without_name, id="one-session-row-without-name"),
+        pytest.param(_v2_every_session_without_name, id="every-session-row-without-name"),
+    ],
+)
+def test_a_version_two_session_row_without_name_is_malformed__S034_001_DoD9(
+    engine: Engine, granularity: ExportGranularity, mutate: Mutator
+) -> None:
+    """DoD-9 — in a version-2 file a `sessions` row without `name` is `malformed_payload`."""
+    body = _mutated(engine, granularity, mutate)
+    assert body["schema_version"] == 2
+
+    _assert_refused(REASON_MALFORMED_PAYLOAD, body, frozenset({granularity}))
+
+
+@pytest.mark.parametrize("granularity", ALL_GRANULARITIES)
+def test_a_version_two_file_with_name_still_validates__S034_001_DoD9(
+    engine: Engine, granularity: ExportGranularity
+) -> None:
+    """DoD-9's premise — the unmutated version-2 file validates and carries the stored name, so
+    the refusal above is about the missing `name`."""
+    _store_session_name(engine, SESSION_A1, STORED_SESSION_NAME)
+    body = _envelope(engine, granularity)
+    assert body["schema_version"] == 2
+
+    rows = validate_envelope(body, frozenset({granularity})).rows
+
+    sessions = _rows_by_id(rows[schema.sessions.name])
+    assert sessions[SESSION_A1]["name"] == STORED_SESSION_NAME
+
+
+# --- DoD-10: every other version is `schema_mismatch` -----------------------------------
+
+
+def _schema_version(value: Any, *, version_one_shape: bool = False) -> Mutator:
+    def mutate(envelope: dict[str, Any]) -> None:
+        if version_one_shape:
+            _as_version_one(envelope)
+        envelope["schema_version"] = value
+
+    return mutate
+
+
+@pytest.mark.parametrize("granularity", ALL_GRANULARITIES)
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(_schema_version(0), id="zero"),
+        pytest.param(_schema_version(3), id="three"),
+        pytest.param(_schema_version("2"), id="string-two"),
+        pytest.param(_schema_version("1", version_one_shape=True), id="string-one"),
+        pytest.param(_schema_version(True), id="boolean-true"),
+        pytest.param(_schema_version(True, version_one_shape=True), id="boolean-true-v1-shape"),
+        pytest.param(_schema_version(False), id="boolean-false"),
+    ],
+)
+def test_any_other_schema_version_is_schema_mismatch__S034_001_DoD10(
+    engine: Engine, granularity: ExportGranularity, mutate: Mutator
+) -> None:
+    """DoD-10 — `schema_version` 0, 3, a string, or a boolean is `schema_mismatch` (a boolean
+    is refused even where its integer value would be an accepted version)."""
+    _assert_refused(
+        REASON_SCHEMA_MISMATCH, _mutated(engine, granularity, mutate), frozenset({granularity})
+    )

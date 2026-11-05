@@ -561,7 +561,7 @@ REASON_UNSUPPORTED_VERSION: Final[ExportInvalidReason] = "unsupported_version"
 """`version` is not an integer equal to 030's `ENVELOPE_VERSION`."""
 
 REASON_SCHEMA_MISMATCH: Final[ExportInvalidReason] = "schema_mismatch"
-"""`schema_version` is not an integer equal to 030's `SCHEMA_VERSION` — newer and older both refuse."""
+"""`schema_version` is not an integer 1 or 2 — version 1 is upgraded on import, anything else refuses."""
 
 REASON_WRONG_GRANULARITY: Final[ExportInvalidReason] = "wrong_granularity"
 """The envelope's granularity is a real one, but not one this route accepts."""

@@ -55,7 +55,7 @@ EXPORT_FORMAT: Final[str] = "rphelper-export"
 ENVELOPE_VERSION: Final[int] = 1
 """The envelope's own format version. Bumped when the envelope shape or a serialization rule changes."""
 
-SCHEMA_VERSION: Final[int] = 1
+SCHEMA_VERSION: Final[int] = 2
 """The registry-shape version. Bumped **by hand** whenever `app.db.schema` changes a table's shape.
 
 Separate from `ENVELOPE_VERSION` on purpose: the two move independently (`context.md`

@@ -51,11 +51,14 @@ LAST_USED_AT = "2026-09-29T12:00:00.000000+00:00"
 ARCHIVED_AT = "2026-10-01T09:00:00.000000+00:00"
 
 # context.md "Wire contract" — `Session` on the wire has exactly these eight keys.
+# Amended by feature 034, step 001 (DoD-2; 034 context.md "Wire shape of a session"): plus
+# `name` — nine keys. The "eight keys" wording in older tests below means exactly `WIRE_KEYS`.
 WIRE_KEYS = {
     "id",
     "character_id",
     "setup_id",
     "setup_name",
+    "name",
     "archived_at",
     "last_used_at",
     "created_at",
@@ -94,6 +97,8 @@ def _response(**overrides: Any) -> SessionResponse:
         "character_id": 7_205_759_403_792_793_601,
         "setup_id": 7_205_759_403_792_793_602,
         "setup_name": "Tavern",
+        # 034/001 DoD-2 — a never-renamed session's `name` is null.
+        "name": None,
         "archived_at": None,
         "last_used_at": LAST_USED_AT,
         "created_at": CREATED_AT,
@@ -474,6 +479,8 @@ def _session_value(**overrides: Any) -> SimpleNamespace:
         "character_id": STARTED_CHARACTER_ID,
         "setup_id": STARTED_SETUP_ID,
         "setup_name": "Tavern",
+        # 034/001 DoD-2 — the service value carries `name` (None = never renamed).
+        "name": None,
         "archived_at": None,
         "last_used_at": LAST_USED_AT,
         "created_at": CREATED_AT,
@@ -507,6 +514,7 @@ EXPECTED_SESSION_WIRE: dict[str, Any] = {
     "character_id": "7250000000000000102",
     "setup_id": "7250000000000000103",
     "setup_name": "Tavern",
+    "name": None,
     "archived_at": None,
     "last_used_at": LAST_USED_AT,
     "created_at": CREATED_AT,
@@ -613,3 +621,78 @@ def test_session_response_still_serialises_exactly_eight_keys__S018_001_DoD6() -
     assert set(payload) == WIRE_KEYS
     assert "opening_message" not in payload
     assert "opening_message" not in SessionResponse.model_fields
+
+
+# ============================================================= 034/001 DoD-2, DoD-3, DoD-4
+# `SessionResponse` gains `name` (string or null); `StartedSessionResponse` inherits it; the
+# start body has no `name` and ignores one sent (034 step 001 Interface intent, US-150.AC-1,
+# US-150.AC-6). Bindings: `## Skeleton` -> Step 001 — `SessionResponse.name: str | None`.
+
+#: A stored name different from the setup name, so the two can never be confused.
+SESSION_NAME = "Le phare — chapitre deux"
+
+
+def test_session_response_declares_name__S034_001_DoD2() -> None:
+    """034/001 DoD-2 — `name` is a field of `SessionResponse` and of `StartedSessionResponse`."""
+    assert "name" in SessionResponse.model_fields
+    assert "name" in StartedSessionResponse.model_fields
+
+
+def test_session_response_serialises_a_null_name_as_null__S034_001_DoD2() -> None:
+    """034/001 DoD-2 — a never-renamed session carries `name: null` on the wire (the server
+    never computes a default label)."""
+    payload = _wire(_response(name=None))
+
+    assert "name" in payload
+    assert payload["name"] is None
+    assert set(payload) == WIRE_KEYS
+
+
+def test_session_response_passes_a_stored_name_through_verbatim__S034_001_DoD4() -> None:
+    """034/001 DoD-4 — a stored name serialises as that exact string, beside a distinct
+    `setup_name`."""
+    payload = _wire(_response(name=SESSION_NAME, setup_name="Tavern"))
+
+    assert payload["name"] == SESSION_NAME
+    assert payload["setup_name"] == "Tavern"
+
+
+def test_session_response_copies_name_from_a_session_value__S034_001_DoD4() -> None:
+    """034/001 DoD-4 — built from a service session value (as the router maps it), `name` is
+    the value's `name`; `setup_name` stays the value's `setup_name`."""
+    named = _wire(SessionResponse.model_validate(_session_value(name=SESSION_NAME), from_attributes=True))
+    unnamed = _wire(SessionResponse.model_validate(_session_value(name=None), from_attributes=True))
+
+    assert named == {**EXPECTED_SESSION_WIRE, "name": SESSION_NAME}
+    assert unnamed == EXPECTED_SESSION_WIRE
+    assert unnamed["name"] is None
+
+
+def test_started_response_carries_name__S034_001_DoD2__S034_001_DoD4() -> None:
+    """034/001 DoD-2 / DoD-4 — `StartedSessionResponse` inherits `name`: null for a new
+    session, and a stored value passes through."""
+    unnamed = _wire(_started_from_attributes(_session_value(name=None), None))
+    named = _wire(_started_from_attributes(_session_value(name=SESSION_NAME), _message_value()))
+
+    assert set(unnamed) == WIRE_KEYS | {"opening_message"}
+    assert unnamed["name"] is None
+    assert named["name"] == SESSION_NAME
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"name": "Chosen at start"},
+        {"name": "Chosen at start", "opening_message": "Hi"},
+        {"name": None, "setup_id": SETUP_ID_TEXT},
+    ],
+    ids=["name-only", "with-opening-message", "with-setup"],
+)
+def test_start_request_ignores_a_name_key__S034_001_DoD3(body: dict[str, Any]) -> None:
+    """034/001 DoD-3 — US-150.AC-6: a `name` key in a start body is ignored (not rejected) and
+    never lands on the parsed request."""
+    request = StartSessionRequest.model_validate(body)
+
+    assert "name" not in StartSessionRequest.model_fields
+    assert not hasattr(request, "name")
+    assert set(request.model_dump()) == {"setup_id", "opening_message"}

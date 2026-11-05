@@ -31,7 +31,7 @@ before the handler runs. Because the parameter carries a default it is declared 
 after the dependencies, the same way `include_archived` is on the two list routes. Since
 `018` (D3) the body may also carry an optional `opening_message`: when present the route
 calls `start_seeded_session`, which creates the session and seeds that text into its zone in
-one transaction; either way the route answers `StartedSessionResponse` — the eight session
+one transaction; either way the route answers `StartedSessionResponse` — the nine session
 keys plus `opening_message`, `null` when none was sent.
 
 **No `PATCH` and no `DELETE` handler exists here** (`context.md` R6, D9). Nothing in this
@@ -88,7 +88,7 @@ router = APIRouter(
 
 def _to_response(session: RpSession) -> SessionResponse:
     """Render one service `RpSession` as the wire shape, timestamps passed through as text."""
-    # `RpSession` is a frozen dataclass carrying exactly the wire's eight fields and no
+    # `RpSession` is a frozen dataclass carrying exactly the wire's nine fields and no
     # `user_id`, so this is a field-for-field read: `from_attributes` takes them off the
     # object, `SnowflakeOut` renders `id`, `character_id` and `setup_id` as decimal strings
     # (a `None` `setup_id` staying JSON `null`), and `archived_at`, `last_used_at`,

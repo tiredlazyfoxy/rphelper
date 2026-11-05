@@ -167,7 +167,8 @@ def deserialize_row(
 
     The row's key set must equal `table`'s column names minus `allow_missing` — a missing column
     and an extra one are both refused. `allow_missing` is 030's `USER_EXCLUDED_COLUMNS` for the
-    `users` row of a `user` envelope, and empty everywhere else.
+    `users` row of a `user` envelope, `name` for a `sessions` row of a version-1 file (DEC-034-7),
+    and empty everywhere else.
 
     Raises `ExportInvalidError(REASON_MALFORMED_PAYLOAD)` for every one of those failures, so
     the caller never learns which column or value was at fault.
@@ -205,7 +206,8 @@ def validate_envelope(body: object, accepted: Collection[ExportGranularity]) -> 
        keys; `format` is not 030's `EXPORT_FORMAT`; `granularity` is not in
        `EXPORT_GRANULARITIES`.
     2. `unsupported_version` — `version` is not an integer equal to `ENVELOPE_VERSION`.
-    3. `schema_mismatch` — `schema_version` is not an integer equal to `SCHEMA_VERSION`.
+    3. `schema_mismatch` — `schema_version` is not an integer equal to `SCHEMA_VERSION` (2) or
+       to 1, the one older shape upgraded on import (DEC-034-7); a boolean never counts.
     4. `wrong_granularity` — the granularity is real but not in `accepted`.
     5. `malformed_payload` — `payload` is not an object; its key set is not
        `GRANULARITY_TABLES[granularity]`; a table's value is not a list; a row fails
@@ -224,11 +226,19 @@ def validate_envelope(body: object, accepted: Collection[ExportGranularity]) -> 
         raise ExportInvalidError(REASON_NOT_AN_EXPORT)
     if not _is_version(body[_KEY_VERSION], ENVELOPE_VERSION):
         raise ExportInvalidError(REASON_UNSUPPORTED_VERSION)
-    if not _is_version(body[_KEY_SCHEMA_VERSION], SCHEMA_VERSION):
+    # Exactly two registry shapes are readable (DEC-034-7): the current one, and version 1, which
+    # predates `sessions.name` and is upgraded row by row in `_deserialize_payload`. Settling the
+    # version to a plain `int` here keeps the raw JSON value out of the deserializer.
+    raw_schema_version = body[_KEY_SCHEMA_VERSION]
+    if _is_version(raw_schema_version, SCHEMA_VERSION):
+        schema_version = SCHEMA_VERSION
+    elif _is_version(raw_schema_version, 1):
+        schema_version = 1
+    else:
         raise ExportInvalidError(REASON_SCHEMA_MISMATCH)
     if granularity not in accepted:
         raise ExportInvalidError(REASON_WRONG_GRANULARITY)
-    return ValidatedExport(granularity, _deserialize_payload(body[_KEY_PAYLOAD], granularity))
+    return ValidatedExport(granularity, _deserialize_payload(body[_KEY_PAYLOAD], granularity, schema_version))
 
 
 _MAX_ID: Final[int] = 2**63 - 1
@@ -283,16 +293,17 @@ def _granularity_of(value: object) -> ExportGranularity | None:
 def _is_version(value: object, expected: int) -> bool:
     """Whether `value` is an integer **equal** to `expected`, a boolean not counting as one.
 
-    Equality only, in both directions: a newer file may carry rules this build does not apply and
-    an older one rules it no longer applies, so neither can be read safely (`context.md`
-    §"The failure contract"). `True` is excluded because `bool` is an `int` subclass and would
-    otherwise pass for version 1.
+    Equality only: a newer file may carry rules this build does not apply, so it cannot be read
+    safely (`context.md` §"The failure contract"). An older schema version is readable only where
+    a named upgrade exists — the caller asks once per version it accepts (`validate_envelope`:
+    `SCHEMA_VERSION` and version 1, DEC-034-7). `True` is excluded because `bool` is an `int`
+    subclass and would otherwise pass for version 1.
     """
     return isinstance(value, int) and not isinstance(value, bool) and value == expected
 
 
 def _deserialize_payload(
-    payload: object, granularity: ExportGranularity
+    payload: object, granularity: ExportGranularity, schema_version: int
 ) -> dict[str, list[ImportRow]]:
     """A raw `payload` as deserialized rows per table, or `malformed_payload`.
 
@@ -301,6 +312,10 @@ def _deserialize_payload(
     order, so the result's keys come out in insert order and the walk hands over the `Table` each
     row is checked against. The `users` row of a `user` envelope is the one row allowed to be
     short, by exactly 030's `USER_EXCLUDED_COLUMNS`.
+
+    `schema_version` is the file's own (1 or 2): for 1 only, a `sessions` row may lack `name`
+    and is imported with `name` NULL; a version-1 row that carries `name`, and a version-2 row
+    that lacks it, are `malformed_payload` (DEC-034-7). Every other column-set rule is unchanged.
 
     Last comes the root count: the granularity's root table holds **exactly one** row, that row
     being the envelope's root. `database` has no root, so nothing is counted for it.
@@ -319,9 +334,19 @@ def _deserialize_payload(
             if granularity == "user" and table.name == schema.users.name
             else ()
         )
-        rows[table.name] = [
+        # The version-1 upgrade (DEC-034-7, DEC-arch-session-names-7): a v1 file predates
+        # `sessions.name`, so its session rows must lack it — through the same exact-key-set
+        # check, a v1 row that carries `name` is an extra column and refused. The absent value
+        # is set to NULL explicitly ("never renamed") rather than left to the writer's default.
+        upgrade_v1_sessions = schema_version == 1 and table.name == schema.sessions.name
+        if upgrade_v1_sessions:
+            allow_missing = (*allow_missing, schema.sessions.c.name.name)
+        deserialized = [
             deserialize_row(table, row, allow_missing=allow_missing) for row in table_rows
         ]
+        if upgrade_v1_sessions:
+            deserialized = [{**row, schema.sessions.c.name.name: None} for row in deserialized]
+        rows[table.name] = deserialized
     root = ROOT_TABLES.get(granularity)
     if root is not None and len(rows[root]) != 1:
         raise ExportInvalidError(REASON_MALFORMED_PAYLOAD)

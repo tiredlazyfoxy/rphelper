@@ -272,6 +272,44 @@ def test_the_database_envelope_carries_the_whole_instances_rows__S030_003_DoD1(
     assert {row["id"] for row in payload["sessions"]} == {str(SESSION_ID)}
 
 
+# --- 034/001 DoD-5: schema version 2, session rows carry `name` -----------------------
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md` DoD-5:
+# `SCHEMA_VERSION` is 2, every export emits it, and every session row carries `name`.
+
+#: A stored session name (non-ASCII), written directly into `sessions.name` in setup.
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def test_the_admin_export_is_version_two_and_carries_a_null_session_name__S034_001_DoD5(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-5 — the database export says `schema_version` 2, and a never-named session row
+    carries `name` as JSON null."""
+    envelope = _export(_administrator(application, db_settings).get(EXPORT_PATH))
+
+    assert envelope["schema_version"] == 2
+    [session_row] = envelope["payload"]["sessions"]
+    assert "name" in session_row
+    assert session_row["name"] is None
+
+
+def test_the_admin_export_carries_a_stored_session_name__S034_001_DoD5(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-5 — a stored session name is exported exactly in the session row's `name`."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update()
+            .where(schema.sessions.c.id == SESSION_ID)
+            .values(name=STORED_SESSION_NAME)
+        )
+
+    envelope = _export(_administrator(application, db_settings).get(EXPORT_PATH))
+
+    [session_row] = envelope["payload"]["sessions"]
+    assert session_row["name"] == STORED_SESSION_NAME
+
+
 # --- DoD-2: the inherited admin guard -------------------------------------------------
 
 

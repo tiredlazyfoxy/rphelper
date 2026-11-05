@@ -621,3 +621,129 @@ def test_the_three_export_routes_still_answer_200__S031_005_DoD11(
     assert _user_envelope(player)["granularity"] == "user"
     assert _character_envelope(player, CHAR_A1)["granularity"] == "character"
     assert _session_envelope(player, SESSION_A)["granularity"] == "session"
+
+
+# ====================================================================== 034/001 DoD-6/7/8/9
+# Feature 034, step 001 — session names through the roleplayer import routes, end to end.
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md` DoD-6
+# (US-150.AC-5: a renamed session exported and re-imported keeps its name), DoD-7 (a
+# version-1 file imports with `name` NULL), DoD-8 / DoD-9 and DEC-034-7. Every envelope comes
+# from 030's own GET routes; the name is written straight into `sessions.name` in setup and
+# read back through the session routes, whose payload carries `name` (034/001 DoD-2).
+
+#: A stored session name (non-ASCII), checked exactly after the round trip.
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+REASON_MALFORMED_PAYLOAD = "malformed_payload"
+
+
+def _store_session_name(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly in test setup."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == session_id).values(name=name)
+        )
+
+
+def _as_version_one(envelope: dict[str, Any]) -> dict[str, Any]:
+    """The version-1 shape of a current export: `schema_version` 1, no `sessions.name`."""
+    envelope["schema_version"] = 1
+    for row in envelope["payload"]["sessions"]:
+        del row["name"]
+    return envelope
+
+
+def _sessions_under(client: TestClient, character_ids: list[str]) -> list[dict[str, Any]]:
+    """Every session (archived included) of the given characters, through the session routes."""
+    sessions: list[dict[str, Any]] = []
+    for character_id in character_ids:
+        response = client.get(
+            f"{CHARACTERS_PATH}/{character_id}/sessions", params={"include_archived": "true"}
+        )
+        assert response.status_code == 200, response.text
+        sessions.extend(response.json()["sessions"])
+    return sessions
+
+
+def test_a_renamed_session_keeps_its_name_through_the_session_import_route__S034_001_DoD6(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-6 — US-150.AC-5: exported through `GET /api/sessions/{id}/export` and posted to
+    `POST /api/characters/{id}/import`, the new session reads back with the stored name."""
+    _store_session_name(engine, SESSION_A, STORED_SESSION_NAME)
+    player = _player_a(application, db_settings)
+    envelope = _session_envelope(player, SESSION_A)
+    assert envelope["schema_version"] == 2
+
+    session_id = _session_import(player.post(_session_import_path(CHAR_A2), json=envelope))
+
+    read_back = player.get(_session_path(session_id))
+    assert read_back.status_code == 200, read_back.text
+    assert read_back.json()["name"] == STORED_SESSION_NAME
+
+
+@pytest.mark.parametrize("granularity", ["user", "character"])
+def test_a_renamed_session_keeps_its_name_through_the_owned_import_route__S034_001_DoD6(
+    application: FastAPI, db_settings: Settings, engine: Engine, granularity: str
+) -> None:
+    """DoD-6 — US-150.AC-5: a user or character export posted to `POST /api/import` creates
+    the session anew, and it reads back with the stored name."""
+    _store_session_name(engine, SESSION_A, STORED_SESSION_NAME)
+    player = _player_a(application, db_settings)
+    envelope = _user_envelope(player) if granularity == "user" else _character_envelope(player, CHAR_A1)
+
+    character_ids = _owned_import(player.post(OWNED_IMPORT_PATH, json=envelope), granularity)
+
+    sessions = _sessions_under(player, character_ids)
+    assert [session["name"] for session in sessions] == [STORED_SESSION_NAME]
+    assert sessions[0]["id"] != str(SESSION_A)
+
+
+def test_a_version_one_session_export_imports_through_the_route_with_name_null__S034_001_DoD7(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-7 — a version-1 session file posted to the session import route answers 200, and
+    the new session reads back with `name` null."""
+    _store_session_name(engine, SESSION_A, STORED_SESSION_NAME)
+    player = _player_a(application, db_settings)
+    envelope = _as_version_one(_session_envelope(player, SESSION_A))
+
+    session_id = _session_import(player.post(_session_import_path(CHAR_A2), json=envelope))
+
+    assert player.get(_session_path(session_id)).json()["name"] is None
+
+
+@pytest.mark.parametrize("granularity", ["user", "character"])
+def test_a_version_one_owned_export_imports_through_the_route_with_name_null__S034_001_DoD7(
+    application: FastAPI, db_settings: Settings, engine: Engine, granularity: str
+) -> None:
+    """DoD-7 — a version-1 user or character file posted to `POST /api/import` answers 200,
+    and every imported session reads back with `name` null."""
+    _store_session_name(engine, SESSION_A, STORED_SESSION_NAME)
+    player = _player_a(application, db_settings)
+    envelope = _user_envelope(player) if granularity == "user" else _character_envelope(player, CHAR_A1)
+    _as_version_one(envelope)
+
+    character_ids = _owned_import(player.post(OWNED_IMPORT_PATH, json=envelope), granularity)
+
+    sessions = _sessions_under(player, character_ids)
+    assert sessions != []
+    assert all(session["name"] is None for session in sessions)
+
+
+def test_column_set_violations_answer_malformed_payload_on_the_routes__S034_001_DoD8__S034_001_DoD9(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-8 / DoD-9 — a version-1 session row carrying `name`, and a version-2 session row
+    without it, each answer 400 `export_invalid` with reason `malformed_payload`."""
+    player = _player_a(application, db_settings)
+
+    v1_with_name = _session_envelope(player, SESSION_A)
+    v1_with_name["schema_version"] = 1
+    _assert_export_invalid(
+        player.post(_session_import_path(CHAR_A2), json=v1_with_name), REASON_MALFORMED_PAYLOAD
+    )
+
+    v2_without_name = _user_envelope(player)
+    for row in v2_without_name["payload"]["sessions"]:
+        del row["name"]
+    _assert_export_invalid(player.post(OWNED_IMPORT_PATH, json=v2_without_name), REASON_MALFORMED_PAYLOAD)

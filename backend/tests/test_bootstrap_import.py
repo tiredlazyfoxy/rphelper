@@ -567,3 +567,99 @@ def test_restore_logs_carry_no_username_or_password__DoD11(
     assert any(_is_bootstrap_record(name, rendered) for name, rendered in success_records), (
         f"no bootstrap log record for the successful restore: {success_records}"
     )
+
+
+# === 034/001 DoD-6 / DoD-7 / DoD-8 ========================================================
+# Feature 034, step 001 — session names through bootstrap-from-export. Expected values come
+# from `docs/plans/034.session-names/001.session-name-column.md` DoD-6 / DoD-7 / DoD-8 and
+# DEC-034-7: a version-1 database file (session rows without `name`) bootstraps with every
+# `name` NULL; a current file keeps a stored name; a version-1 session row carrying `name`
+# is refused and nothing is configured.
+
+#: A session seeded in the source so the restore has a `sessions` row to carry.
+SESSION_ID = SOURCE_BASE + 30
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def _seed_session(engine: Engine, name: str | None) -> None:
+    """Add one session for the seeded character; `name` is written directly (setup only)."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.insert().values(
+                id=SESSION_ID,
+                user_id=PLAYER_ID,
+                character_id=CHARACTER_ID,
+                setup_id=None,
+                archived_at=None,
+                last_used_at=TIMESTAMP,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == SESSION_ID).values(name=name)
+        )
+
+
+def _export_of(engine: Engine) -> dict[str, Any]:
+    with engine.connect() as connection:
+        built = export_database(connection)
+    decoded: dict[str, Any] = json.loads(json.dumps(built))
+    return decoded
+
+
+def _as_version_one(body: dict[str, Any]) -> dict[str, Any]:
+    """The version-1 shape of a current export: `schema_version` 1, no `sessions.name`."""
+    mutated = copy.deepcopy(body)
+    mutated["schema_version"] = 1
+    for row in mutated["payload"]["sessions"]:
+        del row["name"]
+    return mutated
+
+
+def _session_names(engine: Engine) -> dict[int, Any]:
+    with engine.connect() as connection:
+        rows = connection.execute(select(schema.sessions.c.id, schema.sessions.c.name)).all()
+    return {int(row[0]): row[1] for row in rows}
+
+
+def test_bootstrap_from_a_version_one_file_restores_sessions_with_name_null__S034_001_DoD7(
+    client: TestClient, source_engine: Engine, db_engine: Engine
+) -> None:
+    """DoD-7 — a version-1 database file whose session rows lack `name` bootstraps (204), the
+    instance is configured, and the restored session's `name` is NULL."""
+    _seed_session(source_engine, STORED_SESSION_NAME)
+    body = _as_version_one(_export_of(source_engine))
+
+    response = _restore(client, body)
+
+    assert response.status_code == 204, response.text
+    assert _configured(db_engine) is True
+    assert _session_names(db_engine) == {SESSION_ID: None}
+    assert _users(db_engine) == _users(source_engine)
+
+
+def test_bootstrap_from_a_current_file_keeps_a_stored_session_name__S034_001_DoD6(
+    client: TestClient, source_engine: Engine, db_engine: Engine
+) -> None:
+    """DoD-6 — a current (version-2) database file restores a stored session name exactly."""
+    _seed_session(source_engine, STORED_SESSION_NAME)
+    body = _export_of(source_engine)
+    assert body["schema_version"] == 2
+
+    assert _restore(client, body).status_code == 204
+    assert _session_names(db_engine) == {SESSION_ID: STORED_SESSION_NAME}
+
+
+def test_bootstrap_refuses_a_version_one_session_row_carrying_name__S034_001_DoD8(
+    client: TestClient, source_engine: Engine, db_engine: Engine
+) -> None:
+    """DoD-8 — a version-1 file whose session row still carries `name` is `export_invalid`, and
+    the instance stays unconfigured with no `users` table."""
+    _seed_session(source_engine, None)
+    body = _export_of(source_engine)
+    body["schema_version"] = 1
+
+    _assert_error(_restore(client, body), 400, "export_invalid")
+    assert _table_exists(db_engine, "users") is False
+    assert _configured(db_engine) is False

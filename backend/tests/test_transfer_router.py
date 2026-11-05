@@ -713,3 +713,70 @@ def test_earlier_routes_still_answer_with_the_transfer_router_registered__S030_0
     assert session.status_code == 200, session.text
     assert session.json()["id"] == str(SESSION_A)
     assert session.json()["character_id"] == str(CHAR_A)
+
+
+# =====================================================================================
+# Feature 034, step 001 — the roleplayer exports carry `schema_version` 2 and `name`.
+#
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# DoD-5 (every granularity emits `schema_version` 2; every exported session row carries
+# `name`, the stored value or null) and `transfer.md` § "Session names travel". The name is
+# written straight into `sessions.name` in test setup. Test names end `__S034_001_DoD<n>`.
+# =====================================================================================
+
+#: A stored session name (non-ASCII, distinct from every other seeded string).
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def _store_session_name(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly in test setup."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == session_id).values(name=name)
+        )
+
+
+@pytest.mark.parametrize(("path", "granularity"), ROUTE_GRANULARITIES, ids=ROUTE_IDS)
+def test_every_roleplayer_export_emits_schema_version_two__S034_001_DoD5(
+    application: FastAPI, db_settings: Settings, path: str, granularity: str
+) -> None:
+    """DoD-5 — the user, character and session granularities each emit `schema_version` 2."""
+    client = _player_a(application, db_settings)
+
+    envelope = _export(client.get(path), granularity)
+
+    assert type(envelope["schema_version"]) is int
+    assert envelope["schema_version"] == 2
+
+
+@pytest.mark.parametrize(("path", "granularity"), ROUTE_GRANULARITIES, ids=ROUTE_IDS)
+def test_every_exported_session_row_carries_name__S034_001_DoD5(
+    application: FastAPI, db_settings: Settings, engine: Engine, path: str, granularity: str
+) -> None:
+    """DoD-5 — every session row of every roleplayer granularity has a `name` key: the stored
+    value for the named session, null for a never-renamed one."""
+    _store_session_name(engine, SESSION_A, STORED_SESSION_NAME)
+    client = _player_a(application, db_settings)
+
+    rows = _rows(_export(client.get(path), granularity), "sessions")
+
+    assert rows != []
+    by_id = {int(row["id"]): row for row in rows}
+    assert SESSION_A in by_id
+    for row in rows:
+        assert "name" in row
+    assert by_id[SESSION_A]["name"] == STORED_SESSION_NAME
+    if SESSION_A_SIBLING in by_id:
+        assert by_id[SESSION_A_SIBLING]["name"] is None
+
+
+def test_the_user_export_carries_a_null_name_for_a_never_renamed_session__S034_001_DoD5(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-5 — with no name stored, the user export's session rows all carry `name: null`."""
+    client = _player_a(application, db_settings)
+
+    rows = _rows(_export(client.get(USER_EXPORT_PATH), "user"), "sessions")
+
+    assert {int(row["id"]) for row in rows} == {SESSION_A, SESSION_A_SIBLING}
+    assert all(row["name"] is None for row in rows)

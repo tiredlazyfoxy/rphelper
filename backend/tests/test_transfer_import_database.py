@@ -65,6 +65,7 @@ from app.db.search_tables import (
 )
 from app.errors import (
     REASON_MALFORMED_PAYLOAD,
+    REASON_SCHEMA_MISMATCH,
     REASON_WRONG_GRANULARITY,
     DatabaseNotEmptyError,
     ExportInvalidError,
@@ -1360,3 +1361,174 @@ def test_a_new_dimension_is_accepted_after_the_replace__S031_004_DoD12(
     assert _dimension(target_engine, SESSION_VEC_TABLE) == LATER_DIMENSION
     assert _vector_rows(target_engine, MEMO_VEC_TABLE) == []
     assert _vector_rows(target_engine, SESSION_VEC_TABLE) == []
+
+
+# ======================================================================================
+# Feature 034, step 001 — session names through the database replace.
+#
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# DoD-6 (a renamed session keeps its name through the database replace, US-150.AC-5),
+# DoD-7 (a version-1 database file whose session rows lack `name` imports with every `name`
+# NULL), DoD-8 / DoD-9 / DoD-10 (everything else is still refused, and a refusal changes
+# nothing), DEC-034-7 and `transfer.md` § "Accepted schema versions". The name is written
+# straight into the source's `sessions.name`. Test names end `__S034_001_DoD<n>`.
+# ======================================================================================
+
+#: A stored session name (non-ASCII), checked exactly after the replace.
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def _store_session_name(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly in test setup."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == session_id).values(name=name)
+        )
+
+
+def _session_names(engine: Engine) -> dict[int, Any]:
+    """`sessions.name` by session id, read straight from the database."""
+    with engine.connect() as connection:
+        rows = connection.execute(select(schema.sessions.c.id, schema.sessions.c.name)).all()
+    return {int(row[0]): row[1] for row in rows}
+
+
+def _as_version_one(body: dict[str, Any]) -> dict[str, Any]:
+    """The version-1 shape of a current export: `schema_version` 1, no `sessions.name`."""
+    mutated = copy.deepcopy(body)
+    mutated["schema_version"] = 1
+    for row in mutated["payload"][schema.sessions.name]:
+        del row["name"]
+    return mutated
+
+
+def _assert_refused_unchanged(target_engine: Engine, body: dict[str, Any], reason: str) -> None:
+    """The refusal carries exactly `reason`, and the instance is left as it was."""
+    before = _snapshot(target_engine)
+
+    with pytest.raises(ExportInvalidError) as refusal:
+        _run_import(target_engine, body)
+
+    assert refusal.value.reason == reason
+    assert refusal.value.detail == {"reason": reason}
+    assert _snapshot(target_engine) == before
+
+
+def test_a_renamed_session_keeps_its_name_through_the_database_replace__S034_001_DoD6(
+    source_engine: Engine, target_engine: Engine
+) -> None:
+    """DoD-6 — US-150.AC-5: the database replace restores a stored session name exactly, under
+    the session's own id; a never-renamed session stays null."""
+    _store_session_name(source_engine, SRC_SESSION_1, STORED_SESSION_NAME)
+    body = _envelope(source_engine)
+    assert body["schema_version"] == 2
+
+    _run_import(target_engine, body)
+
+    assert _session_names(target_engine) == {
+        SRC_SESSION_1: STORED_SESSION_NAME,
+        SRC_SESSION_2: None,
+    }
+
+
+def test_a_version_one_database_file_imports_every_session_with_name_null__S034_001_DoD7(
+    source_engine: Engine, target_engine: Engine
+) -> None:
+    """DoD-7 — a version-1 database file whose session rows lack `name` replaces the instance,
+    and every restored session's `name` is NULL; every other restored column matches the
+    source."""
+    _store_session_name(source_engine, SRC_SESSION_1, STORED_SESSION_NAME)
+    body = _as_version_one(_envelope(source_engine))
+
+    _run_import(target_engine, body)
+
+    assert _session_names(target_engine) == {SRC_SESSION_1: None, SRC_SESSION_2: None}
+    source_rows = _payload_rows(source_engine)
+    restored_rows = _payload_rows(target_engine)
+    for table in PAYLOAD_TABLES:
+        if table.name != schema.sessions.name:
+            assert restored_rows[table.name] == source_rows[table.name], table.name
+    name_index = [column.name for column in schema.sessions.columns].index("name")
+    without_name = [
+        tuple(value for index, value in enumerate(row) if index != name_index)
+        for row in source_rows[schema.sessions.name]
+    ]
+    assert [
+        tuple(value for index, value in enumerate(row) if index != name_index)
+        for row in restored_rows[schema.sessions.name]
+    ] == without_name
+
+
+def test_a_version_one_database_file_restores_onto_a_blank_database__S034_001_DoD7(
+    source_engine: Engine, blank_engine: Engine
+) -> None:
+    """DoD-7 — the version-1 upgrade also holds for the replace onto a database with no users
+    (the bootstrap shape)."""
+    _run_import(blank_engine, _as_version_one(_envelope(source_engine)))
+
+    assert _session_names(blank_engine) == {SRC_SESSION_1: None, SRC_SESSION_2: None}
+    assert _ids(blank_engine, schema.users) == sorted([SRC_ADMIN, SRC_PLAYER])
+
+
+def _v1_session_row_carrying_name(body: dict[str, Any]) -> dict[str, Any]:
+    mutated = _as_version_one(body)
+    mutated["payload"][schema.sessions.name][0]["name"] = STORED_SESSION_NAME
+    return mutated
+
+
+def _v1_users_row_missing_password_hash(body: dict[str, Any]) -> dict[str, Any]:
+    mutated = _as_version_one(body)
+    del mutated["payload"][schema.users.name][0]["password_hash"]
+    return mutated
+
+
+def _v1_memo_extra_column(body: dict[str, Any]) -> dict[str, Any]:
+    mutated = _as_version_one(body)
+    mutated["payload"][schema.memos.name][0]["unexpected_column"] = "x"
+    return mutated
+
+
+def _v1_session_missing_another_column(body: dict[str, Any]) -> dict[str, Any]:
+    mutated = _as_version_one(body)
+    del mutated["payload"][schema.sessions.name][0]["rp_language"]
+    return mutated
+
+
+def _v2_session_row_without_name(body: dict[str, Any]) -> dict[str, Any]:
+    mutated = copy.deepcopy(body)
+    del mutated["payload"][schema.sessions.name][0]["name"]
+    return mutated
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(_v1_session_row_carrying_name, id="DoD8-v1-session-row-carrying-name"),
+        pytest.param(_v1_users_row_missing_password_hash, id="DoD8-v1-users-row-missing-password_hash"),
+        pytest.param(_v1_memo_extra_column, id="DoD8-v1-memo-extra-column"),
+        pytest.param(_v1_session_missing_another_column, id="DoD8-v1-session-missing-another-column"),
+        pytest.param(_v2_session_row_without_name, id="DoD9-v2-session-row-without-name"),
+    ],
+)
+def test_a_column_set_violation_is_malformed_and_changes_nothing__S034_001_DoD8__S034_001_DoD9(
+    source_engine: Engine, target_engine: Engine, mutate: Any
+) -> None:
+    """DoD-8 / DoD-9 — through the database replace: a version-1 session row carrying `name`,
+    a version-1 `users` row without `password_hash` (nothing may be omitted at database
+    granularity), a version-1 extra or missing column elsewhere, and a version-2 session row
+    without `name` are each `malformed_payload`, and the instance is unchanged."""
+    _assert_refused_unchanged(
+        target_engine, mutate(_envelope(source_engine)), REASON_MALFORMED_PAYLOAD
+    )
+
+
+@pytest.mark.parametrize("value", [0, 3, "2", True], ids=["zero", "three", "string", "boolean"])
+def test_another_schema_version_is_refused_by_the_database_replace__S034_001_DoD10(
+    source_engine: Engine, target_engine: Engine, value: Any
+) -> None:
+    """DoD-10 — `schema_version` 0, 3, a string or a boolean is `schema_mismatch`, and the
+    instance is unchanged."""
+    body = copy.deepcopy(_envelope(source_engine))
+    body["schema_version"] = value
+
+    _assert_refused_unchanged(target_engine, body, REASON_SCHEMA_MISMATCH)

@@ -862,3 +862,58 @@ def test_id_columns_are_decimal_strings_in_the_session_export__S030_002_DoD14(
     `character_id` / `setup_id` refs of UC-064 are still decimal strings, and a null one
     stays null)."""
     _assert_id_columns_are_decimal_strings(engine, _session_envelope(engine))
+
+
+# =====================================================================================
+# Feature 034, step 001 — `schema_version` 2 and `sessions.name` at every owner-scoped
+# granularity. Expected values come from `docs/plans/034.session-names/
+# 001.session-name-column.md` DoD-5 and `transfer.md` § "Session names travel" (the stored
+# value, or null for a never-renamed session). The name is written straight into
+# `sessions.name` in test setup. Test names end `__S034_001_DoD<n>`.
+# =====================================================================================
+
+#: A stored session name (non-ASCII), so the exported value is checked exactly.
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def _store_session_name(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly in test setup."""
+    with engine.begin() as connection:
+        connection.execute(
+            update(schema.sessions).where(schema.sessions.c.id == session_id).values(name=name)
+        )
+
+
+#: The three owner-scoped exports, each bound to owner A's default root.
+_OWNED_ENVELOPES = [
+    pytest.param(_user_envelope, id="user"),
+    pytest.param(_character_envelope, id="character"),
+    pytest.param(_session_envelope, id="session"),
+]
+
+
+@pytest.mark.parametrize("build", _OWNED_ENVELOPES)
+def test_every_owned_export_emits_schema_version_two__S034_001_DoD5(engine: Engine, build: Any) -> None:
+    """DoD-5 — the user, character and session granularities each emit `schema_version` 2."""
+    envelope = build(engine)
+
+    assert type(envelope["schema_version"]) is int
+    assert envelope["schema_version"] == 2
+
+
+@pytest.mark.parametrize("build", _OWNED_ENVELOPES)
+def test_every_owned_export_session_row_carries_name__S034_001_DoD5(engine: Engine, build: Any) -> None:
+    """DoD-5 — every session row carries `name`: `SESSION_A1`'s stored value, null for every
+    never-renamed session."""
+    _store_session_name(engine, SESSION_A1, STORED_SESSION_NAME)
+
+    rows = _payload_of(build(engine))["sessions"]
+
+    assert rows != []
+    for row in rows:
+        assert "name" in row
+        if int(row["id"]) == SESSION_A1:
+            assert row["name"] == STORED_SESSION_NAME
+        else:
+            assert row["name"] is None
+    assert SESSION_A1 in {int(row["id"]) for row in rows}

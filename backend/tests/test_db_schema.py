@@ -25,6 +25,7 @@ from sqlalchemy import (
     Select,
     String,
     Table,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -1504,7 +1505,10 @@ SESSIONS_017_COLUMNS = {
     "rp_language",
     "preferred_language",
 }
-SESSIONS_COLUMNS = SESSIONS_011_COLUMNS | SESSIONS_017_COLUMNS
+# 034/001 DoD-1 (DEC-arch-session-names-1): feature 034 widens `sessions` by one nullable
+# `name` column (NULL = never renamed).
+SESSIONS_034_COLUMNS = {"name"}
+SESSIONS_COLUMNS = SESSIONS_011_COLUMNS | SESSIONS_017_COLUMNS | SESSIONS_034_COLUMNS
 
 # 011/001 DoD-2 — D4 (title/partner_label deferred to the feature that labels a session)
 # and data-model.md `sessions` (no status column). 017/001 DoD-5 removed `rp_language`,
@@ -1596,12 +1600,14 @@ def test_the_011_delta_survives_a_table_a_later_feature_declares__S011_001_DoD1(
 # --- 011/001 DoD-2: exactly eight columns, the primary key and nullability ---------------
 
 
-def test_sessions_has_exactly_the_sixteen_declared_columns__S011_001_DoD2() -> None:
+def test_sessions_has_exactly_the_seventeen_declared_columns__S011_001_DoD2__S034_001_DoD1() -> None:
     """011/001 DoD-2 — exactly id, user_id, character_id, setup_id, last_used_at, archived_at,
     created_at, updated_at.
 
     017/001 DoD-5 — amended deliberately from eight to sixteen: plus model_server_id,
     model_name, system_prompt, the three tool_* columns, rp_language, preferred_language.
+
+    034/001 DoD-1 — amended deliberately from sixteen to seventeen: plus `name`.
     """
     names = [column.name for column in _sessions().columns]
     assert len(names) == len(set(names))
@@ -2679,9 +2685,11 @@ def test_characters_new_columns_are_nullable_without_default_or_fk_in_a_real_dat
 # --- 017/001 DoD-2: `sessions` gains the six plus the two languages ------------------------
 
 
-def test_sessions_has_exactly_the_011_columns_plus_the_eight_new_ones__S017_001_DoD2() -> None:
+def test_sessions_has_exactly_the_011_columns_plus_the_eight_new_ones__S017_001_DoD2__S034_001_DoD1() -> None:
     """017/001 DoD-2 — the eight existing columns plus model_server_id, model_name,
-    system_prompt, the three tool_* columns, rp_language and preferred_language."""
+    system_prompt, the three tool_* columns, rp_language and preferred_language.
+
+    034/001 DoD-1 — amended: plus 034's `name`."""
     names = [column.name for column in _sessions().columns]
     assert len(names) == len(set(names))
     assert set(names) == {
@@ -2701,6 +2709,7 @@ def test_sessions_has_exactly_the_011_columns_plus_the_eight_new_ones__S017_001_
         "tool_web_search",
         "rp_language",
         "preferred_language",
+        "name",
     }
 
 
@@ -2750,7 +2759,8 @@ def test_sessions_new_columns_are_nullable_without_default_or_fk_in_a_real_datab
     with _seeded_017_connection(db_engine) as connection:
         info = connection.execute(text("PRAGMA table_info(sessions)")).all()
         by_name = {row[1]: row for row in info}
-        assert set(by_name) == SESSIONS_011_COLUMNS | set(SESSIONS_NEW_017_COLUMNS)
+        # 034/001 DoD-1 — amended: the created table also carries 034's `name`.
+        assert set(by_name) == SESSIONS_011_COLUMNS | set(SESSIONS_NEW_017_COLUMNS) | SESSIONS_034_COLUMNS
         for column in SESSIONS_NEW_017_COLUMNS:
             assert by_name[column][3] == 0, column
             assert by_name[column][4] is None, column
@@ -2843,8 +2853,10 @@ def test_forbidden_characters_columns_dropped_only_system_prompt__S017_001_DoD5(
     assert set(FORBIDDEN_CHARACTERS_COLUMNS) == {"model_ref", "tools", "rp_language", "preferred_language"}
 
 
-def test_sessions_column_set_was_widened_not_replaced__S017_001_DoD5() -> None:
-    """017/001 DoD-5 — the amended `SESSIONS_COLUMNS` is 011's eight plus 017's eight."""
+def test_sessions_column_set_was_widened_not_replaced__S017_001_DoD5__S034_001_DoD1() -> None:
+    """017/001 DoD-5 — the amended `SESSIONS_COLUMNS` is 011's eight plus 017's eight.
+
+    034/001 DoD-1 — amended again: plus 034's one (`name`), seventeen in all."""
     assert SESSIONS_011_COLUMNS == {
         "id",
         "user_id",
@@ -2855,8 +2867,8 @@ def test_sessions_column_set_was_widened_not_replaced__S017_001_DoD5() -> None:
         "created_at",
         "updated_at",
     }
-    assert SESSIONS_COLUMNS == SESSIONS_011_COLUMNS | set(SESSIONS_NEW_017_COLUMNS)
-    assert len(SESSIONS_COLUMNS) == 16
+    assert SESSIONS_COLUMNS == SESSIONS_011_COLUMNS | set(SESSIONS_NEW_017_COLUMNS) | {"name"}
+    assert len(SESSIONS_COLUMNS) == 17
 
 
 def test_forbidden_sessions_columns_dropped_only_the_three_017_declares__S017_001_DoD5() -> None:
@@ -3089,3 +3101,65 @@ def test_every_earlier_later_features_set_now_names_translations__S023_001_DoD3(
     assert "translations" in LATER_THAN_012_TABLES
     assert "translations" in LATER_THAN_015_TABLES
     assert "translations" not in PRE_023_TABLES
+
+
+# ======================================================================================
+# Feature 034, step 001 (`001.session-name-column.md`) — `sessions` gains `name`. Expected
+# values come from DoD-1, data-model.md § `sessions` and DEC-arch-session-names-1: nullable
+# text, no default of either kind, no index (NULL = never renamed). The exact column sets
+# above were amended in place with the chained `__S034_001_DoD1` suffix. No table is added.
+# Tests are suffixed `__S034_001_DoD<n>`.
+# ======================================================================================
+
+
+def test_sessions_declares_a_name_column__S034_001_DoD1() -> None:
+    """034/001 DoD-1 — the registry's `sessions` table declares `name`."""
+    assert "name" in _sessions().c
+
+
+def test_sessions_name_is_text__S034_001_DoD1() -> None:
+    """034/001 DoD-1 — `name` is a text column."""
+    assert isinstance(_sessions().c["name"].type, Text)
+
+
+def test_sessions_name_is_nullable__S034_001_DoD1() -> None:
+    """034/001 DoD-1 — `name` is nullable (NULL = never renamed)."""
+    assert _sessions().c["name"].nullable is True
+
+
+def test_sessions_name_declares_no_default__S034_001_DoD1() -> None:
+    """034/001 DoD-1 — `name` carries no default of either kind."""
+    assert _sessions().c["name"].default is None
+    assert _sessions().c["name"].server_default is None
+
+
+def test_sessions_name_declares_no_index_or_foreign_key__S034_001_DoD1() -> None:
+    """034/001 DoD-1 — Interface intent: no index on `name`, and it references no table."""
+    assert not any("name" in {c.name for c in index.columns} for index in _sessions().indexes)
+    assert not _sessions().c["name"].foreign_keys
+
+
+def test_sessions_name_is_nullable_text_without_default_in_a_real_database__S034_001_DoD1(
+    db_engine: Engine,
+) -> None:
+    """034/001 DoD-1 — the created SQLite `sessions` table agrees: `name` is TEXT, carries no NOT
+    NULL flag and no default, and a session inserted without it reads `name` NULL."""
+    with _seeded_sessions_connection(db_engine) as connection:
+        info = connection.execute(text("PRAGMA table_info(sessions)")).all()
+        # PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
+        by_name = {row[1]: row for row in info}
+        assert str(by_name["name"][2]).upper() == "TEXT"
+        assert by_name["name"][3] == 0
+        assert by_name["name"][4] is None
+
+        connection.execute(RAW_SESSIONS_INSERT, _raw_sessions_row(id=340, user_id=1, character_id=10))
+        connection.commit()
+        stored = connection.execute(text("SELECT name FROM sessions WHERE id = 340")).scalar_one()
+        assert stored is None
+
+
+def test_forbidden_sessions_columns_still_name_title_not_name__S034_001_DoD1() -> None:
+    """034/001 DoD-1 — `name` is the label column; `title` and `partner_label` stay forbidden."""
+    assert "name" not in FORBIDDEN_SESSIONS_COLUMNS
+    assert "title" in FORBIDDEN_SESSIONS_COLUMNS
+    assert "partner_label" in FORBIDDEN_SESSIONS_COLUMNS

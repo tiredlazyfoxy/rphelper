@@ -1350,3 +1350,138 @@ def test_the_service_imports_only_the_zone_helper_and_message_type_and_no_fastap
     assert names_from_messages == {"insert_zone_message", "StreamMessage"}
     assert module_imports_of_messages == []
     assert fastapi_imports == []
+
+
+# =========================================================================================
+# Feature 034, step 001 — `RpSession` carries the session's stored `name`.
+#
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# (Interface intent: every service read that returns a session — list, character list, get,
+# archive, restore, start, start-seeded — fills `name`; the joined setup name stays
+# distinguishable; DoD-2, DoD-3, DoD-4) and DEC-034-6 / DEC-arch-session-names-1 (NULL =
+# never renamed). Binding: `## Skeleton` -> Step 001 — `RpSession.name: str | None`. A stored
+# name is written straight into `sessions.name` in test setup. Test names end
+# `__S034_001_DoD<n>`.
+# =========================================================================================
+
+#: A stored name deliberately different from every seeded setup name, so a mix-up of the two
+#: joined columns cannot pass.
+STORED_NAME = "Night watch at the lighthouse"
+
+
+def _store_name(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly (DoD-4: "written directly in test setup")."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == session_id).values(name=name)
+        )
+
+
+def _only(values: list[RpSession], session_id: int) -> RpSession:
+    matched = [value for value in values if value.id == session_id]
+    assert len(matched) == 1
+    return matched[0]
+
+
+# --- DoD-2 / DoD-3: a new session's `name` is None ------------------------------------------
+
+
+def test_start_returns_a_session_with_name_none__S034_001_DoD2__S034_001_DoD3(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-2 / DoD-3 — US-150.AC-1, AC-6: `start_session` needs no name and returns `name` None,
+    with or without a setup."""
+    without_setup = _start(engine, generator, USER_A, CHAR_A1)
+    with_setup = _start(engine, generator, USER_A, CHAR_A1, SETUP_A1)
+
+    assert without_setup.name is None
+    assert with_setup.name is None
+    assert with_setup.setup_name == SETUP_A1_NAME
+    assert _stored_session_row(engine, without_setup.id)["name"] is None
+    assert _stored_session_row(engine, with_setup.id)["name"] is None
+
+
+def test_start_seeded_returns_a_session_with_name_none__S034_001_DoD2__S034_001_DoD3(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-2 / DoD-3 — US-150.AC-1, AC-6: `start_seeded_session` needs no name and its session
+    carries `name` None."""
+    started = _seed(engine, generator, USER_A, CHAR_A1, OPENING_TEXT, SETUP_A1)
+
+    assert started.session.name is None
+    assert started.session.setup_name == SETUP_A1_NAME
+    assert _stored_session_row(engine, started.session.id)["name"] is None
+
+
+def test_every_read_of_a_new_session_has_name_none__S034_001_DoD2(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-2 — list, character list, get, archive and restore all return `name` None for a
+    never-renamed session."""
+    created = _start(engine, generator, USER_A, CHAR_A1, SETUP_A1)
+
+    assert _only(_list(engine, USER_A), created.id).name is None
+    assert _only(_list_character(engine, USER_A, CHAR_A1), created.id).name is None
+    assert _get(engine, USER_A, created.id).name is None
+    assert _archive(engine, USER_A, created.id).name is None
+    assert _restore(engine, USER_A, created.id).name is None
+
+
+# --- DoD-4: a stored name comes back exactly on every read ----------------------------------
+
+
+def test_every_read_returns_the_stored_name__S034_001_DoD4(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-4 — a stored `name` comes back exactly from list, character list, get, archive (and
+    the archived listings) and restore; `setup_name` still carries the setup's name."""
+    created = _start(engine, generator, USER_A, CHAR_A1, SETUP_A1)
+    _store_name(engine, created.id, STORED_NAME)
+
+    reads = [
+        _only(_list(engine, USER_A), created.id),
+        _only(_list_character(engine, USER_A, CHAR_A1), created.id),
+        _get(engine, USER_A, created.id),
+    ]
+    archived = _archive(engine, USER_A, created.id)
+    reads += [
+        archived,
+        _only(_list_all(engine, USER_A), created.id),
+        _only(_list_character_all(engine, USER_A, CHAR_A1), created.id),
+    ]
+    reads.append(_restore(engine, USER_A, created.id))
+
+    for read in reads:
+        assert isinstance(read, RpSession)
+        assert read.name == STORED_NAME
+        assert read.setup_name == SETUP_A1_NAME
+
+
+def test_a_stored_name_on_a_session_without_a_setup_reads_back__S034_001_DoD4(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-4 — the session's own `name` is read even when there is no setup to join
+    (`setup_name` stays None)."""
+    created = _start(engine, generator, USER_A, CHAR_A1)
+    _store_name(engine, created.id, STORED_NAME)
+
+    read = _get(engine, USER_A, created.id)
+
+    assert read.name == STORED_NAME
+    assert read.setup_id is None
+    assert read.setup_name is None
+
+
+def test_a_stored_name_belongs_to_its_session_only__S034_001_DoD4(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-4 — of two sessions under one character, only the one whose name is stored
+    carries it."""
+    named = _start(engine, generator, USER_A, CHAR_A1)
+    unnamed = _start(engine, generator, USER_A, CHAR_A1)
+    _store_name(engine, named.id, STORED_NAME)
+
+    listing = _list_character(engine, USER_A, CHAR_A1)
+
+    assert _only(listing, named.id).name == STORED_NAME
+    assert _only(listing, unnamed.id).name is None

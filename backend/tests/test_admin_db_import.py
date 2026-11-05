@@ -39,7 +39,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection, Engine, Table
+from sqlalchemy import Connection, Engine, Table, select
 
 from app.config import Settings, get_settings
 from app.db import schema
@@ -482,3 +482,74 @@ def test_the_admin_drift_report_route_still_answers_200__S031_005_DoD11(
 
     assert response.status_code == 200, response.text
     assert isinstance(response.json(), dict)
+
+
+# ====================================================================== 034/001 DoD-6/7
+# Feature 034, step 001 — session names through the admin database replace route. Expected
+# values come from `docs/plans/034.session-names/001.session-name-column.md` DoD-6 (a renamed
+# session keeps its name through the database replace, US-150.AC-5) and DoD-7 (a version-1
+# database file imports with every session `name` NULL). The other instance gets one session
+# whose `name` is written directly in setup; the envelope comes from 030's own GET route.
+
+OTHER_SESSION_ID = BASE + 111
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def _add_named_session(engine: Engine, name: str | None) -> None:
+    """One session for the other instance's character, with `name` written directly."""
+    _insert(
+        engine,
+        schema.sessions,
+        id=OTHER_SESSION_ID,
+        user_id=OTHER_PLAYER_ID,
+        character_id=OTHER_CHARACTER_ID,
+        setup_id=None,
+        archived_at=None,
+        last_used_at=TIMESTAMP,
+        created_at=TIMESTAMP,
+        updated_at=TIMESTAMP,
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == OTHER_SESSION_ID).values(name=name)
+        )
+
+
+def _session_names(engine: Engine) -> dict[int, Any]:
+    with engine.connect() as connection:
+        rows = connection.execute(select(schema.sessions.c.id, schema.sessions.c.name)).all()
+    return {int(row[0]): row[1] for row in rows}
+
+
+def test_a_renamed_session_keeps_its_name_through_the_admin_replace__S034_001_DoD6(
+    eligible_application: FastAPI, db_settings: Settings, eligible_engine: Engine, tmp_path: Path
+) -> None:
+    """DoD-6 — US-150.AC-5: a version-2 database export carrying a stored session name replaces
+    the instance (204), and the restored session has that exact name."""
+    other = _other_instance(db_settings, tmp_path)
+    _add_named_session(other, STORED_SESSION_NAME)
+    envelope = _envelope_from_other_instance(eligible_application, db_settings, other)
+    assert envelope["schema_version"] == 2
+
+    response = _admin(eligible_application, db_settings).post(IMPORT_PATH, json=envelope)
+
+    assert response.status_code == 204, response.text
+    assert _session_names(eligible_engine) == {OTHER_SESSION_ID: STORED_SESSION_NAME}
+
+
+def test_a_version_one_database_file_replaces_with_session_name_null__S034_001_DoD7(
+    eligible_application: FastAPI, db_settings: Settings, eligible_engine: Engine, tmp_path: Path
+) -> None:
+    """DoD-7 — a version-1 database file whose session rows lack `name` replaces the instance
+    (204), and the restored session's `name` is NULL."""
+    other = _other_instance(db_settings, tmp_path)
+    _add_named_session(other, STORED_SESSION_NAME)
+    envelope = _envelope_from_other_instance(eligible_application, db_settings, other)
+    envelope["schema_version"] = 1
+    for row in envelope["payload"]["sessions"]:
+        del row["name"]
+
+    response = _admin(eligible_application, db_settings).post(IMPORT_PATH, json=envelope)
+
+    assert response.status_code == 204, response.text
+    assert _session_names(eligible_engine) == {OTHER_SESSION_ID: None}

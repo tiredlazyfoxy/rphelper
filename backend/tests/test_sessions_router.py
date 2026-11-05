@@ -63,19 +63,23 @@ UNKNOWN_SESSION_ID = "7250000000000000002"
 UNKNOWN_SETUP_ID = "7250000000000000003"
 
 #: The ``Session`` wire object's keys, from the feature context's Wire contract. Never ``user_id``.
+#: Amended by feature 034, step 001 (DoD-2; 034 ``context.md`` "Wire shape of a session"): plus
+#: ``name`` — nine keys. The tests' "eight keys" wording below predates the amendment and
+#: means exactly ``SESSION_KEYS``.
 SESSION_KEYS = {
     "id",
     "character_id",
     "setup_id",
     "setup_name",
+    "name",
     "archived_at",
     "last_used_at",
     "created_at",
     "updated_at",
 }
 
-#: 018 D3 / Wire contract: the start route answers ``StartedSession`` — the eight session
-#: keys plus ``opening_message``. Every other session route keeps exactly ``SESSION_KEYS``.
+#: 018 D3 / Wire contract: the start route answers ``StartedSession`` — the session keys
+#: plus ``opening_message``. Every other session route keeps exactly ``SESSION_KEYS``.
 STARTED_SESSION_KEYS = SESSION_KEYS | {"opening_message"}
 
 #: 012's eight-key ``Message`` wire shape, cited by 018's Wire contract.
@@ -379,6 +383,8 @@ def _assert_wire_shape(session: dict[str, Any]) -> None:
     assert session["character_id"].isdigit()
     assert session["setup_id"] is None or (isinstance(session["setup_id"], str) and session["setup_id"].isdigit())
     assert session["setup_name"] is None or isinstance(session["setup_name"], str)
+    # 034/001 DoD-2 — `name` is a string, or null when never renamed.
+    assert session["name"] is None or isinstance(session["name"], str)
     assert session["archived_at"] is None or TIMESTAMP_PATTERN.match(session["archived_at"]) is not None
     assert TIMESTAMP_PATTERN.match(session["last_used_at"]) is not None
     assert TIMESTAMP_PATTERN.match(session["created_at"]) is not None
@@ -1204,3 +1210,220 @@ def test_an_archived_setup_with_an_opening_message_answers_409_and_creates_nothi
     assert _character_sessions(client, character["id"], include_archived=True) == before
     assert _count_rows(engine, schema.sessions) == sessions_before
     assert _count_rows(engine, schema.messages) == messages_before
+
+
+# =====================================================================================
+# Feature 034, step 001 — every session payload carries `name`.
+#
+# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# (DoD-2, DoD-3, DoD-4) and the feature `context.md` ("Wire shape of a session": `name` is a
+# string, or null when never renamed; the server never computes a default label). US-150.AC-1,
+# US-150.AC-6. A stored name is written straight into `sessions.name` in test setup — there is
+# no rename route in this step. Test names end `__S034_001_DoD<n>`.
+# =====================================================================================
+
+#: A stored session name with non-ASCII text, so an exact-value read-back is meaningful.
+STORED_SESSION_NAME = "Le phare — chapitre deux"
+
+
+def _store_session_name(engine: Engine, session_id: str, name: str | None) -> None:
+    """Write `sessions.name` directly (DoD-4: "written directly in test setup")."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.sessions.update().where(schema.sessions.c.id == int(session_id)).values(name=name)
+        )
+
+
+def _stored_session_name(engine: Engine, session_id: str) -> Any:
+    with engine.connect() as connection:
+        return connection.execute(
+            select(schema.sessions.c.name).where(schema.sessions.c.id == int(session_id))
+        ).scalar_one()
+
+
+def _matching(rows: list[dict[str, Any]], session_id: str) -> dict[str, Any]:
+    matched = [row for row in rows if row["id"] == session_id]
+    assert len(matched) == 1
+    return matched[0]
+
+
+# --- DoD-2: a new session reads `name` null on every payload ------------------------------
+
+
+@pytest.mark.parametrize("body", [_OMITTED, {}], ids=["no-body", "empty-object"])
+def test_the_start_answer_carries_name_null__S034_001_DoD2(
+    application: FastAPI, db_settings: Settings, body: Any
+) -> None:
+    """DoD-2 — US-150.AC-1: `POST /api/characters/{id}/sessions` answers `name: null`."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+
+    started = _start_started(client, character["id"], body)
+
+    _assert_started_wire_shape(started)
+    assert "name" in started
+    assert started["name"] is None
+
+
+def test_the_create_and_seed_answer_carries_name_null__S034_001_DoD2(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-2 — US-150.AC-1: the create-and-seed answer (start with `opening_message`) carries
+    `name: null` beside its opening message."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+
+    started = _start_started(client, character["id"], {"opening_message": OPENING_TEXT})
+
+    _assert_started_wire_shape(started)
+    assert started["name"] is None
+    assert started["opening_message"] is not None
+
+
+def test_every_read_of_a_new_session_carries_name_null__S034_001_DoD2(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-2 — US-150.AC-1: `GET /api/sessions`, `GET /api/characters/{id}/sessions`,
+    `GET /api/sessions/{id}`, archive and restore all carry `name: null` for a new session."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+
+    for row in (
+        _matching(_all_sessions(client), session_id),
+        _matching(_character_sessions(client, character["id"]), session_id),
+        _read_session(client, session_id),
+    ):
+        _assert_wire_shape(row)
+        assert row["name"] is None
+
+    archived = _archive_session(client, session_id)
+    assert archived.status_code == 200, archived.text
+    _assert_wire_shape(archived.json())
+    assert archived.json()["name"] is None
+    assert _matching(_all_sessions(client, include_archived=True), session_id)["name"] is None
+
+    restored = _restore_session(client, session_id)
+    assert restored.status_code == 200, restored.text
+    _assert_wire_shape(restored.json())
+    assert restored.json()["name"] is None
+
+
+def test_a_new_session_with_a_setup_still_carries_name_null__S034_001_DoD2(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-2 — the setup's name travels as `setup_name`, never as the session's `name`."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    setup = _create_setup(client, character["id"], "Tavern", "# Night")
+
+    started = _start_started(client, character["id"], {"setup_id": setup["id"]})
+
+    assert started["setup_name"] == setup["name"]
+    assert started["name"] is None
+    read_back = _read_session(client, started["id"])
+    assert read_back["setup_name"] == setup["name"]
+    assert read_back["name"] is None
+
+
+# --- DoD-3: starting needs no name, and a sent `name` is ignored --------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"name": "Chosen at start"},
+        {"name": "Chosen at start", "opening_message": OPENING_TEXT},
+    ],
+    ids=["plain-start", "create-and-seed"],
+)
+def test_a_name_in_the_start_body_is_ignored__S034_001_DoD3(
+    application: FastAPI, db_settings: Settings, engine: Engine, body: dict[str, Any]
+) -> None:
+    """DoD-3 — US-150.AC-6: a `name` key in a start body (either start) is ignored: 201, the
+    answer carries `name: null`, the stored column is NULL and the read-back is null."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+
+    response = _start_request(client, character["id"], body)
+
+    assert response.status_code == 201, response.text
+    started = response.json()
+    _assert_started_wire_shape(started)
+    assert started["name"] is None
+    assert _stored_session_name(engine, started["id"]) is None
+    assert _read_session(client, started["id"])["name"] is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [_OMITTED, {}, {"opening_message": OPENING_TEXT}],
+    ids=["no-body", "empty-object", "create-and-seed"],
+)
+def test_starting_needs_no_name__S034_001_DoD3(
+    application: FastAPI, db_settings: Settings, engine: Engine, body: Any
+) -> None:
+    """DoD-3 — US-150.AC-6: starting either way with no name succeeds and stores `name` NULL."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+
+    response = _start_request(client, character["id"], body)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["name"] is None
+    assert _stored_session_name(engine, response.json()["id"]) is None
+
+
+# --- DoD-4: a stored name reads back exactly on every payload ------------------------------
+
+
+def test_a_stored_name_reads_back_on_every_session_read__S034_001_DoD4(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-4 — a session whose `name` is stored returns that exact value from both listings,
+    the single read, archive (and the archived listing) and restore."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    setup = _create_setup(client, character["id"], "Tavern", "# Night")
+    session_id = _start(client, character["id"], {"setup_id": setup["id"]})["id"]
+    _store_session_name(engine, session_id, STORED_SESSION_NAME)
+
+    for row in (
+        _matching(_all_sessions(client), session_id),
+        _matching(_character_sessions(client, character["id"]), session_id),
+        _read_session(client, session_id),
+    ):
+        _assert_wire_shape(row)
+        assert row["name"] == STORED_SESSION_NAME
+        # The joined setup name stays distinguishable from the session's own name.
+        assert row["setup_name"] == setup["name"]
+
+    archived = _archive_session(client, session_id)
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["name"] == STORED_SESSION_NAME
+    assert _matching(_all_sessions(client, include_archived=True), session_id)["name"] == STORED_SESSION_NAME
+    assert (
+        _matching(_character_sessions(client, character["id"], include_archived=True), session_id)["name"]
+        == STORED_SESSION_NAME
+    )
+
+    restored = _restore_session(client, session_id)
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["name"] == STORED_SESSION_NAME
+
+
+def test_a_stored_name_is_per_session__S034_001_DoD4(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-4 — only the session whose name is stored carries it; its sibling stays null."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    named_id = _start(client, character["id"], {})["id"]
+    unnamed_id = _start(client, character["id"], {})["id"]
+    _store_session_name(engine, named_id, STORED_SESSION_NAME)
+
+    rows = _character_sessions(client, character["id"])
+
+    assert _matching(rows, named_id)["name"] == STORED_SESSION_NAME
+    assert _matching(rows, unnamed_id)["name"] is None
+    assert _read_session(client, unnamed_id)["name"] is None

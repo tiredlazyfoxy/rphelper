@@ -78,16 +78,22 @@ NOT_COPIED_COLUMNS = (
     "preferred_language",
 )
 
-#: RpSession's eight fields, in order (011's frozen value).
-RP_SESSION_FIELDS = (
-    "id",
-    "character_id",
-    "setup_id",
-    "setup_name",
-    "archived_at",
-    "last_used_at",
-    "created_at",
-    "updated_at",
+#: RpSession's fields (011's frozen value). Amended by feature 034, step 001 (DoD-2, DoD-4;
+#: DEC-034-6): plus `name` — nine fields. This exact-set check is DEC-034-6's guard against the
+#: field going unmapped. Compared as a set: the position of `name` is not a behavioural promise
+#: (DEC-034-6 says "last", the frozen skeleton places it after `setup_name`).
+RP_SESSION_FIELDS = frozenset(
+    {
+        "id",
+        "character_id",
+        "setup_id",
+        "setup_name",
+        "name",
+        "archived_at",
+        "last_used_at",
+        "created_at",
+        "updated_at",
+    }
 )
 
 
@@ -319,28 +325,36 @@ def test_only_disabled_models_still_captures_null__S017_002_DoD4(
     assert _captured(engine, created.id) == (None, None)
 
 
-def test_the_returned_value_keeps_rp_sessions_eight_fields__S017_002_DoD4(
+def test_the_returned_value_keeps_rp_sessions_fields__S017_002_DoD4__S034_001_DoD2(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-4 — the returned ``RpSession`` is unchanged in shape: exactly the eight 011 fields."""
+    """DoD-4 — the returned ``RpSession`` is unchanged in shape: exactly the 011 fields, plus
+    034/001's `name` (None for a new session, 034/001 DoD-2)."""
     created = _start(engine, generator, USER_A, CHAR_PLAIN)
 
     assert isinstance(created, RpSession)
-    assert tuple(field.name for field in dataclasses.fields(created)) == RP_SESSION_FIELDS
+    names = [field.name for field in dataclasses.fields(created)]
+    assert len(names) == len(RP_SESSION_FIELDS)
+    assert set(names) == RP_SESSION_FIELDS
     assert created.character_id == CHAR_PLAIN
     assert created.setup_id is None
+    assert created.name is None
 
 
 def test_the_returned_value_keeps_its_shape_when_a_model_is_captured__S017_002_DoD4(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-4 — capturing a model adds nothing to the returned value (D9)."""
+    """DoD-4 — capturing a model adds nothing to the returned value (D9); 034/001 DoD-2:
+    its `name` is still None."""
     _seed_two_enabled(engine)
 
     created = _start(engine, generator, USER_A, CHAR_PLAIN, SETUP_A)
 
-    assert tuple(field.name for field in dataclasses.fields(created)) == RP_SESSION_FIELDS
+    names = [field.name for field in dataclasses.fields(created)]
+    assert len(names) == len(RP_SESSION_FIELDS)
+    assert set(names) == RP_SESSION_FIELDS
     assert created.setup_id == SETUP_A
+    assert created.name is None
 
 
 # --------------------------------------------------------------------------- DoD-5

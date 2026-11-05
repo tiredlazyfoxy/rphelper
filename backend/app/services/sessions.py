@@ -68,13 +68,15 @@ class RpSession:
     UTC text, passed through unparsed; `archived_at` is `None` for a working session. `setup_id`
     is `None` when the session was started with no setup (R2), and `setup_name` is the
     referenced setup's current name joined at read time — `None` exactly when `setup_id` is,
-    and present even when that setup is archived (D10).
+    and present even when that setup is archived (D10). `name` is the session's stored label
+    (`sessions.name`), `None` when it was never renamed (US-150).
     """
 
     id: int
     character_id: int
     setup_id: int | None
     setup_name: str | None
+    name: str | None
     archived_at: str | None
     last_used_at: str
     created_at: str
@@ -191,6 +193,7 @@ def _insert_session(
         character_id=character_id,
         setup_id=setup_id,
         setup_name=setup_name,
+        name=None,  # a new session is unnamed (US-150.AC-6)
         archived_at=None,
         last_used_at=now,
         created_at=now,
@@ -288,8 +291,13 @@ def restore_session(connection: Connection, user_id: int, session_id: int) -> Rp
     return session
 
 
-def _session_select(user_id: int) -> Select[tuple[int, int, int | None, str | None, str | None, str, str, str]]:
+def _session_select(
+    user_id: int,
+) -> Select[tuple[int, int, int | None, str | None, str | None, str | None, str, str, str]]:
     """The one `sessions` projection every result is built from, with the setup label joined.
+
+    The joined setup name is labelled `setup_name` so it stays distinct from the session's own
+    `name` (NULL when never renamed), which is selected beside it.
 
     The owner stays out of the projection. The LEFT OUTER JOIN onto `setups` carries
     `setups.user_id == user_id` in the join condition itself and no `archived_at` predicate, so
@@ -302,7 +310,10 @@ def _session_select(user_id: int) -> Select[tuple[int, int, int | None, str | No
         sessions.c.id,
         sessions.c.character_id,
         sessions.c.setup_id,
-        setups.c.name,
+        # Labelled: `sessions.name` is selected too, and two unlabelled `name` columns would
+        # clash on the row (Step 001).
+        setups.c.name.label("setup_name"),
+        sessions.c.name,
         sessions.c.archived_at,
         sessions.c.last_used_at,
         sessions.c.created_at,
@@ -310,13 +321,16 @@ def _session_select(user_id: int) -> Select[tuple[int, int, int | None, str | No
     ).select_from(sessions.outerjoin(setups, label_join))
 
 
-def _to_session(row: Row[tuple[int, int, int | None, str | None, str | None, str, str, str]]) -> RpSession:
-    """Map a projected row to the plain result; the stored timestamp text passes through."""
+def _to_session(
+    row: Row[tuple[int, int, int | None, str | None, str | None, str | None, str, str, str]],
+) -> RpSession:
+    """Map a projected row to the plain result; the stored timestamp text and `name` pass through."""
     return RpSession(
         id=row.id,
         character_id=row.character_id,
         setup_id=row.setup_id,
-        setup_name=row.name,
+        setup_name=row.setup_name,
+        name=row.name,
         archived_at=row.archived_at,
         last_used_at=row.last_used_at,
         created_at=row.created_at,

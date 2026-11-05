@@ -88,11 +88,13 @@ MODEL_LOW_OFF_NAME = "low-off"
 MISSING_SERVER_ID = 7_777_777
 
 #: The ``Session`` wire object's eight keys (011's Wire contract; D9 keeps it).
+#: Amended by feature 034, step 001 (DoD-2): plus ``name`` — nine keys.
 SESSION_KEYS = {
     "id",
     "character_id",
     "setup_id",
     "setup_name",
+    "name",
     "archived_at",
     "last_used_at",
     "created_at",
