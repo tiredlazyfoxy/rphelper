@@ -524,6 +524,20 @@ def _drive_every_success_path(world: AuditWorld, log: _DriveLog) -> None:
         log,
     )
     _send(a, _Drive(31, "GET", f"/api/sessions/{session_id}"), log)
+    # 034/002 DoD-12: row 76, the session rename, carrying A's own session-name sentinel. The
+    # world's own value is written back unchanged, so nothing downstream shifts; the rename
+    # request's log records are then swept like every other row's (deployment.md § Logging:
+    # session names are never logged at any level).
+    _send(
+        a,
+        _Drive(
+            76,
+            "PATCH",
+            f"/api/sessions/{session_id}",
+            {"name": f"audit session name {registry.get(user='A', table='sessions', field='name')}"},
+        ),
+        log,
+    )
     _send(a, _Drive(42, "GET", f"/api/sessions/{session_id}/configuration"), log)
     _send(
         a,
@@ -665,7 +679,8 @@ def test_world_build_and_every_success_path_log_no_sentinel__S032_007_DoD1(harne
         # and nothing outside them may be counted as covering one.
         expected = {route.row for route in ENUMERATED_ROUTES if route.route_class in ("self", "owner", "registry")}
         # fast/014 (message-delete): 48 plus owner row 75.
-        assert len(expected) == 49, sorted(expected)
+        # 034/002 DoD-12: plus owner row 76 (the session rename) — 50.
+        assert len(expected) == 50, sorted(expected)
         assert set(log.rows) == expected, (
             f"rows driven but not swept: {sorted(set(log.rows) - expected)}; "
             f"rows of class self/owner/registry never driven: {sorted(expected - set(log.rows))}"
@@ -701,6 +716,9 @@ _FOREIGN_BODIES: Final[dict[tuple[str, str], Any]] = {
     ("POST", "/api/sessions/{}/zone/messages"): {"text": f"audit refusal {PROBE}"},
     ("POST", "/api/sessions/{}/zone/compose"): {"text": f"audit refusal {PROBE}"},
     ("PATCH", "/api/sessions/{}/configuration"): {"system_prompt": f"audit refusal {PROBE}"},
+    # 034/002 DoD-12: the rename's only key. The refused foreign rename is overridden in the
+    # loop below to carry A's own session-name sentinel.
+    ("PATCH", "/api/sessions/{}"): {"name": f"audit refusal {PROBE}"},
     ("PATCH", "/api/messages/{}"): {"text": f"audit refusal {PROBE}"},
     ("PATCH", "/api/memos/{}"): {"body": f"audit refusal {PROBE}"},
 }
@@ -750,12 +768,17 @@ def test_refusal_paths_log_no_sentinel__S032_007_DoD2_DoD6(harness: LogHarness) 
         with captured_logs(restore_stdlib=False) as capture:
             _control(capture, harness, "dod2")
 
-            # (a) every foreign-id refusal of the thirty-six owner rows (fast/014 added row 75).
+            # (a) every foreign-id refusal of the thirty-seven owner rows (fast/014 added row
+            # 75, 034/002 added row 76).
             owner_rows = [route for route in ENUMERATED_ROUTES if route.route_class == "owner"]
-            assert len(owner_rows) == 36, sorted(route.row for route in owner_rows)
+            assert len(owner_rows) == 37, sorted(route.row for route in owner_rows)
+            a_session_name = world.sentinels.get(user="A", table="sessions", field="name")
             for route in owner_rows:
                 path = fill_path(registered[route.key()], unknown_id=_foreign_id(route, world))
                 body = _FOREIGN_BODIES.get(route.key())
+                if route.key() == ("PATCH", "/api/sessions/{}"):
+                    # 034/002 DoD-12: the refused rename carries a session-name sentinel.
+                    body = {"name": f"audit refusal {a_session_name}"}
                 if route.key() == ("POST", "/api/characters/{}/import"):
                     # The envelope is validated before the character is resolved, so a
                     # bogus body would be refused as ``export_invalid`` instead.
@@ -804,6 +827,14 @@ def test_refusal_paths_log_no_sentinel__S032_007_DoD2_DoD6(harness: LogHarness) 
             # validation error reports the whole body — including the sentinel — back).
             invalid = a.post("/api/characters", json={"sheet": f"audit invalid {SENTINEL_INVALID_BODY}"})
             assert invalid.status_code == 422, invalid.text
+
+            # 034/002 DoD-12: a refused rename of A's own session (an extra key is a 422,
+            # DEC-034-2) whose body carries the session-name sentinel logs none of it.
+            refused_rename = a.patch(
+                f"/api/sessions/{world.a.session_with_setup_id}",
+                json={"name": f"audit refusal {a_session_name}", "system_prompt": SENTINEL_INVALID_BODY},
+            )
+            assert refused_rename.status_code == 422, refused_rename.text
 
             # (d) DoD-6: an import rejected as ``export_invalid`` whose payload carries
             # every one of A's sentinels, plus a planted one of this module's.

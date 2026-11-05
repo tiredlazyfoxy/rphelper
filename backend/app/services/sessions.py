@@ -291,6 +291,28 @@ def restore_session(connection: Connection, user_id: int, session_id: int) -> Rp
     return session
 
 
+def rename_session(connection: Connection, user_id: int, session_id: int, name: str | None) -> RpSession:
+    """Set the owner's session's `name` and bump `updated_at`; return the re-read session.
+
+    `name` is trimmed and a blank one is stored as NULL, as the request model does
+    (DEC-034-1), so a direct caller cannot store a blank name; `None` clears the name. An
+    archived session may be renamed and stays archived. One transaction: the owner-scoped
+    locating read, the write, the read-back. `last_used_at` is never written
+    (DEC-arch-session-names-6), and nothing is embedded and no search table is touched
+    (DEC-034-5). Two sessions may hold the same name. Raises `SessionNotFoundError` for
+    another user's id or a nonexistent one alike (R5).
+    """
+    # DEC-034-1 applied here too, not only in the request model: the service is the last gate
+    # before the row, so no caller can store a blank or untrimmed name.
+    stored = (name.strip() or None) if name is not None else None
+    with connection.begin():
+        _require_session(connection, user_id, session_id)
+        # Only `name` and `updated_at`: `last_used_at` stays put so no list order moves
+        # (DEC-arch-session-names-6); no embedding and no search-table write (DEC-034-5).
+        connection.execute(_owned_update(user_id, session_id).values(name=stored, updated_at=_now_text()))
+        return _fetch_existing(connection, user_id, session_id)
+
+
 def _session_select(
     user_id: int,
 ) -> Select[tuple[int, int, int | None, str | None, str | None, str | None, str, str, str]]:

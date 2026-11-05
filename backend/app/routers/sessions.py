@@ -15,9 +15,10 @@ parameter dependency to receive the `CurrentUser` whose `id` scopes the service 
 FastAPI's per-request dependency cache resolves the guard once, so that is the router's
 guard handing over its value, not a second authorization check.
 
-Six routes (`context.md` Wire contract): `GET /api/sessions`, `GET` and
-`POST /api/characters/{character_id}/sessions`, `GET /api/sessions/{session_id}` and
-`POST /api/sessions/{session_id}/archive|restore`. Start answers **201**, the rest **200**.
+Seven routes (`context.md` Wire contract, plus 034's rename): `GET /api/sessions`, `GET` and
+`POST /api/characters/{character_id}/sessions`, `GET /api/sessions/{session_id}`,
+`POST /api/sessions/{session_id}/archive|restore` and `PATCH /api/sessions/{session_id}`.
+Start answers **201**, the rest **200**.
 Both path ids are declared with the inbound snowflake alias, so a non-numeric path id fails
 validation and answers 422. The router is registered in `app.main` **after** the setups
 router, and no path of 009's or 010's is shadowed: the literal third segment `sessions`
@@ -34,11 +35,12 @@ calls `start_seeded_session`, which creates the session and seeds that text into
 one transaction; either way the route answers `StartedSessionResponse` — the nine session
 keys plus `opening_message`, `null` when none was sent.
 
-**No `PATCH` and no `DELETE` handler exists here** (`context.md` R6, D9). Nothing in this
-router edits a session and nothing deletes one; Starlette answers 405 for either method on
-any matching path, with no code of ours. Since `017`, a session's configuration is edited
-through `routers/configuration.py`'s `PATCH /api/sessions/{id}/configuration`;
-`PATCH /api/sessions/{id}` itself still does not exist.
+**One narrow `PATCH` and no `DELETE`** (034 step 002; DEC-arch-session-names-2).
+`PATCH /api/sessions/{session_id}` renames a session and accepts `name` as its only key
+(`RenameSessionRequest`, any other key a 422); it answers 200 with `SessionResponse`.
+Nothing here deletes a session; Starlette answers 405 for `DELETE` on any matching path.
+A session's configuration is edited through `routers/configuration.py`'s
+`PATCH /api/sessions/{id}/configuration`, which this route does not shadow.
 
 The router translates no error by hand: `SessionNotFoundError`, `CharacterNotFoundError`,
 `SetupNotFoundError` and `SetupArchivedError` propagate to the one `DomainError` handler
@@ -62,6 +64,7 @@ from app.dependencies import CurrentUser, require_user
 from app.ids import SnowflakeGenerator
 from app.models.ids import SnowflakeIn
 from app.models.sessions import (
+    RenameSessionRequest,
     SessionListResponse,
     SessionResponse,
     StartedSessionResponse,
@@ -75,6 +78,7 @@ from app.services.sessions import (
     get_session,
     list_character_sessions,
     list_sessions,
+    rename_session,
     restore_session,
     start_seeded_session,
     start_session,
@@ -193,4 +197,21 @@ def restore_own_session(
 ) -> SessionResponse:
     """Put the session back into the working lists via `restore_session(...)`; idempotent (D13)."""
     session = restore_session(connection, current_user.id, session_id)
+    return _to_response(session)
+
+
+@router.patch("/api/sessions/{session_id}", status_code=200)
+def rename_own_session(
+    session_id: SnowflakeIn,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+    body: RenameSessionRequest,
+) -> SessionResponse:
+    """Rename one of the caller's sessions via `rename_session(...)`; answers 200 with `SessionResponse`.
+
+    The body's `name` is already trimmed, blank → `null` (DEC-034-1); an archived session may
+    be renamed. `SessionNotFoundError` propagates as 404 `session_not_found`. The name is never
+    logged (deployment.md § Logging).
+    """
+    session = rename_session(connection, current_user.id, session_id, body.name)
     return _to_response(session)

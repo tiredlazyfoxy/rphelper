@@ -24,6 +24,10 @@ Key-set repaired by feature 024, step 005 (`docs/plans/024.embedding-lifecycle/c
 `search_coverage_incomplete`, always present on the wire and `false` outside the
 record-keeping routes, so the embedded message's key set is **twelve** keys. Only the
 message key set, the message value and its expected wire object changed.
+
+Extended by feature 034 (`docs/plans/034.session-names/`): step 001 adds `name` to the
+session wire shape; step 002 adds `RenameSessionRequest`, the strict one-key rename body
+(suffix `__S034_002_DoD<n>`, section at the end).
 """
 
 import json
@@ -37,6 +41,7 @@ from pydantic import ValidationError
 
 from app.errors import DomainError, SessionNotFoundError, SetupArchivedError, register_exception_handlers
 from app.models.sessions import (
+    RenameSessionRequest,
     SessionListResponse,
     SessionResponse,
     StartedSessionResponse,
@@ -696,3 +701,123 @@ def test_start_request_ignores_a_name_key__S034_001_DoD3(body: dict[str, Any]) -
     assert "name" not in StartSessionRequest.model_fields
     assert not hasattr(request, "name")
     assert set(request.model_dump()) == {"setup_id", "opening_message"}
+
+
+# ============================================================= 034/002 DoD-1, DoD-2, DoD-4, DoD-5
+# `RenameSessionRequest`: exactly one field, `name` — required, a string or null, trimmed, blank
+# becomes null (DEC-034-1); any other key is refused (DEC-034-2); no length cap (DEC-034-3).
+# Expected values from `docs/plans/034.session-names/002.rename-route.md` (Interface intent and
+# DoD). Binding: `## Skeleton` -> Step 002 — `class RenameSessionRequest(BaseModel)` with
+# `name: SessionNameIn`. A `ValidationError` here is what the route answers as 422.
+
+
+def test_rename_request_has_exactly_one_field_name__S034_002_DoD4() -> None:
+    """034/002 DoD-4 — Interface intent: the rename body has exactly one field, `name`."""
+    assert set(RenameSessionRequest.model_fields) == {"name"}
+
+
+def test_rename_request_trims_the_name__S034_002_DoD1() -> None:
+    """034/002 DoD-1 — US-150.AC-2, DEC-034-1: `"  The Docks  "` parses to `"The Docks"`."""
+    request = RenameSessionRequest.model_validate({"name": "  The Docks  "})
+
+    assert request.name == "The Docks"
+
+
+def test_rename_request_keeps_inner_whitespace_and_non_ascii_text__S034_002_DoD1() -> None:
+    """034/002 DoD-1 — DEC-034-1: only the ends are trimmed; the value is otherwise verbatim."""
+    request = RenameSessionRequest.model_validate({"name": "\tLe phare —  chapitre deux \n"})
+
+    assert request.name == "Le phare —  chapitre deux"
+
+
+def test_rename_request_has_no_length_cap__S034_002_DoD1() -> None:
+    """034/002 DoD-1 — DEC-034-3: a very long name is accepted unchanged (no maximum length)."""
+    long_name = "N" * 10_000
+
+    request = RenameSessionRequest.model_validate({"name": long_name})
+
+    assert request.name == long_name
+
+
+@pytest.mark.parametrize("value", ["", " ", "   ", " \t\n "], ids=["empty", "one-space", "spaces", "mixed"])
+def test_rename_request_turns_a_blank_name_into_none__S034_002_DoD2(value: str) -> None:
+    """034/002 DoD-2 — US-150.AC-3, DEC-034-1: empty or whitespace-only becomes None."""
+    request = RenameSessionRequest.model_validate({"name": value})
+
+    assert request.name is None
+
+
+def test_rename_request_accepts_a_null_name__S034_002_DoD2() -> None:
+    """034/002 DoD-2 — US-150.AC-3, DEC-034-1: `null` is a valid value meaning "no name"."""
+    request = RenameSessionRequest.model_validate({"name": None})
+
+    assert request.name is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"model": None},
+        {"system_prompt": "a prompt"},
+        {"archived_at": None},
+        {"name": "The Docks", "model": None},
+        {"name": "The Docks", "system_prompt": "a prompt"},
+        {"name": "The Docks", "archived_at": "2026-01-01T00:00:00.000000+00:00"},
+        {"name": None, "setup_id": None},
+    ],
+    ids=[
+        "model-alone",
+        "system-prompt-alone",
+        "archived-at-alone",
+        "name-and-model",
+        "name-and-system-prompt",
+        "name-and-archived-at",
+        "null-name-and-setup-id",
+    ],
+)
+def test_rename_request_refuses_any_other_key__S034_002_DoD4(body: dict[str, Any]) -> None:
+    """034/002 DoD-4 — DEC-arch-session-names-2, DEC-034-2: a key other than `name`, alone or
+    beside `name`, fails validation — it is refused, never ignored."""
+    with pytest.raises(ValidationError):
+        RenameSessionRequest.model_validate(body)
+
+
+def test_rename_request_requires_the_name_key__S034_002_DoD5() -> None:
+    """034/002 DoD-5 — DEC-034-1: `{}` fails validation; a missing key is not "leave unchanged"."""
+    with pytest.raises(ValidationError):
+        RenameSessionRequest.model_validate({})
+
+
+@pytest.mark.parametrize(
+    "body",
+    [[], ["The Docks"], "The Docks", 42, None],
+    ids=["empty-list", "list", "string", "number", "null"],
+)
+def test_rename_request_refuses_a_non_object_body__S034_002_DoD5(body: Any) -> None:
+    """034/002 DoD-5 — DEC-034-1: a body that is not a JSON object fails validation."""
+    with pytest.raises(ValidationError):
+        RenameSessionRequest.model_validate(body)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [42, 0, 4.5, True, False, [], ["The Docks"], {"text": "The Docks"}],
+    ids=["integer", "zero", "float", "true", "false", "empty-list", "list", "object"],
+)
+def test_rename_request_refuses_a_non_string_non_null_name__S034_002_DoD5(value: Any) -> None:
+    """034/002 DoD-5 — DEC-034-1: `name` as a number, a boolean or a list (or an object)
+    fails validation — it is never coerced to text."""
+    with pytest.raises(ValidationError):
+        RenameSessionRequest.model_validate({"name": value})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ['{"name": 42}', '{"name": true}', '{"name": ["x"]}', "{}", '{"name": "x", "model": null}'],
+    ids=["number", "boolean", "list", "missing", "extra-key"],
+)
+def test_rename_request_refuses_the_same_bodies_as_json__S034_002_DoD4__S034_002_DoD5(payload: str) -> None:
+    """034/002 DoD-4 / DoD-5 — parsed from raw JSON text (as the route receives it), the same
+    refusals hold."""
+    with pytest.raises(ValidationError):
+        RenameSessionRequest.model_validate_json(payload)

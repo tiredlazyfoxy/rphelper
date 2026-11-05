@@ -30,7 +30,7 @@ The domain layer: every business rule, ownership check and transaction lives her
 - `parens.py` — the `(( ))` parser: classify a message text and strip its instruction fragments.
 - `passwords.py` — the password-hashing seam.
 - `session_index.py` — the session side of the search index: composed session text, refresh, fan-out ids.
-- `sessions.py` — RP sessions: start under a character, list, get, archive, restore.
+- `sessions.py` — RP sessions: start under a character, list, get, rename, archive, restore.
 - `settle.py` — settle and re-open, the only writers of the burial and settle columns.
 - `setups.py` — a character's setups: list, create, get, update, archive, restore.
 - `transfer.py` — export: the transfer envelope, the column-agnostic row serializer and the whole-database export.

@@ -364,6 +364,15 @@ def test_own_export_carries_nothing_of_the_other_user__S032_005_DoD1_DoD6(world:
         if missing_ids:
             problems.append(f"DoD-1: {user}'s own export is missing {len(missing_ids)} own id(s): {missing_ids}")
 
+        # 034/002 DoD-12 (DEC-034-4), named explicitly although the sweep above already
+        # includes it: the session name travels in its owner's export and in no other's.
+        own_session_name = world.sentinels.get(user=user, table="sessions", field="name")
+        other_session_name = world.sentinels.get(user=other, table="sessions", field="name")
+        if own_session_name not in text:
+            problems.append(f"034/002 DoD-12: {user}'s own export is missing {user}'s session name")
+        if other_session_name in text:
+            problems.append(f"034/002 DoD-12: {user}'s export carries {other}'s session name")
+
         # The absence, with the whole of the other user's sentinel set (translations
         # included — it must not be there either) and the whole of their seeded id set.
         try:

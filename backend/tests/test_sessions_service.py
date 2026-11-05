@@ -50,6 +50,7 @@ from app.services.sessions import (
     get_session,
     list_character_sessions,
     list_sessions,
+    rename_session,
     restore_session,
     start_seeded_session,
     start_session,
@@ -1485,3 +1486,191 @@ def test_a_stored_name_belongs_to_its_session_only__S034_001_DoD4(
 
     assert _only(listing, named.id).name == STORED_NAME
     assert _only(listing, unnamed.id).name is None
+
+
+# =========================================================================================
+# Feature 034, step 002 — `rename_session`.
+#
+# Expected values come from `docs/plans/034.session-names/002.rename-route.md` (Interface
+# intent for `rename_session`: one transaction, the owned session required with archived
+# sessions allowed, the normalised name and a fresh `updated_at` written, `last_used_at`
+# never written, the re-read `RpSession` returned, `session_not_found` for a missing or
+# foreign id, the same trim / blank-to-None normalisation as the request model; DoD-3,
+# DoD-6, DoD-7, DoD-8, DoD-10) and DEC-034-1 / DEC-arch-session-names-6. Binding:
+# `## Skeleton` -> Step 002 — `rename_session(connection, user_id, session_id, name) ->
+# RpSession`. Test names end `__S034_002_DoD<n>`.
+# =========================================================================================
+
+
+def _rename(engine: Engine, user_id: int, session_id: int, name: str | None) -> RpSession:
+    """One direct service call on its own connection; the service opens its own transaction."""
+    with engine.connect() as connection:
+        return rename_session(connection, user_id, session_id, name)
+
+
+# --- DoD-10: the service normalises the name itself ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("sent", "stored"),
+    [
+        ("  The Docks  ", "The Docks"),
+        ("The Docks", "The Docks"),
+        ("\tTwo  words inside\n", "Two  words inside"),
+        ("Le phare — chapitre deux ", "Le phare — chapitre deux"),
+    ],
+    ids=["padded", "already-trimmed", "inner-whitespace-kept", "non-ascii"],
+)
+def test_a_direct_call_stores_the_trimmed_name__S034_002_DoD10(
+    engine: Engine, generator: SnowflakeGenerator, sent: str, stored: str
+) -> None:
+    """DoD-10 — DEC-034-1: called directly, `rename_session` stores the value trimmed at both
+    ends (inner whitespace untouched) and returns it on the re-read session."""
+    created = _start(engine, generator, USER_A, CHAR_A1)
+
+    renamed = _rename(engine, USER_A, created.id, sent)
+
+    assert isinstance(renamed, RpSession)
+    assert renamed.name == stored
+    assert _stored_session_row(engine, created.id)["name"] == stored
+    assert _get(engine, USER_A, created.id).name == stored
+
+
+@pytest.mark.parametrize("blank", ["", " ", "   ", " \t\n "], ids=["empty", "one-space", "spaces", "mixed"])
+def test_a_direct_call_stores_null_for_a_blank_name__S034_002_DoD10(
+    engine: Engine, generator: SnowflakeGenerator, blank: str
+) -> None:
+    """DoD-10 — DEC-034-1: a direct caller cannot store a blank name — whitespace only (or
+    empty) is stored as NULL and returned as None, replacing an existing name."""
+    created = _start(engine, generator, USER_A, CHAR_A1)
+    _store_name(engine, created.id, STORED_NAME)
+
+    renamed = _rename(engine, USER_A, created.id, blank)
+
+    assert renamed.name is None
+    assert _stored_session_row(engine, created.id)["name"] is None
+
+
+def test_a_direct_call_with_none_clears_the_name__S034_002_DoD10(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-10 — DEC-034-1: None passes through as NULL (clearing a name, US-150.AC-3)."""
+    created = _start(engine, generator, USER_A, CHAR_A1)
+    _store_name(engine, created.id, STORED_NAME)
+
+    renamed = _rename(engine, USER_A, created.id, None)
+
+    assert renamed.name is None
+    assert _stored_session_row(engine, created.id)["name"] is None
+
+
+def test_the_returned_session_is_the_stored_one__S034_002_DoD10(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-10 — Interface intent: the return value is the re-read session — equal to a fresh
+    `get_session`, with the setup name still joined beside the new name."""
+    created = _start(engine, generator, USER_A, CHAR_A1, SETUP_A1)
+
+    renamed = _rename(engine, USER_A, created.id, "  The Docks  ")
+
+    assert renamed == _get(engine, USER_A, created.id)
+    assert renamed.setup_name == SETUP_A1_NAME
+    assert renamed.name == "The Docks"
+
+
+# --- DoD-3: `updated_at` advances, `last_used_at` does not move ------------------------------
+
+
+def test_a_rename_advances_updated_at_and_leaves_last_used_at__S034_002_DoD3(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-3 — US-150.AC-4, DEC-arch-session-names-6: the stored `updated_at` moves forward
+    (fixed-width form) and `last_used_at` is byte-identical; `archived_at` is untouched."""
+    created = _start(engine, generator, USER_A, CHAR_A1)
+    archived_before, last_used_before, updated_before = _stored_state(engine, created.id)
+
+    renamed = _rename(engine, USER_A, created.id, "The Docks")
+
+    archived_after, last_used_after, updated_after = _stored_state(engine, created.id)
+    assert last_used_after == last_used_before
+    assert archived_after == archived_before
+    assert FIXED_WIDTH_TIMESTAMP.match(updated_after) is not None
+    assert updated_after > updated_before
+    assert renamed.updated_at == updated_after
+    assert renamed.last_used_at == last_used_before
+
+
+def test_a_rename_does_not_reorder_the_listings__S034_002_DoD3(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-3 — US-150.AC-4: renaming the oldest session leaves both listings' order as is."""
+    oldest = _start(engine, generator, USER_A, CHAR_A1)
+    _start(engine, generator, USER_A, CHAR_A2)
+    _start(engine, generator, USER_A, CHAR_A1)
+    all_before = _ids(_list(engine, USER_A))
+    character_before = _ids(_list_character(engine, USER_A, CHAR_A1))
+
+    _rename(engine, USER_A, oldest.id, "Renamed oldest")
+
+    assert _ids(_list(engine, USER_A)) == all_before
+    assert _ids(_list_character(engine, USER_A, CHAR_A1)) == character_before
+
+
+# --- DoD-6: a missing or foreign session is `session_not_found` ------------------------------
+
+
+def test_renaming_another_users_session_raises_not_found_and_changes_nothing__S034_002_DoD6(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-6 — US-029.AC-1, R5: A renaming B's session raises `SessionNotFoundError`; B's row
+    is unchanged, column for column."""
+    foreign = _start(engine, generator, USER_B, CHAR_B1)
+    _store_name(engine, foreign.id, STORED_NAME)
+    row_before = _stored_session_row(engine, foreign.id)
+
+    with pytest.raises(SessionNotFoundError):
+        _rename(engine, USER_A, foreign.id, "Taken over")
+
+    assert _stored_session_row(engine, foreign.id) == row_before
+
+
+def test_renaming_an_unknown_session_raises_not_found__S034_002_DoD6(engine: Engine) -> None:
+    """DoD-6 — R5: an id that exists for nobody raises the same `SessionNotFoundError`."""
+    with pytest.raises(SessionNotFoundError):
+        _rename(engine, USER_A, UNKNOWN_SESSION_ID, "Anything")
+
+
+# --- DoD-7: an archived session can be renamed -----------------------------------------------
+
+
+def test_an_archived_session_can_be_renamed_and_stays_archived__S034_002_DoD7(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-7: the owner's archived session is renamed, and its `archived_at` is unchanged."""
+    created = _start(engine, generator, USER_A, CHAR_A1)
+    archived = _archive(engine, USER_A, created.id)
+    assert archived.archived_at is not None
+
+    renamed = _rename(engine, USER_A, created.id, "The Docks")
+
+    assert renamed.name == "The Docks"
+    assert renamed.archived_at == archived.archived_at
+    assert _stored_state(engine, created.id)[0] == archived.archived_at
+    assert created.id not in _ids(_list(engine, USER_A))
+
+
+# --- DoD-8: names are not unique -------------------------------------------------------------
+
+
+def test_two_sessions_can_hold_the_same_name__S034_002_DoD8(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """DoD-8 — UC-089 exception flows: two sessions of one owner accept the same name."""
+    first = _start(engine, generator, USER_A, CHAR_A1)
+    second = _start(engine, generator, USER_A, CHAR_A1)
+
+    assert _rename(engine, USER_A, first.id, "The Docks").name == "The Docks"
+    assert _rename(engine, USER_A, second.id, "The Docks").name == "The Docks"
+
+    assert _stored_session_row(engine, first.id)["name"] == "The Docks"
+    assert _stored_session_row(engine, second.id)["name"] == "The Docks"

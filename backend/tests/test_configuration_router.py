@@ -1019,10 +1019,15 @@ def test_get_session_still_answers_exactly_eight_keys__S017_005_DoD9(
     assert set(_read_session(client, session["id"])) == SESSION_KEYS
 
 
-def test_patch_on_the_session_itself_still_answers_405__S017_005_DoD9(
+def test_patch_on_the_session_itself_cannot_write_configuration__S017_005_DoD9__S034_002_DoD4(
     application: FastAPI, db_settings: Settings, engine: Engine
 ) -> None:
-    """DoD-9 — D9, D13: 017 adds no route at `/api/sessions/{id}`; the session is unchanged."""
+    """DoD-9 — D9, D13: 017 adds no route at `/api/sessions/{id}`; configuration is written
+    only through `/api/sessions/{id}/configuration`, and the session is unchanged.
+
+    Amended by feature 034, step 002: that path now carries the narrow rename (034 adds it,
+    not 017), which accepts `name` as its only key. A body with `system_prompt` therefore
+    answers 422, not 405, and changes nothing (034/002 DoD-4, DEC-034-2)."""
     _seed_registry(engine)
     client = _player_a(application, db_settings)
     character = _character(client, "Aria")
@@ -1031,7 +1036,7 @@ def test_patch_on_the_session_itself_still_answers_405__S017_005_DoD9(
 
     response = client.patch(_session_path(session["id"]), json={"system_prompt": "S"})
 
-    assert response.status_code == 405, response.text
+    assert response.status_code == 422, response.text
     assert _session_configuration(client, session["id"]) == before
 
 

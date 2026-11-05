@@ -21,6 +21,10 @@ characters through 009's ``POST /api/characters``, setups through 010's
 Every path helper builds an **exact** path (``/api/sessions``, ``/api/sessions/<id>``,
 ``/api/characters/<id>/sessions`` and ``/api/characters/<id>/setups`` share prefixes).
 ``conftest.py`` is untouched: every fixture below is file-local.
+
+Extended by feature 034, step 002 (``docs/plans/034.session-names/002.rename-route.md``): the
+narrow ``PATCH /api/sessions/{id}`` rename. 011's DoD-13 "PATCH answers 405" clause is
+replaced accordingly (a PATCH with a non-``name`` key is now 422). See the section at the end.
 """
 
 import re
@@ -35,9 +39,11 @@ from sqlalchemy import Engine, func, select
 
 from app.config import Settings, get_settings
 from app.db import schema
+from app.dependencies import get_llm_client_factory
 from app.main import create_app
 from app.roles import Role
 from app.services.passwords import hash_password
+from tests.llm_fakes import FakeClientFactory, fake_factory
 
 CHARACTERS_PATH = "/api/characters"
 SETUPS_PATH = "/api/setups"
@@ -870,13 +876,18 @@ def test_reading_a_session_twice_bumps_nothing__S011_003_DoD12(
     assert first["updated_at"] == second["updated_at"] == created["updated_at"]
 
 
-# --- DoD-13: no edit and no delete ---------------------------------------------------
+# --- DoD-13: no delete (and, since 034/002, only the narrow rename edit) ---------------
 
 
-def test_patch_and_delete_answer_405_and_the_session_survives__S011_003_DoD13(
+def test_delete_answers_405_and_the_session_survives__S011_003_DoD13__S034_002_DoD4(
     application: FastAPI, db_settings: Settings
 ) -> None:
-    """DoD-13 — R6, D9: nothing is editable and no delete route exists; status only."""
+    """DoD-13 — R6, D9: no delete route exists; status only.
+
+    Amended by feature 034, step 002: `PATCH /api/sessions/{id}` now exists as the narrow
+    rename (DEC-arch-session-names-2), so the old "PATCH answers 405" clause no longer holds.
+    A PATCH carrying any key other than `name` (here 011's `setup_id`) answers 422 and
+    changes nothing (034/002 DoD-4)."""
     client = _player_a(application, db_settings)
     character = _character(client, "Aria")
     created = _start(client, character["id"], {})
@@ -884,7 +895,7 @@ def test_patch_and_delete_answer_405_and_the_session_survives__S011_003_DoD13(
     assert client.delete(_session_path(created["id"])).status_code == 405
     assert client.delete(SESSIONS_PATH).status_code == 405
     assert client.delete(_character_sessions_path(character["id"])).status_code == 405
-    assert client.patch(_session_path(created["id"]), json={"setup_id": None}).status_code == 405
+    assert client.patch(_session_path(created["id"]), json={"setup_id": None}).status_code == 422
 
     assert _read_session(client, created["id"]) == created
 
@@ -1427,3 +1438,526 @@ def test_a_stored_name_is_per_session__S034_001_DoD4(
     assert _matching(rows, named_id)["name"] == STORED_SESSION_NAME
     assert _matching(rows, unnamed_id)["name"] is None
     assert _read_session(client, unnamed_id)["name"] is None
+
+
+# =====================================================================================
+# Feature 034, step 002 — `PATCH /api/sessions/{session_id}` renames an owned session.
+#
+# Expected values come from `docs/plans/034.session-names/002.rename-route.md` (Interface
+# intent; DoD-1..DoD-9 and DoD-11 here), DEC-034-1 (`name` is a required key, a string or
+# null, trimmed, blank -> null), DEC-034-2 (any other key is a 422), DEC-034-5 (a rename
+# embeds nothing and needs no embedding model), DEC-arch-session-names-6 (a rename writes
+# `name` and `updated_at`, never `last_used_at`, so no list order moves) and 011's refusal
+# identity (R5: foreign and unknown ids answer the same 404 `session_not_found`). Binding:
+# `## Skeleton` -> Step 002 — `PATCH /api/sessions/{session_id}`, status 200, answering
+# `SessionResponse`. Test names end `__S034_002_DoD<n>`.
+# =====================================================================================
+
+#: DoD-1's name as sent, and as it must come back trimmed.
+RENAME_SENT = "  The Docks  "
+RENAME_TRIMMED = "The Docks"
+
+#: A name stored before a refused rename, so "the row is unchanged" covers `name` too.
+NAME_BEFORE = "Before the storm"
+
+#: The two keys a rename may change; every other session key must come back as it was.
+RENAME_WRITES = {"name", "updated_at"}
+
+#: Registry rows for DoD-9's designated-model case (raw inserts, null `api_key_ref`, so no
+#: secret has to resolve — the same seeding shape `test_record_keeping_embedding.py` uses).
+EMBEDDING_SERVER_ID = 7_250_000_000_000_000_501
+EMBEDDING_MODEL_ID = 7_250_000_000_000_000_502
+EMBEDDING_MODEL_NAME = "the-designated-embedding-model"
+
+
+def _rename_request(client: TestClient, session_id: Any, body: Any) -> httpx.Response:
+    """`PATCH /api/sessions/<id>` with ``body`` as its JSON body — the exact single-session path."""
+    return client.patch(_session_path(session_id), json=body)
+
+
+def _rename(client: TestClient, session_id: Any, name: Any) -> dict[str, Any]:
+    """A rename that must succeed: 200 and the `Session` wire object (DoD-1)."""
+    response = _rename_request(client, session_id, {"name": name})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert isinstance(body, dict)
+    _assert_wire_shape(body)
+    return body
+
+
+def _unchanged_by_rename(before: dict[str, Any], after: dict[str, Any]) -> None:
+    """Every key a rename does not write is exactly what it was."""
+    assert {key: value for key, value in after.items() if key not in RENAME_WRITES} == {
+        key: value for key, value in before.items() if key not in RENAME_WRITES
+    }
+
+
+def _stored_times(engine: Engine, session_id: str) -> tuple[Any, Any, Any]:
+    """`(last_used_at, updated_at, archived_at)` read straight from the row (DoD-3, DoD-7)."""
+    with engine.connect() as connection:
+        row = connection.execute(
+            select(
+                schema.sessions.c.last_used_at,
+                schema.sessions.c.updated_at,
+                schema.sessions.c.archived_at,
+            ).where(schema.sessions.c.id == int(session_id))
+        ).one()
+    return (row[0], row[1], row[2])
+
+
+def _stored_row(engine: Engine, session_id: str) -> dict[str, Any]:
+    """The whole `sessions` row, for "the row is unchanged" (DoD-4, DoD-5, DoD-6)."""
+    with engine.connect() as connection:
+        row = connection.execute(select(schema.sessions).where(schema.sessions.c.id == int(session_id))).one()
+    return dict(row._mapping)
+
+
+def _designate_embedding_model(engine: Engine) -> None:
+    """Seed one server and one enabled, embedding-designated model (DoD-9's second case)."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.metadata.tables["llm_servers"].insert().values(
+                id=EMBEDDING_SERVER_ID,
+                name="the embedding server",
+                kind="llamaswap",
+                base_url="http://embedding.test:8080/v1",
+                api_key_ref=None,
+                last_test_at=None,
+                last_test_ok=None,
+                last_test_error=None,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+        connection.execute(
+            schema.metadata.tables["models"].insert().values(
+                id=EMBEDDING_MODEL_ID,
+                server_id=EMBEDDING_SERVER_ID,
+                model_name=EMBEDDING_MODEL_NAME,
+                is_enabled=True,
+                is_embedding_designated=True,
+                embedding_dim=8,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+
+
+# --- DoD-1: a rename answers 200 with the session, trimmed, and later reads agree --------
+
+
+def test_a_rename_answers_200_with_the_trimmed_name__S034_002_DoD1(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-1 — US-150.AC-2: `{"name": "  The Docks  "}` answers 200 with the nine-key session
+    whose `name` is `"The Docks"`; every key a rename does not write is unchanged."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    setup = _create_setup(client, character["id"], "Tavern", "# Night")
+    created = _start(client, character["id"], {"setup_id": setup["id"]})
+
+    renamed = _rename(client, created["id"], RENAME_SENT)
+
+    assert renamed["name"] == RENAME_TRIMMED
+    assert renamed["id"] == created["id"]
+    _unchanged_by_rename(created, renamed)
+    assert renamed["setup_name"] == setup["name"]
+    assert _stored_session_name(engine, created["id"]) == RENAME_TRIMMED
+
+
+def test_later_reads_return_the_new_name__S034_002_DoD1(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-1 — US-150.AC-2: after a rename, the single read and both listings return the name,
+    and each equals the rename's own answer."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+
+    renamed = _rename(client, session_id, RENAME_SENT)
+
+    assert _read_session(client, session_id) == renamed
+    assert _matching(_all_sessions(client), session_id) == renamed
+    assert _matching(_character_sessions(client, character["id"]), session_id) == renamed
+
+
+def test_a_second_rename_replaces_the_first__S034_002_DoD1(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-1 — US-150.AC-2: renaming an already-named session stores the new name."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+    _rename(client, session_id, "First name")
+
+    renamed = _rename(client, session_id, STORED_SESSION_NAME)
+
+    assert renamed["name"] == STORED_SESSION_NAME
+    assert _read_session(client, session_id)["name"] == STORED_SESSION_NAME
+
+
+# --- DoD-2: blank or null clears the name --------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cleared",
+    ["", "   ", " \t\n ", None],
+    ids=["empty", "spaces", "mixed-whitespace", "null"],
+)
+def test_a_blank_or_null_name_clears_it__S034_002_DoD2(
+    application: FastAPI, db_settings: Settings, engine: Engine, cleared: str | None
+) -> None:
+    """DoD-2 — US-150.AC-3, DEC-034-1: `name` as `""`, whitespace only or `null` answers 200
+    with `name` null; the stored column is NULL and later reads return null."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+    _store_session_name(engine, session_id, NAME_BEFORE)
+
+    renamed = _rename(client, session_id, cleared)
+
+    assert renamed["name"] is None
+    assert _stored_session_name(engine, session_id) is None
+    assert _read_session(client, session_id)["name"] is None
+    assert _matching(_all_sessions(client), session_id)["name"] is None
+    assert _matching(_character_sessions(client, character["id"]), session_id)["name"] is None
+
+
+def test_clearing_a_never_named_session_answers_200_with_null__S034_002_DoD2(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-2 — US-150.AC-3: `null` on a session that has no name is still a 200 with null."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+
+    renamed = _rename(client, session_id, None)
+
+    assert renamed["name"] is None
+    assert _read_session(client, session_id)["name"] is None
+
+
+# --- DoD-3: updated_at advances, last_used_at and list order do not move --------------------
+
+
+def test_a_rename_advances_updated_at_and_keeps_last_used_at__S034_002_DoD3(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-3 — US-150.AC-4, DEC-arch-session-names-6: `updated_at` moves forward; the stored
+    `last_used_at` is byte-identical to what it was before the rename."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    created = _start(client, character["id"], {})
+    last_used_before, updated_before, _archived = _stored_times(engine, created["id"])
+
+    renamed = _rename(client, created["id"], RENAME_TRIMMED)
+
+    last_used_after, updated_after, _archived_after = _stored_times(engine, created["id"])
+    assert last_used_after == last_used_before
+    assert renamed["last_used_at"] == created["last_used_at"]
+    # The fixed-width timestamp form orders lexically.
+    assert updated_after > updated_before
+    assert renamed["updated_at"] > created["updated_at"]
+    assert renamed["updated_at"] == updated_after
+    assert _read_session(client, created["id"])["updated_at"] == renamed["updated_at"]
+
+
+def test_a_rename_moves_no_session_in_either_listing__S034_002_DoD3(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-3 — US-150.AC-4: renaming the oldest and a middle session leaves the order of
+    `GET /api/sessions` and of `GET /api/characters/{id}/sessions` exactly as it was."""
+    client = _player_a(application, db_settings)
+    aria = _character(client, "Aria")
+    bramble = _character(client, "Bramble")
+    oldest = _start(client, aria["id"], {})
+    middle = _start(client, bramble["id"], {})
+    _start(client, aria["id"], {})
+    all_before = _ids(_all_sessions(client))
+    aria_before = _ids(_character_sessions(client, aria["id"]))
+    bramble_before = _ids(_character_sessions(client, bramble["id"]))
+
+    _rename(client, oldest["id"], "Renamed oldest")
+    _rename(client, middle["id"], "Renamed middle")
+
+    assert _ids(_all_sessions(client)) == all_before
+    assert _ids(_character_sessions(client, aria["id"])) == aria_before
+    assert _ids(_character_sessions(client, bramble["id"])) == bramble_before
+    assert all_before[-1] == oldest["id"]
+
+
+# --- DoD-4: any key other than `name` is a 422 and changes nothing --------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"model": {"server_id": "7250000000000000009", "model_name": "x"}},
+        {"system_prompt": "a prompt"},
+        {"archived_at": None},
+        {"name": "Changed", "model": None},
+        {"name": "Changed", "system_prompt": "a prompt"},
+        {"name": "Changed", "archived_at": "2026-01-01T00:00:00.000000+00:00"},
+        {"name": "Changed", "setup_id": None},
+        {"name": "Changed", "last_used_at": "2030-01-01T00:00:00.000000+00:00"},
+    ],
+    ids=[
+        "model-alone",
+        "system-prompt-alone",
+        "archived-at-alone",
+        "name-and-model",
+        "name-and-system-prompt",
+        "name-and-archived-at",
+        "name-and-setup-id",
+        "name-and-last-used-at",
+    ],
+)
+def test_any_other_key_answers_422_and_leaves_the_row_unchanged__S034_002_DoD4(
+    application: FastAPI, db_settings: Settings, engine: Engine, body: dict[str, Any]
+) -> None:
+    """DoD-4 — DEC-arch-session-names-2, DEC-034-2: a body with any key other than `name`,
+    alone or beside `name`, answers 422; the stored row and the read are unchanged."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+    _store_session_name(engine, session_id, NAME_BEFORE)
+    read_before = _read_session(client, session_id)
+    row_before = _stored_row(engine, session_id)
+
+    response = _rename_request(client, session_id, body)
+
+    assert response.status_code == 422, response.text
+    assert _stored_row(engine, session_id) == row_before
+    assert _read_session(client, session_id) == read_before
+
+
+# --- DoD-5: a missing `name`, a non-object body, a non-string `name` -------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{}, [], ["The Docks"], "The Docks", 42],
+    ids=["empty-object", "empty-list", "list", "string", "number"],
+)
+def test_a_body_without_name_or_not_an_object_answers_422__S034_002_DoD5(
+    application: FastAPI, db_settings: Settings, engine: Engine, body: Any
+) -> None:
+    """DoD-5 — DEC-034-1: `{}` (no `name`) and a non-object body each answer 422; nothing is
+    written."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+    _store_session_name(engine, session_id, NAME_BEFORE)
+    row_before = _stored_row(engine, session_id)
+
+    response = _rename_request(client, session_id, body)
+
+    assert response.status_code == 422, response.text
+    assert _stored_row(engine, session_id) == row_before
+
+
+def test_a_json_null_body_answers_422__S034_002_DoD5(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-5 — DEC-034-1: a JSON `null` body is not an object and carries no `name`: 422."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+    row_before = _stored_row(engine, session_id)
+
+    response = client.patch(
+        _session_path(session_id), content=b"null", headers={"content-type": "application/json"}
+    )
+
+    assert response.status_code == 422, response.text
+    assert _stored_row(engine, session_id) == row_before
+
+
+@pytest.mark.parametrize(
+    "value",
+    [42, 4.5, ["The Docks"], [], True, False, {"text": "The Docks"}],
+    ids=["integer", "float", "list", "empty-list", "true", "false", "object"],
+)
+def test_a_non_string_non_null_name_answers_422__S034_002_DoD5(
+    application: FastAPI, db_settings: Settings, engine: Engine, value: Any
+) -> None:
+    """DoD-5 — DEC-034-1: `name` as a number, a list or a boolean (or an object) answers 422;
+    nothing is written."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+    _store_session_name(engine, session_id, NAME_BEFORE)
+    row_before = _stored_row(engine, session_id)
+
+    response = _rename_request(client, session_id, {"name": value})
+
+    assert response.status_code == 422, response.text
+    assert _stored_row(engine, session_id) == row_before
+
+
+# --- DoD-6: foreign and unknown ids are one 404; a malformed id is a 422 ---------------------
+
+
+def test_renaming_another_users_session_answers_404_and_changes_nothing__S034_002_DoD6(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-6 — US-029.AC-1, R5: A renaming B's session answers 404 `session_not_found`; B's
+    stored row and B's own read are unchanged."""
+    owner = _player_b(application, db_settings)
+    foreign_character = _character(owner, "Bramble")
+    foreign_id = _start(owner, foreign_character["id"], {})["id"]
+    _store_session_name(engine, foreign_id, NAME_BEFORE)
+    owner_read_before = _read_session(owner, foreign_id)
+    row_before = _stored_row(engine, foreign_id)
+    intruder = _player_a(application, db_settings)
+
+    response = _rename_request(intruder, foreign_id, {"name": "Taken over"})
+
+    _assert_envelope(response, 404, SESSION_NOT_FOUND)
+    assert response.json()["error"]["detail"] == {}
+    assert _stored_row(engine, foreign_id) == row_before
+    assert _read_session(owner, foreign_id) == owner_read_before
+
+
+def test_a_foreign_rename_is_indistinguishable_from_an_unknown_id__S034_002_DoD6(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-6 — R5 refusal identity: the foreign-id answer equals the unknown-id answer, body
+    for body, and the unknown id answers 404 `session_not_found` too."""
+    owner = _player_b(application, db_settings)
+    foreign_id = _start(owner, _character(owner, "Bramble")["id"], {})["id"]
+    intruder = _player_a(application, db_settings)
+
+    foreign = _rename_request(intruder, foreign_id, {"name": "Taken over"})
+    unknown = _rename_request(intruder, UNKNOWN_SESSION_ID, {"name": "Taken over"})
+
+    _assert_envelope(foreign, 404, SESSION_NOT_FOUND)
+    _assert_envelope(unknown, 404, SESSION_NOT_FOUND)
+    assert foreign.json() == unknown.json()
+
+
+def test_a_malformed_session_id_answers_422__S034_002_DoD6(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-6 — the Wire contract: a non-numeric path id is FastAPI's native 422."""
+    client = _player_a(application, db_settings)
+
+    response = _rename_request(client, "abc", {"name": "Anything"})
+
+    assert response.status_code == 422, response.text
+
+
+# --- DoD-7: an archived session can be renamed and stays archived ---------------------------
+
+
+def test_an_archived_session_can_be_renamed_and_stays_archived__S034_002_DoD7(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-7: renaming an archived session answers 200 with the name; `archived_at` is
+    unchanged, it stays out of the working lists and appears renamed in the archived view."""
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+    archived = _archive_session(client, session_id)
+    assert archived.status_code == 200, archived.text
+    archived_at = archived.json()["archived_at"]
+    assert archived_at is not None
+
+    renamed = _rename(client, session_id, RENAME_SENT)
+
+    assert renamed["name"] == RENAME_TRIMMED
+    assert renamed["archived_at"] == archived_at
+    assert _stored_times(engine, session_id)[2] == archived_at
+    assert session_id not in _ids(_all_sessions(client))
+    assert session_id not in _ids(_character_sessions(client, character["id"]))
+    assert _matching(_all_sessions(client, include_archived=True), session_id)["name"] == RENAME_TRIMMED
+    assert _read_session(client, session_id)["archived_at"] == archived_at
+
+
+# --- DoD-8: names are not unique -------------------------------------------------------------
+
+
+def test_two_sessions_can_hold_the_same_name__S034_002_DoD8(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-8 — UC-089 exception flows: the same name on two sessions (here under two
+    characters, and twice under one) is accepted every time and reads back on each."""
+    client = _player_a(application, db_settings)
+    aria = _character(client, "Aria")
+    bramble = _character(client, "Bramble")
+    first = _start(client, aria["id"], {})["id"]
+    second = _start(client, aria["id"], {})["id"]
+    third = _start(client, bramble["id"], {})["id"]
+
+    for session_id in (first, second, third):
+        assert _rename(client, session_id, RENAME_TRIMMED)["name"] == RENAME_TRIMMED
+
+    for session_id in (first, second, third):
+        assert _read_session(client, session_id)["name"] == RENAME_TRIMMED
+
+
+# --- DoD-9: no embedding model needed, no embedding call made --------------------------------
+
+
+def test_a_rename_succeeds_with_no_embedding_model_designated__S034_002_DoD9(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """DoD-9 — DEC-034-5: the seeded instance designates no embedding model (it holds no
+    server at all); a rename still answers 200, and the provider seam builds no client."""
+    factory: FakeClientFactory = fake_factory()
+    application.dependency_overrides[get_llm_client_factory] = lambda: factory
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+    constructions_before = factory.call_count
+
+    renamed = _rename(client, session_id, RENAME_SENT)
+
+    assert renamed["name"] == RENAME_TRIMMED
+    assert factory.call_count == constructions_before
+    assert factory.embed_calls == []
+
+
+def test_a_rename_makes_no_embedding_call_even_with_a_designated_model__S034_002_DoD9(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-9 — DEC-034-5: with an embedding model designated, a rename still constructs no
+    provider client and issues no embed call (the name is not part of the session text)."""
+    _designate_embedding_model(engine)
+    factory: FakeClientFactory = fake_factory()
+    application.dependency_overrides[get_llm_client_factory] = lambda: factory
+    client = _player_a(application, db_settings)
+    character = _character(client, "Aria")
+    session_id = _start(client, character["id"], {})["id"]
+    constructions_before = factory.call_count
+    embeds_before = list(factory.embed_calls)
+
+    renamed = _rename(client, session_id, RENAME_SENT)
+
+    assert renamed["name"] == RENAME_TRIMMED
+    assert factory.call_count == constructions_before
+    assert factory.embed_calls == embeds_before
+
+
+# --- DoD-11: the rename route refuses anonymous callers --------------------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"name": "Anything"}, {}],
+    ids=["valid-body", "empty-body"],
+)
+def test_an_anonymous_rename_answers_401__S034_002_DoD11(
+    application: FastAPI, db_settings: Settings, engine: Engine, body: dict[str, Any]
+) -> None:
+    """DoD-11: with no session cookie, `PATCH /api/sessions/{id}` answers 401
+    `not_authenticated` — for an existing session and for an unknown id — and writes nothing."""
+    owner = _player_a(application, db_settings)
+    session_id = _start(owner, _character(owner, "Aria")["id"], {})["id"]
+    row_before = _stored_row(engine, session_id)
+    anonymous = _anonymous(application)
+
+    for target in (session_id, UNKNOWN_SESSION_ID):
+        _assert_envelope(_rename_request(anonymous, target, body), 401, NOT_AUTHENTICATED)
+
+    assert _stored_row(engine, session_id) == row_before

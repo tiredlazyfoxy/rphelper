@@ -60,7 +60,9 @@ from tests.privacy_audit_support import (
 #: (`POST /api/bootstrap/import`, owner fast/003) is now built and enumerated.
 #: fast/014 (message-delete): one higher again — row 75, `DELETE /api/messages/{}`, an
 #: `owner` row classified like row 45 (PATCH on the same path).
-EXPECTED_ROW_COUNT = 75
+#: 034/002 DoD-11: one higher again — row 76, `PATCH /api/sessions/{}`, the session rename,
+#: an `owner` row refusing with `session_not_found`.
+EXPECTED_ROW_COUNT = 76
 
 #: The owner column of every coverage-list table that has one (`002.context.md`'s list,
 #: resolved against the real schema: character and session configuration and user settings
@@ -84,6 +86,9 @@ READ_SURFACE_OF_CARRIER: Mapping[tuple[str, str], str] = {
     ("setups", "name"): "setup",
     ("setups", "description"): "setup",
     ("sessions", "system_prompt"): "session_configuration",
+    # 034/002 DoD-12 (DEC-034-4): the session name travels on every session payload; the
+    # single-session read is its named surface here (the lists carry it too).
+    ("sessions", "name"): "session",
     ("users", "rp_language"): "settings",
     ("users", "preferred_language"): "settings",
     ("messages", "text[partner]"): "entries",
@@ -158,6 +163,7 @@ def test_app_routes_and_the_enumeration_agree_exactly__S032_002_DoD1(world: Audi
     assert [(route.method, route.path, route.route_class) for route in row_five] == [
         ("POST", "/api/bootstrap/import", "public")
     ]
+    assert ("PATCH", "/api/sessions/{}") in ENUMERATED_OPERATIONS  # 034/002 DoD-11
     for row, reason in EXCLUDED_ROWS.items():
         assert reason.strip(), f"row {row} is excluded without a recorded reason"
 
@@ -173,6 +179,38 @@ def test_app_routes_and_the_enumeration_agree_exactly__S032_002_DoD1(world: Audi
         f"routes the table does not classify ({len(unclassified)}): {unclassified}\n"
         f"table rows with no route ({len(without_route)}): {without_route}"
     )
+
+
+def test_the_session_rename_is_an_owner_row_refusing_with_session_not_found__S034_002_DoD11() -> None:
+    """034/002 DoD-11 (DEC-034-4): the enumeration lists `PATCH /api/sessions/{}` exactly once,
+    as an `owner` route whose foreign/unknown-id refusal is `session_not_found`. The two-way
+    equality with the application's routes is `test_app_routes_and_the_enumeration_agree_exactly`
+    above; the anonymous 401 is `test_every_non_public_route_refuses_anon_with_401` below."""
+    rename_rows = [route for route in ENUMERATED_ROUTES if route.key() == ("PATCH", "/api/sessions/{}")]
+    assert [(route.route_class, route.not_found_code) for route in rename_rows] == [
+        ("owner", "session_not_found")
+    ]
+    # The configuration PATCH on the longer path is a different row and stays classified.
+    assert ("PATCH", "/api/sessions/{}/configuration") in ENUMERATED_OPERATIONS
+    assert len({route.row for route in ENUMERATED_ROUTES}) == len(ENUMERATED_ROUTES), "a row number repeats"
+
+
+def test_the_session_rename_route_refuses_anon_with_401__S034_002_DoD11(world: AuditWorld) -> None:
+    """034/002 DoD-11: anonymous `PATCH /api/sessions/{id}` answers 401 `not_authenticated` with
+    an empty detail — for the unknown id and for one of B's real sessions — and B's session
+    is unchanged afterwards."""
+    registered = registered_paths_by_operation(world.application)
+    template = registered[("PATCH", "/api/sessions/{}")]
+    b_session = world.b.session_with_setup_id
+    before = world.clients.b.get(f"/api/sessions/{b_session}")
+    assert before.status_code == 200, before.text
+
+    for path in (fill_path(template), fill_path(template, unknown_id=b_session)):
+        for body in ({}, {"name": "anonymous rename"}):
+            response = world.clients.anon.request("PATCH", path, json=body)
+            assert_empty_detail(assert_envelope(response, 401, "not_authenticated"))
+
+    assert world.clients.b.get(f"/api/sessions/{b_session}").json() == before.json()
 
 
 def test_no_unbuilt_surface_has_landed__S032_002_DoD1(world: AuditWorld) -> None:

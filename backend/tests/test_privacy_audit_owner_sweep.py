@@ -56,7 +56,8 @@ from tests.privacy_audit_support import (
 # The enumeration's `owner` rows are table rows 19..53 inclusive (context.md). The count is
 # asserted so the sweep can never silently iterate a shrunken set.
 # fast/014 (message-delete): plus row 75, `DELETE /api/messages/{}` — 36 owner rows.
-EXPECTED_OWNER_ROWS = 36
+# 034/002 DoD-11: plus row 76, `PATCH /api/sessions/{}` (the session rename) — 37 owner rows.
+EXPECTED_OWNER_ROWS = 37
 
 # Tokens A tries to write into B's rows. They are not registry sentinels (so they cannot be
 # confused with seeded content) and are single lowercase alphanumeric words, like sentinels,
@@ -179,6 +180,9 @@ def _write_body(
         ("POST", "/api/sessions/{}/zone/messages"): {"text": text},
         ("POST", "/api/sessions/{}/zone/compose"): {"text": text},
         ("PATCH", "/api/sessions/{}/configuration"): {"system_prompt": text},
+        # 034/002 DoD-6 / DoD-12: the rename body is exactly `{"name": ...}` (any other key
+        # would be a 422, not the owner refusal), carrying A's probe and A's sentinel.
+        ("PATCH", "/api/sessions/{}"): {"name": name},
         ("PATCH", "/api/characters/{}/configuration"): {"system_prompt": text},
         ("PATCH", "/api/messages/{}"): {"text": text},
         ("PATCH", "/api/memos/{}"): {"body": text},
@@ -214,7 +218,7 @@ def _owner_rows() -> tuple[EnumeratedRoute, ...]:
     rows = tuple(route for route in ENUMERATED_ROUTES if route.route_class == "owner")
     assert len(rows) == EXPECTED_OWNER_ROWS, (
         f"the enumeration holds {len(rows)} `owner` rows, expected {EXPECTED_OWNER_ROWS} "
-        "(context.md rows 19..53, plus fast/014's row 75)"
+        "(context.md rows 19..53, plus fast/014's row 75 and 034/002's row 76)"
     )
     return rows
 
@@ -390,6 +394,13 @@ def test_every_owner_row_refuses_a_foreign_id_and_b_is_untouched__S032_003_DoD1_
     except AssertionError as failure:
         problems.append(f"DoD-2: an A sentinel reached one of B's own reads: {failure}")
 
+    # 034/002 DoD-6 / DoD-12: the refused renames (row 76, by A and by ADM) left B's session
+    # name exactly as B set it — the positive control that the snapshot above really holds it.
+    b_name = world.sentinels.get(user="B", table="sessions", field="name")
+    b_session = world.clients.b.get(f"/api/sessions/{world.b.session_with_setup_id}").json()
+    if b_session.get("name") != f"audit session name {b_name}":
+        problems.append(f"034/002 DoD-6: B's session name changed after the refused renames: {b_session!r}")
+
     report = "\n".join(problems)
     assert not problems, f"owner-scoped cross-user sweep found {len(problems)} problem(s):\n{report}"
 
@@ -474,6 +485,20 @@ def test_as_own_surfaces_carry_no_b_material__S032_003_DoD4_DoD10_DoD11(world: A
     per_character_ids = {item["id"] for item in per_character_sessions["sessions"]}
     assert a.session_with_setup_id in per_character_ids
     assert per_character_ids.isdisjoint(set(b.all_session_ids()))
+
+    # 034/002 DoD-12 (DEC-034-4): A's session lists and single read carry A's own session
+    # name (positive control) and never B's; the sweep above already proved no B sentinel.
+    a_session_name = world.sentinels.get(user="A", table="sessions", field="name")
+    b_session_name = world.sentinels.get(user="B", table="sessions", field="name")
+    for label, path in (
+        ("sessions", "/api/sessions"),
+        ("sessions+archived", "/api/sessions?include_archived=true"),
+        ("character-sessions", f"/api/characters/{a.character_id}/sessions"),
+        ("session", f"/api/sessions/{a.session_with_setup_id}"),
+    ):
+        text_of_read = rendered_text(client.get(path).json())
+        assert a_session_name in text_of_read, f"034/002 DoD-12: A's own session name is missing from A's {label}"
+        assert b_session_name not in text_of_read, f"034/002 DoD-12: B's session name reached A's {label}"
 
     scope_ids: dict[MemoScope, str | None] = {
         "user": None,

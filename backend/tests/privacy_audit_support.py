@@ -286,8 +286,11 @@ _CARRIER_ROWS: Final[tuple[tuple[str, str, str, bool, str], ...]] = (
         "system_prompt",
         "sessprompt",
         True,
-        "schema.sessions has no content text column: no title, no partner_label",
+        "the session-level system prompt (no title, no partner_label columns exist)",
     ),
+    # 034/002 DEC-034-4: a session's name is user content, owner-scoped on every read and
+    # never logged. Seeded through the rename route (`PATCH /api/sessions/{id}`).
+    ("sessions", "name", "sessname", True, "the roleplayer's session name (feature 034)"),
     ("users", "rp_language", "rplang", True, "user settings are two columns on users"),
     ("users", "preferred_language", "preflang", True, "second user-settings column"),
     ("messages", "text[partner]", "msgpartner", True, "the pasted partner block, born settled"),
@@ -1055,6 +1058,10 @@ ENUMERATED_ROUTES: Final[tuple[EnumeratedRoute, ...]] = (
     # fast/014 (message-delete, plan P1 / P2): DELETE on a message, classified exactly like
     # row 45 (PATCH on the same path) — owner-scoped, a foreign id is 404 message_not_found.
     EnumeratedRoute(75, "DELETE", "/api/messages/{}", "owner", "message_not_found"),
+    # 034/002 DoD-11 (DEC-034-4): the narrow session rename, an owner route classified like
+    # the other single-session rows 31..44 — a foreign or unknown id is 404 session_not_found.
+    # Appended rather than inserted among rows 31..44 so no existing row number moves.
+    EnumeratedRoute(76, "PATCH", "/api/sessions/{}", "owner", "session_not_found"),
 )
 
 ENUMERATED_OPERATIONS: Final[frozenset[tuple[str, str]]] = frozenset(
@@ -1382,6 +1389,12 @@ def _seed_user_content(
         ),
         200,
     )
+
+    # 034/002 DEC-034-4: the session name, seeded through the rename route like every other
+    # carrier (never a raw insert). The answer must carry the name exactly as sent.
+    session_name = f"audit session name {mark('sessions', 'name')}"
+    renamed = _ok(client.patch(f"/api/sessions/{session_with_setup_id}", json={"name": session_name}), 200)
+    assert renamed["name"] == session_name, renamed
 
     # memos: the twelve scope x reach combinations. Seeded **before** compose, so the
     # scripted memo_search call has a searchable chain memo to find and the tool-result

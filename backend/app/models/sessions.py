@@ -32,12 +32,18 @@ so that *any* non-numeric JSON value answers 422 rather than 500 (`context.md`'s
 non-numeric path id or `setup_id` → 422"). It lives here rather than in `models/ids.py`
 because it has exactly one call site so far.
 
+`RenameSessionRequest` is the `PATCH /api/sessions/{session_id}` body and the one named
+exception to "unknown keys are ignored": it carries exactly one **required** key, `name`,
+whose value is a string or `null`, and any other key is refused with a 422 (DEC-034-1,
+DEC-034-2). The value is trimmed and a blank one becomes `None`; there is no length cap
+(DEC-034-3).
+
 This module imports neither `app.services`, `app.routers`, `app.db` nor `fastapi`.
 """
 
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict
 
 from app.models.ids import SnowflakeOut
 from app.models.stream import MessageResponse, NonBlankText
@@ -100,3 +106,30 @@ class StartSessionRequest(BaseModel):
 
     setup_id: OptionalSnowflakeIn = None
     opening_message: NonBlankText | None = None
+
+
+def _normalise_session_name(value: str | None) -> str | None:
+    """Trim a supplied session name; a blank one becomes `None`; `None` passes through (DEC-034-1).
+
+    Same shape as `app.models.configuration._normalise_language`. No length cap (DEC-034-3).
+    """
+    if value is None:
+        return None
+    return value.strip() or None
+
+
+#: A nullable session name as the rename route accepts it: trimmed, blank → `None`.
+SessionNameIn = Annotated[str | None, AfterValidator(_normalise_session_name)]
+
+
+class RenameSessionRequest(BaseModel):
+    """The rename body: exactly one required key, `name` — a string or `null`.
+
+    A missing `name`, a non-string non-null value, or any other key answers 422. The stored
+    value is the trimmed name, or `None` when blank or `null` (clears the name, US-150.AC-3).
+    """
+
+    # DEC-034-2: the one request model that forbids unknown keys — any other key is a 422.
+    model_config = ConfigDict(extra="forbid")
+
+    name: SessionNameIn
