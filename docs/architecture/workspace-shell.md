@@ -9,7 +9,8 @@ US-040, US-053, US-059, US-079, US-080, US-088, US-089, US-090, US-091, US-092,
 US-093, US-094, US-095, US-096, US-097, US-098, US-099, US-100, US-101, US-102,
 US-103, US-104, US-105, US-107, US-109, US-110, US-112, US-113, US-114, US-115,
 US-116, US-117, US-118, US-119, US-120, US-121, US-123, US-124, US-125, US-126,
-US-128, US-132, US-133, US-134, US-135, US-139, US-141, US-142, US-143, US-145
+US-128, US-132, US-133, US-134, US-135, US-139, US-141, US-142, US-143, US-149,
+UC-089, US-150, US-151
 
 The `app` entry's one screen: three columns, a stream with a ruler through it, and
 a wall of notes. This doc holds the **shell** — geometry, the columns, the wall's
@@ -146,7 +147,7 @@ tree becomes an off-canvas overlay":
 
 | Thing | Value | Why this value |
 |---|---|---|
-| Tree column, expanded | `252px` | fits a character name, plus a session row's start-time label with a setup label beside it |
+| Tree column, expanded | `252px` | fits a character name, and a session row's two lines: the session's label (truncated) above a fixed-width last-use time with a setup label beside it |
 | Tree column, collapsed | `48px` | one 28px icon button plus its padding; nothing else fits, and nothing else belongs |
 | Wall, floating | `min(320px, 84vw)` | 320px reads a note body at 12px without wrapping every line; the `84vw` cap keeps a sliver of stream visible on a narrow screen so the overlay reads as an overlay |
 | Wall, pinned | `320px` | no `vw` term — pinned, it is a grid column and the grid already bounds it |
@@ -155,12 +156,48 @@ tree becomes an off-canvas overlay":
 | Composer text area | starts at `rows` **3** in the session composer, **10** in the character page's start composer; **native vertical handle** (`resize: vertical`); **no auto-grow**; scrolls internally; a dragged height is persisted per place | the roleplayer sizes the writing area themselves and it stays that size; 10 lines where a session is started, because the user wanted the larger area there especially (2026-10-08 decision, below) |
 | Responsive threshold | `820px` | below it the tree becomes a 48px rail with a lifted overlay, and a pinned wall reverts to floating |
 
-**The tree row holds a start time, not a title** (011 D4, US-145). A session is
-identified by its **start time** — `created_at` rendered `YYYY-MM-DD HH:MM` in
-local time — because `docs/product/` asks for no session title and `sessions` has
-no `title` column (`data-model.md`). The 252px reasoning above used to cite "a
-session title"; the measure is unchanged, because a fixed-width timestamp plus a
-dimmed setup label is about the same width as the title it replaced, and both fit.
+**The tree row holds the session's label on one line, and its last use beneath
+it** (session names, 2026-11-05; this replaces the start-time row of 011 D4).
+
+```
+┌──────────────────────────────────┐
+│ <label, one line, ellipsis>      │   line 1 — the session's label
+│ 2026-11-05 21:40 · <setup label> │   line 2 — smaller, dimmed
+└──────────────────────────────────┘
+```
+
+- **Line 1 is the session's label**, by the one label rule below. It sits on one
+  line and **truncates with an ellipsis**: a name may be long, and a wrapped name
+  would make row height depend on content.
+- **Line 2, smaller and dimmed:** `last_used_at` rendered **local
+  `YYYY-MM-DD HH:MM`**, then the setup label beside it. The setup label moved from
+  line 1 to line 2 so that the name has the full row width. The last-use time is
+  the same signal the tree is ordered by (`sessions.last_used_at`), so the order
+  of the rows is readable from the rows themselves. Fixed-width absolute time,
+  not a relative "5 min ago" and not a date alone — `DEC-arch-session-names-3`.
+- **The 252px measure is unchanged.** Line 2 is a fixed-width timestamp plus a
+  dimmed setup label, which is the start-time-plus-setup line the 252px reasoning
+  was originally checked against; line 1 truncates rather than widening anything.
+  A second line costs row height, not column width.
+
+**The label rule — one rule, every place a session is named.** A session's label
+is its `name`; when `name` is NULL it is the **local start date**, `created_at`
+rendered `YYYY-MM-DD` in the roleplayer's own timezone. The client computes it,
+because the server cannot know the timezone (`data-model.md`). The rule is
+applied identically in the tree, the open session's header, the character page's
+Sessions tab and my-search's session results; it lives in **one** client-side
+derivation, so the four places cannot drift apart.
+
+**Rename is offered in two places: the tree row and the open session's header.**
+Both edit the same label in place and write through
+`PATCH /api/sessions/{session_id}` (`backend-structure.md`). Committing empty text
+sends `null`, which returns the session to its default label. The rename is **not
+optimistic** — the label changes when the server answers, per
+`forms-and-lists.md`'s never-optimistic rule — and on success the session lists
+are re-read; the row does not move, because a rename never touches
+`last_used_at`. It is one more in-place edit beside the entry, message and note
+editors, not a `Modal`. The interaction's specifics (inline, which keys commit
+and cancel, blur) are `DEC-arch-session-names-4`.
 
 **The composer's text area is user-resizable, vertically, and does not grow with
 its content** (user decision, 2026-10-08). The rule is the same in both places the
@@ -416,21 +453,21 @@ rule — a parameter, never a global.
 
 ## The stream — the settled record
 
-**Realizes:** FEAT-009, UC-078, UC-082, US-109, US-110, US-123, US-124
+**Realizes:** FEAT-009, UC-078, UC-082, US-109, US-110, US-123, US-124, US-149
 
 Above the ruler is the record, read from the **`settled_entries` selectable** and
 ordered by **`id`** — a snowflake is k-sortable, so `ORDER BY id` *is* the stream
 order and there is no `position` column to consult (`data-model.md`). Every reader
-goes through a named selectable; raw `messages` is touched only by settle and
-re-open (R11).
+goes through a named selectable; raw `messages` is touched only by settle,
+re-open and single-message delete (R11).
 
 Three kinds render differently, because they are three different things:
 
 | `kind` | Rendering | Actions in the entry |
 |---|---|---|
-| `partner` | the partner's block, quoted surface | translate (FEAT-011), edit — **no copy** |
-| `turn` | the roleplayer's own settled turn | edit, **copy as plain text** |
-| `decision` | a dashed, accent-coloured card — visibly not roleplay prose (UC-081) | edit only — **no copy at all** (US-123) |
+| `partner` | the partner's block, quoted surface | translate (FEAT-011), edit, delete — **no copy** |
+| `turn` | the roleplayer's own settled turn | edit, **copy as plain text**, delete |
+| `decision` | a dashed, accent-coloured card — visibly not roleplay prose (UC-081) | edit, delete — **no copy at all** (US-123) |
 
 **A `partner` entry offers no copy either** (014 D7, user decision). UC-030,
 UC-082 and US-033 all speak of copying *the roleplayer's own answer*; a partner
@@ -440,7 +477,7 @@ decision's.
 
 **Every per-entry action lives inside the entry.** There is no row toolbar, no
 context menu and no separate action column: the actions sit in the entry's own
-header. **Edit, copy, the translation flicker and re-open are one revealed
+header. **Edit, copy, the translation flicker, re-open and delete are one revealed
 group**, and the reveal is `ui-conventions.md`'s — Mantine's `useHover` +
 `useFocusWithin` + a touch query, applied as opacity so the controls stay in the
 DOM and the tab order. The stream is a column of documents, not a table, so
@@ -450,20 +487,41 @@ rule exists to keep a *row* from collapsing under four icon buttons.
 **Editing is in place and saves on focus loss** (US-109, US-110). There is no
 modal — which is a **named exception** to `forms-and-lists.md`'s "create and edit
 are always a `Modal`" rule, recorded there with the reason the two do not
-conflict. As built (014 D1, D10):
+conflict. As built (014 D1, D10; fast/014):
 
 - **"Edit entry" swaps the body for an autosizing plain textarea.** A settled
   entry is edited as plain text, not through the markdown editor — the editor is
   for authoring a note or a persona, and swapping a paragraph of prose for a
   WYSIWYG surface mid-stream is a different interaction from the one UC-078 asks
   for.
-- **Blur commits.** Blank or unchanged text **sends nothing**.
+- **Blur commits.** **Unchanged text sends nothing.** **Text cleared to blank
+  deletes the entry** (US-149) — the same delete the trash control sends, with
+  its buried discussion, and **with no confirm**: emptying the field is the
+  deliberate act, as it is for a note (`forms-and-lists.md`; DEC-F014-10, which
+  supersedes the earlier "blank sends nothing" rule).
 - **The `PATCH` response replaces that one row**, not the stream
   (`forms-and-lists.md`'s narrowed re-load). A full stream re-load on every blur
   would re-scroll the roleplayer away from the line they are writing.
 - **On failure the editor stays open with the typed text** (R10 — nothing the
   roleplayer typed is lost to a failure) and the entries are re-read.
 - **An edit never re-parses `(( ))` and never changes `kind`** (R12).
+
+**Deleting an entry** (US-149; fast/014). A **"Delete entry"** control sits in
+the entry's revealed group on every kind — partner, turn and decision alike. As
+built (DEC-F014-4, DEC-F014-11):
+
+- **It opens the shared confirm** — red, the consequence naming that the entry
+  goes for good and, for a settled entry with a discussion, that the discussion
+  goes with it (`forms-and-lists.md`'s confirm convention). Cancel sends nothing.
+- **It is absent while that entry's editor is open** — the editor's own blank
+  commit is the delete path there — and **disabled while a stream mutation is in
+  flight or a generation is streaming**, so a delete cannot race the post-stream
+  re-read.
+- **On success the entry leaves the record from the server's answer** and the
+  coverage banner takes the response's flag; **on failure the entries are
+  re-read** and the failure notified (`forms-and-lists.md`'s narrowed re-load).
+- Deleting the **last** settled entry moves the re-open control to the entry
+  before it, because that is now the last settled row (R11).
 
 Bodies are rendered with **`react-markdown`** through the one renderer,
 `app/MessageBody.tsx` (`frontend-structure.md`). **Copy yields plain text, never
@@ -513,8 +571,10 @@ marked **"Read-only"** (022 D11, U1). As built:
 - **An empty group says so**, and a load failure renders **inline inside the
   group**, not as a notification (`ui-conventions.md`'s boundary — the group is on
   screen and is where the roleplayer is looking).
-- **The rows render with no edit control.** The server half is the `PATCH`
-  refusal of a buried row (`message_not_editable`, R7, R11).
+- **The rows render with no edit and no delete control.** The server half is the
+  refusal of a buried row by `PATCH` and `DELETE` alike (`message_not_editable`,
+  R7, R11). A buried row leaves only with its head, when the settled entry is
+  deleted.
 
 **"Opening a discussion" has no control of its own** (022 D12). The zone *is* the
 discussion: it opens with the first message written on *my turn*, and the collapse
@@ -563,8 +623,8 @@ short of US-112.AC-1 and US-112.AC-3).
 and the narrowness is deliberate** (024 D11):
 
 - It is driven by the **latest record-keeping write's response in this view** —
-  settle, re-open, a settled edit, a partner filing — through the
-  `search_coverage_incomplete` flag those responses carry
+  settle, re-open, a settled edit, a partner filing, the delete of a settled
+  entry — through the `search_coverage_incomplete` flag those responses carry
   (`session-stream.md`).
 - It **starts hidden on mount**, because nothing persists staleness.
 - It is **cleared by the next fully indexed write**.
@@ -584,7 +644,7 @@ layer, not that the design chose silence.
 
 ## The ruler and the current zone
 
-**Realizes:** FEAT-010, UC-079, UC-083, US-114, US-115, US-125
+**Realizes:** FEAT-010, UC-079, UC-083, US-114, US-115, US-125, US-149
 
 **One visible separator**, and below it the live chat read from the
 **`current_zone` selectable**. One ruler and one zone per session — the zone is
@@ -598,21 +658,32 @@ visible separator" is checkable rather than descriptive.
 - **Every message in the zone is editable by the roleplayer, the assistant's
   included** (US-115). Edited in place, same as a settled entry. This is not a
   courtesy affordance — it is the mechanism R7 and R11 depend on, because settle
-  reads whatever the row holds at that moment. As built (013 D10): an `IconEdit`
-  control swaps the body for an autosizing textarea, blur commits, blank or
-  unchanged text sends nothing, the `PATCH` response replaces that one row, and on
-  failure the editor **stays open with the typed text** (R10) and the zone is
-  re-read.
+  reads whatever the row holds at that moment. As built (013 D10; fast/014): an
+  `IconEdit` control swaps the body for an autosizing textarea, blur commits,
+  **unchanged text sends nothing**, **text cleared to blank deletes that message
+  with no confirm** (US-149, DEC-F014-10), the `PATCH` response replaces that one
+  row, and on failure the editor **stays open with the typed text** (R10) and the
+  zone is re-read.
+- **Every user and assistant message in the zone can be deleted on its own**
+  (US-149) — a double send usually lands here. As built (DEC-F014-11): a
+  **"Delete message"** control in the message's header opens the shared red
+  confirm; it is **absent on tool rows, in the read-only discussion view and
+  while that message's editor is open**, and **disabled while a stream mutation
+  is in flight or a generation is streaming**. Success removes the row from the
+  zone from the server's answer; failure notifies and re-reads the zone. Deleting
+  a zone row may leave the zone with nothing to settle, which Settle's own rules
+  below already handle.
 - **An assistant row is edited as its raw stored text, `<think>` tags included**
   (022 D10). The server strips them at settle (R12's parallel `<think>` rule), so
   what the roleplayer edits is what is stored and what they see is not a second,
   cleaned copy they cannot reach.
-- **A tool row carries no edit control, and this is settled rather than a
-  shortfall.** `US-115.AC-1` now carries a **`Constraint:`** stating that a tool's
-  own record is not a message anyone wrote and is not editable. The build matches
-  the criterion: a tool row's text summarises a payload the model produced and the
-  server recorded, so an "edit" to it would be a forgery of a call that happened
-  (021 D8, R11's head rule). **No defect.**
+- **A tool row carries no edit and no delete control, and this is settled rather
+  than a shortfall.** `US-115.AC-1` now carries a **`Constraint:`** stating that a
+  tool's own record is not a message anyone wrote and is not editable. The build
+  matches the criterion: a tool row's text summarises a payload the model produced
+  and the server recorded, so an "edit" to it would be a forgery of a call that
+  happened (021 D8, R11's head rule). The server refuses deleting one alone for
+  the same reason (`message_not_editable`, `session-stream.md`). **No defect.**
 - **The live reply has no edit control, and that is `docs/plans/defects.md` D-02.**
   While streaming, the read-only live reply renders beneath the zone rows
   (below); only once the stream ends and the zone re-read brings in the persisted
@@ -924,15 +995,21 @@ paragraph is a control that eventually does.
 
 The glyph is **`IconX`**, labelled **"Discard empty zone"** (013 D3). `IconX`
 already means "dismiss" on the wall, and `IconTrash` would promise the deletion of
-content that, by the rule above, is never there.
+content that, by the rule above, is never there. **That contrast is now sharper,
+not weaker**: `IconTrash` is the stream's delete-a-stored-message glyph
+("Delete entry" / "Delete message", above), so putting it on this control would
+promise exactly the server-side deletion it does not perform.
 
 **It is frontend-only. There is no route and no backend surface.** An empty
 current zone has **no rows at all** — R11 defines the zone as the rows matching
 `related_to IS NULL AND settled_at IS NULL`, so an empty one is an empty set. The
-server has nothing to discard, and **R11 is therefore unchanged**: raw `messages`
-is still touched by exactly two operations, settle and re-open. A planner who
-adds a discard route breaks that invariant for no gain, and this paragraph is
-here to be cited when one proposes it.
+server has nothing to discard, and **R11 is unchanged by this control**: raw
+`messages` is touched by exactly three operations — settle, re-open and
+single-message delete (fast/014) — and none of them is a zone discard.
+Single-message delete removes one addressed message per request; it is not a
+discard of the zone and does not license one. A planner who adds a discard route
+breaks that invariant for no gain, and this paragraph is here to be cited when
+one proposes it.
 
 The absent-not-disabled posture follows the existing precedent exactly: re-open's
 `IconArrowBackUp` is **absent** rather than disabled once the zone is non-empty
@@ -1121,7 +1198,9 @@ components, different arrangement" a checkable claim rather than an intention.
 - **Sessions** (plan 011): a "Show archived sessions" switch, a table of sessions
   with a per-row Archive / Restore / Export menu, the neutral empty line "No
   sessions yet.", an **"Import session"** button (plan 031), and the inline start
-  control below.
+  control below. Each row is labelled by the one session label rule ("Geometry"
+  above) — the same label the tree and the session header show. Rename is not
+  offered here; it lives on the tree row and the session header.
 
 **The archive toggle is section-local everywhere, and nothing persists it**
 (018 D11, closing a question 009, 010 and 011 each answered a part of). The tree
@@ -1347,6 +1426,8 @@ for this surface specifically:
 **As built** (017 D16, D18):
 
 - A Mantine **`Select` labelled "Model"**, in a header bar after the title row.
+  **The title row shows the session's label** by the one label rule and is the
+  second place a session is renamed ("Geometry" above).
 - Options in **first-enabled order** (`llm_servers.id`, then `models.id` — the
   LLM Servers page's order), each labelled **"name (server)"**.
 - A **captured model that is no longer enabled is shown as a disabled "(not
@@ -1438,3 +1519,14 @@ re-derived. **(B) does not return**; its subject, the answer box, no longer exis
 (C) has already returned in the modified form above, as the composer's native
 handle — which is **not** (B): no hand-rolled splitter, no clamp, and no stored
 number driving layout geometry outside the composer's own text area.
+
+---
+
+## Decision history
+
+- **2026-11-05 — the tree row shows a session's label, not its start time.**
+  Supersedes the start-time row (011 D4): line 1 is the session's `name` or,
+  when never renamed, its local start date; line 2 is the local last-use time
+  beside the setup label. One label rule everywhere a session is named; rename
+  from the tree row and the session header. Detail in `DEC-arch-session-names-1`,
+  `DEC-arch-session-names-3` and `DEC-arch-session-names-4`.

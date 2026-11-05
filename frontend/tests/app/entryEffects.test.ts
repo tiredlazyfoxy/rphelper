@@ -11,11 +11,21 @@
 //   - copyAsPlainText: toPlainText, then navigator.clipboard.writeText, or — when the clipboard
 //     API is absent — a transient textarea + document.execCommand("copy"), removed afterwards
 //     with focus restored; failures notify and resolve false; no request, no success notice.
+//
+// Amended by fast feature 014 (docs/plans/fast/014.message-delete/plan.md, context.md P4-P6):
+//   - deleteMessage sends DELETE /api/messages/<encoded id> and returns the parsed body;
+//   - deleteEntry: success removes the entry and sets searchCoverageIncomplete from the
+//     response, resolves true; abort resolves false silently with no re-read; any other
+//     failure notifies, re-reads the entries and resolves false; never sets busy, never rejects;
+//   - editEntry with blank / whitespace-only text now delegates to deleteEntry (DELETE, not
+//     PATCH) — 014 step 004's "blank is a no-op" (DoD-4) is superseded; unchanged text is still
+//     a no-op. These cases carry "F014 DoD-<n>".
 import { runInAction, toJS } from "mobx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copyAsPlainText } from "../../src/app/copyOut";
+import { deleteMessage } from "../../src/app/streamApi";
 import type { Message, MessageKind } from "../../src/app/streamApi";
-import { StreamState, chooseKind, editEntry, effectiveKind } from "../../src/app/streamState";
+import { StreamState, chooseKind, deleteEntry, editEntry, effectiveKind } from "../../src/app/streamState";
 import { ApiError } from "../../src/shared/apiError";
 
 const notifyFailureSpy = vi.hoisted(() => vi.fn<(error: unknown) => void>());
@@ -32,6 +42,12 @@ const ZONE_PATH = `/api/sessions/${SESSION_ID}/zone`;
 const GET_ENTRIES = `GET ${ENTRIES_PATH}`;
 const GET_ZONE = `GET ${ZONE_PATH}`;
 const patchMessage = (id: string): string => `PATCH /api/messages/${id}`;
+const deleteKey = (id: string): string => `DELETE /api/messages/${id}`;
+
+/** The DELETE route's success body (plan Interface intent: deleted_ids + the coverage flag). */
+function deleted(ids: string[], searchCoverageIncomplete = false): unknown {
+  return { deleted_ids: ids, search_coverage_incomplete: searchCoverageIncomplete };
+}
 
 const STAMP = "2026-05-10T09:00:00.000000+00:00";
 const LATER = "2026-05-10T09:05:00.000000+00:00";
@@ -251,22 +267,53 @@ describe("editEntry — a settled served row replaces that one entry", () => {
   });
 });
 
-describe("editEntry — blank or unchanged text", () => {
-  it.each([
-    ["empty text", ""],
-    ["whitespace-only text", "  \n"],
-    ["text identical to the held entry's text", "Unchanged entry text."],
-  ])("with %s makes no request and resolves true — DoD-4", async (_label, text) => {
+describe("editEntry — unchanged text", () => {
+  it("with text identical to the held entry's text makes no request and resolves true — DoD-4 — F014 DoD-20", async () => {
     const backend = serve({});
     const other = entry("partner", "Partner block.");
     const target = entry("turn", "Unchanged entry text.");
     const state = seeded({ entries: [other, target] });
 
-    await expect(editEntry(state, target.id, text)).resolves.toBe(true);
+    await expect(editEntry(state, target.id, "Unchanged entry text.")).resolves.toBe(true);
 
     expect(backend.mock).not.toHaveBeenCalled();
     expect(toJS(state.entries)).toEqual([other, target]);
     expect(notifyFailureSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("editEntry — blank text deletes the entry (fast 014 P6)", () => {
+  it.each([
+    ["empty text", ""],
+    ["whitespace-only text", "  \n"],
+  ])("with %s sends DELETE /api/messages/<id> (no PATCH), removes the entry, resolves true — F014 DoD-19", async (_label, text) => {
+    const other = entry("partner", "Partner block.");
+    const target = entry("turn", "Entry to clear.");
+    const backend = serve({ [deleteKey(target.id)]: ok(deleted([target.id])) });
+    const state = seeded({ entries: [other, target] });
+
+    await expect(editEntry(state, target.id, text)).resolves.toBe(true);
+
+    expect(backend.keys()).toEqual([deleteKey(target.id)]);
+    expect(backend.keys().some((key) => key.startsWith("PATCH "))).toBe(false);
+    expect(toJS(state.entries)).toEqual([other]);
+    expect(notifyFailureSpy).not.toHaveBeenCalled();
+  });
+
+  it("with blank text and a failing DELETE resolves false like deleteEntry (notifies, re-reads entries) — F014 DoD-19", async () => {
+    const target = entry("turn", "Entry to clear.");
+    const reread = [target];
+    const backend = serve({
+      [deleteKey(target.id)]: fails("message_not_editable", 409),
+      [GET_ENTRIES]: entriesList(reread),
+    });
+    const state = seeded({ entries: [target] });
+
+    await expect(editEntry(state, target.id, "   ")).resolves.toBe(false);
+
+    expectNotifiedOnceWith("message_not_editable");
+    expect(backend.keys()).toEqual([deleteKey(target.id), GET_ENTRIES]);
+    expect(toJS(state.entries)).toEqual(reread);
   });
 });
 
@@ -450,15 +497,202 @@ describe("editEntry — abort and busy", () => {
     expect(state.busy).toBe(false);
   });
 
-  it("busy stays false for a blank edit — DoD-8", async () => {
-    serve({});
+  it("busy stays false for a blank edit (now a delete) — DoD-8 — F014 DoD-19", async () => {
     const target = entry("turn", "Held turn.");
+    serve({ [deleteKey(target.id)]: ok(deleted([target.id])) });
     const state = seeded({ entries: [target] });
 
     await editEntry(state, target.id, "   ");
 
     expect(state.busy).toBe(false);
   });
+});
+
+// ===========================================================================
+// deleteMessage (fast 014 P4)
+// ===========================================================================
+describe("deleteMessage", () => {
+  it("sends DELETE to /api/messages/<id> and resolves with the parsed body — F014 DoD-14", async () => {
+    const id = "7360000000000000999";
+    const body = deleted([id, "7360000000000000998"], true);
+    const backend = serve({ [deleteKey(id)]: ok(body) });
+
+    await expect(deleteMessage(id)).resolves.toEqual(body);
+
+    expect(backend.keys()).toEqual([deleteKey(id)]);
+  });
+
+  it("URI-encodes the id into the path — F014 DoD-14", async () => {
+    const seenUrls: string[] = [];
+    const seenMethods: string[] = [];
+    stubFetch(async (input, init) => {
+      seenUrls.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      seenMethods.push(requestMethod(input, init));
+      return jsonResponse(deleted(["a/b c"]), 200);
+    });
+
+    await deleteMessage("a/b c");
+
+    expect(seenMethods).toEqual(["DELETE"]);
+    expect(seenUrls).toHaveLength(1);
+    expect(requestUrl(seenUrls[0] as string).pathname).toBe(`/api/messages/${encodeURIComponent("a/b c")}`);
+  });
+
+  it("throws ApiError on a failing response — F014 DoD-14", async () => {
+    serve({ [deleteKey("7360000000000000997")]: fails("message_not_found", 404) });
+
+    const failure = deleteMessage("7360000000000000997");
+
+    await expect(failure).rejects.toBeInstanceOf(ApiError);
+    await expect(failure).rejects.toMatchObject({ code: "message_not_found" });
+  });
+});
+
+// ===========================================================================
+// deleteEntry (fast 014 P5)
+// ===========================================================================
+describe("deleteEntry — success", () => {
+  it.each<[string, boolean]>([
+    ["true", true],
+    ["false", false],
+  ])(
+    "removes only that entry, sets searchCoverageIncomplete to the served %s, resolves true, makes no re-read — F014 DoD-15",
+    async (_label, flag) => {
+      const before = entry("partner", "Partner opener.");
+      const target = entry("turn", "Duplicate turn.");
+      const after = entry("decision", "Skip to dusk.");
+      const backend = serve({ [deleteKey(target.id)]: ok(deleted([target.id], flag)) });
+      const state = seeded({ entries: [before, target, after] });
+      runInAction(() => {
+        state.searchCoverageIncomplete = !flag;
+      });
+
+      await expect(deleteEntry(state, target.id)).resolves.toBe(true);
+
+      expect(backend.keys()).toEqual([deleteKey(target.id)]);
+      expect(toJS(state.entries)).toEqual([before, after]);
+      expect(state.searchCoverageIncomplete).toBe(flag);
+      expect(notifyFailureSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("never sets busy — not while the DELETE is pending, not after it — F014 DoD-15", async () => {
+    const answer = deferred<Response>();
+    const target = entry("turn", "Duplicate turn.");
+    serve({ [deleteKey(target.id)]: () => answer.promise });
+    const state = seeded({ entries: [target] });
+
+    const running = deleteEntry(state, target.id);
+    await flush();
+    expect(state.busy).toBe(false);
+
+    answer.resolve(jsonResponse(deleted([target.id]), 200));
+    await expect(running).resolves.toBe(true);
+    expect(state.busy).toBe(false);
+  });
+
+  it("leaves the entries untouched while the DELETE is pending (never optimistic) — F014 DoD-15", async () => {
+    const answer = deferred<Response>();
+    const other = entry("partner", "Partner block.");
+    const target = entry("turn", "Duplicate turn.");
+    serve({ [deleteKey(target.id)]: () => answer.promise });
+    const state = seeded({ entries: [other, target] });
+
+    const running = deleteEntry(state, target.id);
+    await flush();
+    expect(toJS(state.entries)).toEqual([other, target]);
+
+    answer.resolve(jsonResponse(deleted([target.id]), 200));
+    await running;
+    expect(toJS(state.entries)).toEqual([other]);
+  });
+});
+
+describe("deleteEntry — failure", () => {
+  it.each<[string, string, number]>([
+    ["404 message_not_found", "message_not_found", 404],
+    ["409 message_not_editable", "message_not_editable", 409],
+    ["500 internal_error", "internal_error", 500],
+  ])(
+    "a %s notifies once with that ApiError, re-reads the entries (not the zone), resolves false — F014 DoD-17",
+    async (_label, code, status) => {
+      const keep = entry("partner", "Kept partner block.");
+      const target = entry("turn", "Turn gone elsewhere.");
+      const reread = [keep];
+      const backend = serve({
+        [deleteKey(target.id)]: fails(code, status),
+        [GET_ENTRIES]: entriesList(reread),
+        [GET_ZONE]: zoneList([zoneRow("Should not be read.")]),
+      });
+      const state = seeded({ entries: [keep, target] });
+
+      await expect(deleteEntry(state, target.id)).resolves.toBe(false);
+
+      expectNotifiedOnceWith(code);
+      expect(backend.keys()).toEqual([deleteKey(target.id), GET_ENTRIES]);
+      expect(toJS(state.entries)).toEqual(reread);
+      expect(state.busy).toBe(false);
+    },
+  );
+});
+
+describe("deleteEntry — abort", () => {
+  it("aborted while the DELETE is pending (fetch rejects) resolves false, notifies nothing, re-reads nothing — F014 DoD-18", async () => {
+    const seen: string[] = [];
+    stubFetch((input, init) => {
+      seen.push(`${requestMethod(input, init)} ${requestUrl(input).pathname}`);
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => {
+          reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+        });
+      });
+    });
+    const other = entry("partner", "Partner.");
+    const target = entry("turn", "Held turn.");
+    const state = seeded({ entries: [other, target] });
+    const controller = new AbortController();
+
+    const running = deleteEntry(state, target.id, controller.signal);
+    await flush();
+    controller.abort();
+
+    await expect(running).resolves.toBe(false);
+    await flush();
+    expect(seen).toEqual([deleteKey(target.id)]);
+    expect(toJS(state.entries)).toEqual([other, target]);
+    expect(notifyFailureSpy).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, (target: Message) => Response]>([
+    ["a success", (target) => jsonResponse(deleted([target.id]), 200)],
+    ["a 409 failure", () => envelope("message_not_editable", 409)],
+  ])(
+    "whose DELETE answers with %s after the abort resolves false, writes nothing, notifies nothing, re-reads nothing — F014 DoD-18",
+    async (_label, late) => {
+      const answer = deferred<Response>();
+      const other = entry("partner", "Partner.");
+      const target = entry("turn", "Held turn.");
+      const backend = serve({
+        [deleteKey(target.id)]: () => answer.promise,
+        [GET_ENTRIES]: entriesList([entry("partner", "Late entry.")]),
+        [GET_ZONE]: zoneList([zoneRow("Late zone row.")]),
+      });
+      const state = seeded({ entries: [other, target] });
+      const controller = new AbortController();
+
+      const running = deleteEntry(state, target.id, controller.signal);
+      await flush();
+      controller.abort();
+      answer.resolve(late(target));
+
+      await expect(running).resolves.toBe(false);
+      await flush();
+      expect(backend.keys()).toEqual([deleteKey(target.id)]);
+      expect(toJS(state.entries)).toEqual([other, target]);
+      expect(notifyFailureSpy).not.toHaveBeenCalled();
+    },
+  );
 });
 
 // ===========================================================================

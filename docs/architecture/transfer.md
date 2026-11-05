@@ -1,7 +1,8 @@
 # Transfer — export and import
 
 **Realizes:** FEAT-001, FEAT-018, FEAT-019, UC-002, UC-061, UC-062, UC-063,
-UC-064, UC-065, UC-066, US-077, US-078, US-079, US-080, US-081, US-082, US-136
+UC-064, UC-065, UC-066, US-077, US-078, US-079, US-080, US-081, US-082, US-136,
+US-150
 
 The export/import contract: the envelope, the id-serialization rules, the two
 version constants, the four granularities, what never leaves the instance, the
@@ -82,6 +83,53 @@ readable.
 `schema_version` mechanically — from the registry itself — instead of trusting
 discipline. The hand bump is the cheap option taken while the registry changes
 once per feature, not a claim that hand bumps are reliable.
+
+### Session names travel — and what that does to `schema_version`
+
+**A session record carries `name`** (session names, 2026-11-05;
+`data-model.md`). Nothing in the exporter changes for it — the column-agnostic
+`select(Table)` walk picks the column up — and a renamed session therefore keeps
+its name through every granularity that carries sessions. A NULL `name` travels
+as NULL and is still "never renamed" on the other side; the default label is
+recomputed by the importing client from the preserved `created_at`, in the
+importing roleplayer's own timezone.
+
+**`schema_version` is hand-bumped by this change**, from 1 to 2, because
+`db/schema.py` changes the shape of `sessions`. This is the first bump the flip
+condition above is watching for.
+
+### Accepted schema versions — the current one, and the one before it with a named upgrade
+
+**The import policy as built is strict on two axes.** `schema_mismatch` is
+raised on **any** inequality between the file's `schema_version` and the
+instance's — an older file and a newer file both refuse. And row deserialization
+refuses a row whose column set differs from the registry's, missing **or** extra
+columns alike, as `malformed_payload`; the one exception is the `users` row,
+whose columns excluded from the `user` granularity may be absent.
+
+**After this bump the importer accepts exactly two versions** (user decision,
+2026-11-06; `DEC-arch-session-names-7`):
+
+| File's `schema_version` | Outcome |
+|---|---|
+| **2** (current) | imported under the existing rules, unchanged — **a session row without `name` is `malformed_payload`**, like any other missing column |
+| **1** (immediately prior) | imported through **one named upgrade**: session rows lack `name` and are imported with `name` NULL — "never renamed", so they show their date label. **Nothing else is relaxed**: a missing or extra column anywhere else, `sessions` included, is still `malformed_payload` |
+| anything else, older or newer | `schema_mismatch`, as before |
+
+**Why accept version 1 at all.** Under strict equality every export and every
+backup made before this change would become unimportable the moment the instance
+upgraded — including a whole-database backup, the operator's only restore path.
+The upgrade it needs is one absent nullable column whose NULL already means
+exactly what an old session is, so accepting it costs nothing and loses nothing.
+
+**Why the upgrade is named rather than a general tolerance.** "Import a missing
+column as NULL" in general would quietly accept a truncated or hand-edited file;
+naming the one column and the one prior version keeps the column-set rule
+meaningful for every other case.
+
+**Flip condition:** the next shape change to the registry (a version 3) has to
+decide explicitly whether the upgrade chain grows — version 1 → 2 → 3 — or
+version 1 support is dropped. Neither is implied by this rule.
 
 ## Granularity boundaries
 

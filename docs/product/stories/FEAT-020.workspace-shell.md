@@ -77,4 +77,13 @@
   - **US-097.AC-1** — Given the roleplayer opens character creation, when the draft page opens with nothing entered, then no character is persisted yet.
   - **US-097.AC-2** — Given the draft page is open, when the roleplayer enters something real, then the character exists and appears in the character list.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 14.
+
+### US-151 — A session's tree row shows its name, and beneath it when it was last used beside its setup label
+- **Actor:** ACT-002 · **Feature:** FEAT-020 · **Exercises:** UC-069
+- **Status:** proposed
+- **Story:** As a roleplayer, I want each session row to show its name and when I last used it, so that I can tell storylines under one character apart at a glance.
+- **Acceptance criteria:**
+  - **US-151.AC-1** — Given a session in the tree, when the roleplayer views its row, then the row shows its name and, beneath it, when the session was last used, with its setup label (US-088) beside that moment.
+  - **US-151.AC-2** — Given several sessions in the tree, when the roleplayer reads their last-use moments, then the order of the rows agrees with them, most recent first (US-089).
+- **Source:** `[confirmed: user]` interview 2026-11-05, session names; challenge C56.
 <!-- product-spec:end -->

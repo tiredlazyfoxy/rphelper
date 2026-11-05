@@ -18,8 +18,8 @@ renumbered, never reused; gaps stay if a number is ever withdrawn or skipped.
 | `vision.md` | Problem, who has it, what happens without it, 3 success signals, scope & non-goals |
 | `actors.md` | ACT-001..ACT-004 blocks, plus 2 named non-actors |
 | `features.md` | FEAT-001..FEAT-020 blocks + `## Relationships` (dependency graph, overlaps, boundary, conflicts). Never a registry, never splits. |
-| `use-cases/<FEAT-###>.<slug>.md` | UC-001..UC-088, one file per feature |
-| `stories/<FEAT-###>.<slug>.md` | US-001..US-140 plus US-141..US-148, with `US-###.AC-#` criteria, one file per feature |
+| `use-cases/<FEAT-###>.<slug>.md` | UC-001..UC-089, one file per feature |
+| `stories/<FEAT-###>.<slug>.md` | US-001..US-152, with `US-###.AC-#` criteria, one file per feature |
 | `glossary.md` | Domain terms, one line each |
 | `quick-reference.md` (this file) | The id registry |
 
@@ -64,14 +64,15 @@ Feature → filename slug (use-cases and stories share the slug):
 ## Features
 
 All 20 are `Priority: must`. Sequencing comes from the dependency graph below,
-not from priority. 14 are `delivered` (FEAT-002, 003, 004, 006, 007, 011, 012,
-013, 014, 015, 016, 018, 019, 020) and 6 are `partially delivered` (FEAT-001,
-005, 008, 009, 010, 017). No FEAT is `proposed` any more — see the Status
+not from priority. 13 are `delivered` (FEAT-002, 003, 004, 006, 007, 011, 012,
+013, 014, 015, 016, 018, 019) and 7 are `partially delivered` (FEAT-001,
+005, 008, 009, 010, 017, 020). No FEAT is `proposed` any more — see the Status
 column below and each block's `**Delivered:**`/`**Remaining:**` lines in
 `features.md`. FEAT-009, FEAT-010 and FEAT-017 are `partially delivered`
 because shipped behaviour does not satisfy a named criterion (recorded in
 `docs/plans/defects.md`); the lifecycle has no "delivered but defective"
-value.
+value. FEAT-008, FEAT-017 and FEAT-020 are also `partially delivered` because
+of not-yet-planned session-name items (UC-089, US-150, US-151, US-152).
 
 | FEAT | Name | Actors | Realized by (UC) | Realized by (US) | Status |
 |---|---|---|---|---|---|
@@ -82,8 +83,8 @@ value.
 | FEAT-005 | Database consistency & management | ACT-001 | UC-014–016 | US-017–019 | partially delivered |
 | FEAT-006 | Characters | ACT-002 | UC-017–019, UC-067 | US-020–022, US-086 | delivered |
 | FEAT-007 | Setups | ACT-002 | UC-020–022, UC-068 | US-023–025, US-087 | delivered |
-| FEAT-008 | RP sessions | ACT-002 | UC-023–026, UC-080 | US-026–029, US-117, US-145 | partially delivered |
-| FEAT-009 | Session entries & the RP flow | ACT-002 | UC-027–031, UC-078, UC-081–082 | US-030–035, US-109–112, US-120–124 | partially delivered |
+| FEAT-008 | RP sessions | ACT-002 | UC-023–026, UC-080, UC-089 | US-026–029, US-117, US-145 (withdrawn), US-150 | partially delivered |
+| FEAT-009 | Session entries & the RP flow | ACT-002 | UC-027–031, UC-078, UC-081–082 | US-030–035, US-109–112, US-120–124, US-149 | partially delivered |
 | FEAT-010 | Compose discussion | ACT-002, ACT-004 | UC-032–038, UC-079, UC-083–086 | US-036–044, US-113–116, US-125–135, US-146 | partially delivered |
 | FEAT-011 | Partner-text translation | ACT-002 | UC-039–041 | US-045–048 | delivered |
 | FEAT-012 | Memos | ACT-002, ACT-004 | UC-042–046, UC-075–076, UC-088 | US-049–057, US-098–104, US-119, US-141 | delivered |
@@ -91,10 +92,10 @@ value.
 | FEAT-014 | `memo_search` tool | ACT-002, ACT-004 | UC-051–052 | US-063–066 | delivered |
 | FEAT-015 | `session_search` tool | ACT-002, ACT-004 | UC-053–054 | US-067–069, US-138 | delivered |
 | FEAT-016 | `web_search` tool | ACT-002, ACT-004 | UC-055–057 | US-070–073 | delivered |
-| FEAT-017 | My search | ACT-002 | UC-058–060 | US-074–076, US-118, US-137, US-147 | partially delivered |
+| FEAT-017 | My search | ACT-002 | UC-058–060 | US-074–076, US-118, US-137, US-147, US-152 | partially delivered |
 | FEAT-018 | Export & import | ACT-001, ACT-002 | UC-061–064 | US-077–082, US-136 | delivered |
 | FEAT-019 | Privacy & isolation | ACT-001, ACT-002 | UC-065–066 | US-083–085 | delivered |
-| FEAT-020 | Workspace shell & navigation | ACT-002 (primary), ACT-001 (admin entry point only) | UC-069–074 | US-088–097 | delivered |
+| FEAT-020 | Workspace shell & navigation | ACT-002 (primary), ACT-001 (admin entry point only) | UC-069–074 | US-088–097, US-151 | partially delivered |
 
 **Build order** (transcribed verbatim from `features.md`'s `## Relationships`):
 
@@ -110,11 +111,11 @@ above is `must`, so priority carries no sequencing information on its own.
 
 ## Use cases
 
-UC-001..UC-088, grouped by owning feature, id order. One-liners are the use
+UC-001..UC-089, grouped by owning feature, id order. One-liners are the use
 case's own heading text, verbatim. Every UC below is `Status: delivered`
 except the ones tagged inline: UC-002, UC-016 are `deferred`; UC-080 is
 `partially delivered` (step 5 is the US-117.AC-3 defect, see
-`docs/plans/defects.md`).
+`docs/plans/defects.md`); UC-089 is `proposed`.
 
 **FEAT-001**
 - UC-001 — Create a new database with the first administrator · **Status:** delivered
@@ -161,6 +162,7 @@ except the ones tagged inline: UC-002, UC-016 are `deferred`; UC-080 is
 - UC-025 — Archive and restore a session
 - UC-026 — See sessions ordered by last use
 - UC-080 — Start a session by writing the first message on a character's page · **Status:** partially delivered → docs/plans/defects.md
+- UC-089 — Rename a session · **Status:** proposed → not yet planned
 
 **FEAT-009**
 - UC-027 — Add a partner entry by pasting
@@ -244,14 +246,14 @@ except the ones tagged inline: UC-002, UC-016 are `deferred`; UC-080 is
 - UC-073 — Work on a character's page — persona, notes, setups, settings, sessions
 - UC-074 — Create a character from a draft page
 
-Total: 88, UC-001..UC-088, no gaps.
+Total: 89, UC-001..UC-089, no gaps.
 
 ## Stories
 
-US-001..US-148, grouped by owning feature, id order. `ACs` is the count of
+US-001..US-152, grouped by owning feature, id order. `ACs` is the count of
 `US-###.AC-#` criteria on that story. One-liners are the story's own heading
 text, verbatim. Every US below is `Status: delivered` except the ones tagged
-inline: US-148 is `proposed` (not yet planned); US-002, US-019 are `deferred`; US-112 (AC-1's widened half and AC-3),
+inline: US-148, US-150, US-151, US-152 are `proposed` (not yet planned); US-145 is `withdrawn`; US-002, US-019 are `deferred`; US-112 (AC-1's widened half and AC-3),
 US-115 (AC-1's streaming half), US-117 (AC-3) and US-147 (name matching folds
 case ASCII-only) are `partially delivered` — each points at
 `docs/plans/defects.md`.
@@ -305,7 +307,8 @@ case ASCII-only) are `partially delivered` — each points at
 - US-028 — List ordered by last use (ACs: 1)
 - US-029 — Sessions are mine alone (ACs: 1)
 - US-117 — Writing the first message on a character's page creates the session (ACs: 4) · **Status:** partially delivered → docs/plans/defects.md
-- US-145 — A session is identified by its start time, not a title (ACs: 2)
+- US-145 — A session is identified by its start time, not a title (ACs: 2, both withdrawn) · **Status:** withdrawn — reversed by the user 2026-11-05 (C55) · **Superseded by:** US-150
+- US-150 — A session has a name, by default its start date, that the roleplayer can change (ACs: 6) · **Status:** proposed → not yet planned
 
 **FEAT-009**
 - US-030 — Paste a partner block (ACs: 1)
@@ -323,6 +326,7 @@ case ASCII-only) are `partially delivered` — each points at
 - US-122 — A settled decision sits in the record, reaches the assistant as context, and is found by session search (ACs: 2)
 - US-123 — A settled decision offers no copy-out (ACs: 1)
 - US-124 — Copying a settled turn yields plain text, not markdown (ACs: 2)
+- US-149 — Remove an entry or a message the roleplayer no longer wants (ACs: 7) · **Status:** delivered
 
 **FEAT-010**
 - US-036 — The assistant mirrors the language of each message (ACs: 3)
@@ -417,6 +421,7 @@ case ASCII-only) are `partially delivered` — each points at
 - US-118 — My search is reachable whether the left column is expanded or collapsed (ACs: 2)
 - US-137 — My-search returns disabled memos, marked as disabled (ACs: 2)
 - US-147 — Name matching is case-insensitive in any script (ACs: 1) · **Status:** partially delivered → docs/plans/defects.md
+- US-152 — My search finds a session by its name and shows the name on session results (ACs: 2) · **Status:** proposed → not yet planned
 
 **FEAT-018**
 - US-077 — Admin exports the whole database (ACs: 3)
@@ -443,9 +448,11 @@ case ASCII-only) are `partially delivered` — each points at
 - US-095 — With no session open, the note wall is not shown at all (ACs: 1)
 - US-096 — A character's page shows its persona, its notes, its setups, its configuration and its sessions in one place (ACs: 1)
 - US-097 — Creating a character opens a draft page; nothing is persisted until the roleplayer enters something (ACs: 2)
+- US-151 — A session's tree row shows its name, and beneath it when it was last used beside its setup label (ACs: 2) · **Status:** proposed → not yet planned
 
-Total: 148, US-001..US-148, no gaps. Total numbered ACs across all stories:
-271, of which 270 are active and 1 (`US-131.AC-1`) is withdrawn.
+Total: 152, US-001..US-152, no gaps (US-145 withdrawn, tombstoned in place).
+Total numbered ACs across all stories: 288, of which 285 are active and 3
+(`US-131.AC-1`, `US-145.AC-1`, `US-145.AC-2`) are withdrawn.
 
 ## Open `_TBD:` items
 
@@ -466,6 +473,6 @@ carries no inferred requirement.
 
 - `ACT-005`
 - `FEAT-021`
-- `UC-089`
-- `US-149`
+- `UC-090`
+- `US-153`
 <!-- product-spec:end -->

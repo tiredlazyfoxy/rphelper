@@ -35,6 +35,13 @@ a write's result against a list read as whole objects therefore go through `_mes
 which leaves that one field out of the equality and keeps the other twelve in; their meaning —
 position and zone-absence — is unchanged. The flag's own behaviour is covered in
 `test_record_keeping_embedding.py`.
+
+Amended by fast feature 014 (`docs/plans/fast/014.message-delete/plan.md`, context.md P1 / P3):
+`delete_message` now deletes a zone message, or a settled entry together with its buried group,
+and the translations of every deleted id. 012 DoD-13's "no delete path" guard is **narrowed** to
+permit deletes on `messages` and `translations` only (still no raw SQL `DELETE`, still no
+aliased `delete`). The fast-014 cases sit at the end of this file and carry the suffix
+`__F014_DoD<n>`; their bindings come from `## Skeleton` in that plan's `status.md`.
 """
 
 import ast
@@ -45,21 +52,25 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from sqlalchemy import Connection, Engine, func, select
+from sqlalchemy import Connection, Engine, func, select, text
 
 from app.db import schema
+from app.db.search_tables import MESSAGE_FTS_TABLE, ensure_fts_tables
 from app.errors import MessageNotEditableError, MessageNotFoundError, SessionNotFoundError
 from app.ids import SnowflakeGenerator
 from app.roles import Role
 from app.services import messages as messages_module
 from app.services.messages import (
+    DeleteMessageResult,
     StreamMessage,
     append_message,
+    delete_message,
     edit_message_text,
     file_partner_entry,
     list_entries,
     list_zone,
 )
+from tests.llm_fakes import FakeClientFactory, fake_factory, unreachable_factory
 
 #: The seeded instant — older than any instant an operation stamps today, so a bump or an
 #: edit is visible as a change (002.context.md "Instants").
@@ -1140,16 +1151,45 @@ def test_no_select_call_takes_the_messages_table_or_its_columns__S012_002_DoD13(
     assert offenders == []
 
 
-def test_the_module_has_no_delete_path__S012_002_DoD13() -> None:
-    """DoD-13 — D16: no delete path, **narrowed** by feature 023, step 001 (D11,
-    US-111.AC-1) on the user's decision of 2026-10-04: the *only* permitted delete in this
-    module targets the `translations` table — the edited message's cached translations,
-    discarded inside `edit_message_text`'s own transaction. 012's half of the guard keeps
-    biting: no delete reaches `messages`, and no raw `DELETE` SQL keyword appears.
+#: Fast feature 014 (context.md user decisions 2-3, P3) narrows the guard once more: a message
+#: is now deletable, so `messages` joins `translations` as a permitted delete target. Every
+#: other table stays an offender.
+_PERMITTED_DELETE_TABLES = (_PERMITTED_DELETE_TABLE, "messages")
+
+
+def _raw_sql_deletes(tree: ast.Module) -> list[str]:
+    """`text("... DELETE ...")` calls — a raw SQL delete that would bypass the AST target check.
+
+    Fast 014 narrowed this from a whole-source keyword search: the module docstring may now
+    legitimately describe the `DELETE` route, so only SQL handed to `text(...)` is inspected.
+    """
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func_node = node.func
+        name = func_node.id if isinstance(func_node, ast.Name) else (
+            func_node.attr if isinstance(func_node, ast.Attribute) else None
+        )
+        if name != "text":
+            continue
+        for argument in node.args:
+            for inner in ast.walk(argument):
+                if isinstance(inner, ast.Constant) and isinstance(inner.value, str):
+                    if _DELETE_SQL_KEYWORD.search(inner.value.upper()):
+                        found.append(ast.unparse(node))
+    return found
+
+
+def test_the_module_deletes_only_messages_and_translations__S012_002_DoD13__F014_DoD4() -> None:
+    """DoD-13 — D16, narrowed by feature 023 step 001 (`translations`, US-111.AC-1) and by fast
+    feature 014 (`messages`, plan P3): every delete in this module targets `translations` or
+    `messages`, no import rebinds `delete` under another name, and no raw SQL `DELETE` is
+    handed to `text(...)`.
 
     The target check is AST-based rather than a regex, so neither an alias
-    (`from sqlalchemy import delete as _drop`) nor a `<table>.delete()` receiver can slip a
-    `messages` delete past it.
+    (`from sqlalchemy import delete as _drop`) nor a `<table>.delete()` receiver can slip
+    another table's delete past it.
     """
     tree = _module_tree()
     offenders: list[str] = []
@@ -1157,14 +1197,14 @@ def test_the_module_has_no_delete_path__S012_002_DoD13() -> None:
         if not isinstance(node, ast.Call) or not _is_delete_call(node):
             continue
         operands = _delete_operands(node)
-        if not any(_names_table(operand, _PERMITTED_DELETE_TABLE) for operand in operands):
-            offenders.append(f"delete not targeting {_PERMITTED_DELETE_TABLE}: {ast.unparse(node)}")
-        if any(_names_the_messages_table(operand) for operand in operands):
-            offenders.append(f"delete naming the messages table: {ast.unparse(node)}")
+        if not any(
+            _names_table(operand, table) for operand in operands for table in _PERMITTED_DELETE_TABLES
+        ):
+            offenders.append(f"delete not targeting {_PERMITTED_DELETE_TABLES}: {ast.unparse(node)}")
 
     assert offenders == []
     assert _delete_aliases(tree) == []
-    assert _DELETE_SQL_KEYWORD.search(inspect.getsource(messages_module)) is None
+    assert _raw_sql_deletes(tree) == []
 
 
 def _is_forbidden_service_import(module: str) -> bool:
@@ -1256,7 +1296,7 @@ RAW_SETTLED_DECISION = 34
 
 def _seed_weeks_old_turn(engine: Engine) -> None:
     """Session A: three weeks-old settled entries; the middle one is the turn to edit."""
-    for message_id, text, kind in (
+    for message_id, entry_text, kind in (
         (RAW_WEEKS_OLD_BEFORE, "The partner opened the scene.", "partner"),
         (RAW_WEEKS_OLD_TURN, "Fixed the typpo.", "turn"),
         (RAW_WEEKS_OLD_AFTER, "The partner answered.", "partner"),
@@ -1266,7 +1306,7 @@ def _seed_weeks_old_turn(engine: Engine) -> None:
             message_id=message_id,
             user_id=USER_A,
             session_id=SESSION_A,
-            text=text,
+            text=entry_text,
             kind=kind,
             settled_at=WEEKS_OLD,
             created_at=WEEKS_OLD,
@@ -1560,3 +1600,566 @@ def test_no_update_statement_assigns_kind_settled_at_or_related_to__S014_001_DoD
             offenders.extend(_assigned_state_columns(node))
 
     assert offenders == []
+
+
+# =========================================================================================
+# Fast feature 014 — message-delete (`docs/plans/fast/014.message-delete/plan.md`)
+#
+# Expected values come from the plan's Interface intent and DoD-1 .. DoD-10 and from its
+# `context.md` (user decisions 2-3, P1 refusals, P3 order of work). Binding (status.md
+# `## Skeleton`): `delete_message(connection, user_id, message_id, *, client_factory=...,
+# timeout_seconds=...) -> DeleteMessageResult(deleted_ids: list[int],
+# search_coverage_incomplete: bool)`. Nothing here was derived from `messages.py`.
+# =========================================================================================
+
+#: Extra raw-seeded rows for the delete cases (ids chosen so ascending order is decidable).
+RAW_BURIED_EARLY = 8  # buried under RAW_SETTLED_HEAD, smaller id than the head
+RAW_TOOL_ZONE = 16
+RAW_OTHER_HEAD = 17
+RAW_OTHER_BURIED = 18
+RAW_SURVIVOR = 19
+
+#: Translation row ids (any distinct values).
+TRANSLATION_IDS = iter(range(40_001, 40_999))
+
+#: A timeout distinguishable from any default; the fake factory ignores it.
+DELETE_TIMEOUT = 7.5
+
+#: Fake embedding dimension and the designation rows that make the embed path non-degraded.
+DELETE_DIMENSION = 8
+DESIGNATED_SERVER_ID = 61_001
+DESIGNATED_MODEL_ID = 61_002
+DESIGNATED_MODEL_NAME = "the-designated-embedding-model"
+
+SURVIVOR_TEXT = "A surviving settled entry about the harbour."
+#: A token only the deletable settled entry carries, so a `message_fts` MATCH is unambiguous.
+DOOMED_TOKEN = "lighthousekeeper"
+DOOMED_TEXT = f"The {DOOMED_TOKEN} waved from the rocks."
+SURVIVOR_TOKEN = "harbour"
+
+
+def _delete(
+    engine: Engine,
+    user_id: int,
+    message_id: int,
+    factory: FakeClientFactory | None = None,
+) -> DeleteMessageResult:
+    """One `delete_message` call on its own connection, always through a fake client factory
+    so no test can reach a network (plan Test constraints)."""
+    with engine.connect() as connection:
+        return delete_message(
+            connection,
+            user_id,
+            message_id,
+            client_factory=factory if factory is not None else fake_factory(DELETE_DIMENSION),
+            timeout_seconds=DELETE_TIMEOUT,
+        )
+
+
+def _translations() -> Any:
+    return schema.metadata.tables["translations"]
+
+
+def _insert_translation(engine: Engine, *, user_id: int, message_id: int, language: str = "de") -> None:
+    """Raw-insert one cached translation of a message (the FK child the delete must clear)."""
+    with engine.begin() as connection:
+        connection.execute(
+            _translations().insert().values(
+                id=next(TRANSLATION_IDS),
+                user_id=user_id,
+                message_id=message_id,
+                target_language=language,
+                text=f"translation of {message_id} into {language}",
+                created_at=TIMESTAMP,
+            )
+        )
+
+
+def _translated_message_ids(engine: Engine) -> list[int]:
+    with engine.connect() as connection:
+        rows = connection.execute(select(_translations().c.message_id).order_by(_translations().c.message_id))
+        return [int(row[0]) for row in rows]
+
+
+def _all_translations(engine: Engine) -> list[dict[str, Any]]:
+    with engine.connect() as connection:
+        rows = connection.execute(select(_translations()).order_by(_translations().c.id)).all()
+    return [dict(row._mapping) for row in rows]
+
+
+def _message_ids(engine: Engine) -> list[int]:
+    return [int(row["id"]) for row in _all_messages(engine)]
+
+
+def _insert_tool_zone_row(engine: Engine) -> None:
+    """A `role='tool'` current-zone row in session A (021's tool rows carry name + payload)."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.messages.insert().values(
+                id=RAW_TOOL_ZONE,
+                user_id=USER_A,
+                session_id=SESSION_A,
+                role="tool",
+                kind=None,
+                text="1 memo found",
+                related_to=None,
+                settled_at=None,
+                tool_name="memo_search",
+                tool_payload='{"call_id":"call_1","arguments":"{}","status":"ok","content":"x"}',
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+
+
+def _seed_assistant_zone(engine: Engine) -> None:
+    _insert_message(
+        engine,
+        message_id=RAW_ASSISTANT_ZONE,
+        user_id=USER_A,
+        session_id=SESSION_A,
+        text="An assistant zone draft.",
+        role="assistant",
+    )
+
+
+def _seed_survivor(engine: Engine) -> None:
+    """A second settled entry in session A that no delete here targets."""
+    _insert_message(
+        engine,
+        message_id=RAW_SURVIVOR,
+        user_id=USER_A,
+        session_id=SESSION_A,
+        text=SURVIVOR_TEXT,
+        kind="partner",
+        settled_at=TIMESTAMP,
+    )
+
+
+def _seed_designation(engine: Engine) -> None:
+    """Raw `llm_servers` + `models` rows designating an embedding model (no secret to resolve),
+    the same shape `test_record_keeping_embedding.py` seeds — so the refresh is not degraded."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.metadata.tables["llm_servers"].insert().values(
+                id=DESIGNATED_SERVER_ID,
+                name="the embedding server",
+                kind="llamaswap",
+                base_url="http://embedding.test:8080/v1",
+                api_key_ref=None,
+                last_test_at=None,
+                last_test_ok=None,
+                last_test_error=None,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+        connection.execute(
+            schema.metadata.tables["models"].insert().values(
+                id=DESIGNATED_MODEL_ID,
+                server_id=DESIGNATED_SERVER_ID,
+                model_name=DESIGNATED_MODEL_NAME,
+                is_enabled=True,
+                is_embedding_designated=True,
+                embedding_dim=DELETE_DIMENSION,
+                created_at=TIMESTAMP,
+                updated_at=TIMESTAMP,
+            )
+        )
+
+
+def _world(engine: Engine) -> dict[str, Any]:
+    """Every row a delete could touch: messages, translations and the three sessions."""
+    return {
+        "messages": _all_messages(engine),
+        "translations": _all_translations(engine),
+        "sessions": {sid: _session_row(engine, sid) for sid in (SESSION_A, SESSION_A2, SESSION_B)},
+    }
+
+
+def _fts_match_ids(engine: Engine, token: str) -> list[int]:
+    query = text(f"SELECT rowid FROM {MESSAGE_FTS_TABLE} WHERE {MESSAGE_FTS_TABLE} MATCH :token ORDER BY rowid")
+    with engine.connect() as connection:
+        return [int(row[0]) for row in connection.execute(query, {"token": token}).all()]
+
+
+# --- F014 DoD-1: a current-zone message -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("role", "target", "survivors"),
+    [
+        ("user", RAW_ZONE, [RAW_SETTLED_HEAD, RAW_BURIED, RAW_ASSISTANT_ZONE]),
+        ("assistant", RAW_ASSISTANT_ZONE, [RAW_SETTLED_HEAD, RAW_BURIED, RAW_ZONE]),
+    ],
+)
+def test_deleting_a_zone_message_removes_only_that_row__F014_DoD1(
+    engine: Engine, role: str, target: int, survivors: list[int]
+) -> None:
+    """F014 DoD-1 — a user or assistant zone row is removed and nothing else; the result's
+    `deleted_ids` is exactly that id and `search_coverage_incomplete` is false."""
+    _seed_buried_settled_zone(engine)
+    _seed_assistant_zone(engine)
+    assert _stored_message(engine, target)["role"] == role
+    before = {row["id"]: row for row in _all_messages(engine)}
+
+    result = _delete(engine, USER_A, target)
+
+    assert isinstance(result, DeleteMessageResult)
+    assert result.deleted_ids == [target]
+    assert result.search_coverage_incomplete is False
+    assert _message_ids(engine) == survivors
+    for row in _all_messages(engine):
+        assert row == before[row["id"]]
+    assert target not in _ids(_zone(engine, USER_A, SESSION_A))
+
+
+# --- F014 DoD-2: a settled head takes its buried group with it ----------------------------
+
+
+def test_deleting_a_settled_head_removes_its_buried_group__F014_DoD2(engine: Engine) -> None:
+    """F014 DoD-2 — seed head 11, buried 12, zone 13: deleting 11 removes 11 and 12, leaves 13;
+    `deleted_ids` is `[11, 12]` (head first, then buried ascending)."""
+    _seed_buried_settled_zone(engine)
+    zone_before = _stored_message(engine, RAW_ZONE)
+
+    result = _delete(engine, USER_A, RAW_SETTLED_HEAD)
+
+    assert result.deleted_ids == [RAW_SETTLED_HEAD, RAW_BURIED]
+    assert _message_ids(engine) == [RAW_ZONE]
+    assert _stored_message(engine, RAW_ZONE) == zone_before
+    assert _entries(engine, USER_A, SESSION_A) == []
+    assert _ids(_zone(engine, USER_A, SESSION_A)) == [RAW_ZONE]
+
+
+def test_deleted_ids_list_the_head_first_then_the_buried_ids_ascending__F014_DoD2(engine: Engine) -> None:
+    """F014 DoD-2 — with buried rows 8 and 12 under head 11, `deleted_ids` is `[11, 8, 12]`; a
+    second head (17) and its own buried row (18) survive untouched."""
+    _seed_buried_settled_zone(engine)
+    _insert_message(
+        engine,
+        message_id=RAW_BURIED_EARLY,
+        user_id=USER_A,
+        session_id=SESSION_A,
+        text="An earlier buried draft.",
+        related_to=RAW_SETTLED_HEAD,
+    )
+    _insert_message(
+        engine,
+        message_id=RAW_OTHER_HEAD,
+        user_id=USER_A,
+        session_id=SESSION_A,
+        text="Another settled head.",
+        kind="turn",
+        settled_at=TIMESTAMP,
+    )
+    _insert_message(
+        engine,
+        message_id=RAW_OTHER_BURIED,
+        user_id=USER_A,
+        session_id=SESSION_A,
+        text="Buried under the other head.",
+        related_to=RAW_OTHER_HEAD,
+    )
+    other_head_before = _stored_message(engine, RAW_OTHER_HEAD)
+    other_buried_before = _stored_message(engine, RAW_OTHER_BURIED)
+
+    result = _delete(engine, USER_A, RAW_SETTLED_HEAD)
+
+    assert result.deleted_ids == [RAW_SETTLED_HEAD, RAW_BURIED_EARLY, RAW_BURIED]
+    assert _message_ids(engine) == [RAW_ZONE, RAW_OTHER_HEAD, RAW_OTHER_BURIED]
+    assert _stored_message(engine, RAW_OTHER_HEAD) == other_head_before
+    assert _stored_message(engine, RAW_OTHER_BURIED) == other_buried_before
+    assert _ids(_entries(engine, USER_A, SESSION_A)) == [RAW_OTHER_HEAD]
+
+
+# --- F014 DoD-3: a settled entry with no buried group --------------------------------------
+
+
+def test_deleting_a_filed_partner_block_removes_only_it__F014_DoD3(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """F014 DoD-3 — a filed partner block (no buried group) is removed alone; every other row of
+    the stream stays."""
+    _seed_buried_settled_zone(engine)
+    filed = _file(engine, generator, USER_A, SESSION_A, "A pasted partner block.")
+    others_before = [row for row in _all_messages(engine) if row["id"] != filed.id]
+
+    result = _delete(engine, USER_A, filed.id)
+
+    assert result.deleted_ids == [filed.id]
+    assert _all_messages(engine) == others_before
+    assert _ids(_entries(engine, USER_A, SESSION_A)) == [RAW_SETTLED_HEAD]
+    assert _ids(_zone(engine, USER_A, SESSION_A)) == [RAW_ZONE]
+
+
+# --- F014 DoD-4: translations of every deleted id go; others survive ------------------------
+
+
+def test_a_settled_delete_removes_the_translations_of_the_head_and_its_buried_rows__F014_DoD4(
+    engine: Engine,
+) -> None:
+    """F014 DoD-4 — translations of 11 and 12 are removed (no FK error); translations of the zone
+    row 13 and of another user's row survive."""
+    _seed_buried_settled_zone(engine)
+    _seed_user_b_stream(engine)
+    _insert_translation(engine, user_id=USER_A, message_id=RAW_SETTLED_HEAD, language="de")
+    _insert_translation(engine, user_id=USER_A, message_id=RAW_SETTLED_HEAD, language="fr")
+    _insert_translation(engine, user_id=USER_A, message_id=RAW_BURIED, language="de")
+    _insert_translation(engine, user_id=USER_A, message_id=RAW_ZONE, language="de")
+    _insert_translation(engine, user_id=USER_B, message_id=RAW_B_SETTLED, language="de")
+
+    result = _delete(engine, USER_A, RAW_SETTLED_HEAD)
+
+    assert result.deleted_ids == [RAW_SETTLED_HEAD, RAW_BURIED]
+    assert _translated_message_ids(engine) == [RAW_ZONE, RAW_B_SETTLED]
+
+
+def test_a_zone_delete_removes_that_rows_translations_only__F014_DoD4(engine: Engine) -> None:
+    """F014 DoD-4 — deleting zone row 13 removes its translations; the settled head's survive."""
+    _seed_buried_settled_zone(engine)
+    _insert_translation(engine, user_id=USER_A, message_id=RAW_ZONE, language="de")
+    _insert_translation(engine, user_id=USER_A, message_id=RAW_SETTLED_HEAD, language="de")
+
+    _delete(engine, USER_A, RAW_ZONE)
+
+    assert _translated_message_ids(engine) == [RAW_SETTLED_HEAD]
+    assert RAW_ZONE not in _message_ids(engine)
+
+
+# --- F014 DoD-5 / DoD-6: buried and tool rows are refused ----------------------------------
+
+
+def test_deleting_a_buried_row_is_not_editable_and_changes_nothing__F014_DoD5(engine: Engine) -> None:
+    """F014 DoD-5 — a buried row raises `MessageNotEditableError`; no message, translation or
+    session row changes."""
+    _seed_buried_settled_zone(engine)
+    _insert_translation(engine, user_id=USER_A, message_id=RAW_BURIED)
+    _insert_translation(engine, user_id=USER_A, message_id=RAW_SETTLED_HEAD)
+    before = _world(engine)
+
+    with pytest.raises(MessageNotEditableError):
+        _delete(engine, USER_A, RAW_BURIED)
+
+    assert _world(engine) == before
+
+
+def test_deleting_a_tool_row_is_not_editable_and_changes_nothing__F014_DoD6(engine: Engine) -> None:
+    """F014 DoD-6 — a `role='tool'` zone row raises `MessageNotEditableError`; nothing changes."""
+    _seed_buried_settled_zone(engine)
+    _insert_tool_zone_row(engine)
+    _insert_translation(engine, user_id=USER_A, message_id=RAW_TOOL_ZONE)
+    before = _world(engine)
+
+    with pytest.raises(MessageNotEditableError):
+        _delete(engine, USER_A, RAW_TOOL_ZONE)
+
+    assert _world(engine) == before
+
+
+# --- F014 DoD-7: missing and foreign ids are not found (R5) ---------------------------------
+
+
+@pytest.mark.parametrize("message_id", [RAW_B_ZONE, RAW_B_SETTLED, UNKNOWN_MESSAGE_ID])
+def test_deleting_a_missing_or_foreign_id_is_not_found_and_changes_nothing__F014_DoD7(
+    engine: Engine, message_id: int
+) -> None:
+    """F014 DoD-7 — another user's zone row, another user's settled row and an id nobody holds
+    all raise `MessageNotFoundError`; nothing changes anywhere."""
+    _seed_buried_settled_zone(engine)
+    _seed_user_b_stream(engine)
+    _insert_translation(engine, user_id=USER_B, message_id=RAW_B_SETTLED)
+    before = _world(engine)
+
+    with pytest.raises(MessageNotFoundError):
+        _delete(engine, USER_A, message_id)
+
+    assert _world(engine) == before
+
+
+def test_successful_deletes_never_touch_another_users_stream__F014_DoD7(engine: Engine) -> None:
+    """F014 DoD-7 — A's settled and zone deletes leave B's rows, translations and session as
+    they were."""
+    _seed_buried_settled_zone(engine)
+    _seed_user_b_stream(engine)
+    _insert_translation(engine, user_id=USER_B, message_id=RAW_B_SETTLED)
+    b_rows_before = [row for row in _all_messages(engine) if row["user_id"] == USER_B]
+    b_translations_before = [row for row in _all_translations(engine) if row["user_id"] == USER_B]
+    b_session_before = _session_row(engine, SESSION_B)
+
+    _delete(engine, USER_A, RAW_SETTLED_HEAD)
+    _delete(engine, USER_A, RAW_ZONE)
+
+    assert [row for row in _all_messages(engine) if row["user_id"] == USER_B] == b_rows_before
+    assert [row for row in _all_translations(engine) if row["user_id"] == USER_B] == b_translations_before
+    assert _session_row(engine, SESSION_B) == b_session_before
+
+
+# --- F014 DoD-8: a successful delete bumps the session; a refusal does not -----------------
+
+
+@pytest.mark.parametrize("target", [RAW_ZONE, RAW_SETTLED_HEAD], ids=["zone", "settled"])
+def test_a_successful_delete_bumps_the_owning_session__F014_DoD8(engine: Engine, target: int) -> None:
+    """F014 DoD-8 — `last_used_at` and `updated_at` both move forward from the seeded instant, in
+    the fixed-width form; the owner's other session and B's session are untouched."""
+    _seed_buried_settled_zone(engine)
+    other_before = _session_row(engine, SESSION_A2)
+    b_before = _session_row(engine, SESSION_B)
+
+    _delete(engine, USER_A, target)
+
+    session = _session_row(engine, SESSION_A)
+    assert session["last_used_at"] > TIMESTAMP
+    assert session["updated_at"] > TIMESTAMP
+    assert FIXED_WIDTH_TIMESTAMP.match(session["last_used_at"])
+    assert FIXED_WIDTH_TIMESTAMP.match(session["updated_at"])
+    assert _session_row(engine, SESSION_A2) == other_before
+    assert _session_row(engine, SESSION_B) == b_before
+
+
+def test_a_refused_delete_does_not_bump_any_session__F014_DoD8(engine: Engine) -> None:
+    """F014 DoD-8 — buried, tool, foreign and unknown refusals leave every session's timestamps
+    as seeded."""
+    _seed_buried_settled_zone(engine)
+    _seed_user_b_stream(engine)
+    _insert_tool_zone_row(engine)
+    before = {sid: _session_row(engine, sid) for sid in (SESSION_A, SESSION_A2, SESSION_B)}
+
+    with pytest.raises(MessageNotEditableError):
+        _delete(engine, USER_A, RAW_BURIED)
+    with pytest.raises(MessageNotEditableError):
+        _delete(engine, USER_A, RAW_TOOL_ZONE)
+    with pytest.raises(MessageNotFoundError):
+        _delete(engine, USER_A, RAW_B_ZONE)
+    with pytest.raises(MessageNotFoundError):
+        _delete(engine, USER_A, UNKNOWN_MESSAGE_ID)
+
+    for sid, row in before.items():
+        after = _session_row(engine, sid)
+        assert after["last_used_at"] == row["last_used_at"]
+        assert after["updated_at"] == row["updated_at"]
+
+
+# --- F014 DoD-9: the session vector refresh and the coverage flag ---------------------------
+
+
+def test_a_settled_delete_with_a_model_refreshes_through_the_factory__F014_DoD9(engine: Engine) -> None:
+    """F014 DoD-9 — with a designated model the settled delete builds a client through the given
+    factory and embeds the session text, which carries the surviving entry and not the deleted
+    one; the flag is false."""
+    _seed_designation(engine)
+    _seed_buried_settled_zone(engine)
+    _seed_survivor(engine)
+    factory = fake_factory(DELETE_DIMENSION)
+
+    result = _delete(engine, USER_A, RAW_SETTLED_HEAD, factory)
+
+    assert result.search_coverage_incomplete is False
+    assert factory.call_count == 1
+    assert len(factory.embed_calls) == 1
+    model, texts = factory.embed_calls[0]
+    assert model == DESIGNATED_MODEL_NAME
+    embedded = "\n\n".join(texts)
+    assert SURVIVOR_TEXT in embedded
+    assert "The settled head." not in embedded
+
+
+def test_a_settled_delete_without_a_model_still_deletes_and_flags_coverage__F014_DoD9(engine: Engine) -> None:
+    """F014 DoD-9 — with no designated model the embed path degrades: the delete still happens
+    and `search_coverage_incomplete` is true."""
+    _seed_buried_settled_zone(engine)
+    _seed_survivor(engine)
+
+    result = _delete(engine, USER_A, RAW_SETTLED_HEAD, fake_factory(DELETE_DIMENSION))
+
+    assert result.search_coverage_incomplete is True
+    assert result.deleted_ids == [RAW_SETTLED_HEAD, RAW_BURIED]
+    assert _message_ids(engine) == [RAW_ZONE, RAW_SURVIVOR]
+
+
+def test_a_settled_delete_with_an_unreachable_provider_flags_coverage__F014_DoD9(engine: Engine) -> None:
+    """F014 DoD-9 — an unreachable provider is a degraded refresh too: deleted, flag true, and the
+    embed was attempted through the given factory."""
+    _seed_designation(engine)
+    _seed_buried_settled_zone(engine)
+    _seed_survivor(engine)
+    factory = unreachable_factory(DELETE_DIMENSION)
+
+    result = _delete(engine, USER_A, RAW_SETTLED_HEAD, factory)
+
+    assert result.search_coverage_incomplete is True
+    assert factory.call_count == 1
+    assert _message_ids(engine) == [RAW_ZONE, RAW_SURVIVOR]
+
+
+def test_a_zone_delete_does_not_refresh_the_session_vector__F014_DoD9(engine: Engine) -> None:
+    """F014 DoD-9 — a zone delete, even with a designated model, builds no client and embeds
+    nothing; the flag is false."""
+    _seed_designation(engine)
+    _seed_buried_settled_zone(engine)
+    _seed_survivor(engine)
+    factory = fake_factory(DELETE_DIMENSION)
+
+    result = _delete(engine, USER_A, RAW_ZONE, factory)
+
+    assert result.search_coverage_incomplete is False
+    assert factory.call_count == 0
+    assert factory.embed_calls == []
+
+
+# --- F014 DoD-10: the search index forgets a deleted settled entry --------------------------
+
+
+def test_a_deleted_settled_entry_is_gone_from_the_message_index__F014_DoD10(engine: Engine) -> None:
+    """F014 DoD-10 — after the FTS ensure, a MATCH on the doomed entry's token finds it; after the
+    delete it finds nothing, while the surviving entry is still found."""
+    _insert_message(
+        engine,
+        message_id=RAW_SETTLED_TURN,
+        user_id=USER_A,
+        session_id=SESSION_A,
+        text=DOOMED_TEXT,
+        kind="turn",
+        settled_at=TIMESTAMP,
+    )
+    _seed_survivor(engine)
+    with engine.begin() as connection:
+        ensure_fts_tables(connection)
+    assert _fts_match_ids(engine, DOOMED_TOKEN) == [RAW_SETTLED_TURN]
+
+    result = _delete(engine, USER_A, RAW_SETTLED_TURN)
+
+    assert result.deleted_ids == [RAW_SETTLED_TURN]
+    assert _fts_match_ids(engine, DOOMED_TOKEN) == []
+    assert _fts_match_ids(engine, SURVIVOR_TOKEN) == [RAW_SURVIVOR]
+
+
+def test_a_deleted_head_with_a_buried_group_is_gone_from_the_message_index__F014_DoD10(engine: Engine) -> None:
+    """F014 DoD-10 — the same for a settled head that takes a buried group with it."""
+    _insert_message(
+        engine,
+        message_id=RAW_SETTLED_HEAD,
+        user_id=USER_A,
+        session_id=SESSION_A,
+        text=DOOMED_TEXT,
+        kind="turn",
+        settled_at=TIMESTAMP,
+    )
+    _insert_message(
+        engine,
+        message_id=RAW_BURIED,
+        user_id=USER_A,
+        session_id=SESSION_A,
+        text="A buried draft.",
+        related_to=RAW_SETTLED_HEAD,
+    )
+    _seed_survivor(engine)
+    with engine.begin() as connection:
+        ensure_fts_tables(connection)
+    assert _fts_match_ids(engine, DOOMED_TOKEN) == [RAW_SETTLED_HEAD]
+
+    result = _delete(engine, USER_A, RAW_SETTLED_HEAD)
+
+    assert result.deleted_ids == [RAW_SETTLED_HEAD, RAW_BURIED]
+    assert _fts_match_ids(engine, DOOMED_TOKEN) == []
+    assert _fts_match_ids(engine, SURVIVOR_TOKEN) == [RAW_SURVIVOR]

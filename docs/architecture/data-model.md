@@ -3,7 +3,7 @@
 **Realizes:** FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-006, FEAT-007,
 FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-014, FEAT-015,
 FEAT-017, FEAT-018, FEAT-019, UC-088, US-111, US-112, US-119, US-136, US-138,
-US-139, US-141, US-143, US-145
+US-139, US-141, US-143, US-149, UC-089, US-150
 
 One SQLite file under `data/`, holding relational rows, `sqlite-vec` vector
 tables and FTS5 full-text tables. Reasoning for one store is in `overview.md`;
@@ -486,16 +486,15 @@ on it: a setup-level note's chain position cannot change under it.
 
 ### `sessions`
 
-**Realizes:** FEAT-008, FEAT-013, UC-023..UC-026, UC-049
+**Realizes:** FEAT-008, FEAT-013, UC-023..UC-026, UC-049, UC-089, US-150
 
-| Column | Notes |
-|---|---|
 | Column | Notes |
 |---|---|
 | `id` | PK |
 | `user_id` | direct scope column; FK → `users.id` |
 | `character_id` | required; FK → `characters.id` |
 | `setup_id` | FK → `setups.id`, **nullable, no server default, no sentinel** (R2, UC-021) |
+| `name` | Text, **nullable**; trimmed, **blank stored as NULL**; **NULL = never renamed** — the label is then the client-computed default (below). Written only by the rename route |
 | `rp_language` | session override (R1, two-level chain); trimmed free text, blank = NULL, **no language list** |
 | `preferred_language` | the same |
 | `model_server_id` | the captured model's server id; **nullable, no FK** (plan 017) |
@@ -515,19 +514,35 @@ index; **plan 017 added the two languages, the model pair and the four
 configuration columns.** An existing database picks the table up through the
 drift page's **Create** and the later columns through **Sync** (011 D8). As with
 `characters`, the staging is recorded so the plan-011 registry does not read as
-six columns of drift.
+six columns of drift. **`name` is a third delivery** (session names, 2026-11-05):
+an existing database picks it up through the same **Sync**; every existing row
+arrives with `name` NULL, which is exactly "never renamed", so nothing is
+back-filled.
 
 There is **no status or state column**: FEAT-008 and UC-025 state there is no
 "finished" state, and `archived_at` is the only lifecycle change. A `status`
 column would invite one.
 
-**There is no `title` and no `partner_label` column, and that is now a product
-rule rather than a deferral.** Plan 011 declared neither, because no requirement
-set them (011 D4); `US-145` has since made it explicit — **a session is
-identified by its start time, not a title** — so the UI labels a session with
-`created_at` rendered `YYYY-MM-DD HH:MM` local. The consequence for the lexical
-index is in the FTS5 section below: `session_fts` is declared over two columns
-that do not exist.
+**A session has a `name`, and still no `partner_label`.** Plan 011 declared
+neither a title nor a partner label because no requirement set them (011 D4); the
+session-names delta (2026-11-05) reversed the first half, and `name` is the one
+text column a session now carries. **`partner_label` stays absent** — no
+requirement sets it.
+
+**The default label is computed by the client, never stored.** A session whose
+`name` is NULL is labelled with its **local start date** — `created_at` rendered
+`YYYY-MM-DD` in the roleplayer's own timezone. We chose to compute it rather than
+store it because the server cannot know the roleplayer's timezone: a date written
+at creation would have to be supplied by the client on every creation path (the
+start control, the character page's first message, and an emptied rename), and an
+import would land UTC-derived dates that read one day off near midnight. NULL
+therefore has one meaning — "never renamed" — and emptying a name returns the
+row to it. The cost, accepted knowingly, is that the default is display-only: it
+is not text the server can search (`search-and-retrieval.md`). Detail and the
+rejected alternative: `DEC-arch-session-names-1`.
+
+The consequence for the lexical index is in the FTS5 section below:
+`session_fts` stays uncreated.
 
 `last_used_at` is a separate column from `updated_at` because "last use" is a
 reading-and-working signal (UC-026) while `updated_at` moves on any write; using
@@ -535,12 +550,15 @@ one for the other makes list order jump for reasons the roleplayer did not cause
 
 **What moves `last_used_at`, as built** (011 D3, 012 D3). It is set at creation,
 equal to `created_at`, and is afterwards bumped **only by content writes** — the
-zone append, a partner filing, a zone or settled-entry edit, settle, re-open and
-compose — each in its own transaction, to the operation's one instant, together
-with `updated_at`. It is **never** moved by opening or reading a session, by
-archive, or by restore, and a **refused** operation writes nothing. There is no
-resume or touch route: resuming is a read (011 D3). Before plan 012 shipped the
-content writes, last-use order was therefore identical to creation order.
+zone append, a partner filing, a zone or settled-entry edit, a single-message
+delete, settle, re-open and compose — each in its own transaction, to the
+operation's one instant, together with `updated_at`. It is **never** moved by
+opening or reading a session, by archive, by restore, or by a **rename** — a
+rename is a real state change, so it bumps `updated_at` and **never**
+`last_used_at`, the same rule as archive (below; `DEC-arch-session-names-6`) —
+and a **refused** operation writes nothing. There is no resume or touch route: resuming is a read
+(011 D3). Before plan 012 shipped the content writes, last-use order was
+therefore identical to creation order.
 
 **Every session read carries `setup_name`** — the referenced setup's **current**
 name, by an owner-scoped LEFT JOIN, shown **even when the setup is archived**
@@ -625,7 +643,7 @@ reading a superseded draft.
 ### `messages`
 
 **Realizes:** FEAT-009, FEAT-010, UC-027..UC-038, UC-078, UC-081, UC-082,
-UC-083, UC-084
+UC-083, UC-084, US-149
 
 **One table replaces the former `entries`, `discussions` and
 `discussion_messages`.** This is a deliberate reversal of the three-table design,
@@ -703,6 +721,12 @@ What follows from the shape:
   reads the current version — context assembly reads `messages.text` live and
   never caches a snapshot. No revision history table exists; `docs/product/` asks
   for none.
+- **A message row is removed only by the single-message delete** (fast/014,
+  `session-stream.md`) — a hard delete, with no soft-delete column and no
+  tombstone. A settled head is removed **together with its buried group**,
+  because a buried row with no head would point at nothing; a buried row or a
+  tool row is never removed on its own. Archiving a session removes nothing (the
+  archive rule, below).
 
 **The RP-language guarantee narrows, and the narrowing is deliberate.** It applies
 to `kind IN ('partner','turn')` only. A current-zone message is in whatever
@@ -765,7 +789,7 @@ one place.** They are **module-level SQLAlchemy Core selectables declared in
 |---|---|---|---|
 | `settled_entries` | `settled_at IS NOT NULL` | every column | the record read, context assembly, `session_vec` composition, my-search, `session_search`'s excerpt |
 | `current_zone` | `related_to IS NULL AND settled_at IS NULL` | every column | the zone read, context assembly, settle's head and burial set |
-| `message_states` | none of its own | **`id`, `user_id`, `session_id`, `related_to`, `settled_at` only — no text** | the edit route, to tell a buried row from a missing one |
+| `message_states` | none of its own | **`id`, `user_id`, `session_id`, `related_to`, `settled_at` only — no text** | the edit route and the delete route, to tell a buried row from a missing one and a settled target from a zone one |
 | `buried_messages` | `related_to IS NOT NULL` | every column | **the discussion read, and nothing else. Read-only** |
 
 None of them carries a session filter or an ordering — callers narrow and order,
@@ -787,7 +811,8 @@ a buried row from a nonexistent one, and doing that through `settled_entries` or
 `current_zone` is impossible by construction while doing it with a raw `select()`
 on `messages` would breach R11. **It cannot carry content**, so R11's purpose —
 buried text never reaches a reader by accident — holds even though a fourth
-reader of the table now exists. `buried_messages` (022 D2) is the fourth
+reader of the table now exists. The delete route classifies its target through
+the same selectable, for the same reason. `buried_messages` (022 D2) is the fourth
 predicate and is **read-only**: the discussion read is its only consumer, and no
 write path goes through it.
 
@@ -804,6 +829,11 @@ table:
   character page's opening message.
 - **`text` and `updated_at`** are written by the edit route, on a zone row and on
   a settled row alike (plan 014).
+- **Deletes** are the single-message delete only (fast/014): one current-zone
+  row, or one settled row together with its buried group, after the
+  `translations` rows that reference them. It writes no column on a surviving
+  row. The whole-database import's replace (`transfer.md`) is the only other path
+  that removes message rows, and it removes all of them.
 
 Buried rows remain invisible to every reader that goes through a selectable other
 than `buried_messages`: the absence the three-table design got for free is
@@ -858,6 +888,12 @@ rows on **any** text change, inside the edit transaction, and what was a design
 inference is now the requirement it inferred. The reason it was inferred that way
 is unchanged and worth keeping: serving a translation of text that no longer
 exists would show the roleplayer something false.
+
+**Deleting a message deletes its translations first, in the delete's own
+transaction** (fast/014). `message_id` has no cascade, and foreign keys are
+enforced, so the dependent rows must go before the message they reference — for
+a settled head, the translations of every row in its buried group as well. No
+translation outlives its message.
 
 ### `memos`
 
@@ -1115,8 +1151,9 @@ even when its entries do not describe the query. An empty composed text means
 
 **The invalidation edge this creates is a fan-out, and it is the first one in the
 system.** Until now every `session_vec` write was one session per relational
-write — settle, a settled-text edit, re-open. **Editing a character's persona, or
-a setup's text, now invalidates every session vector under that character.**
+write — settle, a settled-text edit, re-open, and (since fast/014) the delete of
+a settled entry. **Editing a character's persona, or a setup's text, now
+invalidates every session vector under that character.**
 `search-and-retrieval.md` owns the write policy, its cost, the deliberate
 fail-hard behaviour it puts character and setup writes under, and the flip
 condition; it is cited here rather than restated, but the schema consequence
@@ -1133,12 +1170,16 @@ CREATE VIRTUAL TABLE message_fts USING fts5(text, content='messages', content_ro
 ```
 
 **Two tables exist. A third, `session_fts`, is declared in this doc's history and
-was never created** (plan 024, U7). Its declaration indexes `title` and
-`partner_label` — **columns `sessions` does not have** and, after `US-145`, is
-not going to have as a title (plan 011 D4). So it could not be created against
-the built registry at all. It waits on **the feature that gives a session text
-columns**, and until then there is no owner to name and nothing to create.
-Recorded because the earlier sentence here — that `message_fts` and `session_fts`
+was never created** (plan 024, U7), and **it stays uncreated**. Its old
+declaration indexed `title` and `partner_label`, columns `sessions` never had.
+Sessions now do carry one text column, `name` — but a session name is a short
+label, and it is matched the way character and setup names already are: an
+escaped substring `LIKE` outside the port (`search-and-retrieval.md`). A short
+label gains nothing from tokenised, ranked matching that would pay for an
+external-content table and its trigger discipline, so **no FTS table is
+warranted**. **Flip condition:** if session names come to need tokenised or
+ranked matching, create an FTS table over `name` alone (`partner_label` still does
+not exist). Recorded because the earlier sentence here — that `message_fts` and `session_fts`
 "exist for FEAT-017's my-search" — was **stale**: `session_fts` does not exist,
 and FEAT-017's my-search was built (plan 029) without it. The same correction is
 made in `search-and-retrieval.md`.
@@ -1168,7 +1209,10 @@ matches, and the corruption surfaces much later as a hit that resolves to nothin
   that first issues `'delete'` with the OLD values **iff OLD was a record row**,
   then inserts NEW **iff NEW is a record row**. One trigger rather than two
   because the settle and re-open transitions change the predicate and the text in
-  the same statement, and two triggers would each see half of it.
+  the same statement, and two triggers would each see half of it. **The delete
+  trigger is what cleans the index after a single-message delete** (fast/014):
+  the delete writes no full-text row itself, so the trigger is the one place the
+  rule lives.
 - **Back-fill on creation** — `memo_fts` via `'rebuild'`; `message_fts` via an
   `INSERT…SELECT` of record rows only, because `'rebuild'` would index every
   current-zone and buried row.
@@ -1308,3 +1352,14 @@ rather than of the envelope:
   `no_embedding_model` while a model was designated with dimension 1024. FEAT-004
   (US-015, UC-013) never required enablement, so no product change. _Code pending
   a bug fix against plan 006 step 004._
+- **2026-11-05 — messages can be deleted.** Until fast/014 no path removed a
+  message row except the whole-database replace. A single-message delete now
+  removes one current-zone row, or one settled row with its buried group, and
+  their translations, in one transaction; burial and settle columns are still
+  written only by settle and re-open. Detail in DEC-F014-3, DEC-F014-5 and
+  DEC-F014-7.
+- **2026-11-05 — sessions gain a `name`.** Reverses 011 D4 ("no title"): a
+  nullable `name`, NULL meaning never renamed, with the default label (the local
+  start date) computed by the client rather than stored. `partner_label` stays
+  absent and `session_fts` stays uncreated. A rename moves `updated_at` only.
+  Detail in `DEC-arch-session-names-1` and `DEC-arch-session-names-6`.

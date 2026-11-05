@@ -58,7 +58,9 @@ from tests.privacy_audit_support import (
 #: (`POST /api/admin/database/rebuild`, owner fast/002) is now built and enumerated.
 #: fast/003 DoD-22 (amendment 2026-10-07): one higher again; row 5
 #: (`POST /api/bootstrap/import`, owner fast/003) is now built and enumerated.
-EXPECTED_ROW_COUNT = 74
+#: fast/014 (message-delete): one higher again — row 75, `DELETE /api/messages/{}`, an
+#: `owner` row classified like row 45 (PATCH on the same path).
+EXPECTED_ROW_COUNT = 75
 
 #: The owner column of every coverage-list table that has one (`002.context.md`'s list,
 #: resolved against the real schema: character and session configuration and user settings

@@ -11,7 +11,9 @@ non-numeric id answers 422.
 The router owns HTTP and nothing else: no SQL, no `app.db.schema` import, no
 `app.services.parens` import (R12 parse-once lives in the settle service). Domain errors
 propagate to the one registered `DomainError` handler; the router catches nothing. No
-discard, stop or delete route exists (R11, UC-086).
+discard or stop route exists (R11, UC-086). Fast feature `014` adds the one delete route,
+`DELETE /api/messages/{message_id}`, over `delete_message` (one owned zone message, or a
+settled entry with its buried group); it answers 200 with the deleted ids and the coverage flag.
 
 Feature `021`, step `006` adds the one streaming route, `POST …/zone/compose` (D1, D2):
 `begin_compose` commits the text (or, textless, checks there is something to retry) on the
@@ -42,6 +44,7 @@ from app.models.ids import SnowflakeIn
 from app.models.stream import (
     AppendMessageRequest,
     ComposeRequest,
+    DeleteMessageResponse,
     DiscussionResponse,
     EditMessageRequest,
     EntryListResponse,
@@ -59,6 +62,7 @@ from app.services.llm_registry import ChatClientFactory, LlmClientFactory
 from app.services.messages import (
     StreamMessage,
     append_message,
+    delete_message,
     edit_message_text,
     file_partner_entry,
     list_discussion,
@@ -285,6 +289,37 @@ def edit_message(
         timeout_seconds=settings.llm_request_timeout_seconds,
     )
     return _message_to_response(message)
+
+
+@router.delete("/api/messages/{message_id}", status_code=200)
+def delete_own_message(
+    message_id: SnowflakeIn,
+    current_user: Annotated[CurrentUser, Depends(require_user)],
+    connection: Annotated[Connection, Depends(get_connection)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
+) -> DeleteMessageResponse:
+    """Delete an owned zone message or settled entry via `delete_message(...)` (fast `014`).
+
+    Same dependency set as the PATCH route: the shared client factory and
+    `settings.llm_request_timeout_seconds` are forwarded for the settled-delete vector refresh.
+    Answers 200 with `DeleteMessageResponse` (`deleted_ids` as strings, target first, plus the
+    coverage flag). Refusals propagate to the `DomainError` handler: 404 `message_not_found`
+    (missing or foreign id), 409 `message_not_editable` (buried or tool row); a non-numeric id
+    answers 422 as on PATCH.
+    """
+    result = delete_message(
+        connection,
+        current_user.id,
+        message_id,
+        client_factory=client_factory,
+        timeout_seconds=settings.llm_request_timeout_seconds,
+    )
+    # Ids are integers inside the backend; `SnowflakeOut` serialises each as a decimal string.
+    return DeleteMessageResponse(
+        deleted_ids=result.deleted_ids,
+        search_coverage_incomplete=result.search_coverage_incomplete,
+    )
 
 
 @router.get("/api/messages/{message_id}/discussion", status_code=200)

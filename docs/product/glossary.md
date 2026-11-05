@@ -21,7 +21,10 @@ separate concept here.
 - **Setup** — an optional reusable object under a character, carrying its
   own memos and acting as a search anchor for a situation.
 - **Session** — one roleplay run under a character, optionally with a
-  setup; always resumable, ordered by last use.
+  setup; always resumable, ordered by last use; named, by default with its
+  start date.
+- **Last use** — the moment a session was last used; orders the list and is
+  shown on its tree row. A rename does not count.
 - **Entry** — one independent item in a session: a partner block, the
   roleplayer's own turn, or a decision — three kinds, added in any order.
 - **Partner entry** — a block of the partner's text, pasted in.

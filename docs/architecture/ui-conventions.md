@@ -4,7 +4,7 @@
 FEAT-012, FEAT-013, FEAT-017, FEAT-018, FEAT-020, UC-030, UC-032, UC-035,
 UC-037, UC-039, UC-040, UC-043, UC-069, UC-070, UC-071, UC-072, UC-075, UC-082,
 UC-085, US-015.AC-2, US-018.AC-3, US-018.AC-4, US-044.AC-3, US-044.AC-4,
-US-044.AC-5, US-102, US-114, US-123, US-124
+US-044.AC-5, US-102, US-114, US-123, US-124, US-149, US-150
 
 **The workspace shell lives in `workspace-shell.md`** — the three columns, all
 geometry, the note wall's two modes, layout persistence, and the anatomy of the
@@ -122,8 +122,10 @@ and it is resolved by scope rather than left to taste:
 
 So a table row contains exactly **one** icon-only control — the `IconDots`
 trigger, which itself goes through `IconButton` and is labelled for its row
-("Actions for &lt;name&gt;", plan 010; "Actions for &lt;start-time label&gt;",
-plan 011) — and no others. The reason the two rules do not conflict: inside the
+("Actions for &lt;name&gt;", plan 010; "Actions for &lt;session label&gt;" —
+plan 011 shipped it naming the start time, and since the session-names delta
+(2026-11-05) the row is named by the session label rule in
+`workspace-shell.md`) — and no others. The reason the two rules do not conflict: inside the
 menu the actions are labelled text, so there is no accessible-name problem for
 `IconButton` to solve, and a row of four icon buttons is both a discoverability
 problem and the thing that makes a row layout collapse on a narrow viewport.
@@ -148,6 +150,8 @@ a row, and the overflow-menu rule exists to keep a *row* from collapsing.
 | My search | `IconSearch` — the collapsed rail's button; the expanded tree header is a **text input** | FEAT-017 |
 | Memos / the note wall | `IconNotes` | FEAT-012 / FEAT-020 |
 | Edit entry, message or note | `IconEdit` | FEAT-009 / FEAT-010 / FEAT-012 |
+| **Rename a session** | `IconEdit`, labelled "Rename session" — on the tree row and in the open session's header; swaps the label for an in-place editor (`workspace-shell.md`) | FEAT-008, US-150 |
+| **Delete a settled entry or a zone message** | `IconTrash`, labelled "Delete entry" (settled) / "Delete message" (zone); opens the red confirm | FEAT-009, US-149 |
 | Save | `IconDeviceFloppy` | FEAT-013 |
 | Collapse / expand (chevron) | `IconChevronDown`, rotated | FEAT-010 / FEAT-020 |
 | Show / hide a settled entry's discussion | `IconChevronDown`, rotated; "Show discussion" / "Hide discussion" | FEAT-010, US-040 |
@@ -191,6 +195,12 @@ built; **the glyph `_TBD:`s this table used to carry are all closed.**
 | User menu — log out | `IconLogout` | UC-071, US-091 |
 
 Notes on individual choices:
+
+- **Renaming a session reuses `IconEdit`, not a second pencil glyph**
+  (2026-11-05). A rename is an in-place edit of one text, exactly like the entry,
+  message and note editors, so it takes their glyph and differs only by label.
+  `IconPencil` was considered and not taken: two edit glyphs in one product would
+  make a reader ask what the difference is, and there is none.
 
 - **`IconCopy` has no precedent in the sibling project** — BookWriter has no copy
   action at all. It is specified here because copying the settled turn out is
@@ -251,6 +261,14 @@ Notes on individual choices:
   "Edit message" / "Edit message text". One glyph, two accessible names, because
   the two sit one above the other across a ruler and a reader of either must know
   which side of the record they are on.
+- **Delete follows edit's naming split exactly** (fast/014, DEC-F014-11): one
+  glyph, `IconTrash`, and two accessible names — **"Delete entry"** above
+  the ruler, **"Delete message"** below it — for the same reason edit's labels
+  differ. It is an icon-only control in the entry's or message's header, because
+  the stream's actions are `IconButton`s (above), and it always opens the red
+  confirm (`forms-and-lists.md`). **`IconTrash` means the server deletes stored
+  text**: the empty-zone discard keeps `IconX` precisely because it deletes
+  nothing stored (`workspace-shell.md`).
 - **`IconArchive` / `IconArchiveOff` and `IconDeviceFloppy` appear as left
   sections of labelled buttons** on the character page (plan 009), and
   **`IconArchive` / `IconArchiveOff` also appear as labelled items of a table
@@ -304,8 +322,8 @@ Notes on individual choices:
   &lt;name&gt;", "Collapse &lt;name&gt;").
 - **Actions revealed on hover must also be revealed on `:focus-within`.** This
   reaches the **stream's per-entry actions** — edit, copy, the translation
-  flicker and re-open, which sit in one revealed group inside the entry — and a
-  hover-only reveal would put them out of a keyboard's reach entirely.
+  flicker, re-open and delete, which sit in one revealed group inside the entry —
+  and a hover-only reveal would put them out of a keyboard's reach entirely.
   **The mechanism is Mantine hooks, not CSS** (014 D6, user decision): `useHover`
   + `useFocusWithin` with merged refs, plus `useMediaQuery("(hover: none)")` so a
   touch device shows them outright, applied as an **opacity** style prop. The
@@ -322,9 +340,9 @@ Notes on individual choices:
   small, holds exactly two controls, and its two flags *are* the information the
   roleplayer scans the wall for — the reach line under the card restates them in
   words precisely because they matter at a glance. A settled entry is a document
-  with four controls that are chrome over prose, and hiding chrome over a page of
-  text is what keeps the stream readable. Two surfaces, two answers, each stated
-  so neither is "corrected" into the other.
+  with several controls that are chrome over prose, and hiding chrome over a page
+  of text is what keeps the stream readable. Two surfaces, two answers, each
+  stated so neither is "corrected" into the other.
 - **Note reordering must have a keyboard path, and it is built.** `@dnd-kit`'s
   `KeyboardSensor` with sortable keyboard coordinates is required, not optional,
   because reordering changes what the system prompt contains (R3, US-102) — it is
@@ -438,7 +456,8 @@ rule alone.
 | The Setups section and its modal (plan 010) | **inline**, inside the section or inside the modal | same; plan 010 adds none either |
 | The Sessions section, the tree's sessions load, the session screen (plan 011) | **inline**, including the non-blocking "Could not load setups to choose from." | a list that could not load must not become a precondition for starting a session |
 | Loading the stream (013 D15) | **inline** — "Could not load the stream" plus Retry | a place of its own exists |
-| Every stream **mutation** failure — settle, re-open, partner filing, a zone edit, re-open's refusal (013 D15) | `notifyFailure`, then a re-read | a mutation has no region of its own; the stream is the content, not a form |
+| Every stream **mutation** failure — settle, re-open, partner filing, a zone edit, re-open's refusal (013 D15), a message delete (fast/014) | `notifyFailure`, then a re-read | a mutation has no region of its own; the stream is the content, not a form |
+| A successful message delete (fast/014) | **nothing** — the row leaves the stream | the missing row is the success signal |
 | A clipboard failure on copy-out (014 D9) | `notifyFailure`; **success raises nothing** | the clipboard is the whole outbound boundary and a silent failure would be invisible |
 | The character page's composer send (018 D4) | `notifyFailure` | same as the stream's composer |
 | The character page's configuration block (018 D9) | **inline**, under the control that failed | each control has its own place |

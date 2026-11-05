@@ -43,9 +43,23 @@
 
 ### US-145 — A session is identified by its start time, not a title
 - **Actor:** ACT-002 · **Feature:** FEAT-008 · **Exercises:** UC-026, UC-059
+- **Status:** withdrawn — reversed by the user 2026-11-05, challenge C55. **Superseded by:** US-150
 - **Story:** As a roleplayer, I want sessions identified without naming them, so that starting a roleplay needs no naming step.
 - **Acceptance criteria:**
   - **US-145.AC-1** — Given a session exists, when the roleplayer looks for a way to name or title it, then none is offered.
   - **US-145.AC-2** — Given a session appears in a listing or a search result, when the roleplayer reads it, then it is labelled by its start time.
 - **Source:** `[confirmed: user]` finalization 2026-10-06, challenge C51 (plan 011 forward note).
+
+### US-150 — A session has a name, by default its start date, that the roleplayer can change
+- **Actor:** ACT-002 · **Feature:** FEAT-008 · **Exercises:** UC-089, UC-023, UC-080
+- **Status:** proposed
+- **Story:** As a roleplayer, I want to name my sessions, so that I can tell the storylines under one character apart at a glance — without being asked to name one when I start it.
+- **Acceptance criteria:**
+  - **US-150.AC-1** — Given a session is created (started, or by the first message on a character's page), when it appears, then its name is its start date.
+  - **US-150.AC-2** — Given a session, when the roleplayer renames it from its tree row or from the open session, then the new name is what every listing, the open session and search show for it.
+  - **US-150.AC-3** — Given a session, when the roleplayer empties its name and confirms, then its name returns to its start date.
+  - **US-150.AC-4** — Given a session is renamed, when the roleplayer views the session list, then its position and its last-use moment are unchanged.
+  - **US-150.AC-5** — Given a renamed session is exported and then imported, when it arrives, then it keeps its name.
+  - **US-150.AC-6** — Given a character, when the roleplayer starts a session under it either way, then no naming step is asked for.
+- **Source:** `[confirmed: user]` interview 2026-11-05, session names; challenges C55, C57, C58, C59, C60.
 <!-- product-spec:end -->

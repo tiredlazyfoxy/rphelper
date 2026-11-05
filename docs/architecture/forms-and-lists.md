@@ -1,8 +1,9 @@
 # Forms, lists and CRUD conventions
 
 **Realizes:** FEAT-003, FEAT-004, FEAT-005, FEAT-006, FEAT-007, FEAT-008,
-FEAT-012, FEAT-013, FEAT-018, FEAT-020, UC-014, UC-015, UC-020, UC-074, UC-078,
-US-015.AC-2, US-018.AC-3, US-018.AC-4, US-097, US-104, US-109, US-110, US-115
+FEAT-009, FEAT-012, FEAT-013, FEAT-018, FEAT-020, UC-014, UC-015, UC-020,
+UC-074, UC-078, UC-089, US-015.AC-2, US-018.AC-3, US-018.AC-4, US-097, US-104,
+US-109, US-110, US-115, US-149, US-150
 
 **This doc was split out of `ui-conventions.md`** at the finalization of plans
 008..032. It holds the CRUD half: tables and lists, the modal rule and its named
@@ -112,15 +113,16 @@ order, so the list is already correct when the form disappears.
 
 ### The named exceptions
 
-Three, each detailed where it lives, and each narrow for a stated reason. None
+Four, each detailed where it lives, and each narrow for a stated reason. None
 weakens the rule, which exists to give a *form* a visible lifetime and one
 predictable place to appear.
 
 | Exception | Where | Why it is not a form |
 |---|---|---|
-| **In-place edit** of a settled entry, a current-zone message and a note (UC-078, US-104, US-109, US-110, US-115) | `workspace-shell.md` | one text field rendered in the position where its content belongs; UC-078 requires it to be edited *where it sits* |
+| **In-place edit** of a settled entry, a current-zone message and a note (UC-078, US-104, US-109, US-110, US-115) | `workspace-shell.md` | one text field rendered in the position where its content belongs; UC-078 requires it to be edited *where it sits*. Committing it emptied removes the item (a note per US-141, an entry or zone message per US-149) |
 | **The character draft page** (UC-074, US-097) | `workspace-shell.md` | it persists nothing until there is content, so there is nothing to submit |
 | **Starting a session** (011 D1, user decision) | `workspace-shell.md`'s character page | a **one-choice inline control** — a Setup select plus a "Start session" button in the Sessions section header. One optional choice is not a form, and a modal around a single select is friction with nothing to hold |
+| **Renaming a session** (UC-089, US-150) | `workspace-shell.md`'s tree row and session header | **one single-line field in the position of the label it replaces** — the in-place edit reading applied to a label. Unlike the content editors above, **emptying it does not remove anything**: it clears the name and the label falls back to the start date. The commit is **not optimistic** — the label changes when the server answers (below) |
 
 Every create and every multi-field edit is still a modal.
 
@@ -131,7 +133,7 @@ before blur-save replaced it. The reading: **the route *is* the form** — there
 no list the form appears over and no other content the modal would protect, so
 the page's own lifetime is the form's lifetime, which is exactly what the modal
 rule asks for. Written as a reading rather than a named exception because naming
-a third exception would invite a fourth; the test a later screen must pass is
+one more exception would invite the next; the test a later screen must pass is
 whether the route has any other subject.
 
 **Blur-save replaced the character page's explicit Save, and the change is
@@ -283,6 +285,16 @@ built (013 D15, 014 D1, 015 D5):
   entry or a zone message. A full stream re-load on every blur would re-scroll
   the roleplayer away from the line they are writing
   (`workspace-shell.md`).
+- **A delete removes exactly the deleted row from the held list once the server
+  has answered** — the settled entry from the record, or the message from the
+  zone — and takes the coverage flag from the response (fast/014, DEC-F014-9).
+  Nothing is removed before the answer arrives, so this is a narrowed re-load,
+  not an optimistic write. An aborted delete changes nothing and says nothing.
+- **A session rename re-reads the session lists once the server has answered**
+  (the tree, and the character page's Sessions list when it is mounted), and the
+  open session's header takes the returned session. The editor keeps the typed
+  text until then; a failure goes through `notifyFailure` and leaves the old
+  label.
 - **Every stream mutation failure goes through `notifyFailure` and then
   re-reads**, so a failed mutation never leaves the client's view of the stream
   diverged from the server's.
@@ -342,6 +354,7 @@ The actions that use it, and why each is destructive:
 | Clear the embedding designation | FEAT-004, US-015.AC-2 | every semantic feature stops working until a model is designated again, and re-designating requires a fresh measuring call (plan 006) |
 | **A lossy `Sync`** on the drift page — **conditional** | FEAT-005, US-018.AC-3, US-018.AC-4 | the rebuild drops the columns the registry no longer declares, and their data goes with them; every surviving column's data is preserved (plan 007) |
 | **Replace the whole database (import)** | FEAT-018, UC-061 | it replaces **every** row, including the administrator's own account, and signs them out (plan 031) |
+| **Delete entry / Delete message** — red | FEAT-009, US-149 | permanent: there is no undo and no restore, and a settled entry takes its buried discussion with it (fast/014) |
 | Rebuild the vector index — **not yet realized** | FEAT-005 | expensive: re-embeds every memo and session, real time and real metered LLM calls (UC-016). UC-016 is deferred to `fast/002.vector-index-rebuild` |
 
 **The lossy-Sync confirm is conditioned on data loss, not on the action's
@@ -353,6 +366,11 @@ with nothing to drop applies directly.
 step 2 rather than step 1 because the administrator should know what they are
 replacing *with* before being asked whether to replace; `admin-surfaces.md` holds
 the page's half.
+
+**The delete confirm guards the trash control, not the deletion.** The same
+deletion reached by emptying the in-place editor is not confirmed (below), so
+the confirm is a property of the one-click control, where a misclick is the risk
+it exists to catch (DEC-F014-4).
 
 **Deliberately NOT confirmed**, so each reads as decided rather than forgotten:
 
@@ -370,6 +388,13 @@ the page's half.
   They are **additive** and destroy nothing: every payload row is minted a fresh
   id and nothing existing is touched (`transfer.md`, US-136). The contrast with
   the database replace above is the whole reason both are listed.
+- **Committing an emptied in-place editor** — a note (UC-088, US-141), a settled
+  entry or a current-zone message (US-149). **Destructive, and unconfirmed on
+  purpose** (DEC-F014-4): clearing every character of the text and leaving the
+  field is already a deliberate two-step act, and a dialog after it would ask
+  the roleplayer to confirm what they just did by hand. The note precedent came
+  first; the entry and message case follows it so the editor behaves one way
+  everywhere. Named here so nobody "fixes" it with a dialog.
 
 **The confirm text must not name a blast radius it is not allowed to know.** R5
 forbids "N sessions use this model" (`domain-rules.md`, `admin-surfaces.md`) — the
@@ -401,9 +426,12 @@ way:** its sub-agents use disable-only-with-no-delete, while its LLM servers use
 hard delete. RPHelper makes a **deliberate choice per entity**: accounts disable
 and re-enable and are never deleted (FEAT-003, `data-model.md`); characters,
 setups and sessions archive and are never deleted (R6); notes are **removed by
-emptying them** (UC-088, US-141 — `workspace-shell.md`); LLM connections **are**
-deleted, because a registration is administrative configuration with no content
-hanging off it and no restore requirement anywhere in `docs/product/`.
+emptying them** (UC-088, US-141 — `workspace-shell.md`); **session messages are
+deleted one at a time** — a settled entry together with its buried discussion,
+or one current-zone message — by the confirmed trash control or by emptying the
+in-place editor (US-149, `session-stream.md`); LLM connections **are** deleted,
+because a registration is administrative configuration with no content hanging
+off it and no restore requirement anywhere in `docs/product/`.
 
 ## Page state — the same MobX convention as the app area
 

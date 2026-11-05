@@ -59,4 +59,19 @@
   5. Assistant answers the message immediately, exactly as it would any other discussion message.
 - **Postconditions:** Session exists with its first turn already being drafted; the partner's block, if any, is pasted afterward as a separate entry. The composer offers neither the kind switch nor a setup choice — the kind is already a turn, and FEAT-007 forbids forcing a setup choice, so the session starts with none.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 15; 2026-09-28, gap-closure round.
+
+### UC-089 — Rename a session
+- **Actor:** ACT-002
+- **Feature:** FEAT-008
+- **Preconditions:** Session exists. Its name is its start date until renamed.
+- **Main flow:**
+  1. Roleplayer chooses to rename a session — from its tree row, or from the open session.
+  2. Roleplayer enters a name and confirms.
+  3. Instance shows the new name in every listing, in the open session and in search.
+- **Alternate flows:**
+  - Roleplayer empties the name and confirms — the name returns to the session's start date (a session is never unnamed).
+- **Exception flows:**
+  - None refused — any text is accepted, including a name another session already has.
+- **Postconditions:** The session's position and last-use moment are unchanged — a rename is not use (UC-026). The name travels with the session's export (UC-064).
+- **Source:** `[confirmed: user]` interview 2026-11-05, session names; challenges C58, C59, C60.
 <!-- product-spec:end -->

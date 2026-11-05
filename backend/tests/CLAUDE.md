@@ -1,0 +1,138 @@
+# tests
+
+<!-- agent-ready:start -->
+
+The backend pytest suite (parallel, no network; `-m live` opts into a real llama-swap): one module per service, router, model set or cross-cutting audit, plus shared fixtures and fakes.
+
+## Glossary
+
+**Files:**
+- `__init__.py` — package marker.
+- `conftest.py` — shared pytest fixtures for the whole suite.
+- `llm_fakes.py` — shared LLM provider fake: fake client, fake factory and a deterministic vector function.
+- `privacy_audit_support.py` — the shared two-user "audit world" the privacy-audit modules sweep over.
+- `test_admin_db_export.py` — whole-database export route.
+- `test_admin_db_import.py` — whole-database import route.
+- `test_admin_db_rebuild.py` — vector-index rebuild route.
+- `test_admin_db_router.py` — `/api/admin/database` drift routes.
+- `test_admin_llm_router.py` — `/api/admin/llm-servers` routes.
+- `test_admin_users_router.py` — `/api/admin/users` routes.
+- `test_assistant_append.py` — `append_assistant_message` in the messages service.
+- `test_auth_router.py` — login, logout and `/api/me` routes.
+- `test_auth_service.py` — the auth service: uniform refusal and the login-session lifecycle.
+- `test_bootstrap_import.py` — `POST /api/bootstrap/import` and restore-from-export.
+- `test_bootstrap_router.py` — `POST /api/bootstrap/create` and the unconfigured-only guard.
+- `test_bootstrap_service.py` — the bootstrap service: configured fact and first-admin creation.
+- `test_build_deploy_scripts.py` — execution tests for the root `build.sh` and `deploy.sh`.
+- `test_characters_models.py` — character errors and wire models.
+- `test_characters_router.py` — `/api/characters` routes.
+- `test_characters_service.py` — the characters service.
+- `test_chat_wire.py` — tool-capable chat values and their OpenAI wire form.
+- `test_compose_route.py` — the compose route (`POST .../zone/compose`).
+- `test_compose_source.py` — the compose source in `services/compose.py`.
+- `test_config.py` — the `Settings` model and its cached accessor.
+- `test_configuration_models.py` — configuration use-time errors and wire models.
+- `test_configuration_resolver.py` — configuration resolvers, the session configuration read and the model check.
+- `test_configuration_router.py` — models, settings and session / character configuration routes.
+- `test_configuration_writes.py` — session, character and user configuration writes.
+- `test_context_assembly.py` — the context assembler.
+- `test_context_render.py` — chat value type, system-prompt renderer and message mapper.
+- `test_context_tool_replay.py` — tool-row replay and `<think>` stripping in the context mapper.
+- `test_db_engine.py` — the SQLite engine, connect listener and connection dependency.
+- `test_db_schema.py` — the table-definition registry.
+- `test_dependencies.py` — the role ladder and the HTTP authentication seam.
+- `test_deployment_files.py` — file-contract tests for the dev and container harness.
+- `test_discussion_read.py` — the buried-group (discussion) read and its route.
+- `test_drift_introspection.py` — drift report value types and shape readers.
+- `test_drift_report.py` — the drift comparison and registry walk.
+- `test_embedding_service.py` — the embedding service.
+- `test_errors.py` — the domain error base, its wire body and handler.
+- `test_health.py` — `GET /api/health` and the health probe.
+- `test_ids.py` — the snowflake id generator.
+- `test_live_llm.py` — opt-in (`-m live`) checks against a real OpenAI-compatible server.
+- `test_llm_chat_stream.py` — `LlmClient.chat_stream` and its delta values.
+- `test_llm_client.py` — the OpenAI-compatible client.
+- `test_llm_frames.py` — SSE frame values and encoder.
+- `test_llm_registry_enabled.py` — enabled-model reads in the LLM registry.
+- `test_llm_registry_models.py` — model enablement, the embedding designation and use-time validators.
+- `test_llm_registry_servers.py` — server registrations and the probe.
+- `test_llm_sse_harness.py` — the SSE harness in `llm/frames.py`.
+- `test_logging.py` — loguru sinks and the stdlib bridge.
+- `test_logging_redaction.py` — logging and engine redaction hardening.
+- `test_main.py` — the application factory and lifespan.
+- `test_memo_chain_clause.py` — the reusable memo-chain clause.
+- `test_memo_chain_service.py` — the memo chain service.
+- `test_memo_search_service.py` — `services/search/memo_search.py`.
+- `test_memo_search_tool.py` — the `memo_search` tool.
+- `test_memos_embedding.py` — embedding lifecycle on memo write paths.
+- `test_memos_models.py` — memo errors and wire models.
+- `test_memos_router.py` — memo and memo-chain routes.
+- `test_memos_service.py` — the memos service.
+- `test_messages_service.py` — the messages service (reads, appends, filing, edit, delete).
+- `test_models_ids.py` — the JSON id boundary.
+- `test_models_secret_ref.py` — the write-time `"$ENV_VAR"` secret pointer.
+- `test_my_search_like.py` — my-search corpora (LIKE matching).
+- `test_my_search_service.py` — the my-search service.
+- `test_my_search_unicode.py` — Unicode name matching (`rp_casefold`) in my-search.
+- `test_open_chat_client.py` — `open_chat_client` in the LLM registry.
+- `test_parens.py` — the `(( ))` parser.
+- `test_passwords.py` — the password-hashing seam.
+- `test_persona_setup_fanout.py` — persona / setup-text fan-out into the session index.
+- `test_privacy_audit_admin.py` — privacy audit of admin surfaces and reverse lookup.
+- `test_privacy_audit_export_import.py` — privacy audit of export, import and bootstrap-from-export.
+- `test_privacy_audit_logs.py` — privacy audit: log sentinel sweep.
+- `test_privacy_audit_owner_sweep.py` — privacy audit of owner-scoped CRUD and stream routes.
+- `test_privacy_audit_routes.py` — the audit world and the route-classification guard.
+- `test_privacy_audit_search_tools.py` — privacy audit of search, tools, context and index writes.
+- `test_record_keeping_embedding.py` — degraded session-index refresh and the coverage flag on record-keeping writes.
+- `test_search_hybrid.py` — end-to-end hybrid `search` entry point.
+- `test_search_lexical.py` — candidate sets and the lexical arm.
+- `test_search_ports.py` — the search port's types and helpers.
+- `test_search_router.py` — `GET /api/search`.
+- `test_search_settings.py` — the search credentials on `Settings`.
+- `test_search_tables.py` — the FTS5 / `vec0` virtual-table layer.
+- `test_search_vector.py` — the vector arm.
+- `test_secrets.py` — the `"$ENV_VAR"` secret-pointer resolver.
+- `test_session_index.py` — the session side of the search index.
+- `test_session_search_excerpts.py` — session-search excerpts.
+- `test_session_search_service.py` — the session-search service.
+- `test_session_search_tool.py` — the `session_search` tool.
+- `test_sessions_capture.py` — model capture at session start.
+- `test_sessions_models.py` — session errors and wire models.
+- `test_sessions_router.py` — session routes.
+- `test_sessions_service.py` — the sessions service.
+- `test_settle_service.py` — settle and re-open.
+- `test_settle_tool_rows_and_think.py` — settle under tool rows and `<think>` text.
+- `test_setups_models.py` — setup errors and wire models.
+- `test_setups_router.py` — setup routes.
+- `test_setups_service.py` — the setups service.
+- `test_stream_models.py` — stream errors and wire models.
+- `test_stream_router.py` — the stream router's JSON routes (including message edit and delete).
+- `test_sync_executor.py` — the DDL executor `app.db.sync`.
+- `test_think_strip.py` — `strip_think` in `llm/chat.py`.
+- `test_tool_definitions.py` — the three tool declarations.
+- `test_tool_rows.py` — tool rows in the messages service and `ToolFailedError`.
+- `test_tool_seam.py` — the tool seam.
+- `test_tool_wire_fields.py` — tool name, status and arguments on the wire.
+- `test_transfer_core.py` — the export core (envelope and serializer).
+- `test_transfer_import_database.py` — whole-database import.
+- `test_transfer_import_owned.py` — owned-data import and id remapping.
+- `test_transfer_import_router.py` — the roleplayer import routes.
+- `test_transfer_import_session.py` — session import into a chosen character.
+- `test_transfer_import_validation.py` — import envelope validation.
+- `test_transfer_router.py` — the roleplayer export routes.
+- `test_transfer_selections.py` — export selections.
+- `test_translation_invalidation.py` — discarding cached translations on message edit.
+- `test_translation_router.py` — the translate route.
+- `test_translation_schema.py` — the `translations` table, its error and response model.
+- `test_translation_service.py` — the translation service.
+- `test_unconfigured_session.py` — a session cookie on an unconfigured instance.
+- `test_users_service.py` — the users (account management) service.
+- `test_web_search_google.py` — the Google Custom Search provider.
+- `test_web_search_offering.py` — configuration-gated offering of `web_search`.
+- `test_web_search_tool.py` — the `web_search` tool adapter.
+- `test_zone_message_insert.py` — the shared zone insert in the messages service.
+
+See also: docs/architecture/backend-structure.md
+
+<!-- agent-ready:end -->

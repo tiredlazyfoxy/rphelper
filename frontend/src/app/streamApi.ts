@@ -1,8 +1,9 @@
 // The stream wire surface (feature 013, step 001): the `Message` row as the stream routes
-// send it, the settle / re-open results, and the seven calls over the shared client (D14).
+// send it, the settle / re-open results, and the calls over the shared client (D14); fast 014
+// adds `deleteMessage`.
 // Ids are decimal strings and are never parsed, coerced or compared numerically. Text is sent
 // verbatim. Failures are the shared client's `ApiError`s, rethrown unchanged.
-import { apiGet, apiPatch, apiPost } from "../shared/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "../shared/api";
 import { postSse } from "../shared/sse";
 import type { SseOutcome, SseProgressFrame } from "../shared/sse";
 
@@ -150,4 +151,24 @@ export async function editMessage(
   signal?: AbortSignal,
 ): Promise<Message> {
   return apiPatch<Message>(`/api/messages/${encodeURIComponent(messageId)}`, { text }, signal);
+}
+
+/**
+ * Fast 014: what `DELETE /api/messages/<messageId>` answers — the deleted ids (the target first,
+ * then its buried group ascending; decimal strings) and the session-vector coverage flag.
+ */
+export type DeleteMessageResult = {
+  deleted_ids: string[];
+  search_coverage_incomplete: boolean;
+};
+
+/**
+ * Fast 014: `DELETE /api/messages/<messageId>` (id URI-encoded); resolves to the parsed body.
+ * The shared client's `ApiError` is rethrown unchanged.
+ */
+export async function deleteMessage(
+  messageId: string,
+  signal?: AbortSignal,
+): Promise<DeleteMessageResult> {
+  return apiDelete<DeleteMessageResult>(`/api/messages/${encodeURIComponent(messageId)}`, signal);
 }

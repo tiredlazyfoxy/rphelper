@@ -10,10 +10,11 @@ import type { SseOutcome, SseProgressFrame } from "../shared/sse";
 
 import type { SettlePreview } from "./parens";
 import { previewSettle } from "./parens";
-import type { Message, ReopenResult, SettleResult } from "./streamApi";
+import type { DeleteMessageResult, Message, ReopenResult, SettleResult } from "./streamApi";
 import {
   appendZoneMessage,
   composeZone,
+  deleteMessage,
   editMessage,
   fetchEntries,
   fetchZone,
@@ -539,9 +540,20 @@ function applyToolFrame(state: StreamState, frame: SseProgressFrame): void {
 const TOOL_FAILED_SUMMARY = "The tool failed.";
 
 /**
+ * DEC-019-BF1: pure: true when the zone's last non-tool row is a `user` row whose text equals
+ * `text` exactly — the served proof that a failed compose's sent text was stored anyway.
+ */
+function lastNonToolIsUserText(zone: Message[], text: string): boolean {
+  const last = zone.filter(isNonToolRow).at(-1);
+  return last !== undefined && last.role === "user" && last.text === text;
+}
+
+/**
  * The compose run shared by `composeMessage` (with the sent text) and `regenerate` (textless,
  * `sent` undefined): 019 D11–D16 plus 022 D7's live tool list. Never rejects; never touches
- * `busy`; a textless run never reads or writes the draft.
+ * `busy`; a textless run never reads or writes the draft. A failed text-bearing run with no
+ * handled `accepted` clears the draft when the terminal re-read shows the sent text stored
+ * (DEC-019-BF1).
  */
 async function runCompose(
   state: StreamState,
@@ -569,12 +581,16 @@ async function runCompose(
 
   try {
     let acceptedReread: Promise<boolean> | null = null;
+    // DEC-019-BF1: whether this run handled `accepted`; without it a failed text-bearing run
+    // lets the terminal re-read decide whether the sent text was nevertheless stored.
+    let acceptedHandled = false;
 
     const onFrame = (frame: SseProgressFrame): void => {
       if (signal?.aborted) {
         return;
       }
       if (frame.event === "accepted") {
+        acceptedHandled = true;
         // D15: the sent text is now a row; adopt its id through a zone re-read.
         // A textless run (022 D8) never touches the draft; it only re-reads.
         if (sent !== undefined) {
@@ -630,11 +646,22 @@ async function runCompose(
       if (signal?.aborted) {
         return;
       }
+      // DEC-019-BF1 (narrows D15): a failed text-bearing run with no handled `accepted` may
+      // still have committed the user row server-side (lost frame, transport drop). When the
+      // served zone proves it — last non-tool row is a `user` row with exactly the sent text —
+      // the draft is cleared under R10's rule, so the next send cannot duplicate the row; the
+      // retry is the textless `regenerate`. Otherwise the draft is kept (D15 / R10 unchanged).
+      const failed = outcome.kind === "error" || outcome.kind === "unexpected_end";
+      const sentStored =
+        sent !== undefined && failed && !acceptedHandled && lastNonToolIsUserText(zone, sent);
       runInAction(() => {
         state.zone = zone;
         state.streamingText = null;
         state.composeHandle = null;
         state.liveTools = [];
+        if (sentStored && state.draft === sent) {
+          state.draft = "";
+        }
       });
     } catch (error) {
       if (signal?.aborted) {
@@ -728,7 +755,11 @@ export async function reopenLast(state: StreamState, signal?: AbortSignal): Prom
   setBusy(state, false);
 }
 
-/** Effect: commits an in-place zone edit; resolves to whether the editor may close (D10). */
+/**
+ * Effect: commits an in-place zone edit; resolves to whether the editor may close (D10).
+ * Fast 014 P6: blank or whitespace-only text delegates to `deleteZoneMessage` and resolves with
+ * its result; unchanged text is still a no-op resolving `true` with no request.
+ */
 export async function editZoneMessage(
   state: StreamState,
   messageId: string,
@@ -736,7 +767,8 @@ export async function editZoneMessage(
   signal?: AbortSignal,
 ): Promise<boolean> {
   if (isBlank(text)) {
-    return true;
+    // Fast 014 P6: clearing the text is the delete gesture (no confirm, memo precedent).
+    return deleteZoneMessage(state, messageId, signal);
   }
   const current = state.zone.find((message) => message.id === messageId);
   if (current !== undefined && current.text === text) {
@@ -770,7 +802,11 @@ export async function editZoneMessage(
 
 // ---- 014 004: settled-entry edit. Never optimistic; never rejects; does not set `busy`. ----
 
-/** Effect: commits a settled entry's edit; resolves to whether the editor may close (D10). */
+/**
+ * Effect: commits a settled entry's edit; resolves to whether the editor may close (D10).
+ * Fast 014 P6: blank or whitespace-only text delegates to `deleteEntry` and resolves with its
+ * result; unchanged text is still a no-op resolving `true` with no request.
+ */
 export async function editEntry(
   state: StreamState,
   messageId: string,
@@ -778,7 +814,8 @@ export async function editEntry(
   signal?: AbortSignal,
 ): Promise<boolean> {
   if (isBlank(text)) {
-    return true;
+    // Fast 014 P6: clearing the text is the delete gesture (no confirm, memo precedent).
+    return deleteEntry(state, messageId, signal);
   }
   const current = state.entries.find((message) => message.id === messageId);
   if (current !== undefined && current.text === text) {
@@ -816,6 +853,87 @@ export async function editEntry(
   runInAction(() => {
     state.entries = state.entries.map((message) => (message.id === messageId ? updated : message));
     state.searchCoverageIncomplete = updated.search_coverage_incomplete ?? false;
+  });
+  return true;
+}
+
+// ---- Fast 014: message delete. Never optimistic; never rejects; does not set `busy`. ----
+
+/**
+ * Effect: permanently deletes one settled entry (and its buried discussion) via
+ * `deleteMessage`. Success removes the entry from `entries` through `applyEntries`, sets
+ * `searchCoverageIncomplete` from the response and resolves `true`. Abort resolves `false`
+ * with no notification and no re-read. Any other failure calls `notifyFailure`, re-reads the
+ * entries and resolves `false`. Never rejects.
+ */
+export async function deleteEntry(
+  state: StreamState,
+  messageId: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (signal?.aborted) {
+    return false;
+  }
+
+  let result: DeleteMessageResult;
+  try {
+    result = await deleteMessage(messageId, signal);
+  } catch (error) {
+    if (signal?.aborted || isAbortRejection(error)) {
+      return false;
+    }
+    // The server may have deleted (or refused) something else than the held list shows, so
+    // the record is re-read rather than guessed at.
+    notifyFailure(error);
+    await rereadEntries(state, signal);
+    return false;
+  }
+  if (signal?.aborted) {
+    return false;
+  }
+
+  // The buried group is not held in `entries`, so only the target leaves this list. Through
+  // `applyEntries` because the id sequence changed, which resets the kind override (P5).
+  applyEntries(state, state.entries.filter((message) => message.id !== messageId));
+  runInAction(() => {
+    state.searchCoverageIncomplete = result.search_coverage_incomplete;
+  });
+  return true;
+}
+
+/**
+ * Effect: permanently deletes one current-zone message via `deleteMessage`. Success filters
+ * the row out of `zone` and resolves `true`. Abort resolves `false` with no notification and
+ * no re-read. Any other failure calls `notifyFailure`, re-reads the zone and resolves `false`.
+ * Never rejects.
+ */
+export async function deleteZoneMessage(
+  state: StreamState,
+  messageId: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (signal?.aborted) {
+    return false;
+  }
+
+  try {
+    await deleteMessage(messageId, signal);
+  } catch (error) {
+    if (signal?.aborted || isAbortRejection(error)) {
+      return false;
+    }
+    notifyFailure(error);
+    await rereadZone(state, signal);
+    return false;
+  }
+  if (signal?.aborted) {
+    return false;
+  }
+
+  // A zone delete does no vector work (its flag is always false), so the coverage flag is
+  // left as the latest record-keeping write set it.
+  runInAction(() => {
+    state.zone = state.zone.filter((message) => message.id !== messageId);
   });
   return true;
 }

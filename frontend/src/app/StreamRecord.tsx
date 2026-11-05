@@ -14,19 +14,27 @@
 // `focusEntryId` — forwarded from `SessionScreen` through `SessionStream`, never read from a
 // router here — marks at most one item as the arrival's focus entry, which scrolls itself into
 // view once and is highlighted briefly.
+//
+// Fast feature 014 (P7, P8): the actions group also offers "Delete entry" (hidden while the
+// editor is open, disabled while busy or composing), which deletes the entry and its buried
+// discussion after a `ConfirmModal`; a blank editor commit deletes with no confirm.
+//
+// Fast feature 015 (DEC-F015-2, DEC-F015-4): while a partner entry's translation is pending, its
+// flicker shows a spinning loader instead of the language glyph and its actions group is revealed.
 import { useEffect, useRef, useState } from "react";
 import type * as React from "react";
 import { observer } from "mobx-react-lite";
-import { Blockquote, Box, Group, Stack, Text, Textarea } from "@mantine/core";
+import { Blockquote, Box, Group, Loader, Stack, Text, Textarea } from "@mantine/core";
 import { useFocusWithin, useHover, useMediaQuery, useMergedRef } from "@mantine/hooks";
-import { IconArrowBackUp, IconCopy, IconEdit, IconLanguage } from "@tabler/icons-react";
+import { IconArrowBackUp, IconCopy, IconEdit, IconLanguage, IconTrash } from "@tabler/icons-react";
 
+import { ConfirmModal } from "../shared/ConfirmModal";
 import { IconButton } from "../shared/IconButton";
 import { copyAsPlainText } from "./copyOut";
 import { DiscussionGroup } from "./DiscussionGroup";
 import { MessageBody } from "./MessageBody";
 import type { Message, MessageKind } from "./streamApi";
-import { editEntry, reopenLast, showsReopen } from "./streamState";
+import { deleteEntry, editEntry, isStreaming, reopenLast, showsReopen } from "./streamState";
 import type { StreamState } from "./streamState";
 import { flickTranslation, invalidateTranslation, translationView } from "./translationState";
 import type { TranslationState } from "./translationState";
@@ -98,12 +106,31 @@ function EntryBody(props: { entry: Message; text?: string }): React.JSX.Element 
 const TRANSLATED_COLOR = "teal";
 
 /**
+ * Fast 015 (DEC-F015-2): the flicker's glyph while this entry's translation is pending — a
+ * module-local component shaped for `IconButton`'s `icon` prop, so `IconButton` is used as is
+ * (DEC-F015-3). It renders a Mantine `Loader` at the numeric `size` `IconButton` passes (so the
+ * button does not change size between glyphs), carrying `data-testid="translation-pending"`.
+ *
+ * @param props.size - The icon size `IconButton` passes; the `Loader` is rendered at it.
+ * @param props.stroke - Passed by `IconButton` for line icons; ignored.
+ * @returns The pending `Loader` element.
+ */
+function TranslationPendingGlyph(props: {
+  size?: number | string;
+  stroke?: number;
+}): React.JSX.Element {
+  return <Loader size={props.size} data-testid="translation-pending" />;
+}
+
+/**
  * 023 `005` (D15): the partner flicker — one `shared/IconButton` with `IconLanguage` whose
  * label carries the state and so feeds both tooltip and `aria-label`: "Show translation" while
  * the original is showing, "Cancel translation" while a request is in flight (pressing it then
  * aborts that request), "Show original" while the translation is showing. No `aria-pressed`:
  * the name changes with the state, which the ARIA toggle pattern forbids combining with it.
  * An `observer`, because the label is derived from observable state the press itself changes.
+ * Fast 015 (DEC-F015-2): while pending, the glyph is `TranslationPendingGlyph` instead of
+ * `IconLanguage`; label, colour and press behaviour are unchanged (DEC-F015-3).
  */
 const PartnerFlicker = observer(function PartnerFlicker(props: {
   translations: TranslationState;
@@ -112,14 +139,15 @@ const PartnerFlicker = observer(function PartnerFlicker(props: {
   const { translations, entry } = props;
   const view = translationView(translations, entry.id);
   const translated = view.status === "translated";
+  const pending = view.status === "pending";
   const label = translated
     ? "Show original"
-    : view.status === "pending"
+    : pending
       ? "Cancel translation"
       : "Show translation";
   return (
     <IconButton
-      icon={IconLanguage}
+      icon={pending ? TranslationPendingGlyph : IconLanguage}
       label={label}
       color={translated ? TRANSLATED_COLOR : undefined}
       onClick={() => {
@@ -160,7 +188,9 @@ type StreamEntryProps = {
 /**
  * One settled entry (014 `005`, D6, D7, D10): kind label, the always-rendered actions group
  * (revealed by opacity, reported as `data-revealed`) and the body by kind, or the
- * "Edit entry text" editor while editing.
+ * "Edit entry text" editor while editing. Fast 014: the group's "Delete entry" icon opens a
+ * confirm dialog whose confirm runs `deleteEntry`. Fast 015 (DEC-F015-4): the group is also
+ * revealed while this entry's translation is pending.
  */
 const StreamEntry = observer(function StreamEntry(
   props: StreamEntryProps,
@@ -172,7 +202,8 @@ const StreamEntry = observer(function StreamEntry(
   const flicker: TranslationState | undefined =
     entry.kind === "partner" ? translations : undefined;
 
-  // Reveal (D6): hovered, focus within, or a device that cannot hover.
+  // Reveal (D6): hovered, focus within, or a device that cannot hover — and, fast 015
+  // (DEC-F015-4), while this entry's translation is pending, so the pending glyph is seen.
   const { hovered, ref: hoverRef } = useHover<HTMLLIElement>();
   const { focused, ref: focusRef } = useFocusWithin<HTMLLIElement>();
   // 029 `006`: the anchor's handle on the element. It JOINS the reveal refs as a third ref —
@@ -180,7 +211,10 @@ const StreamEntry = observer(function StreamEntry(
   const scrollRef = useRef<HTMLLIElement>(null);
   const itemRef = useMergedRef<HTMLLIElement>(hoverRef, focusRef, scrollRef);
   const noHover = useMediaQuery("(hover: none)") === true;
-  const revealed = hovered || focused || noHover;
+  // Read in this observer render so the reveal reacts when the observable pending set changes.
+  const translationPending =
+    translations !== undefined && translationView(translations, entry.id).status === "pending";
+  const revealed = hovered || focused || noHover || translationPending;
 
   // 029 `006` (D8): the arrival's anchor. Only the focus entry acts, and only once.
   const [highlighted, setHighlighted] = useState(false);
@@ -216,6 +250,23 @@ const StreamEntry = observer(function StreamEntry(
     }
     setEditDraft(entry.text);
     setEditing(true);
+  }
+
+  // Fast 014 P8: whether the delete confirm is open, and whether its delete is in flight.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  /**
+   * Fast 014 P8: runs the confirmed delete with the modal loading, then closes the modal
+   * whatever the result (`deleteEntry` never rejects and notifies its own failures). On
+   * success the entry leaves `state.entries` and this item unmounts with it.
+   */
+  function confirmDelete(): void {
+    setDeleting(true);
+    void deleteEntry(state, entry.id, signal).then(() => {
+      setDeleting(false);
+      setConfirmingDelete(false);
+    });
   }
 
   function commit(): void {
@@ -271,6 +322,18 @@ const StreamEntry = observer(function StreamEntry(
                 }}
               />
             ) : null}
+            {editing ? null : (
+              <IconButton
+                icon={IconTrash}
+                label="Delete entry"
+                // Fast 014 P7: compose does not set `busy`, so streaming is checked too; this
+                // keeps compose's finalisation re-read from racing the delete.
+                disabled={state.busy || isStreaming(state)}
+                onClick={() => {
+                  setConfirmingDelete(true);
+                }}
+              />
+            )}
             {reopenOffered ? (
               <IconButton
                 icon={IconArrowBackUp}
@@ -304,6 +367,18 @@ const StreamEntry = observer(function StreamEntry(
           <DiscussionGroup key={entry.id} entryId={entry.id} state={state} />
         ) : null}
       </Stack>
+      <ConfirmModal
+        opened={confirmingDelete}
+        title="Delete entry?"
+        consequence="The entry is removed for good, together with its buried discussion, if it has one."
+        confirmLabel="Delete"
+        confirmColor="red"
+        loading={deleting}
+        onCancel={() => {
+          setConfirmingDelete(false);
+        }}
+        onConfirm={confirmDelete}
+      />
     </Box>
   );
 });

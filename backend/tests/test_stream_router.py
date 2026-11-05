@@ -23,6 +23,12 @@ embedding model, so the degraded path answers ``true`` wherever the session text
 three exact-equality bodies were widened; every other assertion is untouched. The flag's own
 behaviour is covered in ``test_record_keeping_embedding.py``.
 
+Amended by fast feature 014 (``docs/plans/fast/014.message-delete/plan.md``, context.md P2):
+``DELETE /api/messages/{message_id}`` now exists and answers 200 with ``deleted_ids`` and
+``search_coverage_incomplete``. 012 DoD-17's "no route accepts DELETE" guard is narrowed to
+exempt exactly that one path, and its "DELETE answers 405" case is removed (it contradicts the
+plan). The fast-014 cases sit at the end of this file and carry ``__F014_DoD<n>``.
+
 The application is always the real factory's (``create_app()``), pinned to the per-test
 database through ``dependency_overrides[get_settings]``. Each signed-in caller gets its own
 ``TestClient`` carrying exactly one session cookie. Characters come from 009's
@@ -1258,8 +1264,13 @@ def _application_routes(app: FastAPI) -> list[tuple[str, set[str]]]:
     return found
 
 
-def test_no_discard_stop_or_delete_route_exists__S012_004_DoD17(application: FastAPI) -> None:
-    """DoD-17 — R11, UC-086, US-134: no session/message path names discard or stop, none accepts DELETE."""
+#: Fast feature 014 (P2): the one session/message path that may accept DELETE.
+MESSAGE_DELETE_TEMPLATE = "/api/messages/{message_id}"
+
+
+def test_no_discard_stop_or_delete_route_exists__S012_004_DoD17__F014_DoD11(application: FastAPI) -> None:
+    """DoD-17 — R11, UC-086, US-134: no session/message path names discard or stop, and none
+    accepts DELETE — **except** fast 014's ``DELETE /api/messages/{message_id}``, which must."""
     routes = _application_routes(application)
     paths = {path for path, _ in routes}
     assert STREAM_PATH_TEMPLATES <= paths
@@ -1273,21 +1284,9 @@ def test_no_discard_stop_or_delete_route_exists__S012_004_DoD17(application: Fas
     for path, methods in scoped:
         assert "discard" not in path.lower(), path
         assert "stop" not in path.lower(), path
-        assert "DELETE" not in methods, path
-
-
-def test_delete_on_a_message_answers_405_and_the_message_survives__S012_004_DoD17(
-    application: FastAPI, db_settings: Settings
-) -> None:
-    """DoD-17: `DELETE /api/messages/<id>` → 405; the message is still readable."""
-    client = _player_a(application, db_settings)
-    session = _new_session(client)
-    message = _append(client, session["id"], "Keep me.")
-
-    response = client.delete(_message_path(message["id"]))
-
-    assert response.status_code == 405, response.text
-    assert _zone(client, session["id"]) == [message]
+        if path != MESSAGE_DELETE_TEMPLATE:
+            assert "DELETE" not in methods, path
+    assert any(path == MESSAGE_DELETE_TEMPLATE and "DELETE" in methods for path, methods in routes)
 
 
 # --- DoD-18: non-numeric path ids -----------------------------------------------------
@@ -1547,3 +1546,218 @@ def test_another_users_settled_entry_answers_404_message_not_found__S014_001_DoD
     assert unknown.status_code == 404, unknown.text
     assert body == unknown.json()
     assert _entries(owner, sid) == entries_before
+
+
+# =====================================================================================
+# Fast feature 014 — DELETE /api/messages/{message_id}
+#
+# Expected values come from ``docs/plans/fast/014.message-delete/plan.md`` (Interface intent,
+# DoD-11 .. DoD-13) and its ``context.md`` (P1 refusals, P2 route and response). Binding
+# (status.md ``## Skeleton``): ``DELETE /api/messages/{message_id}``, status 200, body
+# ``DeleteMessageResponse(deleted_ids: list[SnowflakeOut], search_coverage_incomplete: bool)``.
+# This file designates no embedding model, so a settled delete's flag value is not pinned here.
+# =====================================================================================
+
+DELETE_RESPONSE_KEYS = {"deleted_ids", "search_coverage_incomplete"}
+
+#: A raw-seeded tool row's id — far from any snowflake the routes mint.
+RAW_TOOL_ROW_ID = 9_400_500
+
+
+def _delete_ok(client: TestClient, message_id: Any) -> dict[str, Any]:
+    """A DELETE expected to succeed: 200 and exactly the two-key body."""
+    response = client.delete(_message_path(message_id))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert isinstance(body, dict)
+    assert set(body) == DELETE_RESPONSE_KEYS
+    assert isinstance(body["deleted_ids"], list)
+    assert all(_is_decimal_string(value) for value in body["deleted_ids"])
+    assert isinstance(body["search_coverage_incomplete"], bool)
+    return body
+
+
+def _settled_head_with_buried_line(client: TestClient) -> tuple[str, str, str]:
+    """A session whose zone settled into one head burying one earlier line.
+
+    Returns (session id, head id, buried id).
+    """
+    session = _new_session(client)
+    sid = session["id"]
+    buried = _append(client, sid, "Buried line.")
+    head = _append(client, sid, "Head line.")
+    settled = _settle(client, sid)
+    assert settled["entry_id"] == head["id"]
+    assert settled["buried_ids"] == [buried["id"]]
+    return sid, head["id"], buried["id"]
+
+
+def _insert_tool_row(engine: Engine, session_id: str) -> str:
+    """A ``role='tool'`` current-zone row in player A's session (no route writes one)."""
+    with engine.begin() as connection:
+        connection.execute(
+            schema.messages.insert().values(
+                id=RAW_TOOL_ROW_ID,
+                user_id=PLAYER_A_ID,
+                session_id=int(session_id),
+                role="tool",
+                kind=None,
+                text="1 memo found",
+                related_to=None,
+                settled_at=None,
+                tool_name="memo_search",
+                tool_payload='{"call_id":"call_1","arguments":"{}","status":"ok","content":"x"}',
+                created_at=RAW_ROW_TIMESTAMP,
+                updated_at=RAW_ROW_TIMESTAMP,
+            )
+        )
+    return str(RAW_TOOL_ROW_ID)
+
+
+# --- F014 DoD-11: success ------------------------------------------------------------
+
+
+def test_delete_on_a_zone_message_answers_200_and_the_zone_drops_it__F014_DoD11(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """F014 DoD-11 — a zone message: 200, ``deleted_ids == [id]`` as a string, the flag false;
+    ``GET …/zone`` no longer lists it and keeps the other row."""
+    client = _player_a(application, db_settings)
+    session = _new_session(client)
+    sid = session["id"]
+    keep = _append(client, sid, "Keep me.")
+    duplicate = _append(client, sid, "Sent twice.")
+
+    body = _delete_ok(client, duplicate["id"])
+
+    assert body["deleted_ids"] == [duplicate["id"]]
+    assert body["search_coverage_incomplete"] is False
+    assert _ids(_zone(client, sid)) == [keep["id"]]
+    assert _entries(client, sid) == []
+
+
+def test_delete_on_a_settled_head_answers_200_with_the_head_and_its_buried_row__F014_DoD11(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """F014 DoD-11 — a settled entry: 200, ``deleted_ids`` is the head then its buried row (as
+    strings); ``GET …/entries`` no longer lists it and the zone is untouched."""
+    client = _player_a(application, db_settings)
+    sid, head_id, buried_id = _settled_head_with_buried_line(client)
+    draft = _append(client, sid, "A later draft.")
+
+    body = _delete_ok(client, head_id)
+
+    assert body["deleted_ids"] == [head_id, buried_id]
+    assert head_id not in _ids(_entries(client, sid))
+    assert _ids(_zone(client, sid)) == [draft["id"]]
+
+
+def test_delete_on_a_filed_partner_block_answers_200_and_the_entries_drop_it__F014_DoD11(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """F014 DoD-11 — a settled partner block with no buried group: ``deleted_ids == [id]``; the
+    other entry stays listed."""
+    client = _player_a(application, db_settings)
+    session = _new_session(client)
+    sid = session["id"]
+    keep = _file_partner(client, sid, "Opening block.")
+    doomed = _file_partner(client, sid, "Pasted twice.")
+
+    body = _delete_ok(client, doomed["id"])
+
+    assert body["deleted_ids"] == [doomed["id"]]
+    assert _ids(_entries(client, sid)) == [keep["id"]]
+
+
+# --- F014 DoD-12: refusals -------------------------------------------------------------
+
+
+def test_delete_on_an_unknown_or_foreign_message_answers_404_alike__F014_DoD12(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """F014 DoD-12 — R5: as B, DELETE on A's zone message and on A's settled entry → 404
+    ``message_not_found``, the same body as for nobody's id; A's stream is unchanged."""
+    owner = _player_a(application, db_settings)
+    sid, head_id, _ = _settled_head_with_buried_line(owner)
+    draft = _append(owner, sid, "A's draft.")
+    entries_before = _entries(owner, sid)
+    zone_before = _zone(owner, sid)
+    intruder = _player_b(application, db_settings)
+
+    unknown = intruder.delete(_message_path(UNKNOWN_MESSAGE_ID))
+    unknown_body = _assert_envelope(unknown, 404, MESSAGE_NOT_FOUND)
+    for target in (draft["id"], head_id):
+        foreign = intruder.delete(_message_path(target))
+        body = _assert_envelope(foreign, 404, MESSAGE_NOT_FOUND)
+        assert body == unknown_body
+
+    owners_unknown = owner.delete(_message_path(UNKNOWN_MESSAGE_ID))
+    _assert_envelope(owners_unknown, 404, MESSAGE_NOT_FOUND)
+    assert _entries(owner, sid) == entries_before
+    assert _zone(owner, sid) == zone_before
+
+
+def test_delete_on_a_buried_message_answers_409_message_not_editable__F014_DoD12(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """F014 DoD-12 — P1: a buried row → 409 ``message_not_editable``; the entry stays listed."""
+    client = _player_a(application, db_settings)
+    sid, head_id, buried_id = _settled_head_with_buried_line(client)
+    entries_before = _entries(client, sid)
+
+    response = client.delete(_message_path(buried_id))
+
+    _assert_envelope(response, 409, MESSAGE_NOT_EDITABLE)
+    assert _entries(client, sid) == entries_before
+    assert head_id in _ids(_entries(client, sid))
+
+
+def test_delete_on_a_tool_row_answers_409_message_not_editable__F014_DoD12(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """F014 DoD-12 — P1 (mirrors 021 D8): a ``role='tool'`` zone row → 409
+    ``message_not_editable``; the zone still lists it."""
+    client = _player_a(application, db_settings)
+    session = _new_session(client)
+    sid = session["id"]
+    tool_id = _insert_tool_row(engine, sid)
+    assert tool_id in _ids(_zone(client, sid))
+
+    response = client.delete(_message_path(tool_id))
+
+    _assert_envelope(response, 409, MESSAGE_NOT_EDITABLE)
+    assert tool_id in _ids(_zone(client, sid))
+
+
+def test_delete_with_a_non_numeric_id_answers_422_like_patch__F014_DoD12(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """F014 DoD-12 / Interface intent — a malformed id gets the PATCH route's handling: 422."""
+    client = _player_a(application, db_settings)
+
+    response = client.delete(f"{MESSAGES_PATH}/abc")
+
+    assert response.status_code == 422, response.text
+
+
+# --- F014 DoD-13: auth -----------------------------------------------------------------
+
+
+def test_delete_without_a_login_answers_401_like_the_other_stream_routes__F014_DoD13(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """F014 DoD-13 — router-level ``require_user``: anonymous DELETE → 401
+    ``not_authenticated``, the same envelope the other stream routes answer; nothing is
+    deleted."""
+    owner = _player_a(application, db_settings)
+    session = _new_session(owner)
+    message = _append(owner, session["id"], "Keep me.")
+    anonymous = _anonymous(application)
+
+    refused = anonymous.delete(_message_path(message["id"]))
+    reference = anonymous.patch(_message_path(message["id"]), json={"text": "x"})
+
+    body = _assert_envelope(refused, 401, NOT_AUTHENTICATED)
+    assert reference.status_code == 401, reference.text
+    assert body == reference.json()
+    assert _ids(_zone(owner, session["id"])) == [message["id"]]

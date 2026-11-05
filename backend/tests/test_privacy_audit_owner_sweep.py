@@ -55,7 +55,8 @@ from tests.privacy_audit_support import (
 
 # The enumeration's `owner` rows are table rows 19..53 inclusive (context.md). The count is
 # asserted so the sweep can never silently iterate a shrunken set.
-EXPECTED_OWNER_ROWS = 35
+# fast/014 (message-delete): plus row 75, `DELETE /api/messages/{}` — 36 owner rows.
+EXPECTED_OWNER_ROWS = 36
 
 # Tokens A tries to write into B's rows. They are not registry sentinels (so they cannot be
 # confused with seeded content) and are single lowercase alphanumeric words, like sentinels,
@@ -95,6 +96,8 @@ _BODYLESS_WRITES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/sessions/{}/reopen"),
         ("POST", "/api/messages/{}/translation"),
         ("DELETE", "/api/memos/{}"),
+        # fast/014 (message-delete): row 75 takes no body, like the memo delete.
+        ("DELETE", "/api/messages/{}"),
     }
 )
 
@@ -210,7 +213,8 @@ def _session_envelope_of_a(world: AuditWorld) -> Mapping[str, Any]:
 def _owner_rows() -> tuple[EnumeratedRoute, ...]:
     rows = tuple(route for route in ENUMERATED_ROUTES if route.route_class == "owner")
     assert len(rows) == EXPECTED_OWNER_ROWS, (
-        f"the enumeration holds {len(rows)} `owner` rows, expected {EXPECTED_OWNER_ROWS} (context.md rows 19..53)"
+        f"the enumeration holds {len(rows)} `owner` rows, expected {EXPECTED_OWNER_ROWS} "
+        "(context.md rows 19..53, plus fast/014's row 75)"
     )
     return rows
 

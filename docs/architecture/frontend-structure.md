@@ -2,7 +2,7 @@
 
 **Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-006,
 FEAT-007, FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-017,
-FEAT-019, FEAT-020, ACT-001, ACT-002, ACT-003, US-006.AC-3
+FEAT-019, FEAT-020, ACT-001, ACT-002, ACT-003, US-006.AC-3, US-150, US-151
 
 React 19 + TypeScript, built by Vite as **four separate entries**. Component
 library, state library and icon set are fixed in `overview.md`.
@@ -690,8 +690,9 @@ exposes one route.
 
 As built (018 D5), through `app/sessionsApi.ts`'s start-with-message call:
 
-- **The response's eight `Session` keys are applied to the workspace
+- **The response's `Session` keys are applied to the workspace
   `SessionsState`**, so the tree shows the new session without a list reload.
+  (Eight as built at 018; `name` makes nine, always NULL on create.)
 - **The client pushes `/sessions/<id>`** — push, not replace, so **Back returns to
   the character page** the roleplayer started from. (Contrast the draft page
   below, which replaces for the opposite reason.)
@@ -779,6 +780,14 @@ throws and nothing warns.
   the tempting key here, since the tree already has one on every row, and it would
   have been wrong twice over: lexicographically as a string, and roundingly as a
   number.
+- **The session label is a pure derivation, written once** (session names,
+  2026-11-05). Every place a session is named — the tree, the session header, the
+  character page's Sessions list, my-search — renders the session's `name`, or,
+  when it is null, the **local** `YYYY-MM-DD` of `created_at`; the tree's second
+  line renders `last_used_at` as local `YYYY-MM-DD HH:MM`. One pure module holds
+  both formats so the four places cannot drift (`workspace-shell.md`'s label rule).
+  It is the client's because only the browser knows the roleplayer's timezone; the
+  server never sends a computed label.
 - **One divergence between the client port and the server, and it is accepted as
   display-only** (013 D16): `app/parens.ts` trims with JavaScript's `trim`, while
   the server uses Python's `isspace`. The two disagree on a handful of rare code

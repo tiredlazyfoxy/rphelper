@@ -2,7 +2,7 @@
 
 **Realizes:** FEAT-001, FEAT-002, FEAT-003, FEAT-004, FEAT-005, FEAT-009,
 FEAT-010, FEAT-016, FEAT-017, FEAT-018, FEAT-019, UC-086, US-134, US-135,
-US-137, US-145,
+US-137, US-149, US-150,
 ACT-001, ACT-002, ACT-003, ACT-004
 
 The system context, who reaches which surface, how it runs in dev and prod, every
@@ -464,12 +464,15 @@ reintroduce the structured partner-and-setup matching FEAT-015 deliberately
 rejects (challenge C5) — a name match is precisely the signal that is *absent* in
 the cases the feature exists to serve. **The engineering half of this entry's
 old wording is corrected:** it used to add that `session_fts`'s columns are
-`title` and `partner_label`, but **`sessions` has neither column** (a session is
-identified by its start time, `US-145`) and **`session_fts` was declared and
-never created** (024 U7). FEAT-017's my-search is still a different surface with a
-different rule, but its session corpus is the **vector** arm, not a lexical index.
+`title` and `partner_label`, but **`sessions` has neither column** and
+**`session_fts` was declared and never created** (024 U7). Sessions now carry a
+roleplayer-given **`name`** (2026-11-05, `data-model.md`), and it changes nothing
+here: a name is a label, not the recorded session text this tool reasons over,
+and `session_search` does not read it. FEAT-017's my-search is still a different
+surface with a different rule — its session corpus is the **vector** arm plus a
+`LIKE` match on `name`, not a lexical index (`search-and-retrieval.md`).
 **Flip condition:** it is no longer one switch — turning a lexical arm on now
-requires first giving a session text columns and an index to put them in. The
+requires first an index over session text to put it in. The
 relevance condition that would justify starting is unchanged: the promise of
 finding "the same person or situation" **when neither is recorded** proving, in
 real use, to need lexical recall.
@@ -535,9 +538,11 @@ current zone **has no rows at all** — R11 defines the zone as the rows matchin
 there is nothing for the server to discard. Abandoning therefore clears the
 unsent composer draft and the kind switch, **in the client, with no route and no
 backend surface**. That is the reason this option was chosen over a discard
-endpoint: **R11 is left exactly as it was** — raw `messages` is still touched by
-exactly two operations, settle and re-open — and a discard route would weaken
-that invariant while removing nothing, because there is nothing to remove. The
+endpoint: **R11 is left exactly as it was by this decision** — raw `messages` is
+touched by exactly three operations, settle, re-open and single-message delete
+(the third added by fast/014, US-149, which removes one addressed message and is
+not a zone discard) — and a discard route would weaken that invariant while
+removing nothing, because there is nothing to remove. The
 paired half is US-135: settling never requires an assistant answer, so a zone
 holding only the roleplayer's own text can always be settled. **The two rules are
 a pair** — without US-135 a zone holding text could be neither discarded (US-134)

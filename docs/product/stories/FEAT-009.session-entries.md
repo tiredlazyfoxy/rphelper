@@ -59,6 +59,7 @@
 - **Acceptance criteria:**
   - **US-110.AC-1** — Given any settled entry (partner block, turn, or decision) exists, when the roleplayer edits its text and moves focus away, then the instance saves the edit.
   - **US-110.AC-2** — Given any settled entry (partner block, turn, or decision) was edited, when the assistant later calls `session_search`, then the search reflects the new text, not the original.
+- **See also:** Clearing the text entirely deletes the entry instead (US-149.AC-5).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 12, round 13; 2026-09-28, round 17.
 
 ### US-111 — Editing any settled entry discards its cached translation
@@ -118,4 +119,18 @@
   - **US-124.AC-1** — Given a settled turn contains markdown formatting, when the roleplayer copies it, then the clipboard holds plain text with no markdown syntax.
   - **US-124.AC-2** — Given a settled turn whose text marks actions with asterisks, when the roleplayer copies it, then the copied text carries the action words without the asterisk markers.
 - **Source:** `[confirmed: user]` interview 2026-09-28, round 17; finalization 2026-10-06, C51.
+
+### US-149 — Remove an entry or a message the roleplayer no longer wants
+- **Actor:** ACT-002 · **Feature:** FEAT-009 · **Exercises:** UC-078
+- **Story:** As a roleplayer, I want to permanently remove an entry or a single message I sent by mistake (a double send, an unwanted entry), so that the session holds only what I meant to keep.
+- **Acceptance criteria:**
+  - **US-149.AC-1** — Given a settled entry, when the roleplayer asks to delete it and confirms, then the entry is gone from the session.
+  - **US-149.AC-2** — Given a settled entry that has a collapsed composition discussion, when the roleplayer deletes the entry, then that discussion is gone too.
+  - **US-149.AC-3** — Given a message in the current zone, when the roleplayer asks to delete it and confirms, then that one message is gone and the rest of the zone is unchanged.
+  - **US-149.AC-4** — Given the delete confirmation is showing, when the roleplayer cancels, then nothing is removed.
+  - **US-149.AC-5** — Given the roleplayer is editing a settled entry or a current-zone message, when they clear its text entirely and finish the edit, then it is deleted without a confirmation.
+  - **US-149.AC-6** — Given a message inside a collapsed discussion or a tool record, when the roleplayer looks for a way to delete it on its own, then none is offered.
+  - **US-149.AC-7** — Given the assistant is still working on a reply, when the roleplayer looks at the delete action, then it is unavailable until the reply finishes.
+- **Constraint:** Deletion is permanent; there is no undo.
+- **Source:** `[confirmed: user]` finalization 2026-11-05, fast/014.message-delete (AC-6, AC-7 and the constraint: defaults accepted with the plan).
 <!-- product-spec:end -->

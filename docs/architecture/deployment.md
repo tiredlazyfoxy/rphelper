@@ -687,11 +687,13 @@ rather than a guideline because it is enforceable only as one.
 - memo bodies;
 - character persona / sheet text;
 - setup text;
-- session titles or partner labels — **columns `sessions` does not have**
-  (011 D4, `US-145`: a session is identified by its start time), so the
-  prohibition has no call site today and is kept deliberately: if a title or a
-  partner-label column ever lands, it is already covered rather than needing
-  this list to be remembered and extended;
+- **session names** (`sessions.name`) — a real column since the session-names
+  delta (2026-11-05), so this entry now has a call site: the rename route and
+  my-search's name arm both handle the text, and neither may log it — log the
+  session id instead. A name is the roleplayer's own words about their
+  roleplay, exactly as much content as a persona. **Partner labels** stay on the
+  list although `sessions` still has no such column: if one ever lands it is
+  already covered rather than needing this list to be remembered and extended;
 - translations;
 - LLM prompt payloads;
 - LLM completions;

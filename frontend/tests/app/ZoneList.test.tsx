@@ -13,11 +13,19 @@
 //   - a failed PATCH notifies, re-reads GET /api/sessions/<id>/zone, and keeps the editor
 //     open with the typed text while the row is still served; a row gone from the re-read
 //     takes its item and editor with it.
+//
+// Amended by fast feature 014 (docs/plans/fast/014.message-delete/plan.md, context.md P7-P8):
+//   - user and assistant rows carry a "Delete message" button; tool rows and read-only
+//     (editable={false}) rows carry none; it is absent while the row's editor is open and
+//     disabled while the stream is busy; it opens a "Delete message?" dialog with a "Delete"
+//     confirm; cancel sends nothing, confirm sends DELETE /api/messages/<id> and the row goes;
+//   - a blank (whitespace-only) commit in the editor now deletes the row with no dialog — the
+//     former "whitespace makes no request" case (DoD-4) is superseded by F014 DoD-24.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ZoneList } from "../../src/app/ZoneList";
+import { ZoneList, ZoneMessage } from "../../src/app/ZoneList";
 import type { Message, MessageRole } from "../../src/app/streamApi";
 import { StreamState } from "../../src/app/streamState";
 import { ApiError } from "../../src/shared/apiError";
@@ -40,6 +48,11 @@ const ASSISTANT_PATH = `/api/messages/${ASSISTANT_ID}`;
 const LIST_NAME = "Zone messages";
 const EDIT_NAME = "Edit message";
 const EDITOR_NAME = "Edit message text";
+const DELETE_NAME = "Delete message";
+const DELETE_TITLE = "Delete message?";
+const CONFIRM_NAME = "Delete";
+const CANCEL_NAME = /cancel/i;
+const USER_PATH = `/api/messages/${USER_ID}`;
 
 const STAMP = "2026-05-10T09:00:00.000000+00:00";
 const LATER = "2026-05-10T09:05:00.000000+00:00";
@@ -123,6 +136,15 @@ function stubFetch(route: (method: string, pathname: string) => Response | undef
   };
   vi.stubGlobal("fetch", vi.fn(impl));
   return log;
+}
+
+/** DELETE /api/messages/<id> answers the fast-014 success body; nothing else is routed. */
+function stubDelete(id: string): Seen[] {
+  return stubFetch((method, pathname) =>
+    method === "DELETE" && pathname === `/api/messages/${id}`
+      ? jsonResponse({ deleted_ids: [id], search_coverage_incomplete: false }, 200)
+      : undefined,
+  );
 }
 
 function lines(log: Seen[]): string[] {
@@ -289,22 +311,48 @@ describe("ZoneList — in-place edit (D10)", () => {
     expect(item(1).textContent).toContain("Hello there");
   });
 
-  it("blurring with only whitespace makes no request and shows the original text — DoD-4", async () => {
-    const log = stubFetch(() => undefined);
+  it("blurring with only whitespace sends DELETE /api/messages/<id> with no confirm dialog, and the row goes — F014 DoD-24", async () => {
+    const log = stubDelete(ASSISTANT_ID);
     const user = newUser();
-    renderZone(seeded(threeRows()));
+    const state = seeded(threeRows());
+    renderZone(state);
 
     const textbox = await openAssistantEditor(user);
     fireEvent.change(textbox, { target: { value: "   \n\t " } });
     fireEvent.blur(textbox);
 
     await waitFor(() => {
-      expect(screen.queryByRole("textbox", { name: EDITOR_NAME })).toBeNull();
+      expect(zoneItems()).toHaveLength(2);
     });
     await settle();
 
-    expect(log).toEqual([]);
-    expect(item(1).textContent).toContain("Hello there");
+    expect(lines(log)).toEqual([`DELETE ${ASSISTANT_PATH}`]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: EDITOR_NAME })).toBeNull();
+    expect(zoneList().textContent).not.toContain("Hello there");
+    expect(state.zone.map((row) => row.id)).toEqual([USER_ID, TOOL_ID]);
+    expect(notifyFailureSpy).not.toHaveBeenCalled();
+  });
+
+  it("clearing the text entirely and blurring deletes the row with no confirm dialog — F014 DoD-24", async () => {
+    const log = stubDelete(USER_ID);
+    const user = newUser();
+    const state = seeded(threeRows());
+    renderZone(state);
+
+    await user.click(within(item(0)).getByRole("button", { name: EDIT_NAME }));
+    const textbox = editor();
+    fireEvent.change(textbox, { target: { value: "" } });
+    fireEvent.blur(textbox);
+
+    await waitFor(() => {
+      expect(zoneItems()).toHaveLength(2);
+    });
+    await settle();
+
+    expect(lines(log)).toEqual([`DELETE ${USER_PATH}`]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(state.zone.map((row) => row.id)).toEqual([ASSISTANT_ID, TOOL_ID]);
   });
 
   it("a 409 message_not_editable notifies, re-reads the zone, and keeps the editor open with the typed text — DoD-5", async () => {
@@ -396,5 +444,125 @@ describe("ZoneList — in-place edit (D10)", () => {
     expect(state.zone.map((row) => row.id)).toEqual([USER_ID, ASSISTANT_ID, TOOL_ID]);
     expect(state.zone[0]?.text).toBe("Hi");
     expect(state.zone[2]?.text).toBe("lookup");
+  });
+});
+
+// ---------------------------------------------------------------- fast 014
+describe("ZoneList — delete a message behind a confirm (fast 014 P7, P8)", () => {
+  it('the user and assistant items each hold one "Delete message" button; the tool item holds none — F014 DoD-22', () => {
+    renderZone(seeded(threeRows()));
+
+    const items = zoneItems();
+    expect(within(items[0] as HTMLElement).getAllByRole("button", { name: DELETE_NAME })).toHaveLength(1);
+    expect(within(items[1] as HTMLElement).getAllByRole("button", { name: DELETE_NAME })).toHaveLength(1);
+    // queryByRole also finds disabled buttons, so null means the control is not rendered.
+    expect(within(items[2] as HTMLElement).queryByRole("button", { name: DELETE_NAME })).toBeNull();
+    expect(screen.getAllByRole("button", { name: DELETE_NAME })).toHaveLength(2);
+  });
+
+  it('a ZoneMessage rendered with editable={false} shows no "Delete message" for any role — F014 DoD-22', () => {
+    const state = seeded([]);
+    render(
+      <AppProviders>
+        <ul aria-label="Read-only rows">
+          {threeRows().map((message) => (
+            <ZoneMessage key={message.id} state={state} message={message} editable={false} />
+          ))}
+        </ul>
+      </AppProviders>,
+    );
+
+    const items = within(screen.getByRole("list", { name: "Read-only rows" })).getAllByRole("listitem");
+    expect(items).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: DELETE_NAME })).toBeNull();
+  });
+
+  it('clicking "Delete message" opens the "Delete message?" dialog with a "Delete" confirm and sends no request — F014 DoD-22', async () => {
+    const log = stubDelete(ASSISTANT_ID);
+    const user = newUser();
+    const state = seeded(threeRows());
+    renderZone(state);
+
+    await user.click(within(item(1)).getByRole("button", { name: DELETE_NAME }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(DELETE_TITLE)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: CONFIRM_NAME })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: CANCEL_NAME })).toBeInTheDocument();
+    await settle();
+    expect(log).toEqual([]);
+    // Read from state: the zone list may be aria-hidden behind the open modal.
+    expect(state.zone.map((row) => row.id)).toEqual([USER_ID, ASSISTANT_ID, TOOL_ID]);
+  });
+
+  it("cancel closes the dialog with no request and the row stays — F014 DoD-22", async () => {
+    const log = stubDelete(ASSISTANT_ID);
+    const user = newUser();
+    renderZone(seeded(threeRows()));
+
+    await user.click(within(item(1)).getByRole("button", { name: DELETE_NAME }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: CANCEL_NAME }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    await settle();
+    expect(log).toEqual([]);
+    expect(zoneItems()).toHaveLength(3);
+    expect(item(1).textContent).toContain("Hello there");
+  });
+
+  it.each<[string, number, string]>([
+    ["user", 0, USER_ID],
+    ["assistant", 1, ASSISTANT_ID],
+  ])(
+    "confirm on the %s row sends exactly DELETE /api/messages/<id>, the dialog closes and the row goes — F014 DoD-22",
+    async (_role, index, id) => {
+      const log = stubDelete(id);
+      const user = newUser();
+      const state = seeded(threeRows());
+      renderZone(state);
+
+      await user.click(within(item(index)).getByRole("button", { name: DELETE_NAME }));
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: CONFIRM_NAME }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).toBeNull();
+      });
+      await waitFor(() => {
+        expect(zoneItems()).toHaveLength(2);
+      });
+      await settle();
+
+      expect(lines(log)).toEqual([`DELETE /api/messages/${id}`]);
+      expect(state.zone.map((row) => row.id)).toEqual([USER_ID, ASSISTANT_ID, TOOL_ID].filter((rowId) => rowId !== id));
+      expect(notifyFailureSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('every "Delete message" button is disabled while the stream is busy — F014 DoD-23', () => {
+    const state = seeded(threeRows());
+    runInAction(() => {
+      state.busy = true;
+    });
+    renderZone(state);
+
+    const buttons = screen.getAllByRole("button", { name: DELETE_NAME });
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) {
+      expect(button).toBeDisabled();
+    }
+  });
+
+  it('"Delete message" is absent from a row while its editor is open, and present on the other editable row — F014 DoD-23', async () => {
+    const user = newUser();
+    renderZone(seeded(threeRows()));
+
+    await openAssistantEditor(user);
+
+    expect(within(item(1)).queryByRole("button", { name: DELETE_NAME })).toBeNull();
+    expect(within(item(0)).getAllByRole("button", { name: DELETE_NAME })).toHaveLength(1);
   });
 });

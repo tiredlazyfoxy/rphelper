@@ -321,8 +321,9 @@ sessions = Table(
 #: row is settled; `tool_name` / `tool_payload` serve `role='tool'` rows only (R9) and have no
 #: writer yet. The four states: NULL/NULL = current zone; `related_to` NULL + `settled_at` set
 #: = record; `related_to` set + `settled_at` NULL = buried; both set = illegal (the named
-#: CHECK). Every foreign key is bare, with **no `ON DELETE`** — nothing deletes a message
-#: (R6). Two non-unique indexes: `(session_id, settled_at)` for the stream reads and
+#: CHECK). Every foreign key is bare, with **no `ON DELETE`**: the one message delete (fast
+#: `014`, `services.messages.delete_message`) removes children before parents — translations,
+#: then the buried group, then the target. Two non-unique indexes: `(session_id, settled_at)` for the stream reads and
 #: `(related_to)` for the group lookups of settle / re-open. Timestamps are the fixed-width
 #: UTC text form.
 messages = Table(
@@ -417,8 +418,9 @@ memos = Table(
 #: Cached translations of settled partner rows (`data-model.md` § `translations`; feature
 #: `023`, D7). Exactly six columns. `user_id` is the direct owner column every read scopes by
 #: (R5). `message_id` is the translated row; its foreign key is bare, with **no `ON DELETE`** —
-#: nothing deletes a message (R6), and an edit discards the row's translations explicitly
-#: (D11). Unique on `(message_id, target_language)`: one cached text per row and language.
+#: an edit discards the row's translations explicitly (D11), and the message delete (fast
+#: `014`) deletes them before the message rows they reference. Unique on
+#: `(message_id, target_language)`: one cached text per row and language.
 #: Deliberately absent: `updated_at` (a row is only ever inserted or deleted, never updated)
 #: and any state column (absence means "not translated"). Timestamps are the fixed-width UTC
 #: text form.

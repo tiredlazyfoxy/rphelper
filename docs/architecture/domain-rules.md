@@ -6,7 +6,7 @@ UC-012, UC-021, UC-025, UC-029, UC-032, UC-035, UC-036, UC-037, UC-038, UC-039,
 UC-040, UC-041, UC-042, UC-044, UC-045, UC-046, UC-047, UC-048, UC-049, UC-050,
 UC-052, UC-061, UC-065, UC-066, UC-067, UC-068, UC-075, UC-076, UC-077, UC-078,
 UC-081, UC-083, UC-084, UC-086, UC-088, US-040, US-044, US-102, US-107, US-114,
-US-116, US-136, US-141, US-143, US-144, US-146
+US-116, US-136, US-141, US-143, US-144, US-146, US-149
 
 Every feature in RPHelper binds to the rules below. They are collected in one
 place because each one is violated by the *obvious* implementation, and because
@@ -606,6 +606,13 @@ the delete by **emptying a saved note** (`UC-088`, `US-141`). It is worth saying
 out loud because the first delete path in the product sits immediately beside a
 rule that reads "no delete path at all".
 
+**A session message's removal is the second hard delete, and it is outside this
+rule for the same reason** (fast/014, US-149). A message is not an archivable
+entity: it belongs to a session that R6 still never destroys, and deleting one
+message — with, for a settled entry, its buried discussion — leaves the session
+and everything else in it intact. R11 governs how the delete may touch
+`messages`.
+
 **One whole-instance delete exists, and it is not a per-entity delete path**
 (plan 031). The whole-database import **replaces** every row — including archived
 characters, setups and sessions, and including the administrator's own account.
@@ -660,6 +667,13 @@ The rules, each separately testable:
   US-116's guarantee a property of the system and not of the UI.
   `US-040.AC-2` / `US-040.AC-3` add that **no message shows before the group is
   opened**, which the lazy read satisfies by construction.
+- **A buried message cannot be deleted on its own; it leaves only with its head**
+  (fast/014, US-149; DEC-F014-3, DEC-F014-5). Deleting a settled entry deletes its
+  buried group in the same transaction, and a delete addressed to a buried row is
+  refused with the same `message_not_editable` the edit gets. The group is
+  scaffolding of the entry; an entry the roleplayer has removed has nothing left
+  for it to explain, and a lone buried row removed from under a surviving head
+  would rewrite the history of how that entry was produced.
 - **Re-open is allowed only while the current zone below is empty** (UC-037,
   US-128). It is an undo for a mis-click, not a workflow. Once anything new
   exists in the zone, re-open is refused and the group is permanently read-only.
@@ -817,7 +831,8 @@ late in use.
 
 ## R11 — The ruler: settle is the only door into the record
 
-**Realizes:** FEAT-009, FEAT-010, UC-035, UC-037, UC-083, UC-086, US-134, US-135
+**Realizes:** FEAT-009, FEAT-010, UC-035, UC-037, UC-083, UC-086, US-134, US-135,
+US-149
 
 A session is a **stream**: settled record above a ruler, and below it exactly one
 **current zone** (US-125, UC-083). The rule, in four parts:
@@ -854,11 +869,16 @@ A session is a **stream**: settled record above a ruler, and below it exactly on
   composer draft", which that postcondition forbids.
   **No discard route exists and none may be added.**
   That is why this option was chosen: a discard endpoint would make raw
-  `messages` writable from a third operation, weakening the two-operation
+  `messages` writable from a fourth operation, weakening the three-operation
   invariant below, in exchange for deleting rows that by definition are not
   there. A zone that *holds* text is never discardable (US-134.AC-2) — it is
   settled, which US-135 guarantees is always possible. The two rules are a pair:
   without US-135, a zone holding text could be neither discarded nor settled.
+  **Single-message delete is not a zone discard and does not license one**
+  (fast/014, US-149): it removes **one addressed message** per request, refuses
+  buried and tool rows, and leaves every other row in the zone where it is. A
+  route that empties the zone, or deletes several messages at once, remains
+  forbidden (DEC-F014-12).
 - **The current zone is structurally unique**, not uniquely-constrained. It is not
   a row but the set of a session's messages matching
   `related_to IS NULL AND settled_at IS NULL` (`data-model.md`). A set cannot be
@@ -887,6 +907,12 @@ A session is a **stream**: settled record above a ruler, and below it exactly on
   implementation precaution is what gets deleted by the next person simplifying
   the settle module — and because the lone-turn case is exactly the one somebody
   would "fix" into a demotion.
+- **"The last settled row" is whatever is last now, so deleting it moves the
+  re-open target** (fast/014). Delete the last settled entry and the settled row
+  before it becomes the last one; re-open then applies to that row under exactly
+  the conditions above — empty zone, a buried group behind it. Nothing records
+  which row *used to be* last, and nothing needs to: re-open reads the stream as
+  it stands.
 - **The predicates live in one place each, and there are four of them.** The merge
   of `entries` and `discussion_messages` cost the old structural guarantee that
   context assembly had *no join* to discussion rows; **four named SQLAlchemy Core
@@ -897,18 +923,26 @@ A session is a **stream**: settled record above a ruler, and below it exactly on
   this schema (012 D1): a view would be invisible to `create_all`, to the drift
   walk and to the drift page's `Create` / `Sync`, and a Sync rebuild of
   `messages` would break a real one at the rename step.
-  What that buys, stated as the four facts it actually is (012 D16, 014 D1,
-  022 D2) rather than as the older single sentence, which contradicted the route
-  table:
-  - **every read outside settle and re-open goes through a selectable** — a
+  What that buys, stated as the facts it actually is (012 D16, 014 D1,
+  022 D2; fast/014) rather than as the older single sentence, which contradicted
+  the route table:
+  - **raw `messages` is touched by exactly three operations — settle, re-open and
+    single-message delete** — and every other read goes through a selectable; a
     `select()` naming `messages` directly anywhere else is a defect, and it is
-    the specific thing to look for when reviewing a plan that touches the stream;
+    the specific thing to look for when reviewing a plan that touches the stream.
+    The delete classifies its target through the text-free `message_states`
+    before it deletes anything (DEC-F014-7);
   - **the burial and settle columns** (`related_to`, `kind`, `settled_at` on an
-    existing row) **are written only by settle and re-open**;
+    existing row) **are written only by settle and re-open** — the delete writes
+    neither; it removes rows;
   - **inserts** are the zone append, the partner filing, the assistant row and
     the character page's opening message;
   - **`text` and `updated_at`** are written by the edit route, on a zone row and
-    on a settled row alike.
+    on a settled row alike;
+  - **deletes** are single-message delete only: one current-zone message, or one
+    settled entry together with its buried group (DEC-F014-3). The whole-database
+    replace (`transfer.md`) is the only other remover of rows, and it is a
+    restore of the instance, not an operation on a stream.
 - **The character page's opening message is a zone row, so the two doors are
   unchanged** (plan 018). It is inserted through the **same transaction-neutral
   zone-insert helper** as the stream's append, and it is **never settled** — so

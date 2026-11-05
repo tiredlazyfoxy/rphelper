@@ -8,9 +8,10 @@ inserts). Reads go only through the schema layer's selectables (`settled_entries
 `current_zone`, `message_states` — D1, D7); every write bumps the session (D3); nothing here
 ever names `related_to` in an insert or update, nor touches the settle columns of an existing
 row (D16). Feature `014` step `001` widens the edit to settled rows of any kind (text only;
-a buried row stays refused). The one delete in this module is the edited message's cached
-`translations` rows, discarded inside the edit's own transaction (feature `023` D11); nothing
-else is deleted or discarded here, and there is no settle-state operation.
+a buried row stays refused). The edit discards the edited message's cached `translations`
+rows inside its own transaction (feature `023` D11). Fast feature `014` adds `delete_message`,
+the one operation that deletes messages: an owned zone message, or a settled entry together
+with its buried group (and their translations). There is no settle-state operation here.
 
 Feature `024`, step `005` (D5, D8, U1, U5) makes two of these operations record-keeping
 writes: `file_partner_entry` (a born-settled row) and `edit_message_text` **on a record row**
@@ -43,6 +44,7 @@ from app.db.schema import (
     settled_entries,
     translations,
 )
+from app.db.search_tables import ensure_fts_tables
 from app.errors import MessageNotEditableError, MessageNotFoundError, SessionNotFoundError
 from app.ids import SnowflakeGenerator
 from app.services.session_index import (
@@ -440,6 +442,122 @@ def edit_message_text(
         # than threaded through it.
         message = replace(_to_message(row), search_coverage_incomplete=search_coverage_incomplete)
     return message
+
+
+@dataclass(frozen=True)
+class DeleteMessageResult:
+    """What `delete_message` removed, plus the session-vector coverage flag (fast `014`).
+
+    `deleted_ids` holds the target's id first, then — when the target was a settled entry — the
+    ids of its buried group in ascending order; never empty. `search_coverage_incomplete` is
+    **true** only when a settled delete's degraded `session_vec` refresh could not embed; a zone
+    delete always answers false. Required, with no default, as on `SettleResult`.
+    """
+
+    deleted_ids: list[int]
+    search_coverage_incomplete: bool
+
+
+def delete_message(
+    connection: Connection,
+    user_id: int,
+    message_id: int,
+    *,
+    client_factory: LlmClientFactory = LlmClient,
+    timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
+) -> DeleteMessageResult:
+    """Permanently delete one owned zone message or settled entry (with its buried group).
+
+    Everything happens in one transaction: the cached `translations` rows of every affected id
+    are deleted, then the buried group (settled target only), then the target; a settled target
+    then refreshes the session's vector through `refresh_session_vector_degraded` (whose
+    degraded result becomes the flag), and the owning session is bumped. FTS rows go with the
+    record rows through the external-content delete trigger.
+
+    Args:
+        connection: The Core connection the transaction runs on.
+        user_id: The owner; every statement is scoped to it.
+        message_id: The message to delete.
+        client_factory: Builds the embedding client for the settled-delete vector refresh;
+            same default as `edit_message_text`. Never used on a zone delete.
+        timeout_seconds: The embed request timeout for that refresh.
+
+    Returns:
+        A `DeleteMessageResult`: the deleted ids (target first, then buried ids ascending) and
+        the coverage flag.
+
+    Raises:
+        MessageNotFoundError: The id is missing or belongs to another user (identical answer).
+        MessageNotEditableError: The target is a buried row, or a `role='tool'` row.
+
+    A refusal changes nothing (no row, no translation, no session bump).
+    """
+    with connection.begin():
+        state_columns = message_states.selected_columns
+        state = connection.execute(
+            message_states.where(state_columns.id == message_id, state_columns.user_id == user_id)
+        ).first()
+        if state is None:
+            raise MessageNotFoundError()
+        if state.related_to is not None:
+            # Fast 014 P1 / US-116: a buried row is neither editable nor deletable on its own; it
+            # only goes with its settled head.
+            raise MessageNotEditableError()
+        settled = state.settled_at is not None
+        selectable = settled_entries if settled else current_zone
+        columns = selectable.selected_columns
+        current = connection.execute(
+            selectable.where(columns.id == message_id, columns.user_id == user_id)
+        ).one()
+        if current.role == "tool":
+            # Fast 014 P1, mirroring 021 D8: tool rows are not user-deletable.
+            raise MessageNotEditableError()
+        buried_ids: list[int] = []
+        if settled:
+            # Fast 014 decision 3: a settled head takes its buried group with it. Ascending id is
+            # the order `deleted_ids` promises after the target.
+            buried_columns = buried_messages.selected_columns
+            buried_ids = [
+                row.id
+                for row in connection.execute(
+                    buried_messages.where(
+                        buried_columns.related_to == message_id, buried_columns.user_id == user_id
+                    ).order_by(buried_columns.id.asc())
+                )
+            ]
+        deleted_ids = [message_id, *buried_ids]
+        # No foreign key cascades and `PRAGMA foreign_keys=ON`, so children go before parents:
+        # translations (FK to messages), then the buried rows (`related_to` FK to the head), then
+        # the target itself (fast 014 P3). Every statement is owner-scoped (R5).
+        connection.execute(
+            translations.delete().where(
+                translations.c.message_id.in_(deleted_ids),
+                translations.c.user_id == user_id,
+            )
+        )
+        if buried_ids:
+            connection.execute(
+                messages.delete().where(messages.c.id.in_(buried_ids), messages.c.user_id == user_id)
+            )
+        connection.execute(messages.delete().where(messages.c.id == message_id, messages.c.user_id == user_id))
+        # Matches `memos.delete_memo`: inside the transaction and after the rows are gone. Once
+        # `message_fts` exists its delete trigger has already dropped the record row's text; on an
+        # instance that never built it, the ensure creates it and back-fills from the rows left.
+        ensure_fts_tables(connection)
+        # Fast 014 P3: only a settled delete changes the text `session_vec` is built from, so a
+        # zone delete builds no client and reports complete coverage. The degraded posture
+        # (catch, no vector, `True` = incomplete) lives inside the refresh, as on edit.
+        search_coverage_incomplete = False
+        if settled:
+            search_coverage_incomplete = refresh_session_vector_degraded(
+                connection,
+                user_id,
+                state.session_id,
+                client_factory=client_factory,
+                timeout_seconds=timeout_seconds,
+            )
+        _bump_session(connection, user_id, state.session_id, _now_text())
+    return DeleteMessageResult(deleted_ids=deleted_ids, search_coverage_incomplete=search_coverage_incomplete)
 
 
 def _list_session_rows(

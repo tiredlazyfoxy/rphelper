@@ -13,6 +13,14 @@
 //     text; blur commits: blank / unchanged -> no request, editor closes; otherwise exactly
 //     PATCH /api/messages/<id> {"text": ...}; success -> editor closes and the served row
 //     renders by its kind; 409 -> notifyFailure, GET …/entries, editor stays with the typed text.
+//
+// Amended by fast feature 014 (docs/plans/fast/014.message-delete/plan.md, context.md P7-P8):
+//   - every entry carries a "Delete entry" button, absent while that entry's editor is open and
+//     disabled while the stream is busy; it opens a confirm dialog titled "Delete entry?" with a
+//     "Delete" confirm; cancel sends nothing, confirm sends DELETE /api/messages/<id> and the
+//     entry disappears;
+//   - a blank (whitespace-only) commit in the editor now deletes the entry with no dialog — the
+//     former "whitespace makes no request" case (DoD-6) is superseded by F014 DoD-24.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
@@ -43,6 +51,10 @@ const EDIT_NAME = "Edit entry";
 const EDITOR_NAME = "Edit entry text";
 const COPY_NAME = "Copy as plain text";
 const REOPEN_NAME = "Re-open last entry";
+const DELETE_NAME = "Delete entry";
+const DELETE_TITLE = "Delete entry?";
+const CONFIRM_NAME = "Delete";
+const CANCEL_NAME = /cancel/i;
 
 const STAMP = "2026-05-10T09:00:00.000000+00:00";
 const LATER = "2026-05-10T09:05:00.000000+00:00";
@@ -135,6 +147,15 @@ function stubFetch(route: (method: string, pathname: string) => Response | undef
 function stubPatch(row: Message): Seen[] {
   return stubFetch((method, pathname) =>
     method === "PATCH" && pathname === messagePath(row.id) ? jsonResponse(row, 200) : undefined,
+  );
+}
+
+/** DELETE /api/messages/<id> answers the fast-014 success body; nothing else is routed. */
+function stubDelete(id: string): Seen[] {
+  return stubFetch((method, pathname) =>
+    method === "DELETE" && pathname === messagePath(id)
+      ? jsonResponse({ deleted_ids: [id], search_coverage_incomplete: false }, 200)
+      : undefined,
   );
 }
 
@@ -336,8 +357,8 @@ describe("StreamRecord actions — in-place edit of a settled entry (D10)", () =
     expect(item(1).textContent).toContain("T1");
   });
 
-  it("blurring with only whitespace makes no request, closes the editor and shows the stored text — DoD-6", async () => {
-    const log = stubFetch(() => undefined);
+  it("blurring with only whitespace sends DELETE /api/messages/<id> with no confirm dialog, and the entry disappears — F014 DoD-24", async () => {
+    const log = stubDelete(TURN_ID);
     const user = newUser();
     renderRecord(seeded(threeEntries()));
 
@@ -345,12 +366,34 @@ describe("StreamRecord actions — in-place edit of a settled entry (D10)", () =
     await commit(textbox, "   \n\t ");
 
     await waitFor(() => {
-      expect(queryEditor()).toBeNull();
+      expect(recordItems()).toHaveLength(2);
     });
     await settle();
 
-    expect(log).toEqual([]);
-    expect(item(1).textContent).toContain("T1");
+    expect(lines(log)).toEqual([`DELETE ${messagePath(TURN_ID)}`]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(queryEditor()).toBeNull();
+    expect(item(0).textContent).toContain("P1");
+    expect(item(1).textContent).toContain("((D1))");
+    expect(notifyFailureSpy).not.toHaveBeenCalled();
+  });
+
+  it("clearing the text entirely and blurring deletes the entry with no confirm dialog — F014 DoD-24", async () => {
+    const log = stubDelete(PARTNER_ID);
+    const user = newUser();
+    renderRecord(seeded(threeEntries()));
+
+    const textbox = await openEditor(user, 0);
+    await commit(textbox, "");
+
+    await waitFor(() => {
+      expect(recordItems()).toHaveLength(2);
+    });
+    await settle();
+
+    expect(lines(log)).toEqual([`DELETE ${messagePath(PARTNER_ID)}`]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(recordItems().some((listItem) => (listItem.textContent ?? "").includes("P1"))).toBe(false);
   });
 
   it("a 409 message_not_editable notifies with that code, re-reads the entries, and keeps the editor open with the typed text — DoD-7", async () => {
@@ -514,5 +557,121 @@ describe("StreamRecord actions — reveal on hover or focus within (D6)", () => 
     await waitFor(() => {
       expect(actionsGroup(item(1))).toHaveAttribute("data-revealed", "true");
     });
+  });
+});
+
+// ---------------------------------------------------------------- fast 014
+describe("StreamRecord actions — delete an entry behind a confirm (fast 014 P7, P8)", () => {
+  it('each of the partner, turn and decision items holds exactly one "Delete entry" button — F014 DoD-21', () => {
+    renderRecord(seeded(threeEntries()));
+
+    for (const listItem of recordItems()) {
+      expect(within(listItem).getAllByRole("button", { name: DELETE_NAME })).toHaveLength(1);
+    }
+  });
+
+  it('clicking "Delete entry" opens the "Delete entry?" dialog with a "Delete" confirm and sends no request — F014 DoD-21', async () => {
+    const log = stubDelete(TURN_ID);
+    const user = newUser();
+    const state = seeded(threeEntries());
+    renderRecord(state);
+
+    await user.click(within(item(1)).getByRole("button", { name: DELETE_NAME }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(DELETE_TITLE)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: CONFIRM_NAME })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: CANCEL_NAME })).toBeInTheDocument();
+    await settle();
+    expect(log).toEqual([]);
+    // Read from state: the record list may be aria-hidden behind the open modal.
+    expect(state.entries.map((e) => e.id)).toEqual([PARTNER_ID, TURN_ID, DECISION_ID]);
+  });
+
+  it("cancel closes the dialog with no request and the entry stays — F014 DoD-21", async () => {
+    const log = stubDelete(TURN_ID);
+    const user = newUser();
+    renderRecord(seeded(threeEntries()));
+
+    await user.click(within(item(1)).getByRole("button", { name: DELETE_NAME }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: CANCEL_NAME }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    await settle();
+    expect(log).toEqual([]);
+    expect(recordItems()).toHaveLength(3);
+    expect(item(1).textContent).toContain("T1");
+  });
+
+  it("confirm sends exactly DELETE /api/messages/<id>, the dialog closes and the entry disappears — F014 DoD-21", async () => {
+    const log = stubDelete(TURN_ID);
+    const user = newUser();
+    const state = seeded(threeEntries());
+    renderRecord(state);
+
+    await user.click(within(item(1)).getByRole("button", { name: DELETE_NAME }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: CONFIRM_NAME }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(recordItems()).toHaveLength(2);
+    });
+    await settle();
+
+    expect(lines(log)).toEqual([`DELETE ${messagePath(TURN_ID)}`]);
+    expect(state.entries.map((e) => e.id)).toEqual([PARTNER_ID, DECISION_ID]);
+    expect(item(0).textContent).toContain("P1");
+    expect(item(1).textContent).toContain("((D1))");
+    expect(notifyFailureSpy).not.toHaveBeenCalled();
+  });
+
+  it('every "Delete entry" button is disabled while the stream is busy — F014 DoD-23', () => {
+    const state = seeded(threeEntries());
+    runInAction(() => {
+      state.busy = true;
+    });
+    renderRecord(state);
+
+    const buttons = screen.getAllByRole("button", { name: DELETE_NAME });
+    expect(buttons).toHaveLength(3);
+    for (const button of buttons) {
+      expect(button).toBeDisabled();
+    }
+  });
+
+  it('"Delete entry" is enabled again once busy clears — F014 DoD-23', async () => {
+    const state = seeded(threeEntries());
+    runInAction(() => {
+      state.busy = true;
+    });
+    renderRecord(state);
+    act(() => {
+      runInAction(() => {
+        state.busy = false;
+      });
+    });
+
+    await waitFor(() => {
+      for (const button of screen.getAllByRole("button", { name: DELETE_NAME })) {
+        expect(button).not.toBeDisabled();
+      }
+    });
+  });
+
+  it('"Delete entry" is absent from an entry while its editor is open, and present on the others — F014 DoD-23', async () => {
+    const user = newUser();
+    renderRecord(seeded(threeEntries()));
+
+    await openEditor(user, 1);
+
+    expect(within(item(1)).queryByRole("button", { name: DELETE_NAME })).toBeNull();
+    expect(within(item(0)).getAllByRole("button", { name: DELETE_NAME })).toHaveLength(1);
+    expect(within(item(2)).getAllByRole("button", { name: DELETE_NAME })).toHaveLength(1);
   });
 });

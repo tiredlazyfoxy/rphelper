@@ -92,7 +92,8 @@ _FTS_TRIGGERS: tuple[str, ...] = (
         INSERT INTO {MESSAGE_FTS_TABLE}(rowid, text)
             SELECT NEW.id, NEW.text WHERE {_RECORD_ROW_NEW};
     END""",
-    # No message delete exists today; the trigger set is complete all the same.
+    # Fires on fast 014's message delete (`services.messages.delete_message`): a deleted record
+    # row leaves the index here; zone and buried rows were never indexed, hence the WHEN.
     f"""CREATE TRIGGER IF NOT EXISTS {MESSAGE_FTS_TABLE}_after_delete AFTER DELETE ON messages
     WHEN {_RECORD_ROW_OLD} BEGIN
         INSERT INTO {MESSAGE_FTS_TABLE}({MESSAGE_FTS_TABLE}, rowid, text) VALUES ('delete', OLD.id, OLD.text);

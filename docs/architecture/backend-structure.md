@@ -300,7 +300,10 @@ Set by plan 009 as the precedent every later roleplayer form follows (009 D8):
   it. A domain code would be a second vocabulary for something the framework
   already answers precisely.
 - **Unknown body keys are ignored**, not refused. A client sending a field the
-  server has not grown yet is a version skew, not an error.
+  server has not grown yet is a version skew, not an error. **One named
+  exception:** the session rename `PATCH /api/sessions/{session_id}` accepts
+  `name` alone and refuses any other key with a 422, so that it can never be
+  mistaken for a configuration write (the `/api/sessions` surface below).
 - **A query parameter is a plain typed parameter with a default, placed last, and
   carries no `Query(...)` wrapper.** `include_archived` on `GET /api/characters`
   was the first query parameter in any router (before it every admin router
@@ -698,7 +701,7 @@ route needs a per-handler guard: `require_role(Role.admin)` is on the router.
 **Realizes:** FEAT-006, FEAT-007, FEAT-008, FEAT-011, FEAT-012, FEAT-013,
 FEAT-017, UC-017, UC-018, UC-019, UC-020, UC-023, UC-024, UC-025, UC-039,
 UC-042, UC-043, UC-044, UC-047, UC-048, UC-049, UC-058, UC-059, UC-060, UC-067,
-UC-068, UC-075, UC-076, UC-077
+UC-068, UC-075, UC-076, UC-077, UC-089, US-150
 
 Every router below carries **router-level `require_user`** and groups **by
 feature, not by path prefix** — which is why `routers/memos.py` owns a route
@@ -707,9 +710,9 @@ path starts `/api/characters/`. Three shapes repeat across all of them and are
 stated once: **lists are wrapped** (`{ characters: [...] }`, `{ setups: [...] }`,
 `{ sessions: [...] }`, `{ memos: [...] }`) so a list response can grow a sibling
 key without becoming a breaking change; **no entity has a `DELETE`** except a
-memo, so an attempted delete is FastAPI's own 405; and **archive and restore are
-named action routes**, never a `PATCH` of a status field, so that each hangs off
-its own rule.
+memo (and, since fast/014, a session message — `session-stream.md`), so an
+attempted delete is FastAPI's own 405; and **archive and restore are named action
+routes**, never a `PATCH` of a status field, so that each hangs off its own rule.
 
 **`/api/characters` — `routers/characters.py` (plan 009).** The first
 roleplayer-owned family, and the shape plans 010 and 011 copied.
@@ -742,14 +745,41 @@ under an **archived** character are allowed (R6 does not cascade).
 
 **`/api/sessions` — `routers/sessions.py` (plan 011).**
 `GET /api/sessions`, `GET` / `POST /api/characters/{character_id}/sessions`,
-`GET /api/sessions/{session_id}`, `…/archive`, `…/restore`,
-`GET /api/sessions/{session_id}/export`. **No `PATCH` and no `DELETE`**:
-configuration is written through `…/configuration`, not through the session
-resource, so there is deliberately no general session patch (017 D9). Lists order
+`GET` / `PATCH /api/sessions/{session_id}`, `…/archive`, `…/restore`,
+`GET /api/sessions/{session_id}/export`. **No `DELETE`.** Lists order
 `last_used_at DESC, id DESC`, and every session carries `setup_name` — the
 referenced setup's **current** name by an owner-scoped LEFT JOIN, shown even when
-the setup is archived, so a rename relabels every session with no fan-out write
-(011 D10).
+the setup is archived, so a setup rename relabels every session with no fan-out
+write (011 D10).
+
+**`PATCH /api/sessions/{session_id}` exists for the session's `name` and for
+nothing else** (session names, 2026-11-05):
+
+| | |
+|---|---|
+| Body | `{ name: string \| null }` — **`name` is the only accepted key** |
+| Any other key | **422** — refused, not ignored |
+| `name` | trimmed; blank or `null` stores NULL, which returns the session to its default label (`data-model.md`) |
+| Scope | owner-scoped; a missing or foreign session answers **404 `session_not_found`** (refusal identity, R5) |
+| Archived session | **may be renamed** — editing an archived object is allowed (`data-model.md`'s archive semantics) |
+| 200 | the session, in the same shape every other session read returns |
+| Writes | `name` and `updated_at`; **never `last_used_at`** |
+
+**Why the body is this narrow.** 017 D9's intent stands: configuration is written
+through `…/configuration` and never through the session resource. Before this
+delta that intent was kept by having no session `PATCH` at all; now it is kept by
+a `PATCH` whose body admits exactly one key. Refusing unknown keys is a
+**deliberate, named deviation** from the project default that unknown body keys
+are ignored (009 D8): on this one route an ignored `model` or `system_prompt` key
+would look to its caller like a configuration write that silently did nothing,
+which is the confusion the narrow body exists to prevent. We chose a general
+resource `PATCH` over a dedicated name sub-route by user preference; the rejected
+alternative is in `DEC-arch-session-names-2`.
+
+**Every session payload carries `name`** — the two lists, the single read, the
+`PATCH` answer, and the create-and-seed answer (`session-stream.md`) — as the
+stored value, NULL when never renamed. **The server never computes the default
+label**: it cannot know the roleplayer's timezone (`data-model.md`).
 
 **`/api/memos` — `routers/memos.py` (plans 015, 016).**
 
@@ -1157,7 +1187,7 @@ The named errors the design requires:
 | `character_not_found` | A character route (or a child route's parent check) addresses an id that does not exist **or belongs to another user** | nothing | FEAT-006, UC-018, UC-067 |
 | `setup_not_found` | As above, for a setup | nothing | FEAT-007, UC-020, UC-068 |
 | `setup_archived` | A session start names the caller's **archived** setup (R6 does not cascade, but a new session may not adopt one) | nothing | FEAT-007, UC-021 |
-| `session_not_found` | As above, for a session | nothing | FEAT-008, UC-024, UC-025 |
+| `session_not_found` | As above, for a session — including the rename `PATCH` | nothing | FEAT-008, UC-024, UC-025, UC-089 |
 | `memo_not_found` | A memo `PATCH` or `DELETE` addresses an id that does not exist **or belongs to another user** | nothing | FEAT-012, UC-044 |
 | `memo_order_mismatch` | A reorder's `memo_ids` is not **exactly** the caller's notes at that level — missing, extra, foreign, nobody's, or duplicated: the client's view is stale | nothing — **it never lists the mismatched ids** (R5) | FEAT-012, UC-076 |
 | `export_invalid` | An import body is malformed or incompatible | exactly `{"reason": …}`, one of `not_an_export`, `unsupported_version`, `schema_mismatch`, `wrong_granularity`, `malformed_payload`; **never a table name, a column name or row content** (R5), and never the driver's message | FEAT-018, UC-061..UC-064 |
@@ -1889,3 +1919,12 @@ endorses:
   instead. See `docs/plans/defects.md` D-04, and note plan 032's finding that any
   such delete must resolve its row ids through an owner-scoped query first —
   the derived tables carry no user column.
+
+## Decision history
+
+- **2026-11-05 — a session `PATCH` exists, for `name` only.** Supersedes 017 D9
+  in part: "no general session patch" became a `PATCH /api/sessions/{session_id}`
+  whose body admits `name` and refuses every other key with a 422, so 017 D9's
+  intent — configuration is never written through the session resource — still
+  holds. Every session payload carries `name`. Detail and the rejected dedicated
+  sub-route in `DEC-arch-session-names-2`.

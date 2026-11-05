@@ -15,22 +15,27 @@ four batches landed.
 |---|---|
 | `overview.md` | System context, actor→surface map, **the outbound surface in full (the three destinations, including the search provider)**, topology, **the full stack decision list with rationale** including the six post-first-pass decisions, the deferred list, the non-functional posture |
 | `quick-reference.md` | This file — the index |
-| `data-model.md` | Tables and columns, **snowflake identifiers** (+ the sparse-rowid verification and the one forbidden query form), the one fixed-width timestamp form (+ its known `users` deviation), ownership/isolation columns **and what they do not guarantee**, `users` / `auth_sessions` / `llm_servers` / `models` as built, `characters` / `setups` / `sessions` as built (the captured model pair, **no `title`**), the merged `messages` table and **the four named Core selectables over it — not SQL views**, `translations`, `memos` (`sort_key`'s allocation, the orphan-scope check), archive semantics, the `vec0` tables, the two FTS5 tables and their exact trigger conditions (`session_fts` **declared and never created**), drift as built |
+| `data-model.md` | Tables and columns, **snowflake identifiers** (+ the sparse-rowid verification and the one forbidden query form), the one fixed-width timestamp form (+ its known `users` deviation), ownership/isolation columns **and what they do not guarantee**, `users` / `auth_sessions` / `llm_servers` / `models` as built, `characters` / `setups` / `sessions` as built (the captured model pair, **a nullable `name` — NULL = never renamed, the default label computed by the client, never stored**; still no `partner_label`), the merged `messages` table and **the four named Core selectables over it — not SQL views**, `translations`, `memos` (`sort_key`'s allocation, the orphan-scope check), archive semantics, the `vec0` tables, the two FTS5 tables and their exact trigger conditions (`session_fts` **declared and never created**), drift as built |
 | `domain-rules.md` | **The role ladder + R1–R12, the cross-cutting invariants.** Read before touching any feature |
 | `backend-structure.md` | FastAPI layout, routers/services split **and the service-to-service import pattern**, the JSON id boundary **and its two named exceptions**, `require_role` / `require_user` / `require_unconfigured`, the bootstrap / auth / three admin / six roleplayer route surfaces, **every route is classified at build time**, the typed error model and **the per-code status record**, the 500 posture, `/api/health`, configuration (`Settings`) and the `"$ENV_VAR"` secret pointer, database access (engine, PRAGMAs, transactional DDL, `get_connection`), **SQLAlchemy Core**, schema evolution (registry + admin-applied Alembic batch DDL), the two transaction rules and their asymmetry, the logging call site |
-| `session-stream.md` | **The session stream's backend**: the route surface and the twelve-key wire shape, `PATCH`'s reach, create-and-seed (UC-080), settle and re-open, the degraded embedding path, the `(( ))` seam, the compose route and its streaming harness, the tool seam and dispatch, the discussion read |
+| `session-stream.md` | **The session stream's backend**: the route surface and the twelve-key wire shape, `PATCH`'s reach, **the single-message delete's reach** (fast/014), create-and-seed (UC-080), settle and re-open, the degraded embedding path, the `(( ))` seam, the compose route and its streaming harness, the tool seam and dispatch, the discussion read |
 | `transfer.md` | **Export and import**: the envelope, the id-serialization rules, the two version constants, the four granularities, what is never exported, the export and import route surfaces, the import policy (mint + remap), the whole-database replace |
 | `frontend-structure.md` | Vite multi-entry (`root: src/`, the emitted layout), the four entries' boot shapes, **the case-collision naming rule**, pure-data-contract MobX (four rules + five conventions + which store a list belongs to), routing inside the `app` entry, **"ids are strings" and the test that enforces it**, the API client (`ApiError`, `apiPut` / `apiDownload` / `importFile`, the `client_*` codes), the SSE consumer's four outcomes and frame handling, markdown (the one `MarkdownEditor` and its emit rules, the one `MessageBody`), the two stylesheets |
-| `workspace-shell.md` | The `app` entry's screens: the three columns, **all geometry**, the narrow-width behaviour, the wall's two modes, layout persistence, the stream and its per-entry actions, the buried-discussion group, the search-coverage banner, the ruler and the current zone (editability, tool/thinking blocks, the live reply, Regenerate, the model gate), the kind switch and settle, the `(( ))` preview and painting, the stop control, discarding an empty zone, the wall's contents and note drag, **the character page**, **the draft page**, **the user menu**, **the model picker**, and the reversal record for the deleted splitters |
+| `workspace-shell.md` | The `app` entry's screens: the three columns, **all geometry**, the narrow-width behaviour, the wall's two modes, layout persistence, the stream and its per-entry actions (**including delete**), the buried-discussion group, the search-coverage banner, the ruler and the current zone (editability, delete, tool/thinking blocks, the live reply, Regenerate, the model gate), the kind switch and settle, the `(( ))` preview and painting, the stop control, discarding an empty zone, the wall's contents and note drag, **the character page**, **the draft page**, **the user menu**, **the model picker**, and the reversal record for the deleted splitters |
 | `ui-conventions.md` | Icons + the shared `IconButton` + the full icon table, the accessibility floor, **async feedback** (no success toasts, the failure channel, the one bounded warning, the two sanctioned importers), the inherited frontend facts. **The CRUD conventions are no longer here** |
 | `forms-and-lists.md` | Tables and lists, **no sorting/filtering/pagination**, loading / error / empty states, **create and edit are always a `Modal`** and its three named exceptions, the MobX draft convention, **mutations are never optimistic** and its one exception (note reordering), the confirm convention and what is deliberately not confirmed, page state |
 | `admin-surfaces.md` | The `admin` entry in full: 3 routes + 404, shell (no user menu, no sign-out), the admin gate and why it deviates, the Users / LLM Servers / Database pages each with its as-built state, the drift report's granularity and statuses, Create/Sync postconditions, the surviving derived-tables gap, the whole-database export/import controls and their opacity |
 | `llm-and-streaming.md` | The one LLM client (`chat_stream` / `embed` / `probe`), use-time validation and `resolve_model_for_use`, the SSE frame protocol, **the four ways a stream ends**, the `<think>` convention, **"Stopping, and what a stop is not"** (UC-085), the tool loop (**no iteration cap**), `web_search`'s provider seam, **context assembly** and its exclusions, language handling, translation |
-| `search-and-retrieval.md` | Hybrid vec+FTS+RRF, the narrow port and its **three variants**, **the forbidden KNN form**, `memo_search`, `session_search` (**vector arm only**), my-search (three port variants + two `LIKE` corpora), the persona-edit fan-out, the embedding lifecycle and its two write postures, rebuild |
+| `search-and-retrieval.md` | Hybrid vec+FTS+RRF, the narrow port and its **three variants**, **the forbidden KNN form**, `memo_search`, `session_search` (**vector arm only**), my-search (three port variants + three `LIKE` matches, **the session group's name arm merged ahead of its vector hits**, and the accepted unnamed-by-date limitation), the persona-edit fan-out, the embedding lifecycle and its two write postures, rebuild |
 | `deployment.md` | Ports, TLS (none — **and the clipboard consequence**), the three dev launch paths (`start.ps1`, `start.sh`, `docker-compose.dev.yml`), prod topology, the single-generator guarantee, nginx directives (the five deliberate deviations, **the app document at `/` in prod and dev — one URL space, the dev routing plugin**, and the two open seams), compose, configuration conventions (incl. the two unprefixed search variables), **logging** (loguru, two sinks, the redaction rule, the access-log filter), operational notes |
 
 Requirements are **not** here. They are in `docs/product/` and are cited by id.
 The id registry is `docs/product/quick-reference.md`.
+
+**Technical decisions below architecture** — mechanisms inside a component,
+orderings, defaults, rejected options — are recorded in **`docs/decisions/`**
+(`DEC-…` ids, one file per feature, `docs/decisions/index.md` is the registry).
+Architecture docs cite a `DEC` id where the detail lives there.
 
 **Splitting note.** A doc splits when it has come to cover **two subjects**, not
 when it crosses a line count (`CLAUDE.md`).
@@ -199,7 +204,8 @@ backend/app/routers/{configuration,translation,memos,search,transfer}.py
 backend/app/services/parens.py                the (( )) parser: classify + strip. Pure, no I/O
 backend/app/services/settle.py                settle + re-open — the ONLY writers of the burial/settle columns
 backend/app/services/messages.py              zone append, append_assistant_message, edit text, partner
-                                              filing, list_discussion, the tool-view derivation
+                                              filing, single-message delete (fast/014), list_discussion,
+                                              the tool-view derivation
 backend/app/services/context.py               context assembly — no router; its only caller is compose.py
 backend/app/services/compose.py               compose_stream + begin_compose
 backend/app/services/memo_chain.py            resolve_chain + memo_reach + the chain CLAUSE BUILDER (R2's one home)
@@ -230,6 +236,7 @@ frontend/src/app/composerHeights.ts           PURE — the third persistence mod
 frontend/src/app/{charactersState,sessionsState}.ts                  the two workspace-level list stores
 frontend/src/app/{sessionScreenState,sessionsSectionState}.ts
 frontend/src/app/{streamState,streamApi}.ts   the stream's store (one per SessionStream mount) + its seven calls
+                                              plus the message delete (fast/014)
 frontend/src/app/parens.ts                    PURE — the one client port of the (( )) rules
 frontend/src/app/{plainText,pasteCost,copyOut}.ts    PURE stripper, PURE paste estimate, the one clipboard writer
 frontend/src/app/thinking.ts                  PURE — splits assistant text into think/answer segments
@@ -254,6 +261,7 @@ data/logs/rphelper.log                        state 2 of 2 — the rotating sink
 docs/product/                                 requirements — read-only
 docs/product/quick-reference.md               the id registry
 docs/architecture/                            this doc set
+docs/decisions/                               decisions below architecture; index.md is the DEC registry
 docs/plans/CLAUDE.md                          the pipeline contract
 docs/plans/defects.md                         the five defects' file of record (the product round's artifact)
 ```
@@ -465,9 +473,10 @@ super-reader** (R5, asserted by plan 032's audit).
 
 All under `/api`. Ids in paths use the `models/ids.py` inbound alias. Lists are
 **wrapped** (`{ characters: [...] }` …) so a list response can grow a sibling key.
-**No entity has a `DELETE` except a memo.** Archive and restore are **named action
-routes**, never a `PATCH` of a status field. Routers group **by feature, not by
-path prefix**.
+**No entity has a `DELETE` except a memo and a session message** (the latter since
+fast/014; characters, setups and sessions never — R6). Archive and restore are
+**named action routes**, never a `PATCH` of a status field. Routers group **by
+feature, not by path prefix**.
 
 ### Bootstrap, auth and health
 
@@ -494,10 +503,10 @@ path prefix**.
 |---|---|
 | **characters** (009) | `GET /api/characters` (`include_archived`; order `created_at DESC, id DESC`) · `POST` (201) · `GET` / `PATCH /{character_id}` (a null key is absent; an empty `PATCH` is a no-op) · `POST /{character_id}/archive` · `/restore` (idempotent) |
 | **setups** (010) | `GET` / `POST /api/characters/{character_id}/setups` (`include_archived`) · `GET` / `PATCH /api/setups/{setup_id}` · `POST /api/setups/{setup_id}/archive` · `/restore`. **Nested collection, flat single resource** — `character_id` is fixed for a setup's life |
-| **sessions** (011) | `GET /api/sessions` · `GET /api/characters/{character_id}/sessions` · `GET /api/sessions/{session_id}` · `POST /api/sessions/{session_id}/archive` · `/restore`. **No `PATCH` and no `DELETE`.** Lists order `last_used_at DESC, id DESC`; every row carries `setup_name` by an owner-scoped LEFT JOIN, shown even when the setup is archived |
-| **the stream** (012, 014, 019, 021, 022 — `routers/stream.py`, `session-stream.md`) | `GET /api/sessions/{id}/entries` · `POST /api/sessions/{id}/entries` (201; `kind` **required and exactly `"partner"`**, every other value a native 422) · `GET /api/sessions/{id}/zone` · `POST /api/sessions/{id}/zone/messages` (201, **no model call**) · **`POST /api/sessions/{id}/zone/compose` (the ONE streaming route)** · `POST /api/sessions/{id}/settle` · `POST /api/sessions/{id}/reopen` · `PATCH /api/messages/{message_id}` · `GET /api/messages/{message_id}/discussion` (read-only). **Eight JSON routes plus compose.** No stop route, no discard route, and none may be added |
-| **create-and-seed** (018) | `POST /api/characters/{character_id}/sessions` — owned by `routers/sessions.py`; body omitted / `{}` / `{ setup_id?, opening_message? }`; **201 `StartedSession`** = the eight `Session` keys plus `opening_message` (a `MessageResponse` or null). One transaction; a whitespace-only `opening_message` is a 422 and nothing is created |
-| **memos** (015, 016) | `GET /api/memos?scope&scope_id` · `POST` (201; flags on the body are **ignored** — created enabled, not forced) · `PATCH /{memo_id}` (any subset of `body` / `is_enabled` / `is_forced`; a null key is "not supplied") · `DELETE /{memo_id}` (204 — the only delete path in the product) · **`PUT /api/memos/order`** (body `{ scope, scope_id?, memo_ids: [string] }`; 200 `{ memos: [...] }` with `sort_key` 0..n−1; declared **before** the `{memo_id}` handlers so `order` is not read as an id; **one request is one level**) · `GET /api/sessions/{session_id}/memo-chain` |
+| **sessions** (011; rename 2026-11-05) | `GET /api/sessions` · `GET /api/characters/{character_id}/sessions` · `GET /api/sessions/{session_id}` · **`PATCH /api/sessions/{session_id}`** (body `{ name: string \| null }`; **`name` is the only accepted key — any other key is a 422**; trimmed, blank/null stores NULL; archived sessions may be renamed; 200 the session; missing/foreign `session_not_found` 404; bumps `updated_at`, **never `last_used_at`**) · `POST /api/sessions/{session_id}/archive` · `/restore`. **No `DELETE`.** Configuration is still never written through the session resource (017 D9's intent, kept by the narrow body). Lists order `last_used_at DESC, id DESC`; every row carries `setup_name` by an owner-scoped LEFT JOIN, shown even when the setup is archived, **and `name`** |
+| **the stream** (012, 014, 019, 021, 022, fast/014 — `routers/stream.py`, `session-stream.md`) | `GET /api/sessions/{id}/entries` · `POST /api/sessions/{id}/entries` (201; `kind` **required and exactly `"partner"`**, every other value a native 422) · `GET /api/sessions/{id}/zone` · `POST /api/sessions/{id}/zone/messages` (201, **no model call**) · **`POST /api/sessions/{id}/zone/compose` (the ONE streaming route)** · `POST /api/sessions/{id}/settle` · `POST /api/sessions/{id}/reopen` · `PATCH /api/messages/{message_id}` · **`DELETE /api/messages/{message_id}`** (200 + body, one current-zone message or one settled entry with its buried group; buried and tool rows refused `message_not_editable`, missing or foreign `message_not_found`) · `GET /api/messages/{message_id}/discussion` (read-only). **Nine JSON routes plus compose.** No stop route, no zone-discard route, no bulk delete, and none may be added |
+| **create-and-seed** (018) | `POST /api/characters/{character_id}/sessions` — owned by `routers/sessions.py`; body omitted / `{}` / `{ setup_id?, opening_message? }`; **201 `StartedSession`** = the `Session` keys (nine since `name` joined them; NULL on create) plus `opening_message` (a `MessageResponse` or null). One transaction; a whitespace-only `opening_message` is a 422 and nothing is created |
+| **memos** (015, 016) | `GET /api/memos?scope&scope_id` · `POST` (201; flags on the body are **ignored** — created enabled, not forced) · `PATCH /{memo_id}` (any subset of `body` / `is_enabled` / `is_forced`; a null key is "not supplied") · `DELETE /{memo_id}` (204 — one of the product's two per-item delete paths; the other is the session message) · **`PUT /api/memos/order`** (body `{ scope, scope_id?, memo_ids: [string] }`; 200 `{ memos: [...] }` with `sort_key` 0..n−1; declared **before** the `{memo_id}` handlers so `order` is not read as an id; **one request is one level**) · `GET /api/sessions/{session_id}/memo-chain` |
 | **configuration** (017 — `routers/configuration.py`) | **seven**: `GET` / `PATCH /api/characters/{character_id}/configuration` · `GET` / `PATCH /api/sessions/{session_id}/configuration` · `GET` / `PATCH /api/me/settings` · **`GET /api/models`** (the enabled set, in first-enabled order `llm_servers.id` then `models.id`). `model: null` clears |
 | **translation** (023) | `POST /api/messages/{message_id}/translation` — an `async def` handler with its own overridable chat-client factory, **no request body** (the target is resolved server-side), 200 `{ message_id, target_language, text, cached }` |
 | **my-search** (029) | **`GET /api/search?q=<text>`** — a **sync `def`** handler; 200 `{ characters, setups, sessions, entries, memos }`, ids as strings; **a blank `q` returns five empty lists and makes no embedding call**; errors 401, **409** `no_embedding_model`, **502** `llm_unreachable` / `secret_ref_missing`. **It fails whole**, never partially |
@@ -524,14 +533,23 @@ path prefix**.
   search_coverage_incomplete }`; `ReopenResponse` = `{ reopened_id, restored_ids,
   search_coverage_incomplete }`. **Both return the ids they moved and nothing
   else**; the client re-reads both lists.
+- **The delete response** (fast/014, DEC-F014-6) = `{ deleted_ids,
+  search_coverage_incomplete }` with **200, not 204**: `deleted_ids` names the
+  target **first**, then its buried ids ascending, as decimal strings. The flag is
+  **false for a zone delete**. The client removes the rows it names; it does not
+  re-read on success.
 - **The nine-key `Memo`** carries `scope_id` **null for the user level** (the
   column stores the owner's own id — the API's choice, not the column's) and
   **never `user_id`**.
-- **Every `Session` read carries `setup_name`.** The create-and-seed route answers
-  the eight `Session` keys plus `opening_message`.
+- **Every `Session` read carries `setup_name` and `name`** (the stored value,
+  null when never renamed — **the server never computes the default label**; the
+  client renders the local start date). The create-and-seed route answers the
+  `Session` keys plus `opening_message`.
 - **Request validation that is not a domain error** (009 D8): a blank or
   whitespace-only required text field is stripped and refused by **FastAPI's own
-  422**, with no domain code. **Unknown body keys are ignored**, not refused. **A
+  422**, with no domain code. **Unknown body keys are ignored**, not refused —
+  **except on the session rename `PATCH`**, which refuses any key but `name` with a
+  422 so it can never pass for a configuration write. **A
   query parameter is a plain typed parameter with a default, placed last, with no
   `Query(...)` wrapper.**
 
@@ -630,12 +648,12 @@ not act on these one-liners alone.**
 | **R3** | A note's reach is **two independent booleans, `is_enabled` and `is_forced`** — not one three-valued column. Defaults `is_enabled = true`, `is_forced = false`. Disabling **preserves** `is_forced`, so re-enabling restores the mode (US-101). **`is_enabled` gates first; `is_forced` is consulted only afterwards.** `NOT is_enabled` reaches the assistant by **NO path**. **One derivation, `memo_reach`, exists in two languages and both test `is_enabled` first**; its two backend consumers are `services/context.py` (which writes **no hand-rolled conjunction**, pinned by a source test) and `services/search/memo_search.py`. **Constrains the assistant only: my-search applies neither flag.** Order is a third axis (`sort_key`). Memos never archive |
 | **R4** | **No silent model fallback.** Resolution yields a model *reference*, unvalidated; validation happens at **use time** and raises typed errors. **The MODEL is captured at session CREATION** onto `sessions.model_server_id` / `model_name` — the character's pair as-is, else the **first enabled model**, else **both NULL** (`US-143`) — and a character configured afterwards reaches **only sessions created from then on** (US-139). **The SYSTEM PROMPT and TOOLS keep resolving LIVE.** **The split is deliberate — harmonising it either way is a defect.** `resolve_model_for_use`'s three refusals run **instance → session → reference**: `no_model_enabled` / `model_not_chosen` / `model_not_enabled`. A captured session model reports `level: "session"`. **Validation also runs at set time** (409, nothing written), and **the session's model is never cleared, only replaced**. Same no-fallback rule for the embedding designation → `no_embedding_model` |
 | **R5** | **A `model → dependent sessions` query must not exist** on any admin surface. "Are you sure? N sessions use this model" is a forbidden UI pattern, and **the LLM Servers page's confirm dialog is where it will be attempted**. Every read path scoped by owner **in the query**. **An admin on a roleplayer route is an ordinary owner.** Proved by three mechanisms: the route-classification guard (**an unclassified route fails the build**), the **admin-response invariance** test, and cross-user proof for the search layer. **Refusal identity** is the companion property. `export_database` / `import_database` are the **only** services taking no `user_id` — compatible through **opacity**, not scoping |
-| **R6** | Archive = out of the working list, never destroyed, always restorable. `archived_at` nullable, **no delete path** for characters/setups/sessions. Flag named `include_archived=true` on every list that has one; a **by-id read answers archived rows**. Idempotent, a no-op writes nothing, archive never moves `last_used_at`. Archiving a referenced setup is **silent, always succeeds, no reference count**. Archived sessions appear **only on the character page**, never in the tree. Memos are the contrast: they do not archive, and their removal is a hard delete |
-| **R7** | Settling **buries** the group under the settled head; re-open is allowed **only while the current zone below is empty**; a buried group **never reaches the assistant again**. A buried group stays readable through the lazy discussion read and is **not editable** — enforced at both boundaries. Deliberate asymmetry: a settled turn is editable forever and the assistant reads the current version |
+| **R6** | Archive = out of the working list, never destroyed, always restorable. `archived_at` nullable, **no delete path** for characters/setups/sessions. Flag named `include_archived=true` on every list that has one; a **by-id read answers archived rows**. Idempotent, a no-op writes nothing, archive never moves `last_used_at`. Archiving a referenced setup is **silent, always succeeds, no reference count**. Archived sessions appear **only on the character page**, never in the tree. Memos are the contrast: they do not archive, and their removal is a hard delete. **A session message is hard-deleted one at a time** (fast/014) — outside R6, because a message is not an archivable entity |
+| **R7** | Settling **buries** the group under the settled head; re-open is allowed **only while the current zone below is empty**; a buried group **never reaches the assistant again**. A buried group stays readable through the lazy discussion read and is **not editable** — enforced at both boundaries. **A buried row cannot be deleted alone; it leaves only with its head** (fast/014). Deliberate asymmetry: a settled turn is editable forever and the assistant reads the current version |
 | **R8** | Translations are a success-only cache keyed `(message, target language)`, in their own table, and **never enter context**. Only settled rows are translatable — in practice only `kind='partner'`. The write is **insert-or-ignore, and only if the message's text still equals what was translated** |
 | **R9** | The assistant's reach is **exactly three tools**, all implemented and registered. **`ToolScope` is built only by the seam, from an owner-scoped session read, and tool arguments never carry ids.** A failed tool is a tool *result* — the exchange continues. **`web_search` is the one tool that is not a scoped read** — no scope ids, no database access, only the query leaves — and it additionally needs **instance credentials** to be offered at all, so on an unconfigured instance the reach is two tools. The assistant never files anything into the record |
 | **R10** | The roleplayer's text is committed **before** any model call; the `accepted` frame makes that observable, and it arrives on the failure path too. **Model-resolution failures arrive INSIDE the stream**, after `accepted`. **The harness persists accumulated `token` text whenever no `done` passed through** — disconnect, domain error, synthesized error, terminal-less exhaustion — written **before** the error frame; whitespace-only text writes no row. Retry re-runs generation **without re-inserting anything**. An enormous paste warns but is **never refused** |
-| **R11** | **The ruler: settle is the only door into the record**, with one exception — a pasted partner block, born settled. The **current zone is a set, not a row** (`related_to IS NULL AND settled_at IS NULL`), so US-125 needs no constraint. **Settle's head is the last NON-TOOL zone row; a zone holding only tool rows is `zone_empty`**, and tool rows are buried with the group. **Settling never requires an assistant answer.** Re-open is settle's exact inverse, gated on an empty zone, and applies only to a head that **has** a buried group — otherwise `nothing_to_reopen`, which covers a pasted partner block, a lone directly-settled turn and a lone decision. **Abandoning an empty zone is frontend-only — no route, no backend surface.** Four facts about `messages`: every read outside settle/re-open goes through a **selectable**; the burial and settle columns are written **only** by settle and re-open; inserts are the zone append, the partner filing, the assistant row and the character page's opening message; `text`/`updated_at` are the edit route's |
+| **R11** | **The ruler: settle is the only door into the record**, with one exception — a pasted partner block, born settled. The **current zone is a set, not a row** (`related_to IS NULL AND settled_at IS NULL`), so US-125 needs no constraint. **Settle's head is the last NON-TOOL zone row; a zone holding only tool rows is `zone_empty`**, and tool rows are buried with the group. **Settling never requires an assistant answer.** Re-open is settle's exact inverse, gated on an empty zone, and applies only to a head that **has** a buried group — otherwise `nothing_to_reopen`, which covers a pasted partner block, a lone directly-settled turn and a lone decision. **Deleting the last settled row makes the one before it the re-open target.** **Abandoning an empty zone is frontend-only — no route, no backend surface; a zone-discard route is forbidden.** Facts about `messages`: **raw `messages` is touched by exactly THREE operations — settle, re-open and single-message delete** (fast/014) — and every other read goes through a **selectable**; the burial and settle columns are written **only** by settle and re-open; inserts are the zone append, the partner filing, the assistant row and the character page's opening message; `text`/`updated_at` are the edit route's; **deletes are single-message delete only** — one zone message, or one settled entry with its buried group |
 | **R12** | `(( ))` is **parsed once, at settle, and stored text is never re-parsed.** Wholly parenthesised (after trimming, starts `((` and ends `))`) → `kind='decision'`, filed **verbatim**; otherwise `kind='turn'` with every shortest fragment stripped along with the spaces and tabs before it. **A fragment-free turn is filed byte-for-byte; a turn can never strip to empty.** **Partner text gets no special treatment.** Three layers: server decides (`services/parens.py`, called from exactly one place), system prompt instructs, client previews and paints **in the zone only** (`app/parens.ts`) and is never authoritative. **An edit can never turn a turn into a decision or back.** Recorded constraint: the convention assumes double parentheses never occur in the roleplayer's own prose (US-130's `Constraint:`) |
 
 **The parallel `<think>` rule** (R12's neighbour, `US-146`): reasoning streams as
@@ -757,22 +775,25 @@ governs translation's target, held in **one constant in
 |---|---|---|---|
 | `memo_search` (FEAT-014) | vec + FTS, RRF | `user_id`, `is_enabled AND NOT is_forced`, the 4-level chain | `is_enabled` gates first, pinned by a test **on the compiled clause**. At most **8 hits**, no paging; the declaration stays `query` only. The model receives `[<level>] <snippet>` per line — **scope literal only, no names, no ids**. Zero hits is a **success** (`No matching notes.`); the `tool_result` summary is `<N> memos` |
 | `session_search` (FEAT-015) | **vec only — no BM25, no RRF blend** | `user_id`, `character_id`, `id != current`, `archived_at IS NULL` — **four terms** | Semantic-only is a product decision (challenge C5). At most **5 hits** (lower than 8 because each carries a long excerpt). One block per hit: `### Session <YYYY-MM-DD> · setup: <name>` plus **the last 1500 characters** of the session's `settled_entries` text, blank-line joined, decisions included, a cut excerpt starting `…`; `(no settled entries)` when there are none. **No persona, no setup description, no ids.** The setup's name shows even when archived. **The excerpt is the tool's own owner-scoped read, not a port feature** |
-| my-search (FEAT-017) | vec + FTS, RRF **within each kind** | `user_id` only | ACT-002 UI, **not** a tool. **The product's count of five corpora is unchanged; the mechanism is three port variants plus two `LIKE` corpora** (029 U2). Grouped by kind in UC-059's order, **at most 20 per group**, no paging. **Applies no `is_enabled`/`is_forced` predicate at all** (ratified by US-137); a disabled hit is **dimmed, struck through, with a gray "Disabled" badge**. **Archived material is included and marked "Archived"** — the deliberate asymmetry with `session_search`. **Fails whole** on a vector-arm error. **Known cost: each search embeds the query twice** |
+| my-search (FEAT-017) | vec + FTS, RRF **within each kind** | `user_id` only | ACT-002 UI, **not** a tool. **The product's count of five corpora is unchanged; the mechanism is three port variants plus three `LIKE` matches** (029 U2; session names 2026-11-05) — characters, setups, and **a name arm on the session group, its hits first, deduplicated against the vector hits, still at most 20**. **Accepted limitation: a never-renamed session is not found by its start date** (the default label is client-computed, never stored). Session results show the session label rule. Grouped by kind in UC-059's order, **at most 20 per group**, no paging. **Applies no `is_enabled`/`is_forced` predicate at all** (ratified by US-137); a disabled hit is **dimmed, struck through, with a gray "Disabled" badge**. **Archived material is included and marked "Archived"** — the deliberate asymmetry with `session_search`. **Fails whole** on a vector-arm error. **Known cost: each search embeds the query twice** |
 
 **Three port variants, and the variant fixes the arms** — no caller chooses:
 **memo** (vec + lexical, fused), **session** (vector only), **entry** (lexical
 only, over `message_fts` scoped to `settled_entries`). **Characters and setups are
 not variants**: no index exists, so they are matched by an **escaped,
 case-insensitive, non-tokenised `LIKE` substring outside the port** — `name` +
-`sheet`, `name` + `description`. That is the one deviation from "all surfaces go
-through one port", and the flip condition is named.
+`sheet`, `name` + `description`. **Session names are matched the same way** —
+`sessions.name`, by my-search, beside the session variant's vector arm, never
+through the port and never by `session_search`. That is the one deviation from
+"all surfaces go through one port" (now three matches), and the flip condition is
+named: an FTS or vector index over any of the three.
 
 **The port applies `user_id` itself, in every statement including hit
 hydration**; beyond that a variant accepts an **optional clause builder** which
 the port **ANDs** with the owner predicate, neither adding nor reordering it.
 **`SearchHit`** = kind, id, fused score, snippet, plus a memo's `scope` /
 `scope_id` and an entry's `session_id`. **A session hit has no snippet** —
-`sessions` has no text column. **The port does no name join.**
+`name` is a label, not indexed text, and the port does no name join.
 
 **Filter first (relational), then rank.** `sqlite-vec` KNN is **exact** — no
 recall tuning. **RRF with `k = 60`, ranks only, per-arm candidate depth 50, ties
@@ -801,16 +822,19 @@ lexical arm is skipped entirely.**
 external content on base `messages`, **restricted to settled rows by the triggers
 rather than by the declaration**; and **`session_fts` is declared in doc history
 and was NEVER created** (024 U7) — its declaration names `title` and
-`partner_label`, columns `sessions` does not have (011 D4, `US-145`). It waits on
-the feature that gives a session text columns; **nobody creates it because the
-declaration exists.** Vector tables are `memo_vec` and `session_vec`.
+`partner_label`, columns `sessions` does not have. **Sessions gaining `name`
+(2026-11-05) does not create it**: one short label per session is served by the
+`LIKE` name arm, and the flip condition is FTS over `name` alone (below);
+**nobody creates it because the declaration exists.** Vector tables are `memo_vec` and `session_vec`.
 
 **Trigger conditions, exactly** — an unconditional update trigger corrupts
 external-content FTS5: `memo_fts` on insert, delete and **`UPDATE OF body`
 only**; `message_fts` insert when the row is **born** a record row, delete iff OLD
 was a record row, and **one** update trigger issuing `'delete'` with OLD iff OLD
 was a record row then inserting NEW iff NEW is one. Back-fill is `'rebuild'` for
-`memo_fts` and an `INSERT…SELECT` of record rows only for `message_fts`.
+`memo_fts` and an `INSERT…SELECT` of record rows only for `message_fts`. **The
+delete trigger is what cleans `message_fts` after a single-message delete**
+(fast/014) — the delete writes nothing to the index itself.
 
 **The `vec0` / FTS5 tables have no user column**, so reads are safe only because
 the port's candidate set is owner-scoped first — and **every write to a derived
@@ -841,11 +865,12 @@ need **no embedding model at all**.
 **The deliberate write asymmetry — authoring act vs record-keeping, not which
 table.** A memo create/body edit **and a character persona / setup text edit**
 with no embedding model **fail the whole transaction**; a settled-entry edit,
-settle, re-open and a **partner filing** **succeed, degraded** (US-112), with
-`search_coverage_incomplete` in the write's own response. **The caught set on the
-degraded path is `no_embedding_model` (including the `dimension_mismatch` form)
-and `llm_unreachable`**; the strict path catches neither and lets both propagate
-at **409** and **502**. Do not harmonise the two.
+settle, re-open, a **partner filing** and **the delete of a settled entry**
+**succeed, degraded** (US-112), with `search_coverage_incomplete` in the write's
+own response. **The caught set on the degraded path is `no_embedding_model`
+(including the `dimension_mismatch` form) and `llm_unreachable`**; the strict path
+catches neither and lets both propagate at **409** and **502**. Do not harmonise
+the two.
 **A memo without a vector is a normal post-import state** after plan 031, so "no
 vector" is no longer diagnostic on its own.
 
@@ -900,7 +925,12 @@ What each of the newer ones means, where it is not obvious:
   exists, answered **as JSON before any stream opens**.
 - **`message_not_editable`** — **exactly two meanings: a buried row (US-116) and a
   `role='tool'` row** (`US-115.AC-1`'s `Constraint:`). The settled case plan 012
-  shipped as an interim was removed by plan 014.
+  shipped as an interim was removed by plan 014. **The delete route refuses the
+  same two rows with the same code** (fast/014, DEC-F014-5) — no
+  `message_not_deletable` code exists.
+- **`message_not_found`** — a missing **or foreign** message, answered
+  identically (refusal identity, R5), on every message route including the
+  delete.
 - **`nothing_to_reopen`** — no settled row at all, or a last settled row with no
   buried group (a pasted partner block, a lone directly-settled turn, a lone
   decision).
@@ -1069,6 +1099,8 @@ tree-header text input**.
 | Discard an **empty** current zone | `IconX`, "Discard empty zone"; **absent**, not disabled, otherwise |
 | Re-open a settled block | `IconArrowBackUp`, "Re-open last entry" |
 | Edit entry, message or note | `IconEdit` — one glyph, **two label families** ("Edit entry" / "Edit message") |
+| Rename a session | `IconEdit`, "Rename session" — tree row and session header; swaps the label for an in-place editor (Enter/blur commits, Escape cancels, not optimistic) |
+| Delete a settled entry or a zone message | `IconTrash` — one glyph, **two labels** ("Delete entry" / "Delete message"); opens the red confirm; absent on tool rows, in the read-only discussion and while editing; disabled while busy or streaming (fast/014) |
 | Save | `IconDeviceFloppy` |
 | Collapse / expand (generic) | `IconChevronDown`, **rotated** — one icon, not a pair |
 | Show / hide a settled entry's discussion | `IconChevronDown` rotated; "Show discussion" / "Hide discussion" |
@@ -1153,12 +1185,14 @@ wrote one it wrote **a neutral line, not an invitation** ("No setups yet.", "No
 sessions yet.").
 
 **Create and edit are always a `Modal`**, with **three named exceptions**:
-in-place edit of a settled entry / zone message / note; the character **draft
-page**; and **starting a session** (a one-choice inline control — a Setup select
-plus a "Start session" button). **The settings page's Languages form is a
-*reading* of the draft-page exception, not a fourth one** — the route *is* the
-form. **Blur-save replaced the character page's explicit Save** (009 D2 → 018 D7);
-`/settings` keeps its Save because it is a form, not content.
+in-place edit of a settled entry / zone message / note (**committing it emptied
+removes the item, with no confirm** — a note per US-141, an entry or zone message
+per US-149); the character **draft page**; and **starting a session** (a
+one-choice inline control — a Setup select plus a "Start session" button). **The
+settings page's Languages form is a *reading* of the draft-page exception, not a
+fourth one** — the route *is* the form. **Blur-save replaced the character page's
+explicit Save** (009 D2 → 018 D7); `/settings` keeps its Save because it is a
+form, not content.
 
 **`@mantine/form` is NOT a dependency** — per-modal MobX `*Draft.ts` class
 (**observable fields only**, no methods, **no getters**) with **pure free
@@ -1175,9 +1209,11 @@ rows**, which is why the live-reply→persisted-row swap is a **remount**.
 **Mutations are never optimistic** — re-load after every mutation, `void` + a
 non-rethrowing catch. The workspace **narrows the scope** rather than skipping it:
 settle, re-open and partner filing re-read the affected lists; an **edit replaces
-exactly one row from the `PATCH` response**; every stream mutation failure goes
-through `notifyFailure` **and then re-reads**; and **a returned row is applied
-only if its `updated_at` is not older than the one already held** (015 D5).
+exactly one row from the `PATCH` response**; **a delete removes exactly the rows
+the server's answer names, and only after it answers** (fast/014); every stream
+mutation failure goes through `notifyFailure` **and then re-reads**; and **a
+returned row is applied only if its `updated_at` is not older than the one already
+held** (015 D5).
 **The one sanctioned exception is note reordering** (016 D7, U1) — optimistic on
 drop, a **total** revert on failure applied to the level as it then is, further
 drags in that level disabled while in flight, and an inline per-level failure
@@ -1188,10 +1224,13 @@ order** and the server either applies it or refuses it outright
 **Confirm step** via **`shared/ConfirmModal.tsx`** (cancel left of confirm) on:
 disable account · delete LLM connection · **clear embedding** (US-015.AC-2) · **a
 lossy Sync, only when a column will be dropped** (US-018.AC-3/AC-4) · **replace
-the whole database** (red, step 2 of four) · rebuild index (**not yet
+the whole database** (red, step 2 of four) · **delete a settled entry or a zone
+message from its trash control** (red, US-149) · rebuild index (**not yet
 realized**). **Deliberately NOT confirmed:** re-enable · saving an enabled-model
 set · `Create` · archiving a character, a setup or a session (named one by one) ·
-**the three roleplayer imports** (additive, they destroy nothing) · the export.
+**the three roleplayer imports** (additive, they destroy nothing) · the export ·
+**committing an emptied in-place editor** (note, entry or zone message — emptying
+the field is the deliberate act).
 A confirm **may name structure** (table, column, index columns, type) and **never
 content** — forbidden strings include "N rows will be lost", "N rows will be
 rebuilt", "rows affected" and every variant of "N sessions use this model".
@@ -1234,11 +1273,13 @@ a hidden input **outside** the menu.
 | Derived-store writes | **every write to a `vec0` or FTS table must resolve its row ids through an owner-scoped query first** — those tables have **no user column** |
 | Settle's head | the **last non-tool** row of `current_zone`; a tool-only zone is `zone_empty`. The client counts non-tool rows the same way, so `canSettle` and the server agree by construction |
 | Settle's order | **bury (step 4) before stamping the head (step 5)** — once the head carries `settled_at` it is no longer in the zone and the burial set stops identifying itself. Driven by the id list read from `current_zone` **in the same transaction** |
+| Single-message delete's order | **one transaction**: classify the target through `message_states` → delete its translations → delete its buried group (settled head only) → delete the target → FTS ensure (the delete trigger cleans the index) → refresh `session_vec` (settled only, degraded path) → bump the session. **Forced by foreign keys with no CASCADE** (`session-stream.md`, DEC-F014-7, DEC-F014-8) |
 | The tool registry | **three tools**, offered order `memo_search`, `session_search`, `web_search`; `web_search` additionally needs **instance credentials** |
-| `session_fts` | **declared in doc history and never created** — its columns `title` / `partner_label` do not exist on `sessions`. Waits on the feature that gives a session text columns |
+| `session_fts` | **declared in doc history and never created** — its columns `title` / `partner_label` do not exist on `sessions`. **`sessions.name` (2026-11-05) does not create it** — the name is matched by `LIKE`; flip condition: FTS over `name` alone |
+| Session label rule | **one rule, every place a session is named** (tree, header, character page Sessions tab, my-search): `name`, or when NULL the **local `YYYY-MM-DD`** of `created_at`, computed by the client. Tree row line 2: `last_used_at` as **local `YYYY-MM-DD HH:MM`** · setup label. A rename bumps `updated_at` only (`DEC-arch-session-names-1`, `-3`, `-6`) |
 | Language of last resort | **English**, `US-142` — **a last resort, never a configured default**. Nothing writes it to a column or offers it in a picker. One constant in `services/translation.py`; the same fallback governs the prompt's instruction |
 | Narrow viewport | the media query is written **`(width < 820px)`**, and the identical string is exported as **`NARROW_VIEWPORT_QUERY`** |
-| `rphelper-export` | `format: "rphelper-export"`, **six header keys and no more** (`format`, `version`, `granularity`, `created_at`, `schema_version`, `payload`) — **no root-reference field**, because the root *is* the single row in the granularity's root table. Payload tables in `metadata.sorted_tables` order, rows in PK order, every column read by a **column-agnostic `select(Table)`**. **Two version constants, kept separate:** `version` (the envelope shape and the serialization rules) and `schema_version` (**a HAND BUMP whenever `db/schema.py` changes a table's shape**). Folding them would make every change to either look like a change to both. **Flip condition: if a hand bump is ever missed in practice, derive `schema_version` from the registry** |
+| `rphelper-export` | `format: "rphelper-export"`, **six header keys and no more** (`format`, `version`, `granularity`, `created_at`, `schema_version`, `payload`) — **no root-reference field**, because the root *is* the single row in the granularity's root table. Payload tables in `metadata.sorted_tables` order, rows in PK order, every column read by a **column-agnostic `select(Table)`**. **Two version constants, kept separate:** `version` (the envelope shape and the serialization rules) and `schema_version` (**a HAND BUMP whenever `db/schema.py` changes a table's shape**). Folding them would make every change to either look like a change to both. **Flip condition: if a hand bump is ever missed in practice, derive `schema_version` from the registry**. **Accepted versions: the current one (2), plus version 1 through one named upgrade** — its session rows lack `name` and import with `name` NULL; any other version is `schema_mismatch`, and a missing or extra column anywhere else is still `malformed_payload` (`DEC-arch-session-names-7`; flip condition: a version 3 decides whether the chain grows or v1 is dropped) |
 | Never exported | credentials (only `"$ENV_VAR"` pointers travel; the web-search key is not even a pointer) · `auth_sessions` · `translations` · **every `vec0` and FTS5 table**. The one thing a reader expects to be stripped and is not: **`users.password_hash` at `database` granularity**, which is what lets restored users sign in (`US-077.AC-2`) |
 | The whole-database replace | allowed **only** on an instance with no users, or exactly one user who is an administrator — otherwise `database_not_empty`. In one transaction it wipes every `metadata` table plus `auth_sessions` and `translations`, **drops** `memo_vec` and `session_vec`, and inserts the export's rows **with their own ids**. Answers **204 with the cookie cleared**. **The vec0 tables' absence after a restore is a legitimate state transition, not drift** |
 | Import mechanics | fresh snowflakes **per table in ascending old-id order**; every FK plus `messages.related_to` and `memos.scope_id` rewritten; `user_id` (and a `scope='user'` memo's `scope_id`) set to the caller; **the payload's `users` row is never written**; a model pair kept only if it exists in the importing instance's `models`, else **both columns nulled**; timestamps and archived state preserved; **the self-reference written in two passes** (insert with `related_to` null, then `UPDATE`) because foreign keys are **immediate**. **Importing the same export twice yields duplicates and nothing warns** |
@@ -1257,12 +1298,14 @@ be wrong. The doc named beside it owns the reasoning.
 | **An export exceeding nginx's `64m` in practice** | raise the limit, or move to a streamed upload — and the streamed upload is the same change the export's memory posture needs | `deployment.md`, `transfer.md` |
 | **A requirement to MERGE a whole-database export into a populated instance** | the replace-that-preserves-ids → a remap like the other three, and the single-admin guard becomes a merge policy | `transfer.md` |
 | **A hand bump of `schema_version` being missed in practice** | the hand bump → derive it mechanically from the registry | `transfer.md` |
-| **The first per-entity delete path** | the orphan-scope check having no reason to exist; an orphaned `(scope, scope_id)` becomes reachable | `data-model.md` |
+| **A third registry shape change (`schema_version` 3)** | the importer's accept-current-plus-v1-upgrade rule → decide whether the upgrade chain grows or v1 support is dropped | `transfer.md` |
+| **The first per-entity delete path for something a memo scopes to** (a user, character, setup or session — the single-message delete is not one) | the orphan-scope check having no reason to exist; an orphaned `(scope, scope_id)` becomes reachable | `data-model.md` |
 | **A real tokenizer reaching the client, or the threshold proving too eager or too late** | chars ÷ 4 against 32,000 tokens | `domain-rules.md` R10 |
 | **A request path needing a long or multi-statement transaction around an awaited call** | the async/sync mix is extended rather than resolved → move the database work off the loop, or adopt an async driver | `backend-structure.md` |
 | **Google's Custom Search transition date, `2027-01-01`** — or the API ceasing to answer for this key | the one Google provider behind the seam → a new provider class plus the factory. **The first symptom is operational**: `web_search` starts failing as `tool_failed` while everything else works | `llm-and-streaming.md`, `deployment.md` |
-| **Characters or setups gaining an FTS or vector index** | the `LIKE` path outside the port → they become port variants and the `LIKE` path goes | `search-and-retrieval.md` |
-| **FEAT-015's promise needing lexical recall in real use** | `session_search`'s vector-only arm — **and it is no longer one switch**: it needs giving a session text columns and an index first | `search-and-retrieval.md`, `overview.md` |
+| **Characters, setups or session names gaining an FTS or vector index** | the `LIKE` path outside the port → they become port variants (or a session-variant arm) and the `LIKE` path goes | `search-and-retrieval.md` |
+| **Finding a never-renamed session by its start date becoming a requirement** | the accepted limitation of the name arm → match the date form of `created_at` too, which needs a timezone the server does not have | `search-and-retrieval.md`, `data-model.md` |
+| **FEAT-015's promise needing lexical recall in real use** | `session_search`'s vector-only arm — **and it is no longer one switch**: it needs an index over session text first (`name` is a label, not that text) | `search-and-retrieval.md`, `overview.md` |
 | **My-search's duplicate query embedding becoming visible in latency or cost** | the port taking text rather than a vector | `search-and-retrieval.md` |
 | **The `InterceptHandler` bridge proving fragile, or structured logs being needed** | `loguru` → stdlib `logging` + `dictConfig`; one module's rewrite, no call-site change | `deployment.md` |
 | **`/api/health`'s PRAGMA walk showing against the healthcheck interval** | the roll-up narrows back to presence and the drift branch moves behind the admin route. **Caching the probe stays rejected** | `backend-structure.md` |
@@ -1308,7 +1351,11 @@ be wrong. The doc named beside it owns the reasoning.
 - **`POST /api/bootstrap/import` (UC-002)** — reserved, not built; owned by
   `docs/plans/fast/003.bootstrap-from-export`.
 - **Abandoning a current zone is NOT here** — it is **resolved** (UC-086, US-134,
-  US-135), frontend-only, no route, R11 unchanged.
+  US-135), frontend-only, no route; R11's ban on a zone-discard route stands.
+- **Out of scope for the single-message delete** (fast/014, DEC-F014-12): deleting
+  a buried or tool row alone, deleting in the read-only discussion view, undo or
+  soft delete, bulk delete or a clear-zone route, reordering or re-kinding
+  neighbours, and any translation-cache invalidation beyond the deleted rows' own.
 
 ## Open `_TBD:` items across the doc set
 
@@ -1390,6 +1437,30 @@ composer), dragged height persisted under `rphelper.composer-heights`. Code
 pending a follow-up fast feature — see `workspace-shell.md`'s "Geometry" and the
 reversal record's decision history for (C).
 
+**Revised (finalization of fast/014, 2026-11-05): R11's raw-`messages`
+invariant.** "Raw `messages` is touched by exactly two operations, settle and
+re-open" became **three — settle, re-open and single-message delete**
+(`DELETE /api/messages/{message_id}`, US-149). The ban on a zone-discard route,
+and on any bulk delete, **stands unchanged**. Detail in `DEC-F014-3`,
+`DEC-F014-5`, `DEC-F014-7` and `DEC-F014-12` (`docs/decisions/`); the rule's own
+text is `domain-rules.md` R11, and `data-model.md`'s Decision history carries the
+matching line.
+
+**Revised (decision revision, 2026-11-05): sessions gain a name.** "A session
+has no title; it is identified by its start time" (011 D4) is **superseded**:
+`sessions.name`, nullable, NULL = never renamed, default label computed by the
+client as the local start date (`DEC-arch-session-names-1`). "No `PATCH` and no
+`DELETE` on sessions" (017 D9) is **superseded in part**: a `PATCH` that accepts
+`name` only and refuses every other key (`DEC-arch-session-names-2`) — the
+configuration-never-through-the-session-resource intent stands. The tree row is
+two lines (label; local last-use · setup label — `-3`); rename is in place on the
+tree row and the header (`-4`); my-search gains a `LIKE` name arm with an
+accepted limitation for unnamed sessions (`-5`); a rename bumps `updated_at` only
+(`-6`). The session export carries `name` and `schema_version` is hand-bumped
+to 2; the importer also accepts version 1 through one named upgrade (`-7`,
+`transfer.md`). Matching `## Decision history` lines in `data-model.md`,
+`backend-structure.md`, `workspace-shell.md` and `search-and-retrieval.md`.
+
 ## Defects — specified but unsatisfied, and NOT `_TBD:` items
 
 **A defect is not an open question.** The design question is answered and the
@@ -1406,7 +1477,7 @@ artifact: cite it, never edit it.
 | **D-02** | `US-115.AC-1`'s streaming half — **the live reply has no edit control**. The build's reason is real: an edit would race the server's own write of that row (019 D11). **An open alternative reading is recorded and NOT resolved** — that US-115.AC-1 is conditioned on a message *sitting in* the zone, which an unpersisted in-flight reply is not, in which case D-02 is a clarification rather than a defect | `session-stream.md`, `workspace-shell.md`, `frontend-structure.md` |
 | **D-03** | `US-112.AC-1` widened ("credentials the instance cannot use") — **the degraded embedding path does not catch `secret_ref_missing`**. The built catch set is `no_embedding_model` and `llm_unreachable` only, so an unset `$ENV_VAR` key makes a settle or a settled edit fail with a **500** and refuses the roleplayer's own text | `session-stream.md`, `backend-structure.md`, `search-and-retrieval.md` |
 | **D-04** | `US-112.AC-3` — **a failed degraded embed leaves existing vectors stale instead of clearing them.** "No marker, no column" stands as the recording decision; the product reversed the consequence. Any fix is bound by the owner-scoped-ids rule, because the derived tables carry no user column | `session-stream.md`, `backend-structure.md`, `search-and-retrieval.md` |
-| **D-05** | `US-147` — **my-search's `LIKE` folds case for ASCII letters only**, so a character or setup named in a non-Latin script matches only in the case typed. It matters more than it looks: `vision.md`'s premise is a roleplayer composing in a language they are not confident in. Any fix must preserve the escape handling — user input may never act as a wildcard | `search-and-retrieval.md` |
+| **D-05** | `US-147` — **my-search's `LIKE` folds case for ASCII letters only**, so a character, setup or session name in a non-Latin script matches only in the case typed. It matters more than it looks: `vision.md`'s premise is a roleplayer composing in a language they are not confident in. Any fix must preserve the escape handling — user input may never act as a wildcard | `search-and-retrieval.md` |
 
 **Separately, and not one of the five:** the **`users.created_at` /
 `updated_at` fixed-width timestamp deviation** (`data-model.md`). It predates

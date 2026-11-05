@@ -44,4 +44,13 @@
 - **Acceptance criteria:**
   - **US-147.AC-1** — Given a character or setup whose name is written in a script other than Latin, when the roleplayer searches for it in a different case from the stored one, then it appears in the results.
 - **Source:** `[confirmed: user]` finalization 2026-10-06, challenge C52 (against plan 029 decision D3).
+
+### US-152 — My search finds a session by its name and shows the name on session results
+- **Actor:** ACT-002 · **Feature:** FEAT-017 · **Exercises:** UC-058, UC-059
+- **Status:** proposed
+- **Story:** As a roleplayer, I want to find a session by its name, so that I can reach the storyline I named without remembering its contents.
+- **Acceptance criteria:**
+  - **US-152.AC-1** — Given a session whose name contains the searched text, when the roleplayer searches, then that session is among the results.
+  - **US-152.AC-2** — Given a result points at a session, when the roleplayer reads it, then it is labelled by the session's name.
+- **Source:** `[confirmed: user]` interview 2026-11-05, session names; challenge C60.
 <!-- product-spec:end -->

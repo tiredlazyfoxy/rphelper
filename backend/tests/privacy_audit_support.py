@@ -1052,6 +1052,9 @@ ENUMERATED_ROUTES: Final[tuple[EnumeratedRoute, ...]] = (
     EnumeratedRoute(73, "POST", "/api/admin/database/import", "admin", None),
     # fast/002 DoD-22: row 74, owner fast/002 (vector-index rebuild), now built.
     EnumeratedRoute(74, "POST", "/api/admin/database/rebuild", "admin", None),
+    # fast/014 (message-delete, plan P1 / P2): DELETE on a message, classified exactly like
+    # row 45 (PATCH on the same path) — owner-scoped, a foreign id is 404 message_not_found.
+    EnumeratedRoute(75, "DELETE", "/api/messages/{}", "owner", "message_not_found"),
 )
 
 ENUMERATED_OPERATIONS: Final[frozenset[tuple[str, str]]] = frozenset(

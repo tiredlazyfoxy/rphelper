@@ -68,6 +68,8 @@
   1. Roleplayer edits the entry's text directly where it sits.
   2. Roleplayer moves focus away from the entry.
   3. Instance saves the edit, and search thereafter reflects the new text.
+- **Alternate flows:**
+  - The roleplayer clears the text entirely → the entry is deleted (US-149).
 - **Exception flows:**
   - An embedding cannot be produced — no model is designated, the server cannot be reached, or its credentials cannot be used — the edit still saves and the roleplayer is told search coverage is incomplete. Any vectors the entry already had are cleared rather than left behind.
 - **Postconditions:** Search reflects the new text; editing any settled entry discards its cached translation (FEAT-011). An entry that could not be re-embedded is absent from semantic search until the index is rebuilt (UC-016) rather than matched on text it no longer holds.

@@ -7,13 +7,13 @@ UC-083, UC-084, UC-085, UC-086, US-030, US-031, US-032, US-034, US-035,
 US-037, US-038, US-039, US-040, US-041, US-042, US-043, US-044, US-109,
 US-110, US-113, US-114, US-115, US-116, US-117, US-120, US-121, US-122,
 US-125, US-126, US-127, US-128, US-129, US-130, US-131, US-132, US-134,
-US-135, US-146
+US-135, US-146, US-149
 
 The backend behaviour of one session's stream: the record above the ruler, the
-current zone below it, settle and re-open, the `(( ))` seam, the compose loop
-with its streaming harness, the tool seam the three tools plug into, and the
-buried-discussion read. This is the backend counterpart to `workspace-shell.md`,
-which owns the one screen these routes serve.
+current zone below it, settle and re-open, single-message delete, the `(( ))`
+seam, the compose loop with its streaming harness, the tool seam the three tools
+plug into, and the buried-discussion read. This is the backend counterpart to
+`workspace-shell.md`, which owns the one screen these routes serve.
 
 Split out of `backend-structure.md` at the finalization of plans 008..032,
 because that doc had come to carry two subjects: the FastAPI application's shape,
@@ -44,11 +44,15 @@ session**, and the route shape follows the selectables exactly:
 | `POST /api/sessions/{id}/settle` | settle the zone (R11, R12) → `{ entry_id, kind, buried_ids, search_coverage_incomplete }` | `services/settle.py` |
 | `POST /api/sessions/{id}/reopen` | settle's exact inverse (R11) → `{ reopened_id, restored_ids, search_coverage_incomplete }` | `services/settle.py` |
 | `PATCH /api/messages/{message_id}` | edit one message's text in place | one update |
+| `DELETE /api/messages/{message_id}` | delete one message for good — a settled entry together with its buried group, or one current-zone message (US-149) → **200** `{ deleted_ids, search_coverage_incomplete }`; `deleted_ids` is the target first, then the buried ids ascending | one transaction; "`DELETE /api/messages/{message_id}` — the reach" below |
 | `GET /api/messages/{message_id}/discussion` | a settled entry's buried group, read-only → `{ messages: [...] }` | `buried_messages`, ascending by id |
 | `POST /api/characters/{character_id}/sessions` | create a session under the character **and**, when an opening message is supplied, seed its zone, in one transaction (UC-080, US-117) | `services/sessions.py`; owned by `routers/sessions.py` |
 
-**The table is complete.** There is no stop route and no discard route; the
-reasons are below, under "The compose route" and R11 respectively.
+**The table is complete.** There is no stop route and no route that discards the
+zone; the reasons are below, under "The compose route" and R11 respectively.
+**Single-message delete exists** (fast/014) and is not a zone discard: it
+addresses one message by id, and clearing a zone is still not an operation the
+server offers (R11).
 
 **The wire shape.** `MessageResponse` carries **twelve keys**, which arrived from
 three plans for three different reasons — the structure is kept visible here
@@ -66,8 +70,9 @@ because a reader counting them will otherwise assume one decision:
 - **The coverage flag**, `search_coverage_incomplete: bool` (plan 024), **false
   for zone rows and plain appends**. It is the degraded-embedding signal ("The
   degraded embedding path", below) and it rides on `SettleResponse`,
-  `ReopenResponse` and the `PATCH` response alike, so every record-keeping write
-  reports it in its own response.
+  `ReopenResponse`, the `PATCH` response and the `DELETE` response alike, so
+  every record-keeping write reports it in its own response. A delete of a
+  current-zone message touches no settled text and always reports `false`.
 
 Every route on `routers/stream.py` is behind router-level `require_user`, and
 every service call takes `user_id` as a required positional argument. A message
@@ -147,6 +152,10 @@ line, which states that a tool's own record is not a message anyone wrote and is
 not editable. It is a narrowing of "whoever wrote it" that the product has since
 ratified, not a slip.
 
+**PATCH never deletes.** An edit committed with its text cleared reaches the
+server as a `DELETE` on the same path, never as a `PATCH` (the client rule is
+`workspace-shell.md`'s, DEC-F014-10).
+
 An assistant zone row is edited as **raw stored text, `<think>` tags included**
 (022 D10); the server strips them at settle, not at edit ("Settle", below).
 
@@ -163,6 +172,57 @@ conditioned on a message *sitting in* the current zone, which an unpersisted
 in-flight reply is not — on that reading D-02 is a clarification to the criterion
 rather than a defect. That reading is recorded here, not resolved.
 
+### `DELETE /api/messages/{message_id}` — the reach
+
+**Realizes:** FEAT-009, US-149
+
+**The same address and the same classification as `PATCH`, stated once beside
+it.** Delete is permanent — there is no soft delete and no undo — and it reaches
+exactly the rows an edit reaches, so the two routes share one refusal table
+rather than keeping two that could drift (DEC-F014-5):
+
+| Target row | Outcome |
+|---|---|
+| a settled row, **any** kind | deleted **together with its buried group** — the rows buried under it. A settled row with no buried group (a pasted partner block, a lone turn or decision) is deleted alone |
+| a current-zone row, user's or assistant's | deleted alone |
+| a **buried** row | refused — `message_not_editable` (409) |
+| a `role='tool'` row | refused — `message_not_editable` (409) |
+| a missing id, or another user's | refused — `message_not_found` (404), the two answers identical (R5) |
+
+**No new error code.** `message_not_editable` keeps its two meanings — buried
+and tool — and now refuses deletion as well as editing; a buried row leaves only
+with its head (US-116). A separate "not deletable" code was rejected because its
+refusal set would be identical (DEC-F014-5). A refusal changes nothing.
+
+**The answer is 200 with a body, not 204** (DEC-F014-6): `{ deleted_ids,
+search_coverage_incomplete }`. `deleted_ids` is the target's id first, then the
+buried group's ids ascending, strings on the wire like every id. The coverage
+flag has to reach the client for the same reason it does on settle, re-open and
+`PATCH`: deleting a settled entry changes the session's indexed text.
+
+**One transaction, in an order the schema forces** (DEC-F014-7). No foreign key
+on `messages` cascades, so dependants are removed before what they reference:
+
+1. classify the target through the text-free `message_states` selectable,
+   owner-scoped — the same classification `PATCH` uses;
+2. delete the `translations` rows of every affected id;
+3. delete the buried group, when the target is settled;
+4. delete the target;
+5. bring the full-text index into line — the index's own after-delete trigger
+   removes the rows' entries; the service writes no full-text row itself
+   (`data-model.md`, DEC-F014-8);
+6. for a settled target only, refresh `session_vec` under the degraded path
+   below; a zone target triggers no refresh and reports `false`;
+7. bump the session (`last_used_at` and `updated_at`).
+
+Deleting a settled entry never moves, re-kinds or re-numbers its neighbours, and
+settle and re-open are unchanged by it. Deleting the **last** settled row makes
+the row before it the structural re-open target (R11, `domain-rules.md`).
+
+**Delete is not a zone discard.** It takes one message per request; there is no
+bulk delete and no "clear the zone" operation, and R11's refusal of a
+discard-the-zone route stands.
+
 ### Starting a session by writing — one route, one transaction
 
 It is the only row in the table not addressed through a session, because when the
@@ -171,8 +231,11 @@ character's page (`workspace-shell.md`), and the first message written there
 creates the session and becomes the opening message of the turn being drafted.
 
 The body is omitted, `{}`, or `{ setup_id?, opening_message? }`. It answers
-**201 `StartedSession`** — the eight `Session` keys plus `opening_message`, which
+**201 `StartedSession`** — the `Session` keys plus `opening_message`, which
 is a `MessageResponse` when one was sent and null exactly when none was (018).
+The `Session` keys were eight until `name` joined them (2026-11-05,
+`backend-structure.md`); a new session's `name` is always NULL — this route takes
+no name, and the default label is the client's to compute.
 A whitespace-only `opening_message` is a **422** and nothing is created.
 
 **US-117.AC-1 makes creating the session and seeding its zone a single outcome**,
@@ -231,6 +294,8 @@ US-135, US-146
 the burial and settle columns on `messages` are written by exactly two
 operations; keeping those two in one module turns that rule into a grep. It
 imports no other service, and no other service imports it (012 D11).
+Single-message delete removes rows but writes neither column, so it lives with
+the other message operations in `services/messages.py`, not here.
 
 **Settle**, entirely inside one `with conn.begin():`
 
@@ -311,14 +376,15 @@ operation's instant, in the same transaction; a refused operation writes nothing
 
 ### The degraded embedding path
 
-Settle, re-open and an accepted `PATCH` are **record-keeping** writes, and
-US-112 is explicit that a platform-level embedding gap must never block the
-roleplayer's own record-keeping. So the `session_vec` refresh in step 6 is
-wrapped: `no_embedding_model` (including the dimension-mismatch form) and
-`llm_unreachable` are **caught**, the relational write commits, and the response
-carries `search_coverage_incomplete: true` (024 U3, D8). The asymmetry with memo
-writes, which fail the whole transaction, is deliberate and is stated in
-`backend-structure.md`'s "two transaction rules" and `search-and-retrieval.md`.
+Settle, re-open, an accepted `PATCH` and the delete of a settled entry are
+**record-keeping** writes, and US-112 is explicit that a platform-level embedding
+gap must never block the roleplayer's own record-keeping. So the `session_vec`
+refresh in step 6 is wrapped: `no_embedding_model` (including the
+dimension-mismatch form) and `llm_unreachable` are **caught**, the relational
+write commits, and the response carries `search_coverage_incomplete: true`
+(024 U3, D8). The asymmetry with memo writes, which fail the whole transaction,
+is deliberate and is stated in `backend-structure.md`'s "two transaction rules"
+and `search-and-retrieval.md`.
 
 Two defects live on this path, and both are recorded rather than designed
 around:
@@ -555,9 +621,9 @@ entry's buried rows, ascending by id, answering `{ "messages": [...] }`
 route, which is why no new code was needed for the widened condition.
 
 It is **read-only**, and it is the one reader of the `buried_messages` selectable
-(022 D2). The rows render with no edit control, and the server half of that is
-`PATCH`'s `message_not_editable` refusal above — the two say the same thing at
-the two boundaries on purpose (R7, US-116).
+(022 D2). The rows render with no edit or delete control, and the server half of
+that is the `message_not_editable` refusal `PATCH` and `DELETE` share above — the
+two say the same thing at the two boundaries on purpose (R7, US-116).
 
 **It carries no count**, by omission rather than design: `GET …/entries` does not
 report how many rows a group holds, so a client cannot show a count before it
@@ -567,5 +633,5 @@ first expand — is `workspace-shell.md`'s, and it now also carries
 group is opened.
 
 `services/messages.py` owns the read (`list_discussion`), so the reader goes
-through a named selectable and raw `messages` stays untouched outside settle and
-re-open (R11).
+through a named selectable and raw `messages` stays untouched outside settle,
+re-open and single-message delete (R11).

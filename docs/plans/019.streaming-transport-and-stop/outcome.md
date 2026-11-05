@@ -73,3 +73,17 @@ Status: Applied 2026-10-06 — /architect finalization (with /product-spec final
 Applied in: B1 (the backend spine — `session-stream.md`, `transfer.md`, `backend-structure.md`, `data-model.md`, `domain-rules.md`), B2 (the LLM/search/operations layer — `llm-and-streaming.md`, `search-and-retrieval.md`, `deployment.md`, `admin-surfaces.md`, `overview.md`) and B3 (the frontend layer — `workspace-shell.md`, `frontend-structure.md`, `ui-conventions.md`, `forms-and-lists.md`).
 Rejected items: Its "Named divergences — no change" status note is rejected: both acceptance criteria were amended on 2026-10-06, so the divergence no longer exists.
 Notes: The widened persist rule (D4), flagged for review, is accepted as a strict improvement on R10's extension. Its token-handling divergence (D11, "re-decide in 022") is not written as open — 022 decided, and only 022's final shape is recorded.
+
+## Decisions
+
+### DEC-019-BF1 — A failed send whose text was already stored clears the draft; the retry is textless
+- **Status:** accepted
+- **Stage:** — · **Feature:** 019.streaming-transport-and-stop · **Step:** 005
+- **Date:** 2026-11-05 · **Decided by:** user
+- **Question:** A text-bearing compose can commit the roleplayer's row and then fail without the client ever handling `accepted` (lost frame, transport/proxy drop, a response the client cannot read). D15 then leaves the draft untouched, so the next Send re-posts the same text and the zone holds two identical user rows (observed 2026-11-05: two identical 322-char rows 8.7 s apart, the first with no reply).
+- **Decision:** After a failed text-bearing compose with no handled `accepted`, the effect's terminal zone re-read decides: if the served zone's last non-tool row is a `user` row whose text equals the text that was sent, the text is stored — the draft is cleared under D15's own rule (only while it still equals the sent text). The retry is then the existing textless compose (Regenerate, body `{}`), which uses the stored row; the server already holds the full conversation, so no text is re-sent. When the re-read does not show the sent text stored, D15 holds unchanged: the draft is kept (R10).
+- **Reason:** The user: "for the retry — do it flag or new call, server has the full conversation, so no new text is needed, the stored one can be used." The served zone is the source of truth for whether the text is stored, so the draft is cleared only when nothing can be lost.
+- **Rejected:** server-side dedupe of an identical unanswered user text in `begin_compose` (changes the "a text compose always appends" route contract and could swallow a deliberate repeat); keeping D15 as is and only adding logging (leaves the duplicate).
+- **Supersedes:** narrows 019 D15's "If no `accepted` arrives … the draft is untouched" for the case the re-read proves the text stored.
+- **Lands in:** `frontend/src/app/streamState.ts` (the compose effect's failure path)
+- **Cites:** R10 (`docs/architecture/domain-rules.md`), US-044.AC-1, US-044.AC-3

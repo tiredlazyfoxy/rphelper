@@ -610,6 +610,19 @@ def _drive_every_success_path(world: AuditWorld, log: _DriveLog) -> None:
     _send(a, _Drive(48, "PATCH", f"/api/memos/{extra_memo_id}", {"body": f"audit 007 memo edited {PROBE}"}), log)
     _send(a, _Drive(49, "DELETE", f"/api/memos/{extra_memo_id}"), log)
 
+    # fast/014 (message-delete): row 75 deletes a throwaway zone message of A's own. The
+    # append that creates it is a plain request, not a `_send`, so row 37 is not driven twice.
+    throwaway = a.post(
+        f"/api/sessions/{session_id}/zone/messages",
+        json={"text": f"audit 014 duplicate {PROBE}"},
+    )
+    if throwaway.status_code != 201:
+        log.problems.append(
+            f"DoD-1: the throwaway zone message for row 75 was not created: {throwaway.text[:400]}"
+        )
+    else:
+        _send(a, _Drive(75, "DELETE", f"/api/messages/{throwaway.json()['id']}"), log)
+
 
 def test_world_build_and_every_success_path_log_no_sentinel__S032_007_DoD1(harness: LogHarness) -> None:
     """DoD-1 (US-084.AC-1) — building the full audit world and driving every ``self``,
@@ -651,7 +664,8 @@ def test_world_build_and_every_success_path_log_no_sentinel__S032_007_DoD1(harne
         # Coverage, two-way and exact: no row of the three swept classes may be skipped,
         # and nothing outside them may be counted as covering one.
         expected = {route.row for route in ENUMERATED_ROUTES if route.route_class in ("self", "owner", "registry")}
-        assert len(expected) == 48, sorted(expected)
+        # fast/014 (message-delete): 48 plus owner row 75.
+        assert len(expected) == 49, sorted(expected)
         assert set(log.rows) == expected, (
             f"rows driven but not swept: {sorted(set(log.rows) - expected)}; "
             f"rows of class self/owner/registry never driven: {sorted(expected - set(log.rows))}"
@@ -736,9 +750,9 @@ def test_refusal_paths_log_no_sentinel__S032_007_DoD2_DoD6(harness: LogHarness) 
         with captured_logs(restore_stdlib=False) as capture:
             _control(capture, harness, "dod2")
 
-            # (a) every foreign-id refusal of the thirty-five owner rows.
+            # (a) every foreign-id refusal of the thirty-six owner rows (fast/014 added row 75).
             owner_rows = [route for route in ENUMERATED_ROUTES if route.route_class == "owner"]
-            assert len(owner_rows) == 35, sorted(route.row for route in owner_rows)
+            assert len(owner_rows) == 36, sorted(route.row for route in owner_rows)
             for route in owner_rows:
                 path = fill_path(registered[route.key()], unknown_id=_foreign_id(route, world))
                 body = _FOREIGN_BODIES.get(route.key())

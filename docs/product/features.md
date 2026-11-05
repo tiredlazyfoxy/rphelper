@@ -99,20 +99,23 @@ dependency graph below, not from priority (challenge C4, rejected).
   always resumable, ordered by last use.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** partially delivered
-- **Delivered:** docs/plans/011.rp-sessions/ (2026-10-02); US-027.AC-3 by docs/plans/012.messages-and-settle/ (2026-10-02); UC-080 / US-117.AC-1 / AC-2 / AC-4 by docs/plans/018.character-page/ (2026-10-03); US-145 by docs/plans/011.rp-sessions/ (2026-10-02) and docs/plans/029.my-search/ (2026-10-05)
+- **Delivered:** docs/plans/011.rp-sessions/ (2026-10-02); US-027.AC-3 by docs/plans/012.messages-and-settle/ (2026-10-02); UC-080 / US-117.AC-1 / AC-2 / AC-4 by docs/plans/018.character-page/ (2026-10-03); US-145 by docs/plans/011.rp-sessions/ (2026-10-02) and docs/plans/029.my-search/ (2026-10-05) (since withdrawn, 2026-11-05)
 - **Remaining:** US-117.AC-3 (UC-080 step 5) — specified, not built, no
-  plan owns it
-- **Realized by:** UC-023, UC-024, UC-025, UC-026, UC-080, US-026, US-027,
-  US-028, US-029, US-117, US-145
+  plan owns it; UC-089, US-150 — not built, not yet planned
+- **Realized by:** UC-023, UC-024, UC-025, UC-026, UC-080, UC-089, US-026,
+  US-027, US-028, US-029, US-117, US-145 (withdrawn), US-150
 - **Note:** No "finished" state — a session stays open indefinitely.
   Archiving removes it from the working list and is restorable, same rule as
   FEAT-006 and FEAT-007. A session can also start by writing the first
   message on its character's page (FEAT-020): the message creates the
   session with a turn being drafted and opens that message's discussion.
-  A session carries no title: it is identified by its start time, which is
-  what listings, the tree and search results show (US-145).
+  A session has a name, by default its start date, so starting one asks for
+  no naming step; the roleplayer can rename it from its tree row and from
+  the open session, and emptying the name returns it to the start date. A
+  rename is not use — order and last use are unchanged (US-150). This
+  reverses the 2026-10-06 "no title" rule (US-145, withdrawn).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 3,
-  round 7, round 15; finalization 2026-10-06, C51.
+  round 7, round 15; finalization 2026-10-06, C51; 2026-11-05, C55–C60.
 
 ### FEAT-009 — Session entries & the RP flow
 - **Purpose:** The independent entries that make up a session — partner
@@ -120,12 +123,12 @@ dependency graph below, not from priority (challenge C4, rejected).
   independent and still addable in any order.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** partially delivered
-- **Delivered:** docs/plans/012.messages-and-settle/ (2026-10-02); docs/plans/013.stream-and-zone-ui/ (2026-10-02); docs/plans/014.entry-editing-and-copy-out/ (2026-10-02); US-111 by docs/plans/023.partner-translation/ (2026-10-04); US-112 by docs/plans/024.embedding-lifecycle/ (2026-10-04); US-122.AC-2 by docs/plans/027.session-search-tool/ (2026-10-05)
+- **Delivered:** docs/plans/012.messages-and-settle/ (2026-10-02); docs/plans/013.stream-and-zone-ui/ (2026-10-02); docs/plans/014.entry-editing-and-copy-out/ (2026-10-02); US-111 by docs/plans/023.partner-translation/ (2026-10-04); US-112 by docs/plans/024.embedding-lifecycle/ (2026-10-04); US-122.AC-2 by docs/plans/027.session-search-tool/ (2026-10-05); US-149 by fast/014.message-delete (2026-11-05)
 - **Remaining:** US-112.AC-1 (widened half), US-112.AC-3 — shipped
   behaviour does not satisfy them → docs/plans/defects.md
 - **Realized by:** UC-027, UC-028, UC-029, UC-030, UC-031, UC-078, UC-081,
   UC-082, US-030, US-031, US-032, US-033, US-034, US-035, US-109, US-110,
-  US-111, US-112, US-120, US-121, US-122, US-123, US-124
+  US-111, US-112, US-120, US-121, US-122, US-123, US-124, US-149
 - **Note:** Entries are independent — partner blocks and the roleplayer's
   answers are separate items added in any order; a compose discussion
   attaches to whichever answer is being worked on. The roleplayer can
@@ -399,9 +402,9 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Status:** partially delivered
 - **Delivered:** docs/plans/029.my-search/ (2026-10-05)
 - **Remaining:** US-147 — name matching folds case ASCII-only →
-  docs/plans/defects.md
+  docs/plans/defects.md; US-152 — not built, not yet planned
 - **Realized by:** UC-058, UC-059, UC-060, US-074, US-075, US-076, US-118,
-  US-137, US-147
+  US-137, US-147, US-152
 - **Note:** Distinct from FEAT-014/FEAT-015, not an overlap (challenge C7,
   rejected by the user: "tool search is the content search, my search is on
   user level UI to find the sessions i did. Totally different
@@ -413,10 +416,11 @@ dependency graph below, not from priority (challenge C4, rejected).
   enabled or forced state — note state never filters a result out — and a
   result that is currently disabled is shown as disabled.
   Character and setup names are matched regardless of case in whatever
-  script they are written in, not only in Latin (US-147).
+  script they are written in, not only in Latin (US-147). A session is found
+  by its name, and session results show the name (US-152).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7, round 8,
   round 14, challenge C7; 2026-09-28, gap-closure round; finalization
-  2026-10-06, C52.
+  2026-10-06, C52; 2026-11-05, C60.
 
 ### FEAT-018 — Export & import
 - **Purpose:** Move or restore data at four granularities — whole database,
@@ -443,7 +447,8 @@ dependency graph below, not from priority (challenge C4, rejected).
   lets the restored users sign in; it is refused onto a database that
   already holds content (UC-061, US-077). An imported single session is
   placed under a character the roleplayer chooses and takes that
-  character's persona, never the source's.
+  character's persona, never the source's. A session's name travels with its
+  export and returns on import (US-150.AC-5).
 - **_TBD:** a single-session export carries only that session's own memos
   (challenge C12), so none of the source's character persona or setup
   travels with it. Narrowed at finalization (2026-10-06): the roleplayer
@@ -453,7 +458,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   defect.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 1, round 2,
   challenge C12; 2026-09-28, gap-closure round, challenge C29; finalization
-  2026-10-06, C39, C41.
+  2026-10-06, C39, C41; 2026-11-05, C60.
 
 ### FEAT-019 — Privacy & isolation
 - **Purpose:** No screen, search, tool or export view ever shows another
@@ -484,23 +489,26 @@ dependency graph below, not from priority (challenge C4, rejected).
   when it is collapsed.
 - **Actors:** ACT-002 (primary), ACT-001 (admin entry point only) ·
   **Priority:** must
-- **Status:** delivered
+- **Status:** partially delivered
 - **Delivered:** docs/plans/008.app-shell-frame/ (2026-10-01); UC-069 / US-088 / US-089 by docs/plans/011.rp-sessions/ (2026-10-02); UC-072 / US-094 / US-095 by docs/plans/016.note-wall/ (2026-10-03); US-092 by docs/plans/017.session-configuration/ (2026-10-03); UC-073 / UC-074 / US-096 / US-097 by docs/plans/018.character-page/ (2026-10-03); US-118 by docs/plans/029.my-search/ (2026-10-05)
+- **Remaining:** US-151 — not built, not yet planned
 - **Realized by:** UC-069, UC-070, UC-071, UC-072, UC-073, UC-074, US-088,
-  US-089, US-090, US-091, US-092, US-093, US-094, US-095, US-096, US-097
-- **Note:** Left column lists characters with their sessions (setup shown as
-  a label on a session row, or nothing when it has none), sessions ordered
-  by last use. Collapsing the left column to an icon rail still leaves
-  search, create and the user menu reachable. The user menu logs the
-  roleplayer out, opens a settings screen carrying the two languages and the
-  roleplayer's own notes, and — for ACT-001 only — the admin entry point.
-  The note wall opens over the stream and can be pinned, the pin surviving a
-  reload; with no session open, the wall is not shown at all. A character's
-  page shows its persona, its notes, its setups, its configuration and its
-  sessions in one place. Creating a character opens a draft page; nothing
-  persists until the roleplayer enters something.
+  US-089, US-090, US-091, US-092, US-093, US-094, US-095, US-096, US-097,
+  US-151
+- **Note:** Left column lists characters with their sessions (a session row
+  shows its name, and beneath it its last use with the setup label beside it,
+  or no label when it has none), sessions ordered by last use (US-151).
+  Collapsing the left column to an icon rail still leaves search, create and
+  the user menu reachable. The user menu logs the roleplayer out, opens a
+  settings screen carrying the two languages and the roleplayer's own notes,
+  and — for ACT-001 only — the admin entry point. The note wall opens over
+  the stream and can be pinned, the pin surviving a reload; with no session
+  open, the wall is not shown at all. A character's page shows its persona,
+  its notes, its setups, its configuration and its sessions in one place.
+  Creating a character opens a draft page; nothing persists until the
+  roleplayer enters something.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 11, round 12,
-  round 13, round 14, round 15.
+  round 13, round 14, round 15; 2026-11-05, C56.
 
 ## Relationships
 

@@ -140,6 +140,17 @@
 - Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓, DoD-9 ✓, DoD-10 ✓, DoD-11 ✓, DoD-12 [manual/live, no test]
 - Pre-existing tests amended: none.
 
+### Step 005 — repro test (2026-11-05)
+- `frontend/tests/app/streamComposeStoredRetry.test.ts` (new) — reproduces: a retry after a failed send duplicates the roleplayer's last message (text-bearing compose committed the user row, failed with no handled `accepted`, draft stayed and was re-posted).
+- covers DEC-019-BF1 — for both failure shapes (SSE body whose first frame is `error`; fetch rejects): terminal re-read serving `[user row SENT]` (also with an earlier assistant row before it and a trailing tool row after it) leaves the draft `""`, the zone equal to the served list with exactly one user row, failure notified once; a following `regenerate` POSTs body exactly `{}`, the sent text went over the wire once, no `zone/messages` POST, zone ends with one user row.
+- covers D15 / R10 guards — same failures with a served zone that does not show the sent text stored (empty; last non-tool row assistant; last non-tool row a user row with different text): draft kept. A draft retyped mid-request with the sent text stored: the edited draft kept.
+- Coverage: DEC-019-BF1 ✓, D15/R10 guards ✓ (guards are expected green pre-fix; the DEC-019-BF1 "cleared" and regenerate cases are the reproducing ones).
+
+## Bug Fixes
+
+### Step 005 — retry after a failed send duplicated the last user message (2026-11-05)
+- `frontend/src/app/streamState.ts` — `runCompose` tracks whether `accepted` was handled; after a failed (`error` / `unexpected_end`) text-bearing run without it, the terminal zone re-read clears the draft (only while it still equals the sent text) when the zone's last non-tool row is a `user` row with exactly the sent text (new private `lastNonToolIsUserText`), per DEC-019-BF1; otherwise the draft is kept (D15/R10).
+
 ## Notes & Issues
 
 _populated by the coder when worth saying_

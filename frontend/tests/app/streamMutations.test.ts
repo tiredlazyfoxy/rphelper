@@ -21,11 +21,23 @@
 // that path; DoD-4's busy-while-pending case moves to the *partner* branch, which keeps `busy`.
 // Partner, paste, settle, re-open and edit cases are unchanged (settle still appends via
 // …/zone/messages).
+//
+// Amended by fast feature 014 (docs/plans/fast/014.message-delete/plan.md, context.md P5-P6):
+//   - deleteZoneMessage: success filters the row out of the zone and resolves true; abort
+//     resolves false silently with no re-read; any other failure notifies, re-reads the zone
+//     and resolves false; never sets busy, never rejects;
+//   - editZoneMessage with blank / whitespace-only text now delegates to deleteZoneMessage
+//     (DELETE, not PATCH) — 013's "blank is a no-op" (DoD-13) is superseded; unchanged text is
+//     still a no-op;
+//   - deleteZoneMessage and deleteEntry join the "every effect and its signal" and "success
+//     paths never notify" tables. These cases carry "F014 DoD-<n>".
 import { runInAction, toJS } from "mobx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, MessageKind, MessageRole } from "../../src/app/streamApi";
 import {
   StreamState,
+  deleteEntry,
+  deleteZoneMessage,
   editZoneMessage,
   effectiveKind,
   filePastedPartner,
@@ -60,6 +72,12 @@ const POST_COMPOSE = `POST ${COMPOSE_PATH}`;
 const POST_SETTLE = `POST ${SETTLE_PATH}`;
 const POST_REOPEN = `POST ${REOPEN_PATH}`;
 const patchMessage = (id: string): string => `PATCH ${messagePath(id)}`;
+const deleteKey = (id: string): string => `DELETE ${messagePath(id)}`;
+
+/** The DELETE route's success body (fast 014 Interface intent). */
+function deleted(ids: string[], searchCoverageIncomplete = false): unknown {
+  return { deleted_ids: ids, search_coverage_incomplete: searchCoverageIncomplete };
+}
 
 const STAMP = "2026-05-10T09:00:00.000000+00:00";
 const LATER = "2026-05-10T09:05:00.000000+00:00";
@@ -633,19 +651,32 @@ describe("editZoneMessage", () => {
     },
   );
 
-  it.each([
-    ["empty text", ""],
-    ["whitespace-only text", "  \n "],
-    ["text identical to the row's current text", "Unchanged text."],
-  ])("with %s makes no request and resolves true — DoD-13", async (_label, text) => {
+  it("with text identical to the row's current text makes no request and resolves true — DoD-13 — F014 DoD-20", async () => {
     const backend = serve({});
     const row = zoneRow("user", "Unchanged text.");
     const state = seeded({ zone: [row] });
 
-    await expect(editZoneMessage(state, row.id, text)).resolves.toBe(true);
+    await expect(editZoneMessage(state, row.id, "Unchanged text.")).resolves.toBe(true);
 
     expect(backend.mock).not.toHaveBeenCalled();
     expect(toJS(state.zone)).toEqual([row]);
+    expect(notifyFailureSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["empty text", ""],
+    ["whitespace-only text", "  \n "],
+  ])("with %s sends DELETE /api/messages/<id> (no PATCH), removes the row, resolves true — F014 DoD-19", async (_label, text) => {
+    const keep = zoneRow("user", "Kept row.");
+    const row = zoneRow("assistant", "Row to clear.");
+    const backend = serve({ [deleteKey(row.id)]: ok(deleted([row.id])) });
+    const state = seeded({ zone: [keep, row] });
+
+    await expect(editZoneMessage(state, row.id, text)).resolves.toBe(true);
+
+    expect(backend.keys()).toEqual([deleteKey(row.id)]);
+    expect(backend.keys().some((key) => key.startsWith("PATCH "))).toBe(false);
+    expect(toJS(state.zone)).toEqual([keep]);
     expect(notifyFailureSpy).not.toHaveBeenCalled();
   });
 
@@ -665,6 +696,174 @@ describe("editZoneMessage", () => {
     expect(backend.keys()).toEqual([patchMessage(gone.id), GET_ZONE]);
     expect(toJS(state.zone)).toEqual(reread);
   });
+});
+
+// ---------------------------------------------------------------------------
+// fast 014 P5 — deleteZoneMessage
+describe("deleteZoneMessage", () => {
+  const DELETED_ROLES: MessageRole[] = ["user", "assistant"];
+
+  it.each(DELETED_ROLES)(
+    "on a %s row sends DELETE /api/messages/<id>, filters only that row out of the zone, makes no GET, resolves true — F014 DoD-16",
+    async (role) => {
+      const before = zoneRow("user", "Before row.");
+      const target = zoneRow(role, "Sent twice.");
+      const after = zoneRow("assistant", "After row.");
+      const backend = serve({
+        [deleteKey(target.id)]: ok(deleted([target.id])),
+        [GET_ZONE]: zoneList([zoneRow("user", "Should not be read.")]),
+        [GET_ENTRIES]: entriesList([]),
+      });
+      const keptEntry = entry("turn", "Settled turn.");
+      const state = seeded({ entries: [keptEntry], zone: [before, target, after] });
+
+      await expect(deleteZoneMessage(state, target.id)).resolves.toBe(true);
+
+      expect(backend.keys()).toEqual([deleteKey(target.id)]);
+      expect(toJS(state.zone)).toEqual([before, after]);
+      expect(toJS(state.entries)).toEqual([keptEntry]);
+      expect(notifyFailureSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("never sets busy and is not optimistic — the row stays while the DELETE is pending — F014 DoD-16", async () => {
+    const answer = deferred<Response>();
+    const target = zoneRow("user", "Sent twice.");
+    serve({ [deleteKey(target.id)]: () => answer.promise });
+    const state = seeded({ zone: [target] });
+
+    const running = deleteZoneMessage(state, target.id);
+    await flush();
+    expect(state.busy).toBe(false);
+    expect(toJS(state.zone)).toEqual([target]);
+
+    answer.resolve(jsonResponse(deleted([target.id]), 200));
+    await expect(running).resolves.toBe(true);
+    expect(state.busy).toBe(false);
+    expect(toJS(state.zone)).toEqual([]);
+  });
+
+  it.each<[string, string, number]>([
+    ["404 message_not_found", "message_not_found", 404],
+    ["409 message_not_editable", "message_not_editable", 409],
+    ["500 internal_error", "internal_error", 500],
+  ])(
+    "a %s notifies once with that ApiError, re-reads the zone (not the entries), resolves false — F014 DoD-17",
+    async (_label, code, status) => {
+      const keep = zoneRow("user", "Kept row.");
+      const gone = zoneRow("assistant", "Settled elsewhere.");
+      const reread = [keep];
+      const backend = serve({
+        [deleteKey(gone.id)]: fails(code, status),
+        [GET_ZONE]: zoneList(reread),
+        [GET_ENTRIES]: entriesList([entry("turn", "Should not be read.")]),
+      });
+      const state = seeded({ zone: [keep, gone] });
+
+      await expect(deleteZoneMessage(state, gone.id)).resolves.toBe(false);
+
+      expectNotifiedOnceWith(code);
+      expect(backend.keys()).toEqual([deleteKey(gone.id), GET_ZONE]);
+      expect(toJS(state.zone)).toEqual(reread);
+      expect(state.busy).toBe(false);
+    },
+  );
+
+  it("a blank-commit DELETE failure through editZoneMessage resolves false the same way — F014 DoD-19", async () => {
+    const row = zoneRow("user", "Row to clear.");
+    const backend = serve({
+      [deleteKey(row.id)]: fails("message_not_editable", 409),
+      [GET_ZONE]: zoneList([row]),
+    });
+    const state = seeded({ zone: [row] });
+
+    await expect(editZoneMessage(state, row.id, "")).resolves.toBe(false);
+
+    expectNotifiedOnceWith("message_not_editable");
+    expect(backend.keys()).toEqual([deleteKey(row.id), GET_ZONE]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fast 014 P5 — abort resolves false with no re-read, for both delete effects
+describe("the delete effects on abort", () => {
+  type DeleteAbortCase = [
+    label: string,
+    run: (state: StreamState, id: string, signal: AbortSignal) => Promise<boolean>,
+    seed: (target: Message) => StreamState,
+    target: () => Message,
+  ];
+  const DELETE_ABORTS: DeleteAbortCase[] = [
+    [
+      "deleteZoneMessage",
+      (state, id, signal) => deleteZoneMessage(state, id, signal),
+      (target) => seeded({ entries: [entry("turn", "Held turn.")], zone: [zoneRow("user", "Kept."), target] }),
+      () => zoneRow("assistant", "Held row."),
+    ],
+    [
+      "deleteEntry",
+      (state, id, signal) => deleteEntry(state, id, signal),
+      (target) => seeded({ entries: [entry("partner", "Kept."), target], zone: [zoneRow("user", "Held row.")] }),
+      () => entry("turn", "Held turn."),
+    ],
+  ];
+
+  it.each(DELETE_ABORTS)(
+    "%s aborted while its DELETE is pending resolves false, notifies nothing and re-reads nothing — F014 DoD-18",
+    async (_label, run, seed, targetOf) => {
+      const target = targetOf();
+      const seen: string[] = [];
+      stubFetch((input, init) => {
+        seen.push(`${requestMethod(input, init)} ${requestUrl(input).pathname}`);
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          signal?.addEventListener("abort", () => {
+            reject(signal.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+          });
+        });
+      });
+      const state = seed(target);
+      const before = written(state);
+      const controller = new AbortController();
+
+      const running = run(state, target.id, controller.signal);
+      await flush();
+      controller.abort();
+
+      await expect(running).resolves.toBe(false);
+      await flush();
+      expect(seen).toEqual([deleteKey(target.id)]);
+      expect(written(state)).toEqual(before);
+      expect(notifyFailureSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(DELETE_ABORTS)(
+    "%s whose DELETE succeeds after the abort resolves false, writes nothing and re-reads nothing — F014 DoD-18",
+    async (_label, run, seed, targetOf) => {
+      const target = targetOf();
+      const answer = deferred<Response>();
+      const backend = serve({
+        [deleteKey(target.id)]: () => answer.promise,
+        [GET_ENTRIES]: entriesList(LATE_ENTRIES),
+        [GET_ZONE]: zoneList(LATE_ZONE),
+      });
+      const state = seed(target);
+      const before = written(state);
+      const controller = new AbortController();
+
+      const running = run(state, target.id, controller.signal);
+      await flush();
+      controller.abort();
+      answer.resolve(jsonResponse(deleted([target.id]), 200));
+
+      await expect(running).resolves.toBe(false);
+      await flush();
+      expect(backend.keys()).toEqual([deleteKey(target.id)]);
+      expect(written(state)).toEqual(before);
+      expect(notifyFailureSpy).not.toHaveBeenCalled();
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -731,6 +930,28 @@ const ABORT_CASES: AbortCase[] = [
     run: (state, signal) => editZoneMessage(state, ABORT_ROW.id, "A changed text.", signal),
     firstKey: () => patchMessage(ABORT_ROW.id),
     firstOk: () => jsonResponse({ ...ABORT_ROW, text: "A changed text.", updated_at: LATER }, 200),
+  },
+  // fast 014 (P5 / P6, F014 DoD-18): the two delete effects and the blank-commit delete.
+  {
+    label: "editZoneMessage with blank text",
+    seed: () => seeded({ entries: [ABORT_ENTRY], zone: [ABORT_ROW], draft: "Typed." }),
+    run: (state, signal) => editZoneMessage(state, ABORT_ROW.id, "   ", signal),
+    firstKey: () => deleteKey(ABORT_ROW.id),
+    firstOk: () => jsonResponse(deleted([ABORT_ROW.id]), 200),
+  },
+  {
+    label: "deleteZoneMessage",
+    seed: () => seeded({ entries: [ABORT_ENTRY], zone: [ABORT_ROW], draft: "Typed." }),
+    run: (state, signal) => deleteZoneMessage(state, ABORT_ROW.id, signal),
+    firstKey: () => deleteKey(ABORT_ROW.id),
+    firstOk: () => jsonResponse(deleted([ABORT_ROW.id]), 200),
+  },
+  {
+    label: "deleteEntry",
+    seed: () => seeded({ entries: [ABORT_ENTRY], zone: [ABORT_ROW], draft: "Typed." }),
+    run: (state, signal) => deleteEntry(state, ABORT_ENTRY.id, signal),
+    firstKey: () => deleteKey(ABORT_ENTRY.id),
+    firstOk: () => jsonResponse(deleted([ABORT_ENTRY.id]), 200),
   },
 ];
 
@@ -814,6 +1035,9 @@ describe("success paths never notify", () => {
       [POST_SETTLE]: ok(SETTLE_RESULT),
       [POST_REOPEN]: ok(REOPEN_RESULT),
       [patchMessage(ABORT_ROW.id)]: ok({ ...ABORT_ROW, text: "Ok edit.", updated_at: LATER }),
+      // fast 014 (F014 DoD-15 / DoD-16 / DoD-19): the delete route for the zone row and the entry.
+      [deleteKey(ABORT_ROW.id)]: ok(deleted([ABORT_ROW.id])),
+      [deleteKey(ABORT_ENTRY.id)]: ok(deleted([ABORT_ENTRY.id])),
       [GET_ENTRIES]: entriesList([entry("turn", "Read entry.")]),
       [GET_ZONE]: zoneList([zoneRow("user", "Read row.")]),
     });
@@ -827,6 +1051,10 @@ describe("success paths never notify", () => {
     ["settleComposer without draft", () => seeded({ zone: [zoneRow("user", "Z.")], kindOverride: "turn" }), (s) => settleComposer(s)],
     ["reopenLast", () => seeded({ entries: [entry("turn", "T.")] }), (s) => reopenLast(s)],
     ["editZoneMessage", () => seeded({ zone: [ABORT_ROW] }), (s) => editZoneMessage(s, ABORT_ROW.id, "Ok edit.")],
+    // fast 014 — F014 DoD-16 / DoD-15 / DoD-19.
+    ["deleteZoneMessage", () => seeded({ zone: [ABORT_ROW] }), (s) => deleteZoneMessage(s, ABORT_ROW.id)],
+    ["deleteEntry", () => seeded({ entries: [ABORT_ENTRY] }), (s) => deleteEntry(s, ABORT_ENTRY.id)],
+    ["editZoneMessage with blank text", () => seeded({ zone: [ABORT_ROW] }), (s) => editZoneMessage(s, ABORT_ROW.id, "")],
   ];
 
   it.each(SUCCESSES)("%s calls no notifyFailure — DoD-15", async (_label, setup, run) => {

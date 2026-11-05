@@ -99,6 +99,7 @@
   - **US-115.AC-2** — Given a message in the current zone was edited, when the edit saves, then that message's text is not findable by session search — only settled entries are.
   - **US-115.AC-3** — Given a message in the current zone was edited, when the edit saves, then the assistant does not produce a new reply on its own.
 - **Constraint:** A tool's own record is not a message anyone wrote, and is not editable.
+- **See also:** Clearing the text entirely deletes the message instead (US-149.AC-5).
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 12; 2026-09-28, round 17; finalization 2026-10-06, C46.
 
 ### US-116 — A collapsed discussion cannot be edited

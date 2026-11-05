@@ -847,7 +847,9 @@ writes.** That is the whole purpose of the two selectables: the merge converted 
 missing join into a `WHERE` clause, and the selectables put that clause in exactly
 one place (`data-model.md`, R11). Assembly therefore names **no** table — a query
 here selecting from raw `messages` is a defect, and R11 says the same from the
-other side: settle and re-open are the only two operations that touch it.
+other side: settle, re-open and single-message delete are the only three
+operations that touch it, and a delete removes a buried group only together with
+its head.
 
 #### Each settled row is tagged with its kind (020 D1, U1)
 

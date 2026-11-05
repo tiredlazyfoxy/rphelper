@@ -3,7 +3,8 @@
 **Realizes:** FEAT-004, FEAT-005, FEAT-006, FEAT-007, FEAT-009, FEAT-012,
 FEAT-014, FEAT-015, FEAT-017, FEAT-019, UC-013, UC-016, UC-018, UC-046, UC-051,
 UC-052, UC-053, UC-054, UC-058, UC-059, UC-060, UC-065, UC-075, UC-078, UC-088,
-US-110, US-112, US-119, US-121, US-122, US-137, US-138, US-141, US-145, US-147
+US-110, US-112, US-119, US-121, US-122, US-137, US-138, US-141, US-147, US-149,
+US-152
 
 Three distinct search surfaces, one hybrid retrieval engine, one store. The
 store decision and its flip condition are in `overview.md`; the tables are in
@@ -177,9 +178,11 @@ surface:
 
 **`SearchHit` as built** (025 D3): kind, id, fused score, snippet, plus a memo's
 `scope` / `scope_id` and an entry's `session_id`. **A session hit's snippet is
-none** — `sessions` has no text column at all, so there is nothing for the port to
-extract; what represents a returned session to the model is `session_search`'s own
-decision and is recorded under that tool.
+none** — the session variant ranks `session_vec` alone, and the only text column
+`sessions` carries is its short `name` (since 2026-11-05), which is a label rather
+than a body to extract from; the port does no name join, so a caller that shows a
+session's label hydrates it itself. What represents a returned session to the
+model is `session_search`'s own decision and is recorded under that tool.
 
 ### Query shape
 
@@ -468,17 +471,21 @@ the back door.
 **The engineering half of the old argument has gone with its subject, and the
 correction matters.** This section used to add that `session_fts`'s columns are
 `title` and `partner_label`, "so a BM25 arm is in practice a partner-name
-matcher". **`sessions` has neither column** (011 D4): a session is identified by
-its start time, not a title (`US-145`), and there is no partner column. So
-**`session_fts` was declared and never created** (024 U7) — it waits on a feature
-that gives a session text columns, and no feature has. The sentence that claimed
-it "exists for FEAT-017's my-search" was **stale and is removed**:
-**my-search's session corpus is the vector arm over `session_vec`** (029 U2), not
-a lexical index.
+matcher". **`sessions` never had either column**, and there is still no partner
+column. Since 2026-11-05 a session does carry one text column, its short `name`
+(`data-model.md`) — but `session_fts` **was declared and never created** (024 U7)
+and stays uncreated: a session name is matched by my-search's `LIKE` arm (below),
+not by an index, and it is **not** an input to `session_search` at all. A name is
+the roleplayer's label for a storyline, not a description of a person or a
+situation, so it carries none of the signal this tool exists to find. The sentence
+that claimed `session_fts` "exists for FEAT-017's my-search" was **stale and is
+removed**: **my-search's session corpus is the vector arm over `session_vec`**
+(029 U2) **plus a `LIKE` arm over `sessions.name`** (2026-11-05), not a lexical
+index.
 
 **The flip condition is named, and it is now larger than one switch.** Turning a
-lexical arm on would require **first creating a session text index at all**, which
-in turn requires a session to have text columns to index. The relevance condition
+lexical arm on would require **first creating a session text index at all** —
+over text that describes what happened, which `name` does not. The relevance condition
 that would justify starting that work: if FEAT-015's promise — finding "the same
 person or situation" **when neither is recorded** — turns out in practice to need
 lexical recall. That is a relevance finding, not a design argument, so it needs
@@ -624,8 +631,9 @@ both sync pieces in the same hop rather than two.
 ### The invalidation fan-out this creates — the first one-to-many in the system
 
 **Until now every `session_vec` write was one session per relational write**:
-settle, a settled-text edit, re-open. Each is a write *to that session*, so the
-refresh was one embedding call in the transaction that caused it.
+settle, a settled-text edit, re-open, and the delete of a settled entry. Each is
+a write *to that session*, so the refresh was one embedding call in the
+transaction that caused it.
 
 **Editing a character's persona — or a setup's text — now invalidates every
 session vector under that character.** One relational write, N embedding writes.
@@ -732,9 +740,10 @@ here rather than treated as a naming nicety:
 - **Reaches everything the roleplayer owns** (UC-058): characters, setups,
   sessions, entries and memos. **The product's count of five corpora is
   unchanged.** What changed is the mechanism: **five corpora are served by three
-  port variants plus two `LIKE` corpora outside the port** (029 U2) —
-  this section used to say "five corpora, so five `SearchScope` variants", and
-  that is no longer the shape.
+  port variants plus three `LIKE` matches outside the port** — characters and
+  setups (029 U2), and since 2026-11-05 the session names, which ride beside the
+  session variant in the sessions group. This section used to say "five corpora,
+  so five `SearchScope` variants", and that is no longer the shape.
 - **Results are grouped by kind** (UC-059) — character, setup, session, entry, memo
   — so RRF fuses *within* a kind and the groups are presented separately. There is
   no cross-kind global ranking, because UC-059 asks the roleplayer to scan by kind
@@ -749,11 +758,11 @@ here rather than treated as a naming nicety:
 - It is a **UI surface, not a tool.** It is never exposed to ACT-004; the
   assistant's reach is exactly three tools (R9).
 
-### Three port variants and two `LIKE` corpora (029 U2)
+### Three port variants and three `LIKE` matches (029 U2; session names 2026-11-05)
 
 | Corpus | Mechanism |
 |---|---|
-| sessions | **port**, session variant — vector only, over `session_vec` |
+| sessions | **two arms, merged**: a **`LIKE` name arm outside the port** over `sessions.name`, **then** the **port**'s session variant — vector only, over `session_vec` (below) |
 | entries | **port**, entry variant — lexical over `message_fts` / `settled_entries` |
 | memos | **port**, memo variant — hybrid, **no extra predicate** (no flag filter at all) |
 | characters | **`LIKE`, outside the port** — over `name` and `sheet` |
@@ -761,21 +770,48 @@ here rather than treated as a naming nicety:
 
 **The `LIKE` path is the one deviation from "all three surfaces go through one
 port", and it is recorded as a deviation rather than quietly admitted.** There is
-**no index for characters or setups** — no FTS table and no vectors
-(`data-model.md` closes that `_TBD:` with "no FTS tables for either") — so a port
-variant over them would carry **no arm at all**: nothing to rank, nothing to fuse,
-a `SearchScope` whose only content is a `WHERE`. The match is a plain
-**escaped, case-insensitive substring over one needle, not tokenised**.
+**no index for characters, setups or session names** — no FTS table and no
+vectors (`data-model.md` closes that `_TBD:` with "no FTS tables for either", and
+keeps `session_fts` uncreated for the same reason) — so a port variant over them
+would carry **no arm at all**: nothing to rank, nothing to fuse, a `SearchScope`
+whose only content is a `WHERE`. The match is a plain **escaped,
+case-insensitive substring over one needle, not tokenised**, and the three
+`LIKE` matches share one escape rule — user input never acts as a wildcard.
 
-**Flip condition:** if characters or setups ever gain an FTS or vector index, they
-**become port variants and the `LIKE` path goes**. That is the single change that
-would make the port universal again, and it is worth naming because the `LIKE`
-path is otherwise the kind of shortcut that gets copied.
+**The session group's name arm** (2026-11-05). Owner-scoped like every other
+query here; a NULL `name` never matches. Its hits are merged with the session
+variant's vector hits **name hits first, then the port's order, deduplicated by
+session id, still at most 20**. Name hits lead because a typed name is the most
+direct statement of which session the roleplayer means; the vector ranking is a
+guess about meaning and goes after it. The merge adds no fusion score — the name
+arm has no rank to fuse. **Fail-whole is unchanged**: the name arm cannot rescue
+a failed vector arm, and a vector failure still fails the whole request (below).
+Detail in `DEC-arch-session-names-5`.
+
+**A known accepted limitation — a never-renamed session is not found by typing
+its start date.** Its label is the local start date, but that label is computed
+by the client and **never stored** (`data-model.md`): `name` is NULL, so the
+name arm has nothing to match, and the server could not compute the local date
+itself because it does not know the roleplayer's timezone. The user accepted
+this knowingly on 2026-11-05, in exchange for a default label that is always the
+correct **local** date. **Flip condition:** if finding unnamed sessions by date
+becomes needed, either store the default at creation (a client-supplied local
+date) or pass the client's timezone to search so the server can match the
+rendered date — the first is the rejected alternative of
+`DEC-arch-session-names-1`.
+
+**Flip condition:** if characters, setups or session names ever gain an FTS or
+vector index, they **become port variants and the `LIKE` path goes** — for
+characters and setups that makes the port universal again; for session names it
+also replaces the merge above with the port's own fusion. Worth naming because the
+`LIKE` path is otherwise the kind of shortcut that gets copied.
 
 **Defect D-05 — `LIKE` folds case for ASCII letters only.** SQLite's `LIKE` is
 case-insensitive for ASCII and **case-sensitive for every other script**, so a
 character or setup whose name is written in a non-Latin script matches **only in
-the case typed** (029 D3). `US-147` requires name matching to be case-insensitive
+the case typed** (029 D3). **The session name arm inherits the same caveat** — it
+uses the same `LIKE` — so a non-Latin session name matches only in the case
+typed, and any fix to D-05 must cover all three matches. `US-147` requires name matching to be case-insensitive
 **in any script**, so the build does not satisfy it. This is a defect, not an open
 question: the requirement is settled and only the code is short. See
 `docs/plans/defects.md` D-05 — which also records why it matters more here than it
@@ -821,16 +857,23 @@ why a hit is not in their working list.
 
 **Five groups, in UC-059's order, at most 20 rows per group.** 20 is
 conventional, not measured — the same posture as the retrieval constants above.
-Within a group: **port order** for sessions, entries and memos; **`name`, then
-`id`** for characters and setups.
+Within a group: **name hits first, then port order** for sessions (the merge
+above); **port order** for entries and memos; **`name`, then `id`** for
+characters and setups.
 
 **Hydration is my-search's own owner-scoped read**, not a port feature:
 
 | Group | Hydrated with |
 |---|---|
-| session | character name, setup name, start time, archived flag |
-| entry | session id, character name, session start |
+| session | the session's `name` and start time (`created_at`), character name, setup name, archived flag |
+| entry | session id, the session's `name` and start time, character name |
 | memo | `is_enabled`, and the character id needed to route to it |
+
+**A session is labelled in the results by the one session label rule**
+(`workspace-shell.md`): its `name`, or — when never renamed — its start time
+rendered as the **local** start date by the client. The server returns the stored
+`name` (NULL when never renamed) and `created_at`, never a computed label, because
+it does not know the roleplayer's timezone.
 
 The port returns ids, scores and snippets; everything a human needs to recognise
 a hit is read afterwards, by `user_id` and hit ids. Same division as
@@ -888,10 +931,11 @@ follow and both are testable as absences:
 The lexical index is **`message_fts`**, renamed from `entry_fts` with the table it
 indexes. It keeps its external content on the base table `messages`, because FTS5
 external content requires a real rowid table, and the triggers — insert on the
-settle transition, delete on re-open, update on a settled text edit — restrict it
-to settled rows (`data-model.md`). The view boundary and the trigger condition say
-the same thing in two places on purpose: whichever arm a reviewer checks, the
-answer is the same.
+settle transition, delete on re-open and on the delete of a settled entry, update
+on a settled text edit — restrict it to settled rows (`data-model.md`). The view
+boundary and the trigger condition say the same thing in two places on purpose:
+whichever arm a reviewer checks, the answer is the same. **A deleted entry is
+therefore never findable by my-search** once its delete commits.
 
 ### Settled and ratified: my-search **does** show disabled notes
 
@@ -942,7 +986,7 @@ is not a path to the assistant.
 ## Embedding lifecycle
 
 **Realizes:** FEAT-004, FEAT-005, FEAT-009, FEAT-012, FEAT-014, FEAT-015,
-UC-013, UC-016, UC-044, UC-078
+UC-013, UC-016, UC-044, UC-078, US-149
 
 **The designated embedding model** (UC-013) is the single source of vectors. Its
 dimension is recorded on the `models` row and is what the `vec0` tables are
@@ -964,8 +1008,10 @@ write that made them stale:
 | a settled message's text edited (UC-078, US-110) | the session's `session_vec` row |
 | re-open (R11) | the session's `session_vec` row |
 | **a partner block filed** (US-121) | the session's `session_vec` row — it is born settled, so it changes the record (degraded path) |
-| a current-zone message written or edited | **nothing** — the zone is not record (US-115) |
+| **a settled entry deleted** (US-149), with its buried group | the session's `session_vec` row — the record lost an entry (degraded path); its `message_fts` rows go by the delete trigger |
+| a current-zone message written, edited or deleted | **nothing** — the zone is not record (US-115) |
 | **character or setup created**, or a **name-only** edit | **nothing** — no session text changed, so no model is needed |
+| **a session renamed** | **nothing** — `sessions.name` is not part of `session_vec`'s text and has no FTS table; the name arm reads the column live |
 | **a character's persona edited (UC-018, US-021)** | **every `session_vec` row under that character** — the fan-out (US-138) |
 | **a setup's text edited (FEAT-007)** | **every `session_vec` row for sessions using that setup** (US-138) |
 
@@ -1008,11 +1054,13 @@ schedule" cannot satisfy an acceptance criterion phrased as *when the assistant
 later calls `session_search`* — any gap is a window in which the criterion is
 false.
 
-So `session_vec` is refreshed **in the same transaction** as each of the three
+So `session_vec` is refreshed **in the same transaction** as each of the four
 writes that change what the record says: **settle, a settled-message text edit,
-and re-open**. Those are the only writes that move a row into, out of, or within
-`settled_entries`, so nothing else needs a refresh — which is why the current
-zone contributes none.
+re-open, and the delete of a settled entry** (fast/014). Those are the only
+writes that move a row into, out of, or within `settled_entries` — beside the
+partner filing, which is born settled and refreshes too (the table above) — so
+nothing else needs a refresh, which is why the current zone contributes none: a
+current-zone delete refreshes nothing.
 
 `_TBD: the COST of that policy is not measured, and it no longer has an owner.
 session_vec embeds a session-level text composed from settled_entries, so every
@@ -1045,7 +1093,7 @@ What differs is what the **write** paths do with that error:
 |---|---|
 | memo create / body edit | **fails the transaction** — nothing is stored |
 | **character persona edit, setup text edit** | **fails the transaction** — nothing is stored |
-| message edit, settle, re-open, **partner filing** (`session_vec`) | **succeeds, degraded** — the row is stored and the response says search coverage is incomplete (US-112) |
+| message edit, settle, re-open, **partner filing**, **settled-entry delete** (`session_vec`) | **succeeds, degraded** — the write commits and the response says search coverage is incomplete (US-112) |
 
 **The caught set on the degraded path is `no_embedding_model` — including the
 `dimension_mismatch` form — and `llm_unreachable`** (024 U3, D8).
@@ -1079,7 +1127,7 @@ the message rule. The line the asymmetry has always been drawn along is not
 
 | | Authoring act | Record-keeping |
 |---|---|---|
-| Writes | memo create/edit, **persona edit, setup edit** | settle, re-open, settled-text edit |
+| Writes | memo create/edit, **persona edit, setup edit** | settle, re-open, settled-text edit, settled-entry delete |
 | On no embedding model | **fails** | **succeeds, degraded** |
 | Why | the roleplayer is composing material *in order for it to be retrieved*; storing it unindexed produces something that silently does nothing | US-112: an instance-level omission must never block the record of what happened in the roleplay |
 
@@ -1193,3 +1241,15 @@ to the administrator with no precondition beyond authentication**
 (`admin-surfaces.md`). An administrator who changes the designation and does not
 rebuild has a working search over a stale index, and the only thing standing
 between that state and a correct one is knowing to press the button.
+
+---
+
+## Decision history
+
+- **2026-11-05 — my-search's session group gains a name arm.** A third `LIKE`
+  match, over `sessions.name`, merged ahead of the session variant's vector hits
+  (deduplicated, still at most 20); fail-whole unchanged; D-05's case caveat
+  extends to it. Accepted limitation: a never-renamed session is not found by its
+  start date, because that label is client-computed and never stored. Hydration
+  carries `name`; results show the session label rule. `session_fts` stays
+  uncreated. Detail in `DEC-arch-session-names-5`.

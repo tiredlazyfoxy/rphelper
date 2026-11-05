@@ -137,3 +137,12 @@ class ReopenResponse(BaseModel):
     reopened_id: SnowflakeOut
     restored_ids: list[SnowflakeOut]
     search_coverage_incomplete: bool
+
+
+class DeleteMessageResponse(BaseModel):
+    """What `DELETE /api/messages/{message_id}` removed (fast `014`): the deleted ids — the
+    target first, then its buried group ascending, every one a decimal string — plus 024's
+    coverage flag (false for a zone delete). Exactly these two keys."""
+
+    deleted_ids: list[SnowflakeOut]
+    search_coverage_incomplete: bool
