@@ -6,8 +6,8 @@ order** — `characters`, `setups`, `sessions`, `entries`, `memos` — each a li
 declaration order and US-075.AC-1 is read off the body (step `003` DoD-2).
 
 One model per kind, each holding **exactly** the contract's keys and nothing convenient on top
-(DoD-3): a note is a snippet plus a level and never a title (US-119), a session has no title column
-at all, and no model here carries `title`, `body`, `is_forced`, a score, a `user_id` or a paging
+(DoD-3): a note is a snippet plus a level and never a title (US-119), a session's only label column is
+its nullable `name`, and no model here carries `title`, `body`, `is_forced`, a score, a `user_id` or a paging
 cursor. Every id field uses the outbound snowflake alias, so each id leaves as a **decimal string**
 (`backend-structure.md` § The JSON id boundary); the nullable ones are spelled
 `SnowflakeOut | None`. Timestamps pass through as the fixed-width UTC text the row stores, exactly
@@ -56,30 +56,36 @@ class SetupHitResponse(BaseModel):
 
 
 class SessionHitResponse(BaseModel):
-    """One matched session: exactly `id`, `character_name`, `setup_name`, `created_at`, `archived`.
+    """One matched session: exactly `id`, `character_name`, `setup_name`, `name`, `created_at`,
+    `archived`.
 
-    `setup_name` is `null` for a session started without a setup; `created_at` is the stored text.
+    `setup_name` is `null` for a session started without a setup; `name` is the stored session name,
+    `null` when never renamed (DEC-034-8) — the client applies its label rule; `created_at` is the
+    stored text.
     """
 
     id: SnowflakeOut
     character_name: str
     setup_name: str | None
+    name: str | None
     created_at: str
     archived: bool
 
 
 class EntryHitResponse(BaseModel):
     """One matched settled entry: exactly `id`, `session_id`, `snippet`, `character_name`,
-    `session_created_at`.
+    `session_name`, `session_created_at`.
 
-    `id` is the **message** id — the `entry=` landing param's value (D8) — and
-    `session_created_at` is the owning session's `created_at`, not the message's own timestamp.
+    `id` is the **message** id — the `entry=` landing param's value (D8) — `session_name` is the
+    owning session's stored name, `null` when never renamed (DEC-034-8), and `session_created_at` is
+    the owning session's `created_at`, not the message's own timestamp.
     """
 
     id: SnowflakeOut
     session_id: SnowflakeOut
     snippet: str
     character_name: str
+    session_name: str | None
     session_created_at: str
 
 

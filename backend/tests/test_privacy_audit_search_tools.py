@@ -9,6 +9,11 @@ support-module record in ``status.md`` supplies only *how to call*.
 
 Requirement covered by every item: **US-085.AC-1**.
 
+Feature 034, step 003 (``docs/plans/034.session-names/003.my-search-names.md``) adds
+``sessions.name`` to DoD-1's searchable targets and one test of its own for its DoD-10
+(the ``session_search`` tool never outputs a session's name, DEC-034-5) and DoD-11 (one
+user's session name never reaches another user's ``/api/search``, DEC-034-4).
+
 This is an **audit** module: it re-asserts in one place that my-search, the hybrid
 search port, the three assistant tools, context assembly and the vector/FTS write
 paths never return, pass on or touch another user's material, even when the model or
@@ -52,7 +57,7 @@ Mechanics
   installs all four model seams itself, atomically; **this module never sets one of
   those override keys** and never makes a network request (the web search is
   captured at the recorder's ``httpx.MockTransport``).
-* Five test functions, each building the world exactly once, because the world is
+* Six test functions (five for 032/004, one for 034/003), each building the world exactly once, because the world is
   expensive (``conftest.py``'s ``db_settings`` is function-scoped). Per-clause
   granularity lives in the failure messages — each names the service, the variant
   and the ids — not in the number of world builds.
@@ -417,8 +422,9 @@ def _searchable_b_targets(world: AuditWorld) -> list[tuple[str, str, str, str]]:
     """`(label, B's sentinel, the group it belongs to, the id of the item carrying it)`.
 
     Only sentinels my-search can actually reach are listed, because DoD-1's positive
-    control has to hold for each one: the two LIKE corpora (`characters` by name and
-    sheet, `setups` by name and description), the FTS corpus over **settled, unburied**
+    control has to hold for each one: the three LIKE corpora (`characters` by name and
+    sheet, `setups` by name and description, `sessions` by stored name — 034/003), the FTS
+    corpus over **settled, unburied**
     record rows (`entries`), and the memo corpus (every reach — my-search legitimately
     shows the owner's disabled memos, R3). The zone, buried, assistant and tool-payload
     sentinels are deliberately absent: `message_fts` does not index those rows, so no
@@ -434,6 +440,8 @@ def _searchable_b_targets(world: AuditWorld) -> list[tuple[str, str, str, str]]:
         ("characters.sheet", sentinel("characters", "sheet"), "characters", b.character_id),
         ("setups.name", sentinel("setups", "name"), "setups", b.setup_id),
         ("setups.description", sentinel("setups", "description"), "setups", b.setup_id),
+        # 034/003 DoD-11: my-search's third LIKE corpus, the stored session name.
+        ("sessions.name", sentinel("sessions", "name"), "sessions", b.session_with_setup_id),
         ("messages.text[partner]", sentinel("messages", "text[partner]"), "entries", b.messages.partner_id),
         ("messages.text[turn]", sentinel("messages", "text[turn]"), "entries", b.messages.turn_head_id),
         ("messages.text[decision]", sentinel("messages", "text[decision]"), "entries", b.messages.decision_id),
@@ -477,7 +485,8 @@ def test_my_search_reaches_no_other_users_material__S032_004_DoD1(world: AuditWo
     """
     problems: list[str] = []
     targets = _searchable_b_targets(world)
-    assert len(targets) == 21, f"the searchable-target list changed shape: {len(targets)}"
+    # 22 since 034/003 added `sessions.name`.
+    assert len(targets) == 22, f"the searchable-target list changed shape: {len(targets)}"
 
     for label, sentinel, group, expected_id in targets:
         as_a = _ok(world.clients.a.get("/api/search", params={"q": sentinel}), 200)
@@ -1090,6 +1099,85 @@ def test_refresh_session_vectors_keeps_a_foreign_sessions_vector__S032_004_DoD9(
     )
 
 
+# --- feature 034, step 003: session names (DoD-10, DoD-11) ------------------------------
+
+
+def _session_name_of(world: AuditWorld, user: AuditUser) -> str:
+    """The stored name of a user's renamed session, read back through the owner's own route."""
+    content = world.content_of(user)
+    client = world.clients.a if user == "A" else world.clients.b
+    body = _ok(client.get(f"/api/sessions/{content.session_with_setup_id}"), 200)
+    name = body["name"]
+    assert isinstance(name, str) and name, f"{user}'s seeded session carries no name: {body}"
+    return name
+
+
+def test_session_names_stay_with_their_owner_and_out_of_the_session_search_tool__S034_003_DoD10_DoD11(
+    world: AuditWorld,
+) -> None:
+    """Covers 034/003 DoD-10 (DEC-034-5) and DoD-11 (DEC-034-4).
+
+    DoD-11 — both users' renamed sessions share the world's name stem around their own
+    sentinel, so a search for the stem matches **both** names. A's `/api/search` for it
+    returns A's renamed session carrying A's name and contains no B sentinel and no B id; B's
+    returns B's and contains nothing of A's. The per-sentinel half (A searching B's exact
+    session-name sentinel) is the `sessions.name` target of DoD-1's sweep above.
+
+    DoD-10 — the assistant's `session_search` tool, run in B's other session, returns B's
+    renamed session (its settled partner text is in the output: the positive control), and the
+    output carries neither the session-name sentinel nor the full stored name.
+    """
+    a, b = world.a, world.b
+    a_sentinel = world.sentinels.get(user="A", table="sessions", field="name")
+    b_sentinel = world.sentinels.get(user="B", table="sessions", field="name")
+    a_name = _session_name_of(world, "A")
+    b_name = _session_name_of(world, "B")
+    assert a_sentinel in a_name and b_sentinel in b_name
+    stem = b_name.replace(b_sentinel, "").strip()
+    assert stem and stem in a_name, f"the two seeded names share no stem: {a_name!r} / {b_name!r}"
+
+    # --- DoD-11 ------------------------------------------------------------------------
+    problems: list[str] = []
+    for viewer, own, other_user, own_name, other_sentinel, other_content in (
+        ("A", a, "B", a_name, b_sentinel, b),
+        ("B", b, "A", b_name, a_sentinel, a),
+    ):
+        client = world.clients.a if viewer == "A" else world.clients.b
+        body = _ok(client.get("/api/search", params={"q": stem}), 200)
+        rows = {str(row["id"]): row for row in body["sessions"]}
+        if own.session_with_setup_id not in rows or rows[own.session_with_setup_id]["name"] != own_name:
+            problems.append(
+                f"positive control failed: {viewer}'s search for the shared stem did not return "
+                f"{viewer}'s renamed session with its name; sessions held {body['sessions']}"
+            )
+        if other_sentinel in rendered_text(body):
+            problems.append(f"{viewer}'s search for the shared stem carries {other_user}'s session name")
+        try:
+            assert_no_sentinel_of_user(body, registry=world.sentinels, user=other_user)
+            assert_no_identifier_of(body, content=other_content)
+        except AssertionError as error:
+            problems.append(f"{viewer}'s search for the shared stem: {error}")
+    assert not problems, "a session name crossed the owner boundary:\n" + "\n".join(problems)
+
+    # --- DoD-10 ------------------------------------------------------------------------
+    b_entry_sentinel = world.sentinels.get(user="B", table="messages", field="text[partner]")
+    with world.engine.connect() as connection:
+        scope_b_other = build_tool_scope(connection, int(b.identity.user_id), int(b.session_without_setup_id))
+    outcome = _run_tool(
+        world.fakes.tool_registry[SESSION_SEARCH_NAME],
+        scope_b_other,
+        world.engine,
+        {"query": b_entry_sentinel},
+    )
+    assert b_entry_sentinel in outcome.content, (
+        "positive control failed: the session_search tool did not return B's renamed session, so the "
+        f"name's absence would be vacuous; content was {outcome.content!r}"
+    )
+    rendered = rendered_text({"content": outcome.content, "summary": outcome.summary})
+    assert b_sentinel not in rendered, "the session_search tool output carries the session's name"
+    assert b_name not in rendered, "the session_search tool output carries the session's name"
+
+
 # --- coverage map ----------------------------------------------------------------------
 #
 # DoD-1  -> test_my_search_reaches_no_other_users_material__S032_004_DoD1
@@ -1105,3 +1193,8 @@ def test_refresh_session_vectors_keeps_a_foreign_sessions_vector__S032_004_DoD9(
 # DoD-10 -> test_index_writes_never_touch_another_users_rows__S032_004_DoD9_DoD10
 #
 # No `[manual/live]` item in this step: every DoD item is covered by a test above.
+#
+# 034/003 DoD-10, DoD-11 -> test_session_names_stay_with_their_owner_and_out_of_the_session_search_tool
+#                           __S034_003_DoD10_DoD11
+# 034/003 DoD-11         -> also the `sessions.name` target of
+#                           test_my_search_reaches_no_other_users_material__S032_004_DoD1

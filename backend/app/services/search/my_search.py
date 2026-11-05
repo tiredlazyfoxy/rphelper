@@ -28,6 +28,15 @@ Step `002` extends this same module with `SessionHit`, `EntryHit`, `MemoHit`,
 `MySearchResults`, the three hydration reads and `run_my_search`, and reuses the cap and
 `_reading` from here.
 
+Feature `034`, step `003` (US-152; DEC-arch-session-names-5, DEC-034-8) adds a **third** `LIKE`
+match outside the port, `search_session_names`, over `sessions.name`: the same escaped,
+case-folded, non-tokenised substring match as the two above, for the same reason (one short
+owner-entered label per row; no FTS table over it). Its ids go ahead of the port's session hits
+through the pure `merge_session_hits`, and the session and entry hydrations return the stored
+session `name` so the client can label the rows. Neither the query nor a name is logged.
+Accepted limitation: a session never renamed has a NULL `name` and is not matched by this arm —
+its client-computed date label is not stored, so typing that date does not find it here.
+
 Service layer only: no `fastapi`, no `starlette`, no `sqlite_vec` and nothing else HTTP-shaped
 — the search package's own import scans assert it. Reads only; nothing here writes a row.
 """
@@ -229,9 +238,11 @@ def search_setups(
 class SessionHit:
     """One matched session, as my-search's session group holds it.
 
-    A session has no title column: it is labelled by its character, its setup and when it started
-    (`002.context.md`), so the label travels with the hit and the group needs no second read. Field
-    order is the wire contract's `{"id", "character_name", "setup_name", "created_at", "archived"}`.
+    A session is labelled by its stored `name` when it has one, else by when it started (client label
+    rule, DEC-arch-session-names-1), with its character and setup, so the label travels with the hit
+    and the group needs no second read. Field
+    order is the wire contract's `{"id", "character_name", "setup_name", "name", "created_at",
+    "archived"}` (034 DEC-034-8 added `name`).
     """
 
     id: int
@@ -240,6 +251,9 @@ class SessionHit:
     """The owning character's name, joined in by the hydration read (D4)."""
     setup_name: str | None
     """The session's setup's name, or `None` when the session has no setup (D4)."""
+    name: str | None
+    """The session's stored `sessions.name`, or `None` when it was never renamed (DEC-034-8). The
+    client applies its label rule; the server never computes a default label."""
     created_at: str
     """When the session was created, the stored fixed-width UTC text exactly as `sessions` holds it —
     no parsing and no reformatting here; the screen formats it."""
@@ -255,7 +269,8 @@ class EntryHit:
     The row reads as a fragment of a session, so the session's label fields travel with it and the
     link lands on the session with the entry anchored (U4, D8). The text comes from the port's
     snippet and is never re-read here, so the whole entry body never leaves the service. Field order
-    is the wire contract's `{"id", "session_id", "snippet", "character_name", "session_created_at"}`.
+    is the wire contract's `{"id", "session_id", "snippet", "character_name", "session_name",
+    "session_created_at"}` (034 DEC-034-8 added `session_name`).
     """
 
     id: int
@@ -267,6 +282,8 @@ class EntryHit:
     text, and never markdown-rendered downstream (D7)."""
     character_name: str
     """The owning session's character's name, joined in by the hydration read (D4)."""
+    session_name: str | None
+    """The owning **session's** stored `name`, or `None` when it was never renamed (DEC-034-8)."""
     session_created_at: str
     """The owning **session's** `created_at`, the stored fixed-width UTC text as held — not the
     message's own timestamp, which my-search never shows."""
@@ -320,38 +337,106 @@ class MySearchResults:
     setups: list[SetupHit]
     """The matched setups, by `name` then `id` ascending (D2)."""
     sessions: list[SessionHit]
-    """The matched sessions, in the port's own order (D2)."""
+    """The matched sessions: name-arm hits first by `name` then `id`, then the port's hits not already
+    matched, in the port's order, capped at the per-kind limit (D2, DEC-arch-session-names-5)."""
     entries: list[EntryHit]
     """The matched settled entries, in the port's own order (D2)."""
     memos: list[MemoHit]
     """The matched notes, in the port's own order (D2), whatever their state (U2)."""
 
 
+def search_session_names(
+    connection: Connection,
+    user_id: int,
+    query_text: str,
+    limit: int = MY_SEARCH_PER_KIND_LIMIT,
+) -> list[int]:
+    """The ids of the owner's sessions whose stored `name` contains `query_text`, in name order.
+
+    The session name arm (034 step `003`, DEC-arch-session-names-5, DEC-034-8), the shape of
+    `search_characters` / `search_setups`: `query_text` is stripped and matched as **one** substring;
+    a blank or whitespace-only query answers `[]` and **issues no SQL at all**. The match goes through
+    `_folded_contains` — case-insensitive in any script, `%`, `_` and the escape character matched
+    literally. A session whose `name` is NULL (never renamed) is never matched, so its client-computed
+    date label cannot be found this way (accepted limitation). Archived sessions are included (U3).
+    `user_id` is in the `WHERE` clause, so another owner's session is absent (R5).
+
+    Ordered by `name` then `id` ascending and cut to `limit` ids. Reads only, and leaves no
+    transaction open on return or on raise (D6). Logs neither the query nor any name.
+    """
+    needle = query_text.strip()
+    if not needle:
+        return []
+    # NULL names drop out of the `LIKE` on their own (NULL never matches), but the explicit term
+    # states the accepted limitation: an unnamed session is not found through this arm (DEC-5).
+    # No `archived_at` term: archived sessions are part of the owner's own search (U3).
+    statement = (
+        select(sessions.c.id)
+        .where(
+            sessions.c.user_id == user_id,
+            sessions.c.name.is_not(None),
+            _folded_contains(sessions.c.name, needle),
+        )
+        .order_by(sessions.c.name.asc(), sessions.c.id.asc())
+        .limit(limit)
+    )
+    with _reading(connection):
+        rows = connection.execute(statement).all()
+    return [int(row.id) for row in rows]
+
+
+def merge_session_hits(
+    name_ids: Sequence[int],
+    vector_hits: Sequence[SearchHit],
+    limit: int,
+) -> list[int]:
+    """The session group's id order: name hits first, then the unmatched vector hits, capped.
+
+    Pure (DEC-arch-session-names-5, DEC-034-8). `name_ids` is `search_session_names`' result, in its
+    own order; `vector_hits` is the port's session result, in the port's order. The answer is every
+    id of `name_ids` in order, followed by the ids of `vector_hits` not already present, in the port's
+    order — a session matched by both appears **once**, in its name position — and is never longer
+    than `limit`. No I/O, no exceptions of its own.
+    """
+    merged: list[int] = []
+    seen: set[int] = set()
+    # Name ids lead; a vector hit already matched by name keeps its name position (DEC-5).
+    for session_id in [*name_ids, *(hit.id for hit in vector_hits)]:
+        if len(merged) >= limit:
+            break
+        if session_id in seen:
+            continue
+        seen.add(session_id)
+        merged.append(session_id)
+    return merged
+
+
 def _hydrate_sessions(
     connection: Connection,
     user_id: int,
-    hits: Sequence[SearchHit],
+    session_ids: Sequence[int],
 ) -> list[SessionHit]:
-    """The owner's sessions among `hits`, labelled, in the hits' own order (D4).
+    """The owner's sessions among `session_ids`, labelled, in the ids' own order (D4).
 
-    `hits` is the port's session result, best first. One owner-scoped read labels them all:
+    `session_ids` is the merged session order (`merge_session_hits`), best first. One owner-scoped
+    read labels them all, `sessions.name` included (DEC-034-8):
     `sessions` inner-joined to `characters` for the character name and LEFT OUTER joined to `setups`
     for the setup name, with `user_id = :user_id` on **every** base table the statement names,
     inside the join conditions included, so another owner's character or setup can never label a
     session (R5). `archived` is the session's own `archived_at` reduced to a boolean (U3).
 
-    Ranking lives in `hits` and nowhere else: the result is one `SessionHit` per hit whose id the read
-    returned, in the sequence's own order — never re-sorted, never longer than `hits`. A hit whose id
-    the read does not return (another owner's, or a row gone between the port call and this read) is
-    **dropped silently**, not raised (D4). An empty `hits` answers `[]` and executes no statement at
-    all. A session hit carries no snippet, so no text is read here.
+    Ranking lives in `session_ids` and nowhere else: the result is one `SessionHit` per id the read
+    returned, in the sequence's own order — never re-sorted, never longer than `session_ids`. An id
+    the read does not return (another owner's, or a row gone between the arm and this read) is
+    **dropped silently**, not raised (D4). An empty `session_ids` answers `[]` and executes no
+    statement at all. A session hit carries no snippet, so no text is read here.
 
     Reads only, and leaves no transaction open on return or on raise (D6).
     """
-    # An empty port result executes no statement at all.
-    if not hits:
+    # An empty merged order executes no statement at all.
+    if not session_ids:
         return []
-    wanted = [hit.id for hit in hits]
+    wanted = list(session_ids)
     character_join = and_(characters.c.id == sessions.c.character_id, characters.c.user_id == user_id)
     # `sessions.py`'s established label join: a NULL `setup_id` matches no `setups` row, which is
     # exactly "joined only when the session has one", and the owner sits in the condition too (R5).
@@ -361,6 +446,7 @@ def _hydrate_sessions(
             sessions.c.id,
             characters.c.name.label("character_name"),
             setups.c.name.label("setup_name"),
+            sessions.c.name,
             sessions.c.created_at,
             sessions.c.archived_at,
         )
@@ -370,18 +456,20 @@ def _hydrate_sessions(
     with _reading(connection):
         labelled = {int(row.id): row for row in connection.execute(statement).all()}
     group: list[SessionHit] = []
-    # The hits' own order is the result's order; ranking lives in `hits` and is never recomputed.
-    for hit in hits:
-        row = labelled.get(hit.id)
+    # The ids' own order is the result's order; ranking lives in `session_ids` and is never recomputed.
+    for session_id in session_ids:
+        row = labelled.get(session_id)
         # Another owner's id, or a row gone since the port call: dropped silently, never raised (D4).
         if row is None:
             continue
         raw_setup_name = row.setup_name
+        raw_name = row.name
         group.append(
             SessionHit(
-                id=hit.id,
+                id=session_id,
                 character_name=str(row.character_name),
                 setup_name=None if raw_setup_name is None else str(raw_setup_name),
+                name=None if raw_name is None else str(raw_name),
                 created_at=str(row.created_at),
                 archived=row.archived_at is not None,
             )
@@ -400,8 +488,9 @@ def _hydrate_entries(
     that travel straight through — the snippet is never recomputed and the entry's body is never
     read. One owner-scoped read supplies the rest: the **`settled_entries`** selectable (used as a
     subquery — never raw `messages`, so a current-zone row and a buried row are excluded
-    structurally, R11) joined to `sessions` and on to `characters`, for the character name and the
-    session's `created_at`, with `user_id = :user_id` on every base relation the statement names (R5).
+    structurally, R11) joined to `sessions` and on to `characters`, for the character name, the
+    session's `name` (DEC-034-8) and the session's `created_at`, with `user_id = :user_id` on every
+    base relation the statement names (R5).
 
     Same order and same dropping rule as `_hydrate_sessions`: the hits' order is kept, an id the read
     does not return is dropped silently, and an empty `hits` executes no statement. Reads only, and
@@ -421,6 +510,7 @@ def _hydrate_entries(
             entries.c.id,
             entries.c.session_id,
             characters.c.name.label("character_name"),
+            sessions.c.name.label("session_name"),
             sessions.c.created_at.label("session_created_at"),
         )
         .select_from(entries.join(sessions, session_join).join(characters, character_join))
@@ -440,6 +530,7 @@ def _hydrate_entries(
                 # The port's snippet travels through unchanged; the entry's body is never read here.
                 snippet=hit.snippet or "",
                 character_name=str(row.character_name),
+                session_name=None if row.session_name is None else str(row.session_name),
                 session_created_at=str(row.session_created_at),
             )
         )
@@ -544,8 +635,10 @@ def run_my_search(
     its **entry** scope, each built from `user_id` alone with **no extra predicate** (passing one is a
     defect: neither a note's state nor an archive flag may narrow an owner's own search — U2, U3,
     US-137.AC-1), each given `MY_SEARCH_PER_KIND_LIMIT` as `limit` and both keyword arguments; then
-    `search_characters` and `search_setups`; then the three hydration reads; and only then the
-    result. The two model-opening scopes go first, so a missing or unreachable model costs no other
+    `search_characters`, `search_setups` and `search_session_names` (034 step `003`); then
+    `merge_session_hits` over the name ids and the port's session hits; then the three hydration reads
+    (the session read over the merged order); and only then the result. The two model-opening scopes
+    go first, so a missing or unreachable model costs no other
     work. The query is therefore embedded **twice** per search, once per model-opening scope, because
     the port takes text rather than a vector (D5, a recorded cost).
 
@@ -554,7 +647,7 @@ def run_my_search(
     `secret_ref_missing` error, anything else — propagates **unchanged** to the single `DomainError`
     handler. No group is answered without the others, there is no lexical-only degrade, and no
     half-built `MySearchResults` is ever returned: with no usable embedding model my-search answers
-    nothing, not even a character-name match.
+    nothing, not even a character-name or session-name match.
 
     Reads only, writes nothing, and leaves the connection with no transaction open on the normal
     return **and** on the raise (D6) — 029's own guarantee to the route, independent of the port's.
@@ -592,10 +685,14 @@ def run_my_search(
         client_factory=client_factory,
         timeout_seconds=timeout_seconds,
     )
-    # Then this module's own two corpora (U2), and only then one hydration read per ported kind (D4).
+    # Then this module's own three `LIKE` corpora (U2; the session name arm, 034 step 003), and only
+    # then one hydration read per ported kind (D4). The name arm runs after the vector session arm,
+    # so a vector-arm failure still fails the whole search before any name is read (U1).
     character_group = search_characters(connection, user_id, query_text, MY_SEARCH_PER_KIND_LIMIT)
     setup_group = search_setups(connection, user_id, query_text, MY_SEARCH_PER_KIND_LIMIT)
-    session_group = _hydrate_sessions(connection, user_id, session_hits)
+    name_ids = search_session_names(connection, user_id, query_text, MY_SEARCH_PER_KIND_LIMIT)
+    session_order = merge_session_hits(name_ids, session_hits, MY_SEARCH_PER_KIND_LIMIT)
+    session_group = _hydrate_sessions(connection, user_id, session_order)
     entry_group = _hydrate_entries(connection, user_id, entry_hits)
     memo_group = _hydrate_memos(connection, user_id, memo_hits)
     # Built only once every arm has succeeded: anything that raised propagated unchanged instead,

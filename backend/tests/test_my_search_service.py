@@ -14,8 +14,8 @@ Bindings come from `## Skeleton` → "Step 002 — frozen interface (2026-10-05)
 (and "Step 001" for the cap):
 
     MY_SEARCH_PER_KIND_LIMIT: Final[int] = 20
-    SessionHit(id, character_name, setup_name: str | None, created_at: str, archived)
-    EntryHit(id, session_id, snippet, character_name, session_created_at: str)
+    SessionHit(id, character_name, setup_name: str | None, name: str | None, created_at: str, archived)
+    EntryHit(id, session_id, snippet, character_name, session_name: str | None, session_created_at: str)
     MemoHit(id, scope: MemoScope, scope_id: int | None, character_id: int | None, snippet, is_enabled)
     MySearchResults(characters, setups, sessions, entries, memos)
     run_my_search(connection, user_id, query_text, *, client_factory=LlmClient,
@@ -53,6 +53,22 @@ Nothing here asks the code under test what the answer is.
 
 Each test name ends `__S029_002_DoD<n>` with the DoD item it covers.
 
+Feature 034, step 003 (session names in my-search)
+--------------------------------------------------
+The later block of this module covers `docs/plans/034.session-names/003.my-search-names.md`
+DoD-1..DoD-9 (DEC-034-8, DEC-arch-session-names-5), each test ending `__S034_003_DoD<n>`.
+The two shapes above carry `SessionHit.name` and `EntryHit.session_name` (step 003's frozen
+record), and the step adds two bindings:
+
+    search_session_names(connection, user_id, query_text, limit=MY_SEARCH_PER_KIND_LIMIT) -> list[int]
+    merge_session_hits(name_ids, vector_hits: Sequence[SearchHit], limit) -> list[int]
+
+A session reachable **only** through the name arm is seeded with no `session_vec` row: the
+session corpus is vector-only, so such a session in the sessions group can only have come from
+the name match. Where the vector arm's order matters, the expectation is the port's own answer
+to the session-scope call (as DoD-8 above does for memos) — 025 is delivered code, not the code
+under test.
+
 Mechanics (`context.md` "Test conventions"): a real SQLite file per test through the shared
 `db_engine` fixture (`tests/conftest.py` and `tests/llm_fakes.py` are untouched), raw inserts
 only, ids above 2^60, two users A and B, and every other helper file-local.
@@ -61,12 +77,13 @@ only, ids above 2^60, two users A and B, and every other helper file-local.
 import ast
 import dataclasses
 import inspect
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import Connection, Engine, Table, select
+from sqlalchemy import Connection, Engine, Table, event, select
 
 from app.db import schema
 from app.db.search_tables import MEMO_VEC_TABLE, SESSION_VEC_TABLE, ensure_fts_tables, ensure_vector_tables
@@ -81,9 +98,11 @@ from app.services.search.my_search import (
     MemoHit,
     MySearchResults,
     SessionHit,
+    merge_session_hits,
     run_my_search,
+    search_session_names,
 )
-from app.services.search.ports import MemoSearchScope
+from app.services.search.ports import MemoSearchScope, SearchHit, SessionSearchScope
 from tests.llm_fakes import FakeClientFactory, embedding_vector, fake_factory, unreachable_factory
 
 #: The seeded instant, in the project's fixed-width UTC text form.
@@ -273,8 +292,9 @@ def _insert_session(
     setup_id: int | None = None,
     archived_at: str | None = None,
     created_at: str = TIMESTAMP,
+    name: str | None = None,
 ) -> None:
-    """Raw-insert one `sessions` row (`002.context.md`: no title, name or partner column)."""
+    """Raw-insert one `sessions` row; `name` stays NULL ("never renamed") unless given (034)."""
     with engine.begin() as connection:
         connection.execute(
             schema.sessions.insert().values(
@@ -286,6 +306,7 @@ def _insert_session(
                 archived_at=archived_at,
                 created_at=created_at,
                 updated_at=TIMESTAMP,
+                name=name,
             )
         )
 
@@ -722,10 +743,12 @@ def test_a_session_hit_carries_its_character_setup_start_and_archive_state__S029
     results = _run(engine)
 
     by_id = {hit.id: hit for hit in results.sessions}
+    # 034/003 DoD-8: none of these three was ever renamed, so each carries `name` None.
     assert by_id[SESSION_WITH_SETUP] == SessionHit(
         id=SESSION_WITH_SETUP,
         character_name=CHARACTER_NAME,
         setup_name=SETUP_NAME,
+        name=None,
         created_at=CREATED_WITH_SETUP,
         archived=False,
     )
@@ -733,6 +756,7 @@ def test_a_session_hit_carries_its_character_setup_start_and_archive_state__S029
         id=SESSION_NO_SETUP,
         character_name=CHARACTER_NAME,
         setup_name=None,
+        name=None,
         created_at=CREATED_NO_SETUP,
         archived=False,
     )
@@ -740,6 +764,7 @@ def test_a_session_hit_carries_its_character_setup_start_and_archive_state__S029
         id=SESSION_ARCHIVED,
         character_name=CHARACTER_NAME,
         setup_name=SETUP_NAME,
+        name=None,
         created_at=CREATED_ARCHIVED,
         archived=True,
     )
@@ -762,6 +787,7 @@ def test_a_settled_entry_is_returned_with_its_session_and_character__S029_002_Do
     assert TOKEN in hit.snippet.lower()
     assert hit.character_name == CHARACTER_NAME
     assert hit.session_created_at == CREATED_WITH_SETUP
+    assert hit.session_name is None  # 034/003 DoD-8: the session was never renamed
 
 
 def test_a_zone_row_and_a_buried_row_are_outside_the_entry_corpus__S029_002_DoD6(engine: Engine) -> None:
@@ -779,13 +805,15 @@ def test_a_zone_row_and_a_buried_row_are_outside_the_entry_corpus__S029_002_DoD6
     assert BURIED_MARKER not in snippets
 
 
-def test_an_entry_hit_carries_the_frozen_five_fields__S029_002_DoD6() -> None:
-    """The hydrated entry value is exactly the wire contract's five keys, in that order."""
+def test_an_entry_hit_carries_the_frozen_six_fields__S029_002_DoD6__S034_003_DoD8() -> None:
+    """The hydrated entry value is exactly the wire contract's keys, in that order; 034/003
+    (DEC-034-8) adds `session_name` next to `session_created_at`."""
     assert [field.name for field in dataclasses.fields(EntryHit)] == [
         "id",
         "session_id",
         "snippet",
         "character_name",
+        "session_name",
         "session_created_at",
     ]
 
@@ -1073,3 +1101,579 @@ def test_the_my_search_module_never_names_the_forced_flag__S029_002_DoD12() -> N
     column name appears nowhere in this module — not in code, not in a comment, not in a
     docstring. A source-text guard, the house form at `tests/test_memos_service.py`."""
     assert "is_forced" not in _module_source()
+
+
+# =============================================================================================
+# Feature 034, step 003 — the session name arm (DoD-1..DoD-9; DEC-034-8,
+# DEC-arch-session-names-5). Expected values come from the step file's Interface intent and
+# Definition of done; nothing below is read off the implementation.
+# =============================================================================================
+
+#: Ids of this block's sessions, in a range of their own (above 2^60, clear of the 029 ids).
+NAMED_BASE = 1_291_000_000_000_001_000
+NAMED_ONE = NAMED_BASE + 1
+NAMED_TWO = NAMED_BASE + 2
+NAMED_OTHER = NAMED_BASE + 3
+NAMED_B = NAMED_BASE + 4
+NAMED_ARCHIVED = NAMED_BASE + 5
+UNNAMED_DATED = NAMED_BASE + 6
+DATE_NAMED = NAMED_BASE + 7
+
+#: DoD-6's name-order sessions. Ids are deliberately out of step with the name order, so an
+#: id sort cannot pass for a name sort: c < b(low) < a < b(high) by id.
+ORDER_C = NAMED_BASE + 11
+ORDER_B_LOW = NAMED_BASE + 12
+ORDER_A = NAMED_BASE + 13
+ORDER_B_HIGH = NAMED_BASE + 14
+
+#: DoD-4's wildcard sessions.
+WILD_PERCENT = NAMED_BASE + 21
+WILD_PLAIN = NAMED_BASE + 22
+WILD_UNDERSCORE = NAMED_BASE + 23
+WILD_LETTER = NAMED_BASE + 24
+
+#: DoD-6's merge sessions: two name-only, one matched by both arms, three vector-only.
+MERGE_NAMED_EARLY = NAMED_BASE + 32
+MERGE_NAMED_LATE = NAMED_BASE + 31
+MERGE_BOTH = NAMED_BASE + 33
+MERGE_VECTOR_IDS = (NAMED_BASE + 34, NAMED_BASE + 35, NAMED_BASE + 36)
+
+#: DoD-6's cap sessions: many named (offset 100..) and many vector-only (offset 200..).
+CAP_NAMED_BASE = NAMED_BASE + 100
+CAP_VECTOR_BASE = NAMED_BASE + 200
+
+LATIN_NAME = "Lantern Quay"
+CYRILLIC_NAME = "Ночной Порт"
+UNRELATED_NAME = "Something else entirely"
+
+#: The query the merge tests type, and the stem every merge / cap name shares.
+MERGE_QUERY = "lantern quay"
+
+#: A start instant for the named sessions whose hit value is compared field for field.
+CREATED_NAMED = "2026-03-05T00:00:00.000000+00:00"
+
+#: DoD-2: the never-renamed session's start instant, and the date a roleplayer would type.
+UNNAMED_CREATED = "2026-03-14T09:30:00.000000+00:00"
+
+
+def _rename(engine: Engine, session_id: int, name: str | None) -> None:
+    """Write `sessions.name` directly (a stored rename; the route is step 002's concern)."""
+    with engine.begin() as connection:
+        connection.execute(schema.sessions.update().where(schema.sessions.c.id == session_id).values(name=name))
+
+
+def _name_arm(engine: Engine, query_text: str, *, user_id: int = USER_A, limit: int | None = None) -> list[int]:
+    """One call of the name arm on a fresh connection; `limit=None` uses its default."""
+    with engine.connect() as connection:
+        if limit is None:
+            return search_session_names(connection, user_id, query_text)
+        return search_session_names(connection, user_id, query_text, limit)
+
+
+def _session_hit(session_id: int) -> SearchHit:
+    """A vector-arm session hit as the port shapes it: only `id` and the order matter to the merge."""
+    return SearchHit(
+        kind="session",
+        id=session_id,
+        score=0.5,
+        snippet="",
+        memo_scope=None,
+        memo_scope_id=None,
+        session_id=None,
+    )
+
+
+def _port_session_order(engine: Engine, query_text: str) -> list[int]:
+    """The vector arm's own order: the port's answer to my-search's session-scope call.
+
+    025 is delivered code, not the code under test, so this is "the vector hits in port
+    order" (DoD-6) written out, not a value read off 034's implementation.
+    """
+    with engine.connect() as connection:
+        hits = port_search(
+            connection,
+            SessionSearchScope(user_id=USER_A),
+            query_text,
+            MY_SEARCH_PER_KIND_LIMIT,
+            client_factory=fake_factory(DIMENSION),
+        )
+    return [hit.id for hit in hits]
+
+
+def _ready_for_search(engine: Engine) -> None:
+    """The designation and the (empty-until-written) search tables, after the rows."""
+    _seed_designation(engine)
+    _build_search_tables(engine)
+
+
+@contextmanager
+def _statements_on(engine: Engine) -> Iterator[list[str]]:
+    """Collect every SQL statement sent through `engine` while the block runs.
+
+    Attached only after the test's connection is open, so connection set-up never counts:
+    what is recorded is exactly what the call under test issued.
+    """
+    seen: list[str] = []
+
+    def record(
+        conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool
+    ) -> None:
+        seen.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        yield seen
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+
+# --- DoD-1: a stored name is found by any substring, in any case (US-152.AC-1, US-147) ------
+
+
+@pytest.mark.parametrize(
+    ("stored", "query_text"),
+    [
+        (LATIN_NAME, "lantern"),
+        (LATIN_NAME, "QUAY"),
+        (LATIN_NAME, "tern qu"),
+        (LATIN_NAME, "lantern quay"),
+        (CYRILLIC_NAME, "ночной"),
+        (CYRILLIC_NAME, "ПОРТ"),
+        (CYRILLIC_NAME, "ной по"),
+    ],
+    ids=[
+        "latin-lower",
+        "latin-upper",
+        "latin-inner",
+        "latin-whole",
+        "cyrillic-lower",
+        "cyrillic-upper",
+        "cyrillic-inner",
+    ],
+)
+def test_the_name_arm_finds_a_session_by_a_substring_in_any_case__S034_003_DoD1(
+    engine: Engine, stored: str, query_text: str
+) -> None:
+    """DoD-1: a query that is a substring of the stored name — in a different case, Latin and
+    Cyrillic alike — finds that session; a session with an unrelated name is not found."""
+    _seed_characters_and_setups(engine)
+    _insert_session(engine, session_id=NAMED_ONE, name=stored)
+    _insert_session(engine, session_id=NAMED_OTHER, name=UNRELATED_NAME)
+
+    assert _name_arm(engine, query_text) == [NAMED_ONE]
+
+
+def test_my_search_returns_a_session_found_only_by_its_name__S034_003_DoD1(engine: Engine) -> None:
+    """DoD-1: neither session has a vector, so only the name arm can put them in the sessions
+    group — a Latin query in another case finds the Latin name, a Cyrillic one the Cyrillic."""
+    _seed_characters_and_setups(engine)
+    _insert_session(engine, session_id=NAMED_ONE, setup_id=SETUP_A1, name=LATIN_NAME, created_at=CREATED_NAMED)
+    _insert_session(engine, session_id=NAMED_TWO, name=CYRILLIC_NAME, created_at=CREATED_NAMED)
+    _ready_for_search(engine)
+
+    latin = _run(engine, query_text="LANTERN quay")
+    cyrillic = _run(engine, query_text="порт")
+
+    assert _ids(latin.sessions) == [NAMED_ONE]
+    assert latin.sessions[0].name == LATIN_NAME
+    assert _ids(cyrillic.sessions) == [NAMED_TWO]
+    assert cyrillic.sessions[0].name == CYRILLIC_NAME
+
+
+# --- DoD-2: a NULL name is never matched; the start date is not a name ----------------------
+
+
+@pytest.mark.parametrize("query_text", ["2026-03-14", "2026", "03-14"])
+def test_a_never_renamed_session_is_not_found_by_its_start_date__S034_003_DoD2(
+    engine: Engine, query_text: str
+) -> None:
+    """DoD-2 (accepted limitation): the never-renamed session's label is its start date, which
+    is computed by the client and never stored, so typing it does not reach that session. A
+    session whose **stored** name holds the same text is the positive control."""
+    _seed_characters_and_setups(engine)
+    _insert_session(engine, session_id=UNNAMED_DATED, created_at=UNNAMED_CREATED)
+    _insert_session(engine, session_id=DATE_NAMED, name="2026-03-14 rematch")
+
+    assert _name_arm(engine, query_text) == [DATE_NAMED]
+
+
+def test_my_search_does_not_return_a_null_named_session_by_its_date__S034_003_DoD2(engine: Engine) -> None:
+    """DoD-2 through `run_my_search`: neither session has a vector, so the sessions group is
+    exactly what the name arm matched — the stored name, never the NULL one."""
+    _seed_characters_and_setups(engine)
+    _insert_session(engine, session_id=UNNAMED_DATED, created_at=UNNAMED_CREATED)
+    _insert_session(engine, session_id=DATE_NAMED, name="2026-03-14 rematch")
+    _ready_for_search(engine)
+
+    assert _ids(_run(engine, query_text="2026-03-14").sessions) == [DATE_NAMED]
+
+
+# --- DoD-3: another user's matching name is never returned (US-076.AC-1) --------------------
+
+
+def test_another_users_session_with_the_same_name_is_never_matched__S034_003_DoD3(engine: Engine) -> None:
+    """DoD-3: B's session carries A's session's exact name; each owner's name arm finds only
+    their own, so the absence is the owner predicate's work and not a name that missed."""
+    _seed_characters_and_setups(engine)
+    _insert_character(engine, character_id=CHAR_B1, user_id=USER_B, name=CHARACTER_NAME)
+    _insert_session(engine, session_id=NAMED_ONE, name=LATIN_NAME)
+    _insert_session(engine, session_id=NAMED_B, user_id=USER_B, character_id=CHAR_B1, name=LATIN_NAME)
+
+    assert _name_arm(engine, "lantern") == [NAMED_ONE]
+    assert _name_arm(engine, "lantern", user_id=USER_B) == [NAMED_B]
+
+
+def test_my_search_never_returns_another_users_named_session__S034_003_DoD3(engine: Engine) -> None:
+    """DoD-3 through `run_my_search`: A sees A's named session only, B sees B's only."""
+    _seed_characters_and_setups(engine)
+    _insert_character(engine, character_id=CHAR_B1, user_id=USER_B, name=CHARACTER_NAME)
+    _insert_session(engine, session_id=NAMED_ONE, name=LATIN_NAME)
+    _insert_session(engine, session_id=NAMED_B, user_id=USER_B, character_id=CHAR_B1, name=LATIN_NAME)
+    _ready_for_search(engine)
+
+    assert _ids(_run(engine, query_text="lantern").sessions) == [NAMED_ONE]
+    assert _ids(_run(engine, query_text="lantern", user_id=USER_B).sessions) == [NAMED_B]
+
+
+# --- DoD-4: `%` and `_` match literally ----------------------------------------------------
+
+
+def _seed_wildcard_names(engine: Engine) -> None:
+    """Four names built so that a query read as a LIKE pattern would match more than one."""
+    _seed_characters_and_setups(engine)
+    _insert_session(engine, session_id=WILD_PERCENT, name="100% harbour")
+    _insert_session(engine, session_id=WILD_PLAIN, name="100 harbour")
+    _insert_session(engine, session_id=WILD_UNDERSCORE, name="night_watch")
+    _insert_session(engine, session_id=WILD_LETTER, name="nightXwatch")
+
+
+@pytest.mark.parametrize(
+    ("query_text", "expected"),
+    [
+        ("%", [WILD_PERCENT]),
+        ("100%", [WILD_PERCENT]),
+        ("0% h", [WILD_PERCENT]),
+        ("_", [WILD_UNDERSCORE]),
+        ("t_w", [WILD_UNDERSCORE]),
+        ("%harbour", []),
+    ],
+    ids=["percent", "percent-suffix", "percent-inner", "underscore", "underscore-inner", "percent-prefix"],
+)
+def test_percent_and_underscore_in_the_query_match_literally__S034_003_DoD4(
+    engine: Engine, query_text: str, expected: list[int]
+) -> None:
+    """DoD-4: user input never acts as a wildcard — `%` and `_` match only names that contain
+    those characters at that place."""
+    _seed_wildcard_names(engine)
+
+    assert _name_arm(engine, query_text) == expected
+
+
+# --- DoD-5: a blank query returns five empty groups and runs no name query -----------------
+
+
+@pytest.mark.parametrize("query_text", ["", "   ", "\t\n "])
+def test_a_blank_query_returns_nothing_from_the_name_arm_and_issues_no_sql__S034_003_DoD5(
+    engine: Engine, query_text: str
+) -> None:
+    """DoD-5: the name arm answers `[]` for a blank query without sending a statement."""
+    _seed_characters_and_setups(engine)
+    _insert_session(engine, session_id=NAMED_ONE, name=LATIN_NAME)
+
+    with engine.connect() as connection:
+        with _statements_on(engine) as seen:
+            found = search_session_names(connection, USER_A, query_text)
+
+    assert found == []
+    assert seen == []
+
+
+@pytest.mark.parametrize("query_text", ["", "   "])
+def test_a_blank_query_still_returns_five_empty_groups_with_named_sessions_present__S034_003_DoD5(
+    engine: Engine, query_text: str
+) -> None:
+    """DoD-5 through `run_my_search`: with a named session present, a blank query still answers
+    five empty groups, opens no model and sends no statement at all — so no name query ran."""
+    _seed_everything(engine)
+    _rename(engine, SESSION_NO_SETUP, f"{CHARACTER_NAME} {LATIN_NAME}")
+    factory = fake_factory(DIMENSION)
+
+    with engine.connect() as connection:
+        with _statements_on(engine) as seen:
+            results = run_my_search(connection, USER_A, query_text, client_factory=factory)
+
+    assert results == MySearchResults(characters=[], setups=[], sessions=[], entries=[], memos=[])
+    assert seen == []
+    assert factory.call_count == 0
+
+
+# --- DoD-6: merge order and the cap (DEC-arch-session-names-5, DEC-034-8) ------------------
+
+
+def test_the_name_arm_orders_by_name_then_id__S034_003_DoD6(engine: Engine) -> None:
+    """DoD-6: name hits are ordered by name, then id — never by id or insertion order."""
+    _seed_characters_and_setups(engine)
+    _insert_session(engine, session_id=ORDER_B_HIGH, name="harbour night b")
+    _insert_session(engine, session_id=ORDER_C, name="harbour night c")
+    _insert_session(engine, session_id=ORDER_A, name="harbour night a")
+    _insert_session(engine, session_id=ORDER_B_LOW, name="harbour night b")
+
+    assert _name_arm(engine, "harbour night") == [ORDER_A, ORDER_B_LOW, ORDER_B_HIGH, ORDER_C]
+
+
+def _seed_cap_named_sessions(engine: Engine, count: int) -> list[int]:
+    """`count` named sessions, ids inserted in **reverse** name order; returns ids in name order."""
+    by_name: list[int] = []
+    for offset in range(count):
+        by_name.append(CAP_NAMED_BASE + (count - 1 - offset))
+    for offset in reversed(range(count)):
+        _insert_session(engine, session_id=by_name[offset], name=f"{MERGE_QUERY} {offset:02d}")
+    return by_name
+
+
+def test_the_name_arm_is_capped_at_its_limit__S034_003_DoD6(engine: Engine) -> None:
+    """DoD-6: the name arm takes the per-kind limit (20 by default), keeping the name order."""
+    _seed_characters_and_setups(engine)
+    by_name = _seed_cap_named_sessions(engine, 25)
+
+    assert _name_arm(engine, MERGE_QUERY) == by_name[:EXPECTED_PER_KIND_CAP]
+    assert _name_arm(engine, MERGE_QUERY, limit=3) == by_name[:3]
+
+
+def test_merge_puts_name_hits_first_then_unmatched_vector_hits_in_port_order__S034_003_DoD6() -> None:
+    """DoD-6: name ids keep their order, then the vector hits in the order given."""
+    name_ids = [NAMED_BASE + 3, NAMED_BASE + 1]
+    vector = [_session_hit(NAMED_BASE + 9), _session_hit(NAMED_BASE + 5), _session_hit(NAMED_BASE + 7)]
+
+    merged = merge_session_hits(name_ids, vector, EXPECTED_PER_KIND_CAP)
+
+    assert merged == [NAMED_BASE + 3, NAMED_BASE + 1, NAMED_BASE + 9, NAMED_BASE + 5, NAMED_BASE + 7]
+
+
+def test_merge_keeps_a_session_matched_by_both_once_in_its_name_position__S034_003_DoD6() -> None:
+    """DoD-6: a session the vector arm also found appears once, where the name arm put it."""
+    name_ids = [NAMED_BASE + 1, NAMED_BASE + 2]
+    vector = [_session_hit(NAMED_BASE + 7), _session_hit(NAMED_BASE + 2), _session_hit(NAMED_BASE + 8)]
+
+    merged = merge_session_hits(name_ids, vector, EXPECTED_PER_KIND_CAP)
+
+    assert merged == [NAMED_BASE + 1, NAMED_BASE + 2, NAMED_BASE + 7, NAMED_BASE + 8]
+
+
+def test_merge_with_an_empty_arm_is_the_other_arm__S034_003_DoD6() -> None:
+    """DoD-6: no name hits leaves the vector order; no vector hits leaves the name order."""
+    vector_ids = [NAMED_BASE + 9, NAMED_BASE + 4, NAMED_BASE + 6]
+
+    assert merge_session_hits([], [_session_hit(one) for one in vector_ids], EXPECTED_PER_KIND_CAP) == vector_ids
+    assert merge_session_hits([NAMED_BASE + 2, NAMED_BASE + 1], [], EXPECTED_PER_KIND_CAP) == [
+        NAMED_BASE + 2,
+        NAMED_BASE + 1,
+    ]
+    assert merge_session_hits([], [], EXPECTED_PER_KIND_CAP) == []
+
+
+def test_merge_never_exceeds_the_limit__S034_003_DoD6() -> None:
+    """DoD-6: the group never exceeds 20 — name hits fill first, vector hits take what is left,
+    and an overlap does not use up a place twice."""
+    names = [CAP_NAMED_BASE + offset for offset in range(15)]
+    vectors = [CAP_VECTOR_BASE + offset for offset in range(10)]
+
+    merged = merge_session_hits(names, [_session_hit(one) for one in vectors], EXPECTED_PER_KIND_CAP)
+    assert merged == names + vectors[:5]
+
+    overlapping = [names[3], names[0]] + vectors
+    merged = merge_session_hits(names, [_session_hit(one) for one in overlapping], EXPECTED_PER_KIND_CAP)
+    assert merged == names + vectors[:5]
+
+    many_names = [CAP_NAMED_BASE + offset for offset in range(25)]
+    merged = merge_session_hits(many_names, [_session_hit(one) for one in vectors], EXPECTED_PER_KIND_CAP)
+    assert merged == many_names[:EXPECTED_PER_KIND_CAP]
+
+    many_vectors = [CAP_VECTOR_BASE + offset for offset in range(25)]
+    merged = merge_session_hits([], [_session_hit(one) for one in many_vectors], EXPECTED_PER_KIND_CAP)
+    assert merged == many_vectors[:EXPECTED_PER_KIND_CAP]
+
+
+def test_merge_honours_a_smaller_limit__S034_003_DoD6() -> None:
+    """DoD-6: the cap is the `limit` argument, not a constant baked into the merge."""
+    names = [NAMED_BASE + 1, NAMED_BASE + 2]
+    vectors = [_session_hit(NAMED_BASE + 7), _session_hit(NAMED_BASE + 8)]
+
+    assert merge_session_hits(names, vectors, 3) == [NAMED_BASE + 1, NAMED_BASE + 2, NAMED_BASE + 7]
+    assert merge_session_hits(names, vectors, 1) == [NAMED_BASE + 1]
+
+
+def test_my_search_puts_name_hits_first_then_the_ports_vector_hits__S034_003_DoD6(engine: Engine) -> None:
+    """DoD-6 through `run_my_search`: the two name-only sessions and the one matched by both
+    arms come first, in name order; then the vector arm's other hits in the port's order. The
+    session matched by both appears once."""
+    _seed_characters_and_setups(engine)
+    _insert_session(engine, session_id=MERGE_NAMED_LATE, name=f"{MERGE_QUERY} b")
+    _insert_session(engine, session_id=MERGE_NAMED_EARLY, name=f"{MERGE_QUERY} a")
+    _insert_session(engine, session_id=MERGE_BOTH, name=f"{MERGE_QUERY} c")
+    for session_id in MERGE_VECTOR_IDS:
+        _insert_session(engine, session_id=session_id)
+    _ready_for_search(engine)
+    _write_vectors(engine, sessions=[(one, MERGE_QUERY) for one in (MERGE_BOTH, *MERGE_VECTOR_IDS)])
+
+    port_order = _port_session_order(engine, MERGE_QUERY)
+    assert set(port_order) == {MERGE_BOTH, *MERGE_VECTOR_IDS}, "the vector arm must reach the seeded rows"
+    name_order = [MERGE_NAMED_EARLY, MERGE_NAMED_LATE, MERGE_BOTH]
+
+    returned = _ids(_run(engine, query_text=MERGE_QUERY).sessions)
+
+    assert returned == name_order + [one for one in port_order if one not in name_order]
+    assert returned.count(MERGE_BOTH) == 1
+
+
+def test_my_search_caps_the_merged_session_group_at_twenty__S034_003_DoD6(engine: Engine) -> None:
+    """DoD-6 through `run_my_search`: 15 name hits and 10 vector-only hits give exactly 20 —
+    all 15 name hits in name order, then the port's first 5 vector hits."""
+    _seed_characters_and_setups(engine)
+    by_name = _seed_cap_named_sessions(engine, 15)
+    vector_ids = [CAP_VECTOR_BASE + offset for offset in range(10)]
+    for session_id in vector_ids:
+        _insert_session(engine, session_id=session_id)
+    _ready_for_search(engine)
+    _write_vectors(engine, sessions=[(one, MERGE_QUERY) for one in vector_ids])
+
+    port_order = _port_session_order(engine, MERGE_QUERY)
+    returned = _ids(_run(engine, query_text=MERGE_QUERY).sessions)
+
+    assert len(returned) == EXPECTED_PER_KIND_CAP
+    assert returned == by_name + port_order[:5]
+
+
+def test_my_search_with_more_name_hits_than_the_cap_returns_only_name_hits__S034_003_DoD6(
+    engine: Engine,
+) -> None:
+    """DoD-6: 25 name hits fill the group by themselves; no vector hit gets a place."""
+    _seed_characters_and_setups(engine)
+    by_name = _seed_cap_named_sessions(engine, 25)
+    vector_ids = [CAP_VECTOR_BASE + offset for offset in range(3)]
+    for session_id in vector_ids:
+        _insert_session(engine, session_id=session_id)
+    _ready_for_search(engine)
+    _write_vectors(engine, sessions=[(one, MERGE_QUERY) for one in vector_ids])
+
+    returned = _ids(_run(engine, query_text=MERGE_QUERY).sessions)
+
+    assert returned == by_name[:EXPECTED_PER_KIND_CAP]
+
+
+# --- DoD-7: a vector-arm failure still fails the whole search (029 U1) ---------------------
+
+
+@pytest.mark.parametrize(
+    ("model_dimension", "unreachable", "expected_error"),
+    [
+        (None, False, NoEmbeddingModelError),
+        (MISMATCHED_DIMENSION, False, NoEmbeddingModelError),
+        (DIMENSION, True, LlmUnreachableError),
+    ],
+    ids=["no-model", "dimension-mismatch", "unreachable"],
+)
+def test_a_vector_arm_failure_fails_the_search_even_when_a_name_matched__S034_003_DoD7(
+    engine: Engine,
+    model_dimension: int | None,
+    unreachable: bool,
+    expected_error: type[Exception],
+) -> None:
+    """DoD-7: the name arm alone does find the session (the control), yet `run_my_search`
+    raises the vector arm's error and returns no partial answer."""
+    _seed_characters_and_setups(engine)
+    _insert_session(engine, session_id=NAMED_ONE, name=LATIN_NAME)
+    if model_dimension is not None:
+        _seed_designation(engine, dimension=model_dimension)
+    _build_search_tables(engine)
+    factory = unreachable_factory(DIMENSION) if unreachable else fake_factory(DIMENSION)
+
+    assert _name_arm(engine, "lantern") == [NAMED_ONE]
+    with engine.connect() as connection:
+        with pytest.raises(expected_error):
+            run_my_search(connection, USER_A, "lantern", client_factory=factory)
+
+
+# --- DoD-8: session hits carry `name`, entry hits `session_name` (US-152.AC-2) ---------------
+
+
+def test_a_session_hit_declares_name_after_setup_name__S034_003_DoD8() -> None:
+    """DoD-8: the hydrated session value carries `name` beside `created_at` (frozen order)."""
+    assert [field.name for field in dataclasses.fields(SessionHit)] == [
+        "id",
+        "character_name",
+        "setup_name",
+        "name",
+        "created_at",
+        "archived",
+    ]
+
+
+def test_session_and_entry_hits_carry_the_stored_name_or_none__S034_003_DoD8(engine: Engine) -> None:
+    """DoD-8: a renamed session's hit carries its name — whether the name arm or the vector arm
+    found it — and a never-renamed one carries None; the entry hit carries its session's name
+    next to the session's `created_at`."""
+    _seed_everything(engine)
+    name_hit_name = f"The {CHARACTER_NAME} rematch"  # holds the token, so the name arm finds it
+    vector_hit_name = "Harbour Vigil"  # no token: this session is reached by its vector only
+    _rename(engine, SESSION_NO_SETUP, name_hit_name)
+    _rename(engine, SESSION_WITH_SETUP, vector_hit_name)
+
+    results = _run(engine)
+
+    by_id = {hit.id: hit for hit in results.sessions}
+    assert by_id[SESSION_NO_SETUP] == SessionHit(
+        id=SESSION_NO_SETUP,
+        character_name=CHARACTER_NAME,
+        setup_name=None,
+        name=name_hit_name,
+        created_at=CREATED_NO_SETUP,
+        archived=False,
+    )
+    assert by_id[SESSION_WITH_SETUP] == SessionHit(
+        id=SESSION_WITH_SETUP,
+        character_name=CHARACTER_NAME,
+        setup_name=SETUP_NAME,
+        name=vector_hit_name,
+        created_at=CREATED_WITH_SETUP,
+        archived=False,
+    )
+    assert by_id[SESSION_ARCHIVED].name is None
+    assert by_id[SESSION_ARCHIVED].created_at == CREATED_ARCHIVED
+    assert _ids(results.sessions)[0] == SESSION_NO_SETUP  # DoD-6: the name hit leads
+
+    entries = {hit.id: hit for hit in results.entries}
+    assert entries[ENTRY_SETTLED].session_id == SESSION_WITH_SETUP
+    assert entries[ENTRY_SETTLED].session_name == vector_hit_name
+    assert entries[ENTRY_SETTLED].session_created_at == CREATED_WITH_SETUP
+
+
+# --- DoD-9: an archived session found by name is returned and marked (029 U3) ---------------
+
+
+def test_an_archived_session_found_by_name_is_returned_and_marked_archived__S034_003_DoD9(
+    engine: Engine,
+) -> None:
+    """DoD-9: the name arm includes archived sessions, and the hit says so."""
+    _seed_characters_and_setups(engine)
+    _insert_session(
+        engine,
+        session_id=NAMED_ARCHIVED,
+        setup_id=SETUP_A1,
+        archived_at=TIMESTAMP,
+        created_at=CREATED_NAMED,
+        name=LATIN_NAME,
+    )
+    _ready_for_search(engine)
+
+    assert _name_arm(engine, "quay") == [NAMED_ARCHIVED]
+    assert _run(engine, query_text="quay").sessions == [
+        SessionHit(
+            id=NAMED_ARCHIVED,
+            character_name=CHARACTER_NAME,
+            setup_name=SETUP_NAME,
+            name=LATIN_NAME,
+            created_at=CREATED_NAMED,
+            archived=True,
+        )
+    ]

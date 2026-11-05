@@ -12,6 +12,10 @@ which table carries which sentinel — comes from the plan. Step 002's frozen `#
 record supplied only *how to call* the shared world, which lives in
 `tests/privacy_audit_support.py` and is this step's other deliverable.
 
+Feature 034 extends the map: step 002 (DoD-11, DoD-12) adds the session rename row and the
+`sessions.name` carrier; step 003 (DoD-11, `docs/plans/034.session-names/003.my-search-names.md`)
+lists `/api/search` as a further reader of `sessions.name`.
+
 This is an **audit step** (`context.md` "The audit-step convention"): these cases assert
 properties the built code is expected to satisfy already, so a pass is the audit passing,
 not a vacuous test. A failure is a leak finding.
@@ -105,6 +109,13 @@ READ_SURFACE_OF_CARRIER: Mapping[tuple[str, str], str] = {
         for scope in MEMO_SCOPES
         for reach in MEMO_REACHES
     },
+}
+
+#: Further readers of a carrier, beyond its named surface above. 034/003 DoD-11 (DEC-034-4):
+#: my-search finds a session by its stored name and labels the hit with it, so `/api/search`
+#: (queried with B's own session-name sentinel) is a reader of `sessions.name`.
+FURTHER_READ_SURFACES_OF_CARRIER: Mapping[tuple[str, str], tuple[str, ...]] = {
+    ("sessions", "name"): ("search_session_name",),
 }
 
 #: Carriers with **no** read surface among the routes DoD-5 names, each with its reason.
@@ -421,6 +432,11 @@ def _read_surfaces(world: AuditWorld) -> dict[str, httpx.Response]:
         "zone": client.get(f"/api/sessions/{b.session_with_setup_id}/zone"),
         "discussion": client.get(f"/api/messages/{b.messages.turn_head_id}/discussion"),
         "memo_chain": client.get(f"/api/sessions/{b.session_with_setup_id}/memo-chain"),
+        # 034/003 DoD-11: my-search, queried with B's own session-name sentinel.
+        "search_session_name": client.get(
+            "/api/search",
+            params={"q": world.sentinels.get(user="B", table="sessions", field="name")},
+        ),
     }
     scope_ids = {
         "user": None,
@@ -451,6 +467,13 @@ def test_b_reads_every_own_sentinel_back_through_own_routes__S032_002_DoD5(world
         sentinel = world.sentinels.get(user="B", table=table, field=carrier_field)
         if sentinel not in rendered[surface]:
             unreachable.append(f"{table}.{carrier_field} ({sentinel}) absent from B's own {surface} read")
+    # 034/003 DoD-11: every further reader also hands B's own sentinel back.
+    assert set(FURTHER_READ_SURFACES_OF_CARRIER) <= set(READ_SURFACE_OF_CARRIER)
+    for (table, carrier_field), further in FURTHER_READ_SURFACES_OF_CARRIER.items():
+        sentinel = world.sentinels.get(user="B", table=table, field=carrier_field)
+        for surface in further:
+            if sentinel not in rendered[surface]:
+                unreachable.append(f"{table}.{carrier_field} ({sentinel}) absent from B's own {surface} read")
     assert not unreachable, (
         "B cannot read back B's own material, so every matching absence assertion in steps "
         "003..007 would pass vacuously:\n" + "\n".join(unreachable)
@@ -462,6 +485,27 @@ def test_b_reads_every_own_sentinel_back_through_own_routes__S032_002_DoD5(world
         for reach in MEMO_REACHES:
             sentinel = world.sentinels.get(user="B", table="memos", field=memo_carrier_field(scope, reach))
             assert sentinel in chain, f"the memo chain omits B's {scope}/{reach} memo"
+
+
+def test_my_search_is_listed_and_works_as_a_reader_of_the_session_name__S034_003_DoD11(
+    world: AuditWorld,
+) -> None:
+    """034/003 DoD-11 (DEC-034-4): the read-surface map lists `/api/search` as a reader of
+    `sessions.name`, and it really is one — B's search for B's own session-name sentinel returns
+    B's renamed session first (a name hit), carrying the name, and nothing of A's name."""
+    assert ("sessions", "name") in READ_SURFACE_OF_CARRIER
+    assert FURTHER_READ_SURFACES_OF_CARRIER[("sessions", "name")] == ("search_session_name",)
+
+    b_sentinel = world.sentinels.get(user="B", table="sessions", field="name")
+    a_sentinel = world.sentinels.get(user="A", table="sessions", field="name")
+    response = world.clients.b.get("/api/search", params={"q": b_sentinel})
+    assert response.status_code == 200, response.text
+    sessions = response.json()["sessions"]
+
+    assert sessions, "B's own session-name search returned no session"
+    assert str(sessions[0]["id"]) == world.b.session_with_setup_id, sessions
+    assert b_sentinel in str(sessions[0]["name"]), sessions[0]
+    assert a_sentinel not in response.text
 
 
 def test_my_search_returns_bs_own_material_for_bs_own_sentinels__S032_002_DoD5(world: AuditWorld) -> None:

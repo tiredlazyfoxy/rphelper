@@ -47,7 +47,10 @@ Nothing here asks the code under test what the answer is.
   `"decision"` — and no kind filter is expected on top of `settled_entries` (R11), so the
   decision's text must be in the excerpt.
 
-Each test name ends `__S027_002_DoD<n>` with the DoD item it covers.
+Each test name ends `__S027_002_DoD<n>` with the DoD item it covers. Feature 034 step 003's
+DoD-10 (`docs/plans/034.session-names/003.my-search-names.md`, DEC-034-5: a session's name
+never enters the `session_search` tool) adds one guard here, ending `__S034_003_DoD10`; the
+tool's own output is checked end to end in `tests/test_privacy_audit_search_tools.py`.
 
 Mechanics (`context.md` "Test conventions"): a real SQLite file per test through the shared
 `db_engine` fixture (`tests/conftest.py` and `tests/llm_fakes.py` are untouched), raw inserts
@@ -234,8 +237,9 @@ def _insert_session(
     setup_id: int | None = None,
     archived_at: str | None = None,
     created_at: str = TIMESTAMP,
+    name: str | None = None,
 ) -> None:
-    """Raw-insert one `sessions` row (no title and no partner column exist to seed)."""
+    """Raw-insert one `sessions` row; `name` (feature 034) stays NULL unless given."""
     with engine.begin() as connection:
         connection.execute(
             schema.sessions.insert().values(
@@ -247,6 +251,7 @@ def _insert_session(
                 archived_at=archived_at,
                 created_at=created_at,
                 updated_at=TIMESTAMP,
+                name=name,
             )
         )
 
@@ -665,3 +670,29 @@ def test_neither_the_persona_nor_the_setup_description_leaks__S027_002_DoD10(eng
         assert DESCRIPTION_MARKER not in str(value)
     assert record.excerpt == MARKED_ENTRY
     assert record.setup_name == HARBOUR_NIGHT
+
+
+# --- 034/003 DoD-10: a session's name is not part of what `session_search` reads ------------
+
+#: A renamed session, and the one word of its name that no other seeded text contains.
+SESSION_RENAMED = 1_300_000_000_000_000_118
+NAME_MARKER = "vexillarius"
+RENAMED_NAME = f"The {NAME_MARKER} night"
+
+
+def test_a_renamed_sessions_excerpt_record_carries_no_name__S034_003_DoD10(engine: Engine) -> None:
+    """034/003 DoD-10 (DEC-034-5): the read behind the `session_search` tool is unchanged by a
+    rename — the record still has its four fields, labelled by setup and start date, and the
+    stored name appears in none of them. The renamed session is still returned (the control)."""
+    _insert_setup(engine, setup_id=SETUP_HARBOUR, name=HARBOUR_NIGHT)
+    _insert_session(engine, session_id=SESSION_RENAMED, setup_id=SETUP_HARBOUR, name=RENAMED_NAME)
+    _settled(engine, MSG_BASE + 71, MARKED_ENTRY, session_id=SESSION_RENAMED)
+
+    record = _one(_read(engine, USER_A, [SESSION_RENAMED]))
+
+    assert [field.name for field in fields(SessionExcerpt)] == ["session_id", "created_date", "setup_name", "excerpt"]
+    assert record.session_id == SESSION_RENAMED
+    assert record.setup_name == HARBOUR_NIGHT
+    assert record.excerpt == MARKED_ENTRY
+    for field in fields(SessionExcerpt):
+        assert NAME_MARKER not in str(getattr(record, field.name))

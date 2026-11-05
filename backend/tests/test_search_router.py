@@ -11,8 +11,10 @@ absence) and above all the **wire contract**, which is this file's specification
     {
       "characters": [ { "id", "name", "archived" } ],
       "setups":     [ { "id", "name", "character_id", "character_name", "archived" } ],
-      "sessions":   [ { "id", "character_name", "setup_name" | null, "created_at", "archived" } ],
-      "entries":    [ { "id", "session_id", "snippet", "character_name", "session_created_at" } ],
+      "sessions":   [ { "id", "character_name", "setup_name" | null, "name" | null,
+                        "created_at", "archived" } ],
+      "entries":    [ { "id", "session_id", "snippet", "character_name", "session_name" | null,
+                        "session_created_at" } ],
       "memos":      [ { "id", "scope", "scope_id" | null, "character_id" | null,
                         "snippet", "is_enabled" } ]
     }
@@ -51,6 +53,13 @@ How the expectations are derived
 Each test name ends `__S029_003_DoD<n>` with the DoD item it covers. DoD-10 is `[manual/live]`
 (the registration position and the docstrings) and carries no test here.
 
+Feature 034, step 003 (`docs/plans/034.session-names/003.my-search-names.md`, DEC-034-8) adds
+the session hit's `name` and the entry hit's `session_name` to the contract above — each the
+stored session name, or null when never renamed — and a name arm that finds sessions by their
+stored name. The block at the end of this module covers its DoD-1, DoD-3..DoD-5 and DoD-7..DoD-9
+on the wire, each test ending `__S034_003_DoD<n>`. A session reachable only through the name arm
+is seeded with **no** vector, so its presence in `sessions` can only be the name match.
+
 Mechanics (`context.md` "Test conventions"): the real application factory pinned to a per-test
 SQLite file through `dependency_overrides[get_settings]`, raw inserts only, two users A and B,
 and every helper file-local. `tests/conftest.py` and `tests/llm_fakes.py` are untouched.
@@ -88,8 +97,9 @@ GROUP_KEYS = ["characters", "setups", "sessions", "entries", "memos"]
 #: The exact key set of one hit per kind (wire contract; DoD-3 allows no extra key).
 CHARACTER_HIT_KEYS = {"id", "name", "archived"}
 SETUP_HIT_KEYS = {"id", "name", "character_id", "character_name", "archived"}
-SESSION_HIT_KEYS = {"id", "character_name", "setup_name", "created_at", "archived"}
-ENTRY_HIT_KEYS = {"id", "session_id", "snippet", "character_name", "session_created_at"}
+#: 034/003 DoD-8 (DEC-034-8): sessions gain `name`, entries gain `session_name`.
+SESSION_HIT_KEYS = {"id", "character_name", "setup_name", "name", "created_at", "archived"}
+ENTRY_HIT_KEYS = {"id", "session_id", "snippet", "character_name", "session_name", "session_created_at"}
 MEMO_HIT_KEYS = {"id", "scope", "scope_id", "character_id", "snippet", "is_enabled"}
 
 HIT_KEYS = {
@@ -241,11 +251,14 @@ EXPECTED_SETUPS: dict[str, dict[str, Any]] = {
     },
 }
 
+# 034/003 DoD-8: none of the seeded sessions is ever renamed here, so `name` and the entry's
+# `session_name` are null on every row.
 EXPECTED_SESSIONS: dict[str, dict[str, Any]] = {
     str(SESSION_WITH_SETUP): {
         "id": str(SESSION_WITH_SETUP),
         "character_name": CHARACTER_NAME,
         "setup_name": SETUP_NAME,
+        "name": None,
         "created_at": CREATED_WITH_SETUP,
         "archived": False,
     },
@@ -253,6 +266,7 @@ EXPECTED_SESSIONS: dict[str, dict[str, Any]] = {
         "id": str(SESSION_NO_SETUP),
         "character_name": CHARACTER_NAME,
         "setup_name": None,
+        "name": None,
         "created_at": CREATED_NO_SETUP,
         "archived": False,
     },
@@ -260,6 +274,7 @@ EXPECTED_SESSIONS: dict[str, dict[str, Any]] = {
         "id": str(SESSION_ARCHIVED),
         "character_name": CHARACTER_NAME,
         "setup_name": SETUP_NAME,
+        "name": None,
         "created_at": CREATED_ARCHIVED,
         "archived": True,
     },
@@ -270,6 +285,7 @@ EXPECTED_ENTRIES: dict[str, dict[str, Any]] = {
         "id": str(ENTRY_SETTLED),
         "session_id": str(SESSION_WITH_SETUP),
         "character_name": CHARACTER_NAME,
+        "session_name": None,
         "session_created_at": CREATED_WITH_SETUP,
     },
 }
@@ -421,7 +437,9 @@ def _insert_session(
     setup_id: int | None = None,
     archived_at: str | None = None,
     created_at: str = TIMESTAMP,
+    name: str | None = None,
 ) -> None:
+    """Raw-insert one `sessions` row; `name` stays NULL ("never renamed") unless given (034)."""
     with engine.begin() as connection:
         connection.execute(
             schema.sessions.insert().values(
@@ -433,6 +451,7 @@ def _insert_session(
                 archived_at=archived_at,
                 created_at=created_at,
                 updated_at=TIMESTAMP,
+                name=name,
             )
         )
 
@@ -844,10 +863,11 @@ def test_every_id_on_the_wire_is_the_decimal_string_of_its_snowflake__S029_003_D
 # --- DoD-3: the exact field shapes (wire contract, US-119) ------------------------------------
 
 
-def test_each_hit_carries_exactly_its_contract_keys__S029_003_DoD3(
+def test_each_hit_carries_exactly_its_contract_keys__S029_003_DoD3__S034_003_DoD8(
     application: FastAPI, db_settings: Settings, engine: Engine
 ) -> None:
-    """DoD-3 — one key set per kind, with no extra key anywhere."""
+    """DoD-3 — one key set per kind, with no extra key anywhere (034/003 DoD-8: sessions carry
+    `name`, entries `session_name`)."""
     _seed_everything(engine)
 
     body = _search(_player_a(application, db_settings))
@@ -1069,3 +1089,285 @@ def test_the_route_table_holds_get_api_search_exactly_once__S029_003_DoD9(applic
 
     operations = application.openapi()["paths"][SEARCH_PATH]
     assert set(operations) == {"get"}
+
+
+# =============================================================================================
+# Feature 034, step 003 — session names on the wire (DEC-034-8, DEC-arch-session-names-5).
+# Expected values come from the step file's Definition of done; nothing is read off the code.
+# =============================================================================================
+
+#: This block's sessions, in an id range of their own (above 2^60, clear of the 029 ids).
+NAMED_LATIN = 1_292_000_000_000_001_001
+NAMED_CYRILLIC = 1_292_000_000_000_001_002
+NAMED_ARCHIVED = 1_292_000_000_000_001_003
+NAMED_OF_B = 1_292_000_000_000_001_004
+WILD_PERCENT = 1_292_000_000_000_001_011
+WILD_PLAIN = 1_292_000_000_000_001_012
+WILD_UNDERSCORE = 1_292_000_000_000_001_013
+WILD_LETTER = 1_292_000_000_000_001_014
+
+LATIN_NAME = "Lantern Quay"
+CYRILLIC_NAME = "Ночной Порт"
+VIGIL_NAME = "Harbour Vigil"
+
+#: The start instant of the named sessions whose wire rows are compared field for field.
+CREATED_NAMED = "2026-03-05T00:00:00.000000+00:00"
+
+RENAME_PATH = "/api/sessions/{session_id}"
+
+
+def _seed_name_world(engine: Engine, *, designated: bool = True) -> None:
+    """The designation and the search tables, built **after** the test's sessions exist.
+
+    No session gets a vector, so the sessions group holds exactly what the name arm matched.
+    `designated=False` leaves no embedding model.
+    """
+    if designated:
+        _seed_designation(engine)
+    _build_search_tables(engine)
+
+
+def _seed_owner_a_character(engine: Engine) -> None:
+    """A's matching character and setup — the parents the named sessions hang off."""
+    _insert_character(engine, character_id=CHAR_A, name=CHARACTER_NAME, sheet=PERSONA)
+    _insert_setup(engine, setup_id=SETUP_A, character_id=CHAR_A, name=SETUP_NAME, description=SETUP_DESCRIPTION)
+
+
+def _session_ids(body: dict[str, Any]) -> list[str]:
+    return [row["id"] for row in body["sessions"]]
+
+
+def _rename_through_the_route(client: TestClient, session_id: int, name: str | None) -> None:
+    """Step 002's rename route — the way a roleplayer stores a name."""
+    response = client.patch(RENAME_PATH.format(session_id=session_id), json={"name": name})
+    assert response.status_code == 200, response.text
+
+
+# --- DoD-1: a stored name is found by a substring in any case, Latin and Cyrillic ------------
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_id", "expected_name"),
+    [
+        ("LANTERN quay", NAMED_LATIN, LATIN_NAME),
+        ("tern Qu", NAMED_LATIN, LATIN_NAME),
+        ("ночной", NAMED_CYRILLIC, CYRILLIC_NAME),
+        ("ПОРТ", NAMED_CYRILLIC, CYRILLIC_NAME),
+    ],
+    ids=["latin-mixed-case", "latin-inner", "cyrillic-lower", "cyrillic-upper"],
+)
+def test_a_session_is_found_by_its_stored_name_on_the_wire__S034_003_DoD1(
+    application: FastAPI,
+    db_settings: Settings,
+    engine: Engine,
+    query: str,
+    expected_id: int,
+    expected_name: str,
+) -> None:
+    """DoD-1 — US-152.AC-1: `GET /api/search?q=<substring, other case>` returns the named
+    session in `sessions`, carrying its name; the other named session is not returned."""
+    _seed_owner_a_character(engine)
+    _insert_session(engine, session_id=NAMED_LATIN, setup_id=SETUP_A, name=LATIN_NAME, created_at=CREATED_NAMED)
+    _insert_session(engine, session_id=NAMED_CYRILLIC, name=CYRILLIC_NAME, created_at=CREATED_NAMED)
+    _seed_name_world(engine)
+
+    body = _search(_player_a(application, db_settings), query)
+
+    assert _session_ids(body) == [str(expected_id)]
+    assert body["sessions"][0]["name"] == expected_name
+
+
+def test_a_name_set_through_the_rename_route_is_found_and_shown__S034_003_DoD1__S034_003_DoD8(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-1 and DoD-8 — a name stored through `PATCH /api/sessions/{id}` is found by my-search,
+    and the hit is the full session row with `name` set; the never-renamed rows carry null."""
+    _seed_everything(engine)
+    client = _player_a(application, db_settings)
+    _rename_through_the_route(client, SESSION_NO_SETUP, LATIN_NAME)
+
+    body = _search(client, "quay")
+
+    rows = _rows_by_id(body, "sessions")
+    assert rows[str(SESSION_NO_SETUP)] == {
+        "id": str(SESSION_NO_SETUP),
+        "character_name": CHARACTER_NAME,
+        "setup_name": None,
+        "name": LATIN_NAME,
+        "created_at": CREATED_NO_SETUP,
+        "archived": False,
+    }
+    assert _session_ids(body)[0] == str(SESSION_NO_SETUP)
+    for other in (SESSION_WITH_SETUP, SESSION_ARCHIVED):
+        if str(other) in rows:
+            assert rows[str(other)]["name"] is None
+
+
+# --- DoD-3: another user's matching name never reaches the response (US-076.AC-1) -----------
+
+
+def test_another_users_session_with_the_same_name_never_reaches_the_wire__S034_003_DoD3(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-3 — B's session carries A's session's exact name. A's response names A's session and
+    no id of B's anywhere; B's own response names B's session (the positive control)."""
+    _seed_owner_a_character(engine)
+    _insert_character(engine, character_id=CHAR_B, user_id=USER_B_ID, name=CHARACTER_NAME, sheet=PERSONA)
+    _insert_session(engine, session_id=NAMED_LATIN, name=LATIN_NAME)
+    _insert_session(engine, session_id=NAMED_OF_B, user_id=USER_B_ID, character_id=CHAR_B, name=LATIN_NAME)
+    _seed_name_world(engine)
+
+    as_a = _search(_player_a(application, db_settings), "lantern")
+    as_b = _search(_player_b(application, db_settings), "lantern")
+
+    assert _session_ids(as_a) == [str(NAMED_LATIN)]
+    assert str(NAMED_OF_B) not in _id_strings(as_a)
+    assert _session_ids(as_b) == [str(NAMED_OF_B)]
+    assert str(NAMED_LATIN) not in _id_strings(as_b)
+
+
+# --- DoD-4: `%` and `_` in `q` match literally ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_id"),
+    [("%", WILD_PERCENT), ("100%", WILD_PERCENT), ("_", WILD_UNDERSCORE), ("t_w", WILD_UNDERSCORE)],
+    ids=["percent", "percent-suffix", "underscore", "underscore-inner"],
+)
+def test_wildcards_in_q_match_only_names_that_contain_them__S034_003_DoD4(
+    application: FastAPI, db_settings: Settings, engine: Engine, query: str, expected_id: int
+) -> None:
+    """DoD-4 — read as a pattern each query would match two or four names; read literally it
+    matches exactly one."""
+    _seed_owner_a_character(engine)
+    _insert_session(engine, session_id=WILD_PERCENT, name="100% harbour")
+    _insert_session(engine, session_id=WILD_PLAIN, name="100 harbour")
+    _insert_session(engine, session_id=WILD_UNDERSCORE, name="night_watch")
+    _insert_session(engine, session_id=WILD_LETTER, name="nightXwatch")
+    _seed_name_world(engine)
+
+    body = _search(_player_a(application, db_settings), query)
+
+    assert _session_ids(body) == [str(expected_id)]
+
+
+# --- DoD-5: a blank query still answers five empty groups --------------------------------------
+
+
+@pytest.mark.parametrize("query", ["", "   "], ids=["empty", "whitespace"])
+def test_a_blank_query_answers_five_empty_groups_with_named_sessions_present__S034_003_DoD5(
+    application: FastAPI,
+    db_settings: Settings,
+    engine: Engine,
+    embedding_factory: FakeClientFactory,
+    query: str,
+) -> None:
+    """DoD-5 — named sessions exist, yet a blank `q` answers the five keys, each empty, and no
+    model is opened."""
+    _seed_owner_a_character(engine)
+    _insert_session(engine, session_id=NAMED_LATIN, name=LATIN_NAME)
+    _insert_session(engine, session_id=NAMED_CYRILLIC, name=CYRILLIC_NAME)
+    _seed_name_world(engine)
+
+    body = _search(_player_a(application, db_settings), query)
+
+    assert body == {key: [] for key in GROUP_KEYS}
+    assert list(body) == GROUP_KEYS
+    assert embedding_factory.call_count == 0
+
+
+# --- DoD-7: a vector-arm failure fails the whole request, even when a name matched ------------
+
+
+def test_no_designated_model_fails_the_request_although_a_name_matched__S034_003_DoD7(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-7 — 029 U1 unchanged: 409 `no_embedding_model` and no group, though the name arm
+    would have found the session."""
+    _seed_owner_a_character(engine)
+    _insert_session(engine, session_id=NAMED_LATIN, name=LATIN_NAME)
+    _seed_name_world(engine, designated=False)
+
+    response = _player_a(application, db_settings).get(SEARCH_PATH, params={"q": "lantern"})
+
+    _assert_envelope(response, 409, NO_EMBEDDING_MODEL)
+    assert all(key not in json.loads(response.text) for key in GROUP_KEYS)
+
+
+def test_an_unreachable_provider_fails_the_request_although_a_name_matched__S034_003_DoD7(
+    db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-7 — the vector arm's `llm_unreachable` reaches the client as 502 with no group."""
+    _seed_owner_a_character(engine)
+    _insert_session(engine, session_id=NAMED_LATIN, name=LATIN_NAME)
+    _seed_name_world(engine)
+
+    with _application_with(db_settings, unreachable_factory(DIMENSION)) as app:
+        response = _player_a(app, db_settings).get(SEARCH_PATH, params={"q": "lantern"})
+
+        _assert_envelope(response, 502, LLM_UNREACHABLE)
+        assert all(key not in json.loads(response.text) for key in GROUP_KEYS)
+
+
+# --- DoD-8: `name` on session hits, `session_name` on entry hits (US-152.AC-2) ----------------
+
+
+def test_entry_and_session_hits_carry_the_renamed_sessions_name__S034_003_DoD8(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-8 — after a rename, the entry hit of that session carries `session_name` next to the
+    unchanged `session_created_at`, and its session hit carries `name`; every row still has
+    exactly its contract keys."""
+    _seed_everything(engine)
+    client = _player_a(application, db_settings)
+    _rename_through_the_route(client, SESSION_WITH_SETUP, VIGIL_NAME)
+
+    body = _search(client)
+
+    entry = _rows_by_id(body, "entries")[str(ENTRY_SETTLED)]
+    assert _without_snippet(entry) == {
+        "id": str(ENTRY_SETTLED),
+        "session_id": str(SESSION_WITH_SETUP),
+        "character_name": CHARACTER_NAME,
+        "session_name": VIGIL_NAME,
+        "session_created_at": CREATED_WITH_SETUP,
+    }
+    sessions = _rows_by_id(body, "sessions")
+    assert sessions[str(SESSION_WITH_SETUP)]["name"] == VIGIL_NAME
+    assert sessions[str(SESSION_NO_SETUP)]["name"] is None
+    assert sessions[str(SESSION_ARCHIVED)]["name"] is None
+    for key in GROUP_KEYS:
+        for row in body[key]:
+            assert set(row) == HIT_KEYS[key], f"{key} hit carries the wrong keys"
+
+
+# --- DoD-9: an archived session found by name is returned and marked (029 U3) -----------------
+
+
+def test_an_archived_session_found_by_name_is_on_the_wire_marked_archived__S034_003_DoD9(
+    application: FastAPI, db_settings: Settings, engine: Engine
+) -> None:
+    """DoD-9 — the archived session is found through its name and arrives with `archived` true."""
+    _seed_owner_a_character(engine)
+    _insert_session(
+        engine,
+        session_id=NAMED_ARCHIVED,
+        setup_id=SETUP_A,
+        archived_at=TIMESTAMP,
+        created_at=CREATED_NAMED,
+        name=LATIN_NAME,
+    )
+    _seed_name_world(engine)
+
+    body = _search(_player_a(application, db_settings), "quay")
+
+    assert body["sessions"] == [
+        {
+            "id": str(NAMED_ARCHIVED),
+            "character_name": CHARACTER_NAME,
+            "setup_name": SETUP_NAME,
+            "name": LATIN_NAME,
+            "created_at": CREATED_NAMED,
+            "archived": True,
+        }
+    ]

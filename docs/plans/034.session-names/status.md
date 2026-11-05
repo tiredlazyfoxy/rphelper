@@ -4,7 +4,7 @@
 |------|-----------------------------------|---------|----------|------|
 | 001  | `001.session-name-column.md`      | done    | PASS     | 2026-11-06 |
 | 002  | `002.rename-route.md`             | done    | PASS     | 2026-11-06 |
-| 003  | `003.my-search-names.md`          | pending | —        | —    |
+| 003  | `003.my-search-names.md`          | done    | PASS     | 2026-11-06 |
 | 004  | `004.session-label-surfaces.md`   | pending | —        | —    |
 | 005  | `005.rename-editor.md`            | pending | —        | —    |
 | 006  | `006.rename-surfaces.md`          | pending | —        | —    |
@@ -24,6 +24,10 @@
 - `backend/app/models/sessions.py` — `_normalise_session_name` body (strip, blank → None, None passes)
 - `backend/app/services/sessions.py` — `rename_session` body (normalise; one transaction: owner-scoped require incl. archived, write `name` + `updated_at`, re-read)
 - `backend/app/routers/sessions.py` — no change beyond the skeleton (handler body was final)
+
+### Step 003 — my-search-names
+- `backend/app/services/search/my_search.py` — `search_session_names` body (strip, blank → [] with no SQL; owner-scoped, non-NULL, `_folded_contains` on `sessions.name`, archived included, name/id order, `limit`, inside `_reading`); `merge_session_hits` body (name ids, then unseen vector ids, capped); `run_my_search` calls the name arm after `search_setups` and hydrates the merged order; module docstring records the unnamed-session-by-date limitation
+- `backend/app/models/search.py`, `backend/app/routers/search.py` — no change beyond the skeleton
 
 ## Notes & Issues
 
@@ -48,6 +52,17 @@
 - `backend/app/models/sessions.py` — `class RenameSessionRequest(BaseModel)`: `model_config = ConfigDict(extra="forbid")` (comment cites DEC-034-2); `name: SessionNameIn` (required, no default, no length cap — `SetupName` has no max either, DEC-034-3) — new. Note: `extra="forbid"` and the required key are declarative, so the 422s of DoD-4/DoD-5 hold already on the stub.
 - `backend/app/services/sessions.py` — `def rename_session(connection: Connection, user_id: int, session_id: int, name: str | None) -> RpSession` — new (STUB: raises `NotImplementedError`; placed before `_session_select`)
 - `backend/app/routers/sessions.py` — `@router.patch("/api/sessions/{session_id}", status_code=200) def rename_own_session(session_id: SnowflakeIn, current_user: Annotated[CurrentUser, Depends(require_user)], connection: Annotated[Connection, Depends(get_connection)], body: RenameSessionRequest) -> SessionResponse` — new; body already final (`return _to_response(rename_session(connection, current_user.id, session_id, body.name))`, the service stub throws). Module docstring: "No PATCH" paragraph replaced with the narrow-PATCH paragraph; route count six → seven. Verified: `route_operations(app)` lists `("PATCH", "/api/sessions/{}")`.
+- Caller-compile edits (out of Source-files scope): None.
+
+### Step 003 — frozen interface (2026-11-06)
+- `backend/app/services/search/my_search.py` — `def search_session_names(connection: Connection, user_id: int, query_text: str, limit: int = MY_SEARCH_PER_KIND_LIMIT) -> list[int]` — new (STUB: raises `NotImplementedError`; placed after `MySearchResults`, before `_hydrate_sessions`)
+- `backend/app/services/search/my_search.py` — `def merge_session_hits(name_ids: Sequence[int], vector_hits: Sequence[SearchHit], limit: int) -> list[int]` — new, pure (STUB: raises `NotImplementedError`)
+- `backend/app/services/search/my_search.py` — `def _hydrate_sessions(connection: Connection, user_id: int, session_ids: Sequence[int]) -> list[SessionHit]` — changed (was `hits: Sequence[SearchHit]`); body final: reads `sessions.name` and keeps the ids' order.
+- `backend/app/services/search/my_search.py` — `SessionHit` field order `id, character_name, setup_name, name: str | None, created_at, archived` — changed (`name` added after `setup_name`, no default). Final (data shape).
+- `backend/app/services/search/my_search.py` — `EntryHit` field order `id, session_id, snippet, character_name, session_name: str | None, session_created_at` — changed (`session_name` added before `session_created_at`, no default); `_hydrate_entries` selects `sessions.name` labelled `session_name`. Final (data shape).
+- `backend/app/services/search/my_search.py` — `run_my_search` signature unchanged. STUB state: body still runs the old path, only adapted mechanically to `_hydrate_sessions(connection, user_id, [hit.id for hit in session_hits])`; the coder must call `search_session_names(connection, user_id, query_text, MY_SEARCH_PER_KIND_LIMIT)` after `search_setups` (the vector session arm stays first, so fail-whole is unchanged) and hydrate `merge_session_hits(name_ids, session_hits, MY_SEARCH_PER_KIND_LIMIT)`. Docstrings (module, `run_my_search`, `MySearchResults.sessions`) already describe the target contract.
+- `backend/app/models/search.py` — `SessionHitResponse` gains `name: str | None` (after `setup_name`); `EntryHitResponse` gains `session_name: str | None` (after `character_name`) — changed, final.
+- `backend/app/routers/search.py` — no change (`_to_response` converts via `from_attributes`, so the new fields flow through).
 - Caller-compile edits (out of Source-files scope): None.
 
 ## Tests
@@ -80,3 +95,11 @@
 - `backend/tests/test_privacy_audit_export_import.py` — covers DoD-12 — each user's export carries their own session name and never the other's.
 - `backend/tests/test_configuration_router.py` — covers DoD-4 (Test files widened by the orchestrator after verify) — 017 DoD-9's "PATCH on the session itself answers 405" replaced: a `system_prompt` body now answers 422 and the session configuration is unchanged (renamed `test_patch_on_the_session_itself_cannot_write_configuration__S017_005_DoD9__S034_002_DoD4`).
 - Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓, DoD-9 ✓, DoD-10 ✓, DoD-11 ✓, DoD-12 ✓
+
+### Step 003 — tests (2026-11-06)
+- `backend/tests/test_my_search_service.py` — covers DoD-1..DoD-9 — `search_session_names`: substring in any case, Latin and Cyrillic; NULL names never matched and a start-date query finds only a stored date-like name; owner-scoped (B's same-named session); `%`/`_` literal; blank query `[]` with zero SQL statements; name-then-id order; default cap 20 and explicit limit. `merge_session_hits` (pure): name ids first, unmatched vector hits in given order, a both-matched id once in name position, empty arms, cap 20 incl. overlap, smaller limit. `run_my_search`: name-only sessions (no vector) reach the group; merged order = name order + port order (port called as oracle); 15+10 → 20; 25 names → 20 names; blank query five empty groups with no SQL and no model; vector-arm failure (no model, dimension mismatch, unreachable) raises although the name arm matched; `SessionHit` field order with `name`, full equality with `name` for a name hit and a vector hit, `EntryHit.session_name` next to `session_created_at`; archived named session returned with `archived=True`. Existing 029 tests updated: `SessionHit(...)` gains `name=None`, `EntryHit` field list gains `session_name` (renamed `..._six_fields__S029_002_DoD6__S034_003_DoD8`), entry hit `session_name is None`.
+- `backend/tests/test_search_router.py` — covers DoD-1, DoD-3, DoD-4, DoD-5, DoD-7, DoD-8, DoD-9 — wire: `SESSION_HIT_KEYS` gains `name`, `ENTRY_HIT_KEYS` gains `session_name` (key-set test renamed `..._S029_003_DoD3__S034_003_DoD8`), expected 029 rows carry null; named session found by mixed-case Latin / Cyrillic substring; a name set through `PATCH /api/sessions/{id}` is found, leads the group, full row with `name`; B's same-named session absent from A's body (and vice versa); `%`/`_` literal; blank `q` five empty groups with named sessions present; 409 / 502 fail-whole although a name matched; renamed session's entry hit carries `session_name` + unchanged `session_created_at`, its session hit `name`, others null; archived named session `archived: true`.
+- `backend/tests/test_privacy_audit_routes.py` — covers DoD-11 — `FURTHER_READ_SURFACES_OF_CARRIER` lists `/api/search` (`search_session_name` surface, queried with B's own session-name sentinel) as a reader of `sessions.name`, checked in the 032 DoD-5 positive control; dedicated test: B's search for B's sentinel returns B's renamed session first with the name, nothing of A's.
+- `backend/tests/test_privacy_audit_search_tools.py` — covers DoD-10, DoD-11 — DoD-1 sweep gains the `sessions.name` target (22 targets); new world test: a search for the shared name stem returns each user's own renamed session with its name and no sentinel/id of the other; the `session_search` tool run in B's other session returns B's renamed session (positive control) and its output carries neither the sentinel nor the full name.
+- `backend/tests/test_session_search_excerpts.py` — covers DoD-10 — a renamed session's `SessionExcerpt` still has exactly four fields and no field carries the name (guard).
+- Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓, DoD-9 ✓, DoD-10 ✓, DoD-11 ✓
