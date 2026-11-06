@@ -3,7 +3,8 @@
 // computed getters; the load effect, the upsert and the two pure derivations are the free
 // functions below, each taking its state or its lists as arguments.
 // The workspace list is always the working list (D5), so there is no show-archived flag here.
-// Ordering compares fixed-width `last_used_at` text only, never an id.
+// Ordering is the server's list order: fixed-width `last_used_at` text descending, then id
+// descending compared numerically on the decimal strings (DEC-034-12).
 import { makeAutoObservable, runInAction } from "mobx";
 
 import type { Session } from "./sessionsApi";
@@ -60,7 +61,23 @@ export async function loadSessions(state: SessionsState, signal?: AbortSignal): 
   });
 }
 
-/** Upsert one server-returned session into the workspace list per D15's rule. */
+/**
+ * Pure: compares two decimal-string ids numerically (negative, zero, positive). Ids are
+ * snowflakes that may exceed 2^53, so they are never converted through `Number`; without
+ * leading zeros a longer string is the larger number, and equal lengths compare as text.
+ */
+function compareIds(left: string, right: string): number {
+  if (left.length !== right.length) {
+    return left.length - right.length;
+  }
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * Upsert one server-returned session into the workspace list per D15's rule: removed by id,
+ * dropped when archived, else inserted by `last_used_at` descending, ties by id descending
+ * (DEC-034-12). Re-applying a row whose `last_used_at` is unchanged keeps its index.
+ */
 export function applySession(state: SessionsState, session: Session): void {
   runInAction(() => {
     // Removed first, then re-inserted: from `012` on a content write moves `last_used_at`
@@ -73,10 +90,14 @@ export function applySession(state: SessionsState, session: Session): void {
       return;
     }
 
-    // Insert at its `last_used_at`-descending position: before the first row whose
-    // `last_used_at` is less than the new one's, else at the end. Equal values insert after
-    // the equal rows. Fixed-width timestamps compare as text; nothing compares an id.
-    const at = next.findIndex((row) => row.last_used_at < session.last_used_at);
+    // Insert before the first row that sorts after it in the server's order (`last_used_at`
+    // DESC, id DESC — DEC-034-12), else at the end. Fixed-width timestamps compare as text;
+    // ids compare numerically, so an equal-`last_used_at` row lands back at its old index.
+    const at = next.findIndex(
+      (row) =>
+        row.last_used_at < session.last_used_at ||
+        (row.last_used_at === session.last_used_at && compareIds(row.id, session.id) < 0),
+    );
     if (at < 0) {
       next.push(session);
     } else {

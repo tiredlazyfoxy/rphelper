@@ -33,6 +33,7 @@ Vitest suites for the `app` entry (`src/app/`): one or more modules per componen
 - `SearchScreen.test.tsx` — the search results page.
 - `SessionConfigBar.test.tsx` — the session header configuration bar.
 - `SessionConfigModal.test.tsx` — the session configuration modal.
+- `SessionNameEditor.test.tsx` — the inline session-name editor.
 - `SessionScreen.test.tsx` — the session screen at `/sessions/:id`.
 - `SessionStream.test.tsx` — the assembled session stream.
 - `SessionStreamCoverage.test.tsx` — the search-coverage banner above the record.
@@ -91,6 +92,7 @@ Vitest suites for the `app` entry (`src/app/`): one or more modules per componen
 - `sessionConfigState.test.ts` — the session configuration state.
 - `sessionFirstReply.test.tsx` — first reply after starting from the character page (component / router level).
 - `sessionLabel.test.ts` — the session display-label module (name-or-date label, local date / date-time formatters).
+- `sessionRenameState.test.ts` — the in-place session rename state and its effects.
 - `sessionScreenState.test.ts` — the session screen state.
 - `sessionsApi.test.ts` — the sessions API client.
 - `sessionsSectionState.test.ts` — the Sessions section state.

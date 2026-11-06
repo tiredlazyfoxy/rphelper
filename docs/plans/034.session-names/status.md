@@ -6,7 +6,7 @@
 | 002  | `002.rename-route.md`             | done    | PASS     | 2026-11-06 |
 | 003  | `003.my-search-names.md`          | done    | PASS     | 2026-11-06 |
 | 004  | `004.session-label-surfaces.md`   | done    | PASS     | 2026-11-06 |
-| 005  | `005.rename-editor.md`            | pending | —        | —    |
+| 005  | `005.rename-editor.md`            | done    | PASS     | 2026-11-06 |
 | 006  | `006.rename-surfaces.md`          | pending | —        | —    |
 
 ## Files Changed
@@ -39,10 +39,16 @@
 - `frontend/src/app/searchApi.ts` — no change beyond the skeleton
 - `frontend/src/app/characterComposerState.ts` — skeleton's caller-compile edit only (`name: started.name`); no coder change
 
+### Step 005 — rename-editor
+- `frontend/src/app/sessionRenameState.ts` — `beginRename` / `cancelRename` / `commitRename` filled: normalise, unchanged-closes, pending guard, never optimistic, inline failure, abort-aware
+- `frontend/src/app/SessionNameEditor.tsx` — Mantine `TextInput` "Session name": autofocus, draft via `runInAction`, Enter/blur commit, Escape cancel, read-only while pending, inline error
+- `frontend/src/app/sessionsState.ts` — `applySession` ties on `last_used_at` ordered by id descending (numeric, length-then-text `compareIds`); header and comments updated
+
 ## Notes & Issues
 
 - Step 001: the frozen skeleton declares `RpSession.name` right after `setup_name` with **no default**, not last-with-default-None as DEC-034-6 states. Left as frozen; any test outside this step's list that constructs `RpSession` positionally or without `name` would break (none in `app/`).
 - Step 002 (orchestrator, 2026-11-06): verify run found `backend/tests/test_configuration_router.py::test_patch_on_the_session_itself_still_answers_405__S017_005_DoD9` asserting 405 on `PATCH /api/sessions/{id}` — obsolete once step 002 adds the route (DoD-4 requires 422). The file was missing from step 002's Test files; the orchestrator widened step 002's test scope to that one test (step file not edited).
+- Step 005 (orchestrator, from verifier concerns, 2026-11-06): for step 006 hosts — keep `onRenamed` non-throwing (a throw after `applySession` leaves the list updated while the editor shows the failure sentence); an aborted commit leaves `pending` true, so a host must not reuse its `SessionRenameState` after aborting (fresh state per host lifetime).
 
 ## Skeleton
 
@@ -86,6 +92,17 @@
 - `CharacterTree.tsx`, `SessionScreen.tsx`, `SessionsSection.tsx`, `SearchScreen.tsx` — STUB STATE: import and call sites only renamed mechanically to `formatLocalDateTime(...)`; they still show the start date-time. The **call-site switch to `sessionLabel` is the coder's** (tree row label :299, header `Title` :217, Sessions row `label` :179 incl. `Actions for ${label}`, search session primary :282, entry secondary :302). It was not wired because `sessionLabel` throws and would crash every existing render test. After the switch, these four files should no longer import `formatLocalDateTime` (step 006 brings it back in the tree's line 2).
 - Caller-compile edits (out of Source-files scope): `frontend/src/app/characterComposerState.ts` (~:130) — the explicit `Session` literal built from `startSessionWithMessage`'s result gains `name: started.name` and its comment reads "nine" keys. This is a mechanical change: without it the `src` typecheck fails.
 - Typecheck (`npm run typecheck`): `src` is clean. 43 errors remain, all in this step's listed Test files: `Session` fixture literals are missing `name`, `SessionHit`/`EntryHit` fixtures are missing `name`/`session_name`, and `SearchScreen.test.tsx` and `sessionLabel.test.ts` still import `formatSessionStart`. Only the test-coder can fix these. No unlisted test file is flagged.
+
+### Step 005 — frozen interface (2026-11-06)
+- `frontend/src/app/sessionRenameState.ts` — `export class SessionRenameState { editingId: string | null = null; draft = ""; originalName: string | null = null; pending = false; error: string | null = null; constructor() }` (`makeAutoObservable(this, {}, { autoBind: true })`, no-arg constructor, observable fields only) — new, final.
+- `frontend/src/app/sessionRenameState.ts` — `export function beginRename(state: SessionRenameState, session: Session): void` — new (STUB: throws `Error("not implemented")`).
+- `frontend/src/app/sessionRenameState.ts` — `export function cancelRename(state: SessionRenameState): void` — new (STUB: throws). "Closed" = `editingId === null`.
+- `frontend/src/app/sessionRenameState.ts` — `export async function commitRename(state: SessionRenameState, sessions: SessionsState, onRenamed?: (session: Session) => void, signal?: AbortSignal): Promise<void>` — new (STUB: throws; never rejects once implemented). The fixed sentence "Could not rename the session." is not yet declared (coder adds the const and the `renameSession` / `applySession` / `runInAction` imports — left out because `noUnusedLocals` rejects them).
+- `frontend/src/app/SessionNameEditor.tsx` — `export type SessionNameEditorProps = { state: SessionRenameState; onCommit: () => void }` — new, final. `onCommit` is the host's commit wiring (Enter and blur call it; the host calls `commitRename` with its workspace store, success callback and signal). Escape calls `cancelRename(props.state)` directly — no prop.
+- `frontend/src/app/SessionNameEditor.tsx` — `export const SessionNameEditor = observer(function SessionNameEditor(props: SessionNameEditorProps): React.JSX.Element)` — new (STUB: throws). Coder adds the Mantine `TextInput` / `runInAction` / `cancelRename` imports.
+- `frontend/src/app/sessionsState.ts` — `applySession(state: SessionsState, session: Session): void` — signature unchanged; **behaviour change left to the coder** (ties on `last_used_at` ordered by id descending, compared numerically on decimal strings — DEC-034-12). The module header ("Ordering compares ... never an id") and the inline comment in `applySession` still describe the old rule and need updating by the coder.
+- Caller-compile edits (out of Source-files scope): None.
+- Typecheck (`npm run typecheck`): clean.
 
 ## Tests
 
@@ -137,3 +154,9 @@
 - `frontend/tests/app/characterComposerState.test.ts` — covers DoD-4 — `SESSION_KEYS` nine keys; workspace row holds exactly the nine keys.
 - Fixture-only (`name: null` / `session_name: null`, typecheck): `searchState.test.ts`, `searchLanding.test.tsx`, `SessionsSection.export.test.tsx` (header comment: labels are dates now), `SessionsSection.import.test.tsx`, `sessionsState.test.ts`, `sessionsSectionState.test.ts`, `sessionScreenState.test.ts`, `App.test.tsx` (also `START_LABEL_HEADING` date-only), `WorkspaceShell.test.tsx`, `CharacterScreen.test.tsx`, `CharacterComposer.test.tsx`, `CharacterComposer.setup.test.tsx`, `sessionFirstReply.test.tsx`.
 - Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓
+
+### Step 005 — tests (2026-11-06)
+- `frontend/tests/app/sessionRenameState.test.ts` — covers DoD-1..DoD-7 — fresh state closed; `beginRename` pre-fills name / empty for null, sets `originalName`, clears error; commit sends one `PATCH /api/sessions/<id>` body exactly `{ name }` trimmed (inner spacing kept), blank/whitespace on a named session → `null`; normalised-equal draft (incl. surrounding whitespace, blank on never-renamed) sends nothing and closes; second commit / `cancelRename` / `beginRename` while pending ignored; list untouched and editor open before the answer; success applies the returned row at its index, callback gets it once, closed, no error; failure (404, 422, 500, transport) → error "Could not rename the session.", editor open with the typed draft, pending cleared, list unchanged, no callback, `notifyFailure` not called, retry works; abort (rejecting fetch, success after abort, failure after abort) leaves both stores as at abort and resolves.
+- `frontend/tests/app/SessionNameEditor.test.tsx` — covers DoD-8 (and DoD-4, DoD-6 through the editor) — one single-line textbox "Session name", pre-filled, empty for unnamed, focused on mount, typing writes the draft, read-only while pending; Enter and blur call `onCommit`, typing alone does not; Escape closes with no request and no commit; Enter wired to the real `commitRename` sends one PATCH and closes; Enter then blur while pending sends one request; error renders after the input with `aria-invalid`, appears reactively, absent when null; a failed real commit shows the sentence inline, keeps the typed text, and no `.mantine-Notification-root`.
+- `frontend/tests/app/sessionsState.test.ts` — covers DoD-9 — 011 DoD-5 tie clause replaced (TIED, higher id, now lands before SECOND; header and fixture comments updated); re-applying a renamed row keeps its index at every position incl. three equal-`last_used_at` rows, repeatedly and with a null name; absent tied rows land by id descending; 18- vs 19-digit ids compare numerically (re-apply stable, mid-length id lands between); ids colliding as `Number` past 2^53 order exactly; a newer `last_used_at` moves a tied/bottom row to the top; archived tied rows dropped / not inserted.
+- Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓, DoD-9 ✓

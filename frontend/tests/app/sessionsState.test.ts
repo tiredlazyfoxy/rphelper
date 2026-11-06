@@ -10,9 +10,15 @@
 // "failed" without rejecting and writes nothing once aborted. applySession removes an
 // archived row and never inserts one; a working row is removed if present and inserted
 // before the first existing row whose last_used_at is less than the new one's, else at the
-// end, with equal values landing after the equal rows — never by id. Every fixture's
-// last_used_at order is deliberately the reverse of its id order, so an accidental id sort
-// would be caught; every id is past Number.MAX_SAFE_INTEGER.
+// end. Every fixture's last_used_at order is deliberately the reverse of its id order, so an
+// accidental id-only sort would be caught; every id is past Number.MAX_SAFE_INTEGER.
+//
+// Amended by feature 034, step 005 (DoD-9; DEC-034-12): ties on last_used_at are now ordered by
+// id descending — the server's own list order (last_used_at DESC, id DESC) — comparing the
+// decimal-string ids as numbers, never as text and never through Number. Re-applying a row whose
+// last_used_at is unchanged therefore keeps its index, even among several equal rows. 011's
+// "equal values land after the equal rows" clause is replaced: TIED (higher id) now lands before
+// SECOND.
 import { autorun, isComputedProp, isObservableProp, runInAction, toJS } from "mobx";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../../src/app/sessionsApi";
@@ -71,8 +77,8 @@ const BETWEEN = makeSession("7270000000000000005", BRENN_ID, "2026-03-05T12:00:0
 /** last_used_at older than every row in WORKING. */
 const OLDEST = makeSession("7270000000000000006", CORVIN_ID, "2026-01-02T03:04:05.000000+00:00");
 /**
- * last_used_at exactly equal to SECOND's, with a HIGHER id than SECOND's: an id DESC
- * tie-break would place it before SECOND, but equal values insert after the equal rows.
+ * last_used_at exactly equal to SECOND's, with a HIGHER id than SECOND's: the id DESC
+ * tie-break (034 DEC-034-12) places it before SECOND.
  */
 const TIED = makeSession("7270000000000000009", CORVIN_ID, SECOND.last_used_at);
 
@@ -313,10 +319,10 @@ describe("applySession — an absent working row is inserted by last_used_at des
     expect(ids(state)).toEqual([FIRST.id, SECOND.id, THIRD.id, OLDEST.id]);
   });
 
-  it("a row whose last_used_at equals an existing row's lands after it — DoD-5", () => {
+  it("a row whose last_used_at equals an existing row's, with a higher id, lands before it — DoD-5, S034_005_DoD9", () => {
     const state = withSessions(WORKING);
     applySession(state, TIED);
-    expect(ids(state)).toEqual([FIRST.id, SECOND.id, TIED.id, THIRD.id]);
+    expect(ids(state)).toEqual([FIRST.id, TIED.id, SECOND.id, THIRD.id]);
   });
 
   it("the first row of an empty list is simply inserted — DoD-5", () => {
@@ -399,6 +405,143 @@ describe("applySession — archived rows never live in the workspace list", () =
     const state = withSessions(WORKING);
     applySession(state, BETWEEN);
     expect(ids(state)).toEqual([FIRST.id, SECOND.id, BETWEEN.id, THIRD.id]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 034 step 005, DoD-9 (DEC-034-12): ties on last_used_at order by id descending,
+// compared as numbers. Every list below is built in the server's order (last_used_at DESC,
+// id DESC), so "unchanged last_used_at keeps its index" is checked against that order.
+describe("applySession — last_used_at ties order by id descending (034)", () => {
+  const TIE_AT = "2026-03-20T00:00:00.000000+00:00";
+  const ABOVE = makeSession("7270000000000000100", ALMA_ID, "2026-03-25T00:00:00.000000+00:00");
+  const TIE_HIGH = makeSession("7270000000000000030", BRENN_ID, TIE_AT);
+  const TIE_MID = makeSession("7270000000000000020", ALMA_ID, TIE_AT);
+  const TIE_LOW = makeSession("7270000000000000010", CORVIN_ID, TIE_AT);
+  const BELOW = makeSession("7270000000000000200", BRENN_ID, "2026-03-15T00:00:00.000000+00:00");
+  const SERVER_ORDER: Session[] = [ABOVE, TIE_HIGH, TIE_MID, TIE_LOW, BELOW];
+
+  /** The row a rename returns: a new name and updated_at, last_used_at unchanged. */
+  function renamed(session: Session, name: string | null): Session {
+    return { ...session, name, updated_at: "2026-04-06T12:00:00.000000+00:00" };
+  }
+
+  for (const [label, row, index] of [
+    ["the highest-id tied row", TIE_HIGH, 1],
+    ["the middle tied row", TIE_MID, 2],
+    ["the lowest-id tied row", TIE_LOW, 3],
+    ["the row above the ties", ABOVE, 0],
+    ["the row below the ties", BELOW, 4],
+  ] as const) {
+    it(`re-applying ${label} renamed keeps its index — S034_005_DoD9`, () => {
+      const state = withSessions(SERVER_ORDER);
+      const next = renamed(row, "Dockside Truce");
+      applySession(state, next);
+      expect(ids(state)).toEqual(SERVER_ORDER.map((s) => s.id));
+      expect(toJS(state.sessions)[index]).toEqual(next);
+      expect(state.sessions).toHaveLength(SERVER_ORDER.length);
+    });
+  }
+
+  it("re-applying every tied row in turn leaves the server order intact — S034_005_DoD9", () => {
+    const state = withSessions(SERVER_ORDER);
+    for (const row of [TIE_LOW, TIE_HIGH, TIE_MID, TIE_HIGH, TIE_LOW]) {
+      applySession(state, renamed(row, `name of ${row.id}`));
+      expect(ids(state)).toEqual(SERVER_ORDER.map((s) => s.id));
+    }
+  });
+
+  it("clearing a name (null) on a tied row keeps its index — S034_005_DoD9", () => {
+    const named = renamed(TIE_MID, "Harbour Night");
+    const state = withSessions([ABOVE, TIE_HIGH, named, TIE_LOW, BELOW]);
+    applySession(state, renamed(TIE_MID, null));
+    expect(ids(state)).toEqual(SERVER_ORDER.map((s) => s.id));
+    expect(state.sessions[2].name).toBeNull();
+  });
+
+  it("an absent tied row lands by id descending among the ties — S034_005_DoD9", () => {
+    const highest = makeSession("7270000000000000040", CORVIN_ID, TIE_AT);
+    const between = makeSession("7270000000000000025", CORVIN_ID, TIE_AT);
+    const lowest = makeSession("7270000000000000005", CORVIN_ID, TIE_AT);
+
+    const first = withSessions(SERVER_ORDER);
+    applySession(first, highest);
+    expect(ids(first)).toEqual([ABOVE.id, highest.id, TIE_HIGH.id, TIE_MID.id, TIE_LOW.id, BELOW.id]);
+
+    const second = withSessions(SERVER_ORDER);
+    applySession(second, between);
+    expect(ids(second)).toEqual([ABOVE.id, TIE_HIGH.id, between.id, TIE_MID.id, TIE_LOW.id, BELOW.id]);
+
+    const third = withSessions(SERVER_ORDER);
+    applySession(third, lowest);
+    expect(ids(third)).toEqual([ABOVE.id, TIE_HIGH.id, TIE_MID.id, TIE_LOW.id, lowest.id, BELOW.id]);
+  });
+
+  it("ids of unequal length compare as numbers, not as text — S034_005_DoD9", () => {
+    // 19 digits vs 18 digits: numerically LONG > SHORT, but as text "9…" > "7…".
+    const LONG = makeSession("7270000000000000010", ALMA_ID, TIE_AT);
+    const SHORT = makeSession("999999999999999999", BRENN_ID, TIE_AT);
+    const state = withSessions([LONG, SHORT]);
+    applySession(state, renamed(SHORT, "Short Id"));
+    expect(ids(state)).toEqual([LONG.id, SHORT.id]);
+    applySession(state, renamed(LONG, "Long Id"));
+    expect(ids(state)).toEqual([LONG.id, SHORT.id]);
+  });
+
+  it("an absent row with a mid-length id lands numerically between — S034_005_DoD9", () => {
+    // 1000000000000000000 (19 digits) sits numerically between the two; as text it sorts last.
+    const LONG = makeSession("7270000000000000010", ALMA_ID, TIE_AT);
+    const SHORT = makeSession("999999999999999999", BRENN_ID, TIE_AT);
+    const MIDDLE = makeSession("1000000000000000000", CORVIN_ID, TIE_AT);
+    const state = withSessions([LONG, SHORT]);
+    applySession(state, MIDDLE);
+    expect(ids(state)).toEqual([LONG.id, MIDDLE.id, SHORT.id]);
+  });
+
+  it("ids that collide as JavaScript Numbers still order exactly — S034_005_DoD9", () => {
+    // Past 2^53 these three ids round to the same Number; only an exact compare orders them.
+    const ELEVEN = makeSession("7270000000000000011", ALMA_ID, TIE_AT);
+    const TEN = makeSession("7270000000000000010", BRENN_ID, TIE_AT);
+    const TWELVE = makeSession("7270000000000000012", CORVIN_ID, TIE_AT);
+    const NINE = makeSession("7270000000000000009", CORVIN_ID, TIE_AT);
+
+    const top = withSessions([ELEVEN, TEN]);
+    applySession(top, TWELVE);
+    expect(ids(top)).toEqual([TWELVE.id, ELEVEN.id, TEN.id]);
+
+    const bottom = withSessions([ELEVEN, TEN]);
+    applySession(bottom, NINE);
+    expect(ids(bottom)).toEqual([ELEVEN.id, TEN.id, NINE.id]);
+
+    const kept = withSessions([TWELVE, ELEVEN, TEN]);
+    applySession(kept, renamed(ELEVEN, "Eleven"));
+    expect(ids(kept)).toEqual([TWELVE.id, ELEVEN.id, TEN.id]);
+  });
+
+  it("a tied row with a newer last_used_at still moves to the top — S034_005_DoD9", () => {
+    const state = withSessions(SERVER_ORDER);
+    const used = { ...TIE_LOW, last_used_at: "2026-04-01T00:00:00.000000+00:00" };
+    applySession(state, used);
+    expect(ids(state)).toEqual([TIE_LOW.id, ABOVE.id, TIE_HIGH.id, TIE_MID.id, BELOW.id]);
+    expect(toJS(state.sessions)[0]).toEqual(used);
+  });
+
+  it("the bottom row with a newer last_used_at moves to the top — S034_005_DoD9", () => {
+    const state = withSessions(SERVER_ORDER);
+    applySession(state, { ...BELOW, last_used_at: "2026-04-01T00:00:00.000000+00:00" });
+    expect(ids(state)).toEqual([BELOW.id, ABOVE.id, TIE_HIGH.id, TIE_MID.id, TIE_LOW.id]);
+  });
+
+  it("an archived tied row is still dropped — S034_005_DoD9", () => {
+    const state = withSessions(SERVER_ORDER);
+    applySession(state, archivedCopy(TIE_MID));
+    expect(ids(state)).toEqual([ABOVE.id, TIE_HIGH.id, TIE_LOW.id, BELOW.id]);
+  });
+
+  it("an absent archived row tied with others is not inserted — S034_005_DoD9", () => {
+    const state = withSessions(SERVER_ORDER);
+    applySession(state, archivedCopy(makeSession("7270000000000000025", CORVIN_ID, TIE_AT)));
+    expect(ids(state)).toEqual(SERVER_ORDER.map((s) => s.id));
   });
 });
 

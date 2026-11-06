@@ -28,6 +28,7 @@ The `app` Vite entry — the roleplayer's workspace: the shell and tree, charact
 - `SearchScreen.tsx` — the my-search results page at `/search`.
 - `SessionConfigBar.tsx` — the session header's configuration bar (model picker, tool badges).
 - `SessionConfigModal.tsx` — the session configuration modal.
+- `SessionNameEditor.tsx` — the inline "Session name" input that renames a session in place, editing a host-owned `SessionRenameState`.
 - `SessionScreen.tsx` — centre column of `/sessions/:id`: header plus the session stream.
 - `SessionStream.tsx` — the session stream: owns one `StreamState` and renders record, ruler, kind switch, zone and composer.
 - `SessionsSection.tsx` — the character page's "Sessions" section (list, archive / restore, export, import).
@@ -71,10 +72,11 @@ The `app` Vite entry — the roleplayer's workspace: the shell and tree, charact
 - `sessionConfigDraft.ts` — the session configuration modal's draft.
 - `sessionConfigState.ts` — the session configuration state shared by the header bar and Send gate.
 - `sessionLabel.ts` — the session display-label module: `sessionLabel` (the stored name, else the local start date), `formatLocalDate`, `formatLocalDateTime`.
+- `sessionRenameState.ts` — in-place session rename state, one per host (tree, session header): `SessionRenameState` plus `beginRename` / `cancelRename` / `commitRename`.
 - `sessionScreenState.ts` — the session screen's state and load.
 - `sessionsApi.ts` — the sessions wire surface (list, read, start, `renameSession`, archive / restore).
 - `sessionsSectionState.ts` — the Sessions section's state and effects.
-- `sessionsState.ts` — the one workspace sessions list for the tree.
+- `sessionsState.ts` — the one workspace sessions list for the tree, ordered by last use (`applySession` upserts a session into it).
 - `settingsState.ts` — the settings languages form state.
 - `setupDraft.ts` — the setup modal's draft.
 - `setupsApi.ts` — the setups wire surface.
