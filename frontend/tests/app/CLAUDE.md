@@ -16,7 +16,7 @@ Vitest suites for the `app` entry (`src/app/`): one or more modules per componen
 - `CharacterNotesSection.test.tsx` — the character page's Notes section.
 - `CharacterScreen.export.test.tsx` — the character screen's Export button.
 - `CharacterScreen.test.tsx` — the character screen and its two routes.
-- `CharacterTree.test.tsx` — the tree header and character level.
+- `CharacterTree.test.tsx` — the tree header, character level and session rows (two-line rows, in-place rename).
 - `Composer.test.tsx` — the session composer.
 - `ComposerCore.keyboard.test.tsx` — Ctrl/Cmd+Enter send in the composer core.
 - `ComposerCore.test.tsx` — the shared composer core.

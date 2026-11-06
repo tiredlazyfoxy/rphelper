@@ -7,7 +7,7 @@ The `app` Vite entry — the roleplayer's workspace: the shell and tree, charact
 ## Glossary
 
 **Files:**
-- `App.tsx` — the entry's application: `WorkspaceShell` around the flat route table.
+- `App.tsx` — the entry's application: `WorkspaceShell` around the flat route table; hands the workspace `SessionsState` to the session route.
 - `AppBoot.tsx` — the boot gate: nothing of the shell renders until `GET /api/me` resolves.
 - `AppBootScreens.tsx` — the two full-page boot screens (not-ready and failure).
 - `AssistantBody.tsx` — assistant message body: think segments as `ThinkingBlock`s, answer segments painted.
@@ -15,7 +15,7 @@ The `app` Vite entry — the roleplayer's workspace: the shell and tree, charact
 - `CharacterConfigSection.tsx` — the character page's "Configuration" region (model, system prompt, tool switches).
 - `CharacterNotesSection.tsx` — the character page's character-level "Notes" region.
 - `CharacterScreen.tsx` — centre column of `/characters/new` and `/characters/:id`.
-- `CharacterTree.tsx` — the workspace tree's header and character / session level in the nav column.
+- `CharacterTree.tsx` — the workspace tree's header and character / session level in the nav column; each session row reads as two lines (label; last use · setup) with an in-place "Rename session" control.
 - `Composer.tsx` — the session composer: send, settle, settle preview, partner-paste filing, discard, stop.
 - `ComposerCore.tsx` — the shared presentational composer core (resizable text area, in-box Send, Ctrl/Cmd+Enter).
 - `DiscussionGroup.tsx` — the collapsed, lazily loaded read-only Discussion group under a settled entry.
@@ -29,9 +29,9 @@ The `app` Vite entry — the roleplayer's workspace: the shell and tree, charact
 - `SessionConfigBar.tsx` — the session header's configuration bar (model picker, tool badges).
 - `SessionConfigModal.tsx` — the session configuration modal.
 - `SessionNameEditor.tsx` — the inline "Session name" input that renames a session in place, editing a host-owned `SessionRenameState`.
-- `SessionScreen.tsx` — centre column of `/sessions/:id`: header plus the session stream.
+- `SessionScreen.tsx` — centre column of `/sessions/:id`: header (with "Rename session", applied to the workspace `SessionsState`) plus the session stream.
 - `SessionStream.tsx` — the session stream: owns one `StreamState` and renders record, ruler, kind switch, zone and composer.
-- `SessionsSection.tsx` — the character page's "Sessions" section (list, archive / restore, export, import).
+- `SessionsSection.tsx` — the character page's "Sessions" section (list, archive / restore, export, import); its rows follow renames made elsewhere in the workspace.
 - `SettingsScreen.tsx` — the `/settings` screen: languages form and the user's own notes.
 - `SetupCreateForm.tsx` — the Setups section's inline create form.
 - `SetupModal.tsx` — the setup create / edit modal.
@@ -75,7 +75,7 @@ The `app` Vite entry — the roleplayer's workspace: the shell and tree, charact
 - `sessionRenameState.ts` — in-place session rename state, one per host (tree, session header): `SessionRenameState` plus `beginRename` / `cancelRename` / `commitRename`.
 - `sessionScreenState.ts` — the session screen's state and load.
 - `sessionsApi.ts` — the sessions wire surface (list, read, start, `renameSession`, archive / restore).
-- `sessionsSectionState.ts` — the Sessions section's state and effects.
+- `sessionsSectionState.ts` — the Sessions section's state and effects, including `syncSectionSessions`, which brings rows up to date from the workspace sessions store.
 - `sessionsState.ts` — the one workspace sessions list for the tree, ordered by last use (`applySession` upserts a session into it).
 - `settingsState.ts` — the settings languages form state.
 - `setupDraft.ts` — the setup modal's draft.

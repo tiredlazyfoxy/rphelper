@@ -42,6 +42,7 @@ import type {
 } from "../../src/app/configurationApi";
 import { CharactersState } from "../../src/app/charactersState";
 import type { Session } from "../../src/app/sessionsApi";
+import { SessionsState } from "../../src/app/sessionsState";
 import type { Message, MessageKind } from "../../src/app/streamApi";
 import type { LayoutStorage } from "../../src/app/workspaceLayout";
 import { AppProviders } from "../../src/shared/AppProviders";
@@ -324,6 +325,7 @@ function renderAt(path: string, storage: LayoutStorage | null = null) {
           <SessionScreen
             sessionId={SESSION_ID}
             characters={workspaceWith(CHARACTER)}
+            sessions={new SessionsState()}
             storage={storage}
           />
         </main>

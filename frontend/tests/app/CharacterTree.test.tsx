@@ -61,6 +61,20 @@
 // 011 DoD-3's two shape clauses now expect the date-only shape (START_LABEL_SHAPE /
 // START_LABEL_IN_TEXT). The named-row clauses are in the last block. Expected local dates are
 // computed with Intl in the runtime zone (`localDate`), never by calling the module under test.
+//
+// Amended by feature 034, step 006 (S034_006_DoD1..DoD4, DoD6): the tree session row has two
+// lines — line 1 the label, line 2 the last-use time `YYYY-MM-DD HH:MM` (local, of
+// `last_used_at`), then ` · <setup name>` when there is a setup (DEC-034-9) — and a "Rename
+// session" icon button beside (never inside) its link (DEC-034-10). So the clauses above that
+// asserted a row's WHOLE text equals its label (011 DoD-3's unnamed row, 004's named row, the
+// relabel clause) now read the row's label as "the row's text with its expected line 2 taken
+// out" (`rowLabelText`), and the clauses that found the setup name as an element of its own now
+// look for it inside line 2. The step 006 clauses are in the last two blocks. The expected
+// last-use time comes from an Intl oracle (`localDateTime`), never from the module under test.
+// Recognition: line 1 / line 2 are elements whose whole (whitespace-normalised) text is exactly
+// the label / exactly the line-2 string, line 1 before line 2 in document order; a row's block
+// is the `li` holding its link (or, while editing, its editor); the editor is the textbox
+// "Session name"; the failure sentence is "Could not rename the session.".
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -111,6 +125,45 @@ function localDate(instant: string): string {
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((candidate) => candidate.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+/**
+ * 034 step 006: the local `YYYY-MM-DD HH:MM` (24-hour, zero-padded) of `instant` in the runtime's
+ * zone — the expected last-use time on a row's line 2, from Intl directly.
+ */
+function localDateTime(instant: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+}
+
+/**
+ * 034 step 006 (DEC-034-9): a row's expected line 2 — the last-use time, then ` · ` and the
+ * setup name when there is one, the time alone otherwise.
+ */
+function expectedLine2(row: Session): string {
+  const time = localDateTime(row.last_used_at);
+  return row.setup_name === null ? time : `${time} · ${row.setup_name}`;
+}
+
+/** Collapses runs of whitespace and trims — how a reader sees an element's text. */
+function normalised(text: string | null | undefined): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** Every element under `container` whose whole normalised text is exactly `text`. */
+function elementsWithText(container: HTMLElement, text: string): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>("*")).filter(
+    (element) => normalised(element.textContent) === text,
+  );
 }
 
 const COLLECTION_PATH = "/api/characters";
@@ -566,6 +619,23 @@ function querySessionRow(sessionId: string): HTMLElement | null {
   return sessionLinks().find((link) => href(link) === `/sessions/${sessionId}`) ?? null;
 }
 
+/** 034 step 006: a session row's whole block — the `li` holding its link (011 harvest). */
+function sessionItem(sessionId: string): HTMLElement {
+  const link = sessionRow(sessionId);
+  const item = link.closest("li");
+  if (item === null) throw new Error(`the session row for /sessions/${sessionId} is not in a li`);
+  return item;
+}
+
+/**
+ * 034 step 006: what a row shows besides its line 2 — the row block's text with the expected
+ * line 2 taken out. For a row showing "label + line 2" (and an icon-only button), this is the
+ * label; it replaces 004's "the link's whole text is the label".
+ */
+function rowLabelText(row: Session): string {
+  return normalised(normalised(sessionItem(row.id).textContent).replace(expectedLine2(row), ""));
+}
+
 function queryChevron(characterName: string, verb: "collapse" | "expand"): HTMLElement | null {
   return within(tree()).queryByRole("button", {
     name: new RegExp(`^${verb} ${characterName}$`, "i"),
@@ -958,21 +1028,23 @@ describe("a session row shows its setup as a label, or nothing (US-088.AC-1, US-
     renderTree();
     await flush();
 
-    const row = sessionRow(SID_A_NEW);
-    expect(within(row).getByText(SETUP_NAME)).toBeInTheDocument();
+    // S034_006_DoD1: the setup name now sits in line 2, after the last-use time and ` · `.
+    expect(sessionItem(SID_A_NEW).textContent ?? "").toContain(SETUP_NAME);
+    expect(elementsWithText(sessionItem(SID_A_NEW), expectedLine2(SESSION_A_NEW))).not.toEqual([]);
   });
 
-  it("a session with no setup shows only its label, the local start date — DoD-3, S034_004_DoD7", async () => {
+  it("a session with no setup shows only its label, the local start date — DoD-3, S034_004_DoD7, S034_006_DoD1", async () => {
     serveListing(PAYLOAD_ABC, [], SESSIONS_PAYLOAD);
     renderTree();
     await flush();
 
     // 034: never renamed, so the label is the local date of created_at (not of last_used_at,
-    // which this fixture deliberately puts on another day), with no time.
-    const text = (sessionRow(SID_A_OLD).textContent ?? "").trim();
+    // which this fixture deliberately puts on another day), with no time. S034_006_DoD1: the
+    // row also carries line 2 (the last-use time alone), so the label is read beside it.
+    const text = rowLabelText(SESSION_A_OLD);
     expect(text).toMatch(START_LABEL_SHAPE);
     expect(text).toBe(localDate(SESSION_A_OLD.created_at));
-    expect(within(sessionRow(SID_A_OLD)).queryByText(SETUP_NAME)).toBeNull();
+    expect(sessionItem(SID_A_OLD).textContent ?? "").not.toContain(SETUP_NAME);
   });
 
   it("the labelled row also carries its date label — DoD-3, S034_004_DoD7", async () => {
@@ -1263,16 +1335,18 @@ describe("034 step 004 — a tree session row shows the session label", () => {
     renderTree();
     await flush();
 
-    expect(within(sessionRow(SID_A_OLD)).getByText("Harbour at dusk")).toBeInTheDocument();
-    expect((sessionRow(SID_A_OLD).textContent ?? "").trim()).toBe("Harbour at dusk");
+    expect(within(sessionItem(SID_A_OLD)).getByText("Harbour at dusk")).toBeInTheDocument();
+    // S034_006_DoD1: the row's text besides its line 2 is exactly the name.
+    expect(rowLabelText(NAMED_A_OLD)).toBe("Harbour at dusk");
   });
 
-  it("a renamed session's row shows neither its start date nor a time — S034_004_DoD7", async () => {
+  it("a renamed session's row shows neither its start date nor a time in its label — S034_004_DoD7", async () => {
     serveListing(PAYLOAD_ABC, [], [SESSION_C, SESSION_A_NEW, NAMED_A_OLD]);
     renderTree();
     await flush();
 
-    const text = sessionRow(SID_A_OLD).textContent ?? "";
+    // S034_006_DoD1: line 2 carries the last-use time by design, so the label is checked apart.
+    const text = rowLabelText(NAMED_A_OLD);
     expect(text).toContain("Harbour at dusk");
     expect(text).not.toContain(localDate(NAMED_A_OLD.created_at));
     expect(text).not.toMatch(/\d{2}:\d{2}/);
@@ -1283,10 +1357,11 @@ describe("034 step 004 — a tree session row shows the session label", () => {
     renderTree();
     await flush();
 
-    const row = sessionRow(SID_A_NEW);
-    expect(within(row).getByText("1999-12-31")).toBeInTheDocument();
-    expect(within(row).getByText(SETUP_NAME)).toBeInTheDocument();
-    expect(row.textContent ?? "").not.toContain(localDate(SESSION_A_NEW.created_at));
+    const item = sessionItem(SID_A_NEW);
+    expect(within(item).getByText("1999-12-31")).toBeInTheDocument();
+    // S034_006_DoD1: the setup name is in line 2, after the last-use time.
+    expect(item.textContent ?? "").toContain(SETUP_NAME);
+    expect(rowLabelText(DATE_NAMED_A_NEW)).toBe("1999-12-31");
   });
 
   it("a never-renamed session's row beside a renamed one shows its local start date, no time — S034_004_DoD7", async () => {
@@ -1294,7 +1369,7 @@ describe("034 step 004 — a tree session row shows the session label", () => {
     renderTree();
     await flush();
 
-    const text = (sessionRow(SID_C).textContent ?? "").trim();
+    const text = rowLabelText(SESSION_C);
     expect(text).toBe(localDate(SESSION_C.created_at));
     expect(text).not.toMatch(/\d{2}:\d{2}/);
   });
@@ -1303,9 +1378,7 @@ describe("034 step 004 — a tree session row shows the session label", () => {
     const { calls } = serveListing(PAYLOAD_ABC, [], SESSIONS_PAYLOAD);
     const { sessions } = renderTree();
     await flush();
-    expect((sessionRow(SID_A_OLD).textContent ?? "").trim()).toBe(
-      localDate(SESSION_A_OLD.created_at),
-    );
+    expect(rowLabelText(SESSION_A_OLD)).toBe(localDate(SESSION_A_OLD.created_at));
     const before = sessionsRequests(calls).length;
 
     await act(async () => {
@@ -1313,7 +1386,396 @@ describe("034 step 004 — a tree session row shows the session label", () => {
     });
     await flush();
 
-    expect((sessionRow(SID_A_OLD).textContent ?? "").trim()).toBe("Harbour at dusk");
+    expect(rowLabelText(NAMED_A_OLD)).toBe("Harbour at dusk");
     expect(sessionsRequests(calls)).toHaveLength(before);
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 006 — the two-line tree row and the rename in place (S034_006_DoD1..DoD4,
+// DoD6). Expected values: the step's Interface intent and DoD; DEC-034-9 (line 2 =
+// `formatLocalDateTime(last_used_at)` then ` · <setup>`, or the time alone); DEC-034-10 (an
+// "Rename session" button beside the link, never inside it; the editor replaces the link while
+// that row is edited); DEC-034-11 (never optimistic, the returned row applied, Escape sends
+// nothing, an inline failure keeps the draft); DEC-034-12 / US-150.AC-4 (a rename keeps the
+// row's position). The step 005 editor's names: the textbox "Session name".
+// ===========================================================================
+
+const RENAME_BUTTON = /^rename session$/i;
+const NAME_INPUT = /^session name$/i;
+const RENAME_FAILED_TEXT = "Could not rename the session.";
+/** Strictly newer than every fixture's `updated_at` — the rename answer's stamp. */
+const RENAME_STAMP = "2026-08-01T12:00:00.000000+00:00";
+const NEW_NAME = "Lantern Row";
+
+/** A third session of A, between A's two in last use, created after both (DoD-2). */
+const SID_A_MID = "8000000000000000041";
+const SESSION_A_MID = session({
+  id: SID_A_MID,
+  characterId: ID_CORVIN,
+  lastUsedAt: "2026-05-05T07:05:00.000000+00:00",
+  createdAt: "2026-07-20T07:05:00.000000+00:00",
+  setupName: SETUP_NAME,
+});
+
+type Patch = { path: string; body: unknown };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/**
+ * The tree's two listings (characters `PAYLOAD_ABC`, sessions `rows`) plus the rename route
+ * `PATCH /api/sessions/<id>`, every PATCH recorded with its parsed body. A successful rename
+ * answers the stored row with the trimmed name (blank → null) and `updated_at` advanced, and
+ * `last_used_at` unchanged (context.md "A rename writes name and updated_at only"). `gate`
+ * holds the answer back until resolved; `fail` answers 500.
+ */
+function serveRenamable(rows: Session[], options: { fail?: boolean; gate?: Promise<void> } = {}) {
+  const held = rows.map((row) => ({ ...row }));
+  const patches: Patch[] = [];
+  const mock = vi.fn<FetchFn>(async (input, init) => {
+    const url = requestUrl(input);
+    const method = requestMethod(input, init);
+    if (method === "GET" && url.pathname === COLLECTION_PATH) {
+      return jsonResponse({ characters: PAYLOAD_ABC }, 200);
+    }
+    if (method === "GET" && url.pathname === SESSIONS_PATH) {
+      return jsonResponse({ sessions: held }, 200);
+    }
+    const item = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname);
+    if (method === "PATCH" && item !== null) {
+      const raw = init?.body;
+      const body: unknown = raw === undefined || raw === null ? undefined : JSON.parse(String(raw));
+      patches.push({ path: url.pathname, body });
+      if (options.gate !== undefined) await options.gate;
+      if (options.fail === true) return serverError();
+      const index = held.findIndex((row) => row.id === item[1]);
+      if (index < 0) {
+        return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
+      }
+      const sent = (body ?? {}) as { name?: unknown };
+      const name =
+        typeof sent.name === "string" && sent.name.trim() !== "" ? sent.name.trim() : null;
+      const next: Session = { ...held[index], name, updated_at: RENAME_STAMP };
+      held[index] = next;
+      return jsonResponse(next, 200);
+    }
+    return jsonResponse({ error: { code: "not_found", message: "", detail: {} } }, 404);
+  });
+  vi.stubGlobal("fetch", mock);
+  return { mock, patches };
+}
+
+function renameButtonOf(sessionId: string): HTMLElement {
+  return within(sessionItem(sessionId)).getByRole("button", { name: RENAME_BUTTON });
+}
+
+function nameInput(): HTMLElement {
+  return within(tree()).getByRole("textbox", { name: NAME_INPUT });
+}
+
+function queryNameInput(): HTMLElement | null {
+  return within(tree()).queryByRole("textbox", { name: NAME_INPUT });
+}
+
+/** The workspace store's copy of one session. */
+function storedRow(sessions: SessionsState, sessionId: string): Session | undefined {
+  return sessions.sessions.find((row) => row.id === sessionId);
+}
+
+/** Whether `first` comes before `second` in document order. */
+function precedes(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+describe("034 step 006 — the tree session row has two lines (US-151.AC-1, US-088)", () => {
+  it("a renamed row with a setup: line 1 is the name, line 2 is `YYYY-MM-DD HH:MM · <setup>` — S034_006_DoD1", async () => {
+    const named: Session = { ...SESSION_A_NEW, name: "Harbour at dusk" };
+    serveListing(PAYLOAD_ABC, [], [SESSION_C, named, SESSION_A_OLD]);
+    renderTree();
+    await flush();
+
+    const item = sessionItem(SID_A_NEW);
+    const line1 = elementsWithText(item, "Harbour at dusk");
+    const line2 = elementsWithText(item, expectedLine2(named));
+    expect(line1).not.toEqual([]);
+    expect(line2).not.toEqual([]);
+    expect(expectedLine2(named)).toBe(`${localDateTime(named.last_used_at)} · ${SETUP_NAME}`);
+    expect(precedes(line1[0], line2[0])).toBe(true);
+    expect(rowLabelText(named)).toBe("Harbour at dusk");
+  });
+
+  it("a never-renamed row with a setup: line 1 is the local start date, line 2 the last-use time and setup — S034_006_DoD1", async () => {
+    serveListing(PAYLOAD_ABC, [], [SESSION_C, SESSION_A_MID]);
+    renderTree();
+    await flush();
+
+    // created_at and last_used_at fall on different days, so line 1 and line 2 cannot be confused.
+    const item = sessionItem(SID_A_MID);
+    const line1 = elementsWithText(item, localDate(SESSION_A_MID.created_at));
+    const line2 = elementsWithText(item, expectedLine2(SESSION_A_MID));
+    expect(line1).not.toEqual([]);
+    expect(line2).not.toEqual([]);
+    expect(precedes(line1[0], line2[0])).toBe(true);
+    expect(rowLabelText(SESSION_A_MID)).toBe(localDate(SESSION_A_MID.created_at));
+  });
+
+  it("a row with no setup: line 2 is the last-use time alone, with no separator — S034_006_DoD1", async () => {
+    serveListing(PAYLOAD_ABC, [], SESSIONS_PAYLOAD);
+    renderTree();
+    await flush();
+
+    const item = sessionItem(SID_A_OLD);
+    const time = localDateTime(SESSION_A_OLD.last_used_at);
+    expect(time).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    const line1 = elementsWithText(item, localDate(SESSION_A_OLD.created_at));
+    const line2 = elementsWithText(item, time);
+    expect(line1).not.toEqual([]);
+    expect(line2).not.toEqual([]);
+    expect(precedes(line1[0], line2[0])).toBe(true);
+    expect(item.textContent ?? "").not.toContain("·");
+    expect(item.textContent ?? "").not.toContain(SETUP_NAME);
+  });
+
+  it("line 2 shows the last use, not the start: a row created later than it was last used — S034_006_DoD1", async () => {
+    serveListing(PAYLOAD_ABC, [], SESSIONS_PAYLOAD);
+    renderTree();
+    await flush();
+
+    const item = sessionItem(SID_A_OLD);
+    expect(item.textContent ?? "").toContain(localDateTime(SESSION_A_OLD.last_used_at));
+    expect(item.textContent ?? "").not.toContain(localDateTime(SESSION_A_OLD.created_at));
+  });
+});
+
+describe("034 step 006 — a character's rows read most recent use first (US-151.AC-2, US-089.AC-1)", () => {
+  it("three sessions under one character are ordered by last use and their line-2 times descend — S034_006_DoD2", async () => {
+    // The server's order (last_used_at DESC); creation order and id order both differ from it.
+    serveListing(PAYLOAD_ABC, [], [SESSION_C, SESSION_A_NEW, SESSION_A_MID, SESSION_A_OLD]);
+    renderTree();
+    await flush();
+
+    expect(sessionHrefsUnder(CORVIN.name)).toEqual([
+      `/sessions/${SID_A_NEW}`,
+      `/sessions/${SID_A_MID}`,
+      `/sessions/${SID_A_OLD}`,
+    ]);
+    const shown = within(sessionsListFor(CORVIN.name))
+      .queryAllByRole("link")
+      .map((link) => {
+        const item = link.closest("li") ?? link;
+        return /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.exec(item.textContent ?? "")?.[0] ?? "";
+      });
+    expect(shown).toEqual([
+      localDateTime(SESSION_A_NEW.last_used_at),
+      localDateTime(SESSION_A_MID.last_used_at),
+      localDateTime(SESSION_A_OLD.last_used_at),
+    ]);
+    expect([...shown].sort().reverse()).toEqual(shown);
+  });
+});
+
+describe("034 step 006 — renaming from a tree row (US-150.AC-2, US-150.AC-4)", () => {
+  it("every session row offers Rename session beside its link, never inside it — S034_006_DoD3", async () => {
+    serveListing(PAYLOAD_ABC, [], SESSIONS_PAYLOAD);
+    renderTree();
+    await flush();
+
+    for (const id of [SID_C, SID_A_NEW, SID_A_OLD]) {
+      const button = renameButtonOf(id);
+      expect(button).toBeInTheDocument();
+      expect(sessionRow(id).contains(button)).toBe(false);
+    }
+  });
+
+  it("activating it on a never-renamed row shows an empty Session name input in place of the link — S034_006_DoD3", async () => {
+    const user = newUser();
+    serveRenamable(SESSIONS_PAYLOAD);
+    renderTree();
+    await flush();
+
+    await user.click(renameButtonOf(SID_A_OLD));
+    await flush();
+
+    expect(nameInput()).toHaveValue("");
+    expect(querySessionRow(SID_A_OLD)).toBeNull();
+    // Only that row is being edited; its neighbours keep their links.
+    expect(querySessionRow(SID_A_NEW)).not.toBeNull();
+    expect(within(tree()).getAllByRole("textbox", { name: NAME_INPUT })).toHaveLength(1);
+  });
+
+  it("activating it on a renamed row pre-fills the input with the current name — S034_006_DoD3", async () => {
+    const user = newUser();
+    const named: Session = { ...SESSION_A_OLD, name: "Harbour at dusk" };
+    serveRenamable([SESSION_C, SESSION_A_NEW, named]);
+    renderTree();
+    await flush();
+
+    await user.click(renameButtonOf(SID_A_OLD));
+    await flush();
+
+    expect(nameInput()).toHaveValue("Harbour at dusk");
+  });
+
+  it("typing a name and pressing Enter sends one PATCH /api/sessions/<id> with { name } — S034_006_DoD3", async () => {
+    const user = newUser();
+    const { patches } = serveRenamable(SESSIONS_PAYLOAD);
+    renderTree();
+    await flush();
+
+    await user.click(renameButtonOf(SID_A_OLD));
+    await user.type(nameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+
+    expect(patches).toEqual([{ path: `/api/sessions/${SID_A_OLD}`, body: { name: NEW_NAME } }]);
+  });
+
+  it("the row shows the new label only after the server answers — S034_006_DoD3", async () => {
+    const user = newUser();
+    const gate = deferred<void>();
+    const { patches } = serveRenamable(SESSIONS_PAYLOAD, { gate: gate.promise });
+    const { sessions } = renderTree();
+    await flush();
+
+    await user.click(renameButtonOf(SID_A_OLD));
+    await user.type(nameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+
+    // Sent, not answered: nothing in the tree reads the new name and the store is untouched.
+    expect(patches).toHaveLength(1);
+    expect(elementsWithText(tree(), NEW_NAME)).toEqual([]);
+    expect(storedRow(sessions, SID_A_OLD)?.name).toBeNull();
+
+    await act(async () => {
+      gate.resolve();
+    });
+    await flush();
+
+    expect(queryNameInput()).toBeNull();
+    expect(rowLabelText({ ...SESSION_A_OLD, name: NEW_NAME })).toBe(NEW_NAME);
+    expect(storedRow(sessions, SID_A_OLD)?.name).toBe(NEW_NAME);
+  });
+
+  it("the renamed row keeps its position under its character, and the characters keep theirs — S034_006_DoD3", async () => {
+    const user = newUser();
+    serveRenamable([SESSION_C, SESSION_A_NEW, SESSION_A_MID, SESSION_A_OLD]);
+    renderTree();
+    await flush();
+    const rowsBefore = sessionHrefsUnder(CORVIN.name);
+    const charactersBefore = characterTexts();
+
+    // The middle row, so a move either way would show.
+    await user.click(renameButtonOf(SID_A_MID));
+    await user.type(nameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+
+    expect(sessionHrefsUnder(CORVIN.name)).toEqual(rowsBefore);
+    expect(rowsBefore).toEqual([
+      `/sessions/${SID_A_NEW}`,
+      `/sessions/${SID_A_MID}`,
+      `/sessions/${SID_A_OLD}`,
+    ]);
+    expect(characterTexts()).toEqual(charactersBefore);
+    expect(rowLabelText({ ...SESSION_A_MID, name: NEW_NAME })).toBe(NEW_NAME);
+  });
+
+  it("a name typed with surrounding spaces is shown trimmed, as the server answers it — S034_006_DoD3", async () => {
+    const user = newUser();
+    serveRenamable(SESSIONS_PAYLOAD);
+    renderTree();
+    await flush();
+
+    // DEC-034-1 / DEC-034-11: the name is trimmed; the row shows the answered (trimmed) name.
+    await user.click(renameButtonOf(SID_A_OLD));
+    await user.type(nameInput(), `   ${NEW_NAME}   {Enter}`);
+    await flush();
+
+    expect(rowLabelText({ ...SESSION_A_OLD, name: NEW_NAME })).toBe(NEW_NAME);
+  });
+});
+
+describe("034 step 006 — Escape in the tree editor (DEC-034-11)", () => {
+  it("Escape restores the row with its old label and sends nothing — S034_006_DoD4", async () => {
+    const user = newUser();
+    const named: Session = { ...SESSION_A_OLD, name: "Harbour at dusk" };
+    const { patches } = serveRenamable([SESSION_C, SESSION_A_NEW, named]);
+    const { sessions } = renderTree();
+    await flush();
+
+    await user.click(renameButtonOf(SID_A_OLD));
+    await user.clear(nameInput());
+    await user.type(nameInput(), `${NEW_NAME}{Escape}`);
+    await flush();
+
+    expect(queryNameInput()).toBeNull();
+    expect(sessionRow(SID_A_OLD)).toHaveAttribute("href", `/sessions/${SID_A_OLD}`);
+    expect(rowLabelText(named)).toBe("Harbour at dusk");
+    expect(elementsWithText(tree(), NEW_NAME)).toEqual([]);
+    expect(patches).toEqual([]);
+    expect(storedRow(sessions, SID_A_OLD)?.name).toBe("Harbour at dusk");
+  });
+
+  it("Escape on a never-renamed row restores its local start date and sends nothing — S034_006_DoD4", async () => {
+    const user = newUser();
+    const { patches } = serveRenamable(SESSIONS_PAYLOAD);
+    renderTree();
+    await flush();
+
+    await user.click(renameButtonOf(SID_A_OLD));
+    await user.type(nameInput(), `${NEW_NAME}{Escape}`);
+    await flush();
+
+    expect(queryNameInput()).toBeNull();
+    expect(rowLabelText(SESSION_A_OLD)).toBe(localDate(SESSION_A_OLD.created_at));
+    expect(patches).toEqual([]);
+  });
+});
+
+describe("034 step 006 — a failed rename from the tree (DEC-034-11)", () => {
+  it("shows Could not rename the session. under the editor, keeps the typed text and the old label — S034_006_DoD6", async () => {
+    const user = newUser();
+    const { patches } = serveRenamable(SESSIONS_PAYLOAD, { fail: true });
+    const { sessions } = renderTree();
+    await flush();
+
+    await user.click(renameButtonOf(SID_A_OLD));
+    await user.type(nameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+
+    expect(patches).toHaveLength(1);
+    const input = nameInput();
+    expect(input).toHaveValue(NEW_NAME);
+    const item = input.closest("li");
+    expect(item).not.toBeNull();
+    const sentence = within(item as HTMLElement).getByText(RENAME_FAILED_TEXT);
+    expect(precedes(input, sentence)).toBe(true);
+
+    // The label elsewhere — the workspace store the tree and the header read — is unchanged.
+    expect(storedRow(sessions, SID_A_OLD)?.name).toBeNull();
+    expect(elementsWithText(tree(), NEW_NAME)).toEqual([]);
+    expect(notificationsShown()).toEqual([]);
+  });
+
+  it("the failure is inline only, and Escape afterwards restores the old label — S034_006_DoD6", async () => {
+    const user = newUser();
+    serveRenamable(SESSIONS_PAYLOAD, { fail: true });
+    renderTree();
+    await flush();
+
+    await user.click(renameButtonOf(SID_A_OLD));
+    await user.type(nameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+    expect(within(tree()).getByText(RENAME_FAILED_TEXT)).toBeInTheDocument();
+
+    await user.type(nameInput(), "{Escape}");
+    await flush();
+
+    expect(queryNameInput()).toBeNull();
+    expect(rowLabelText(SESSION_A_OLD)).toBe(localDate(SESSION_A_OLD.created_at));
   });
 });

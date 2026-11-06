@@ -378,7 +378,7 @@ function renderSessionArrival(arrival: InitialEntry, options: { strict?: boolean
         <main>
           <Routes>
             <Route path="/characters/:id" element={<p>{CHARACTER_PAGE_TEXT}</p>} />
-            <Route path="/sessions/:id" element={<SessionRoute characters={characters} storage={null} />} />
+            <Route path="/sessions/:id" element={<SessionRoute characters={characters} sessions={new SessionsState()} storage={null} />} />
           </Routes>
         </main>
         <RouterProbe />

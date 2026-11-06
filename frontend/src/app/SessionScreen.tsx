@@ -17,6 +17,9 @@
 // branch (016 D1), and any notification API import — the failure branch renders its one
 // fixed sentence inline with a Retry. The header's title-row button is 016's "Open notes";
 // 017's `SessionConfigBar` (model picker, tool badges, gear) follows the title row.
+// Feature 034, step 006 (DEC-034-10/-11/-14): the title row also carries "Rename session",
+// which swaps the title for the in-place `SessionNameEditor`; the answer is applied to this
+// screen's session and to the workspace `SessionsState` threaded in as `sessions`.
 //
 // Feature 029, step 006 (D8): the screen is also the chain's only reader of the URL's search
 // parameters — `?entry=<message id>`, handed down as the stream's focus entry, and
@@ -27,7 +30,7 @@ import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMediaQuery } from "@mantine/hooks";
-import { IconNotes } from "@tabler/icons-react";
+import { IconEdit, IconNotes } from "@tabler/icons-react";
 import {
   Anchor,
   Badge,
@@ -42,6 +45,7 @@ import {
 } from "@mantine/core";
 
 import type { CharactersState } from "./charactersState";
+import type { SessionsState } from "./sessionsState";
 import type { LayoutStorage } from "./workspaceLayout";
 import { isSessionArchived } from "./sessionsApi";
 import { sessionLabel } from "./sessionLabel";
@@ -55,6 +59,8 @@ import { SessionConfigState, sendBlockedReason } from "./sessionConfigState";
 import { SessionConfigBar } from "./SessionConfigBar";
 import { IconButton } from "../shared/IconButton";
 import { isFirstReplyState } from "./firstReply";
+import { SessionRenameState, beginRename, commitRename } from "./sessionRenameState";
+import { SessionNameEditor } from "./SessionNameEditor";
 
 /** The link text when the workspace list does not hold this session's character (D17). */
 const UNKNOWN_CHARACTER = "Character";
@@ -79,6 +85,12 @@ export type SessionScreenProps = {
    */
   characters: CharactersState;
   /**
+   * The one workspace sessions state `App` creates (011 D15), threaded here by `SessionRoute`
+   * (DEC-034-14). A successful rename from the header applies the server's returned session
+   * to it, so the tree row relabels from the same answer (DEC-034-11). Required.
+   */
+  sessions: SessionsState;
+  /**
    * The persisted-layout storage `App` holds, or `null` (016 D2). The note wall reads its
    * pin from it and writes pin changes to it. Required.
    */
@@ -86,14 +98,16 @@ export type SessionScreenProps = {
 };
 
 /**
- * The session's own screen: the header (character link, session-label heading, setup label and
- * the "Archived" badge) plus the session stream, with the loading, not-found and failed
- * branches. Keyed by the session id by `SessionRoute`, so each session gets fresh state.
+ * The session's own screen: the header (character link, session-label heading or the in-place
+ * name editor, the "Rename session" button, setup label and the "Archived" badge) plus the
+ * session stream, with the loading, not-found and failed branches. Keyed by the session id by
+ * `SessionRoute`, so each session gets fresh state. A rename sends one `PATCH` and nothing
+ * else: no re-list and no re-read (DEC-034-11).
  */
 export const SessionScreen = observer(function SessionScreen(
   props: SessionScreenProps,
 ): React.JSX.Element {
-  const { characters, storage } = props;
+  const { characters, sessions, storage } = props;
   // Created once, never with `useMemo`; `SessionRoute` keys the screen by the session id, so
   // a different session builds fresh screen state rather than reusing this one.
   const [state] = useState(() => new SessionScreenState(props.sessionId));
@@ -106,6 +120,11 @@ export const SessionScreen = observer(function SessionScreen(
   const narrow =
     useMediaQuery(NARROW_VIEWPORT_QUERY, false, { getInitialValueInEffect: false }) ?? false;
   const controllerRef = useRef<AbortController | null>(null);
+  // DEC-034-11: the header's own rename state, one per mount (the screen is keyed by the
+  // session id). An aborted commit leaves `pending` set, so this state is never reused after
+  // its controller aborts — the abort happens only on unmount, which discards it too.
+  const [renameState] = useState(() => new SessionRenameState());
+  const renameControllerRef = useRef<AbortController | null>(null);
 
   // 029 `006` (D8): the landing parameters. This screen is the chain's only reader of the URL
   // — it has a router, while `SessionStream` and `StreamRecord` deliberately use no router
@@ -157,8 +176,38 @@ export const SessionScreen = observer(function SessionScreen(
     };
   }, [state]);
 
+  // The rename's own controller, aborted on unmount so a late answer writes to neither the
+  // screen state nor the workspace list.
+  useEffect(() => {
+    const controller = new AbortController();
+    renameControllerRef.current = controller;
+    return () => {
+      controller.abort();
+      if (renameControllerRef.current === controller) {
+        renameControllerRef.current = null;
+      }
+    };
+  }, [renameState]);
+
   const retry = (): void => {
     void loadSessionScreen(state, controllerRef.current?.signal);
+  };
+
+  /**
+   * The editor's commit wiring (Enter / blur). `commitRename` applies the answer to the
+   * workspace list itself; the callback only swaps this screen's session for the returned
+   * row. It runs inside `commitRename`'s action and is a plain, non-throwing field write —
+   * a throw there would leave the list updated while the editor shows the failure sentence.
+   */
+  const commitHeaderRename = (): void => {
+    void commitRename(
+      renameState,
+      sessions,
+      (renamed) => {
+        state.session = renamed;
+      },
+      renameControllerRef.current?.signal,
+    );
   };
 
   // The 404 is terminal: retrying an id that is not ours cannot start answering, so this
@@ -212,9 +261,26 @@ export const SessionScreen = observer(function SessionScreen(
             {characterName}
           </Anchor>
           <Group gap="sm">
-            {/* US-150: the heading is the session label — its name, else its local start
-                date in the browser's own zone (no zone argument is passed). */}
-            <Title order={2}>{sessionLabel(session)}</Title>
+            {/* DEC-034-10: while this session is being renamed the editor takes the title's
+                place, and the button is withdrawn (it would only re-open the open editor). */}
+            {renameState.editingId === session.id ? (
+              <SessionNameEditor state={renameState} onCommit={commitHeaderRename} />
+            ) : (
+              <>
+                {/* US-150: the heading is the session label — its name, else its local
+                    start date in the browser's own zone (no zone argument is passed). */}
+                <Title order={2}>{sessionLabel(session)}</Title>
+                {/* DEC-034-10: offered on archived sessions too — the backend renames them. */}
+                <IconButton
+                  icon={IconEdit}
+                  label="Rename session"
+                  sizeVariant="inline"
+                  onClick={() => {
+                    beginRename(renameState, session);
+                  }}
+                />
+              </>
+            )}
             {/* US-088: the setup's name beside the label, and nothing at all where it
                 would be when the session has none. */}
             {session.setup_name !== null && (
@@ -272,6 +338,8 @@ export const SessionScreen = observer(function SessionScreen(
 export type SessionRouteProps = {
   /** Passed straight through to `SessionScreen`. */
   characters: CharactersState;
+  /** The workspace sessions state, passed straight through to `SessionScreen` (DEC-034-14). */
+  sessions: SessionsState;
   /** Passed straight through to `SessionScreen` (016 D2). */
   storage: LayoutStorage | null;
 };
@@ -283,7 +351,7 @@ export type SessionRouteProps = {
  * session's header.
  */
 export function SessionRoute(props: SessionRouteProps): React.JSX.Element {
-  const { characters, storage } = props;
+  const { characters, sessions, storage } = props;
   const params = useParams();
   const sessionId = params.id ?? "";
 
@@ -292,6 +360,7 @@ export function SessionRoute(props: SessionRouteProps): React.JSX.Element {
       key={sessionId}
       sessionId={sessionId}
       characters={characters}
+      sessions={sessions}
       storage={storage}
     />
   );

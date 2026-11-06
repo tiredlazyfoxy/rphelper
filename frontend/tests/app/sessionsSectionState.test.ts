@@ -17,6 +17,13 @@
 // request assertions keyed on the **exact pathname plus query string** — never a prefix.
 // Fixture ids are past Number.MAX_SAFE_INTEGER and their `last_used_at` order is
 // deliberately the reverse of their id order, so anything ordering by id is caught.
+//
+// Amended by feature 034, step 006 (S034_006_DoD7, S034_006_DoD8): the block at the end covers
+// `syncSectionSessions(state, workspaceSessions)` (frozen in status.md `### Step 006 — frozen
+// interface`). Expected values come from the step's Interface intent and DEC-034-13: every
+// section row whose id matches a workspace session with a STRICTLY newer `updated_at` is replaced
+// in place by that session; an older or equal one changes nothing; rows are never added, removed
+// or reordered.
 import { autorun, runInAction, toJS } from "mobx";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../../src/app/sessionsApi";
@@ -27,6 +34,7 @@ import {
   restoreSectionRow,
   SessionsSectionState,
   setShowArchived,
+  syncSectionSessions,
 } from "../../src/app/sessionsSectionState";
 import { SessionsState } from "../../src/app/sessionsState";
 import type { Setup } from "../../src/app/setupsApi";
@@ -766,5 +774,144 @@ describe("setShowArchived and the observability of the writes", () => {
     setShowArchived(state, true);
     expect(observed).toEqual([false, true]);
     dispose();
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 006 — syncSectionSessions: the section follows the workspace store by the
+// apply-a-row rule (DEC-034-13). "— S034_006_DoD7" = a strictly newer workspace copy relabels the
+// section's row, an older or equal one does not; "— S034_006_DoD8" = never adds, removes or
+// reorders.
+// ===========================================================================
+
+/** Strictly newer than every fixture's `updated_at` — what a rename's answer carries. */
+const RENAMED_STAMP = "2026-07-01T12:00:00.000000+00:00";
+/** Older than every fixture's `updated_at`. */
+const STALE_STAMP = "2026-01-01T00:00:00.000000+00:00";
+
+/** `session` as the workspace would hold it after a rename answered at `updatedAt`. */
+function renamedCopy(session: Session, name: string | null, updatedAt = RENAMED_STAMP): Session {
+  return { ...session, name, updated_at: updatedAt };
+}
+
+describe("034 step 006 — syncSectionSessions replaces a row only from a strictly newer copy", () => {
+  it("a workspace copy with a newer updated_at replaces the section's row in place — S034_006_DoD7", () => {
+    const state = withSessions(WORKING);
+    const renamed = renamedCopy(NOON, "Lantern Row");
+    syncSectionSessions(state, [DAWN, renamed, DUSK]);
+    expect(toJS(state.sessions)).toEqual([DAWN, renamed, DUSK]);
+  });
+
+  it("the replacement is the workspace's row in full, cleared name included — S034_006_DoD7", () => {
+    const named = { ...NOON, name: "Lantern Row" };
+    const state = withSessions([DAWN, named, DUSK]);
+    const cleared = renamedCopy(NOON, null);
+    syncSectionSessions(state, [cleared]);
+    expect(listed(state, NOON.id)).toEqual(cleared);
+    expect(listed(state, NOON.id)?.name).toBeNull();
+  });
+
+  it("several newer copies each replace their own row at its own index — S034_006_DoD7", () => {
+    const state = withSessions(WORKING);
+    const dawn = renamedCopy(DAWN, "First light");
+    const dusk = renamedCopy(DUSK, "Last light");
+    syncSectionSessions(state, [dawn, NOON, dusk]);
+    expect(toJS(state.sessions)).toEqual([dawn, NOON, dusk]);
+  });
+
+  it("a workspace copy with an equal updated_at does not overwrite the section's row — S034_006_DoD7", () => {
+    const state = withSessions(WORKING);
+    syncSectionSessions(state, [{ ...NOON, name: "Same stamp" }]);
+    expect(toJS(state.sessions)).toEqual([DAWN, NOON, DUSK]);
+    expect(listed(state, NOON.id)?.name).toBeNull();
+  });
+
+  it("a workspace copy with an older updated_at does not overwrite the section's row — S034_006_DoD7", () => {
+    const named = renamedCopy(NOON, "Newer in the section");
+    const state = withSessions([DAWN, named, DUSK]);
+    syncSectionSessions(state, [renamedCopy(NOON, "Older in the workspace", STALE_STAMP)]);
+    expect(listed(state, NOON.id)).toEqual(named);
+  });
+
+  it("an observer of the section's rows sees the replacement — S034_006_DoD7", () => {
+    const state = withSessions(WORKING);
+    const observed: Array<string | null | undefined> = [];
+    const dispose = autorun(() => {
+      observed.push(state.sessions.find((row) => row.id === NOON.id)?.name);
+    });
+    syncSectionSessions(state, [renamedCopy(NOON, "Lantern Row")]);
+    expect(observed[observed.length - 1]).toBe("Lantern Row");
+    dispose();
+  });
+
+  it("leaves pendingId, error, status and showArchived alone — S034_006_DoD7", () => {
+    const state = withSessions(WORKING, true);
+    runInAction(() => {
+      state.error = ARCHIVE_FAILED;
+    });
+    syncSectionSessions(state, [renamedCopy(NOON, "Lantern Row")]);
+    expect(state.error).toBe(ARCHIVE_FAILED);
+    expect(state.status).toBe("ready");
+    expect(state.showArchived).toBe(true);
+    expect(state.pendingId).toBeNull();
+  });
+});
+
+describe("034 step 006 — syncSectionSessions never adds, removes or reorders", () => {
+  it("a workspace session the section does not hold is not added — S034_006_DoD8", () => {
+    const state = withSessions(WORKING);
+    syncSectionSessions(state, [renamedCopy(NEWEST, "Elsewhere"), DAWN, NOON, DUSK]);
+    expect(ids(state)).toEqual([DAWN.id, NOON.id, DUSK.id]);
+    expect(listed(state, NEWEST.id)).toBeUndefined();
+  });
+
+  it("a section row the workspace does not hold is kept unchanged — S034_006_DoD8", () => {
+    const state = withSessions(WORKING);
+    const renamed = renamedCopy(DAWN, "Only this one");
+    syncSectionSessions(state, [renamed]);
+    expect(toJS(state.sessions)).toEqual([renamed, NOON, DUSK]);
+  });
+
+  it("an empty workspace list changes nothing — S034_006_DoD8", () => {
+    const state = withSessions(WORKING);
+    syncSectionSessions(state, []);
+    expect(toJS(state.sessions)).toEqual([DAWN, NOON, DUSK]);
+  });
+
+  it("an empty section stays empty whatever the workspace holds — S034_006_DoD8", () => {
+    const state = withSessions([]);
+    syncSectionSessions(state, [renamedCopy(DAWN, "x"), renamedCopy(NEWEST, "y")]);
+    expect(toJS(state.sessions)).toEqual([]);
+  });
+
+  it("the workspace's order never reorders the section — S034_006_DoD8", () => {
+    const state = withSessions(WORKING);
+    const dawn = renamedCopy(DAWN, "a");
+    const noon = renamedCopy(NOON, "b");
+    const dusk = renamedCopy(DUSK, "c");
+    syncSectionSessions(state, [dusk, noon, dawn]);
+    expect(toJS(state.sessions)).toEqual([dawn, noon, dusk]);
+  });
+
+  it("a newer copy whose last use moved is still replaced in place, not moved — S034_006_DoD8", () => {
+    const state = withSessions(WORKING);
+    const moved: Session = { ...DUSK, last_used_at: RENAMED_STAMP, updated_at: RENAMED_STAMP };
+    syncSectionSessions(state, [moved, DAWN, NOON]);
+    expect(toJS(state.sessions)).toEqual([DAWN, NOON, moved]);
+  });
+
+  it("archived section rows the working workspace list lacks are kept while showArchived is true — S034_006_DoD8", () => {
+    const archived = archivedCopy(NOON);
+    const state = withSessions([DAWN, archived, DUSK], true);
+    const dawn = renamedCopy(DAWN, "Still here");
+    syncSectionSessions(state, [dawn, DUSK]);
+    expect(toJS(state.sessions)).toEqual([dawn, archived, DUSK]);
+  });
+
+  it("issues no request — S034_006_DoD8", () => {
+    const mock = stubFetch(() => Promise.resolve(jsonResponse({ sessions: [] }, 200)));
+    const state = withSessions(WORKING);
+    syncSectionSessions(state, [renamedCopy(NOON, "Lantern Row")]);
+    expect(mock).not.toHaveBeenCalled();
   });
 });

@@ -35,12 +35,20 @@
 // with no time (DEC-034-9). The 011 shape clause now expects the date-only shape for the
 // never-renamed fixtures (`name: null`). The 034 block at the end covers S034_004_DoD7 (named
 // and unnamed rows) and S034_004_DoD8 (no rename control in this tab, DEC-arch-session-names-4).
+//
+// Amended by feature 034, step 006 (S034_006_DoD7, S034_006_DoD8): while mounted, the section
+// follows the workspace `SessionsState` it is given (DEC-034-13): a workspace copy of one of its
+// rows with a strictly newer `updated_at` relabels that row in place, an older or equal one does
+// not, and nothing is added, removed or reordered — with no request. The block at the end writes
+// the workspace store directly (as the tree's rename would, through its answer) and reads the
+// section's rows.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionsSection } from "../../src/app/SessionsSection";
 import type { Session } from "../../src/app/sessionsApi";
+import { runInAction } from "mobx";
 import { SessionsState } from "../../src/app/sessionsState";
 import type { Setup } from "../../src/app/setupsApi";
 import { AppProviders } from "../../src/shared/AppProviders";
@@ -837,5 +845,155 @@ describe("034 step 004: the Sessions tab offers no rename (DEC-arch-session-name
     await chooseMenuItem(user, ARCHIVE_ITEM);
 
     expect(calls.filter((call) => call.method === "PATCH")).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 006 — the mounted section follows the workspace store (DEC-034-13).
+// ===========================================================================
+
+/** Strictly newer than both fixtures' `updated_at` — what a rename's answer carries. */
+const SYNC_STAMP = "2026-07-01T12:00:00.000000+00:00";
+/** Older than both fixtures' `updated_at`. */
+const SYNC_STALE_STAMP = "2026-01-01T00:00:00.000000+00:00";
+
+/** A workspace session the section does not list (another id, newest stamp). */
+const OUTSIDER: Session = {
+  ...WITHOUT_SETUP,
+  id: "7250000000000000199",
+  name: "Not in this section",
+  last_used_at: SYNC_STAMP,
+  created_at: SYNC_STAMP,
+  updated_at: SYNC_STAMP,
+};
+
+/**
+ * Writes the workspace store's rows directly, inside `act` so the section's reaction and
+ * re-render settle — a stand-in for the tree applying a rename's answer.
+ */
+async function setWorkspace(workspace: SessionsState, rows: Session[]): Promise<void> {
+  await act(async () => {
+    runInAction(() => {
+      workspace.sessions = rows.map((entry) => ({ ...entry }));
+      workspace.status = "ready";
+    });
+  });
+  await flush();
+}
+
+describe("034 step 006 — a newer workspace copy relabels the section's row", () => {
+  it("a workspace copy with a newer updated_at relabels that row with no request — S034_006_DoD7", async () => {
+    const { calls, workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+    expect(rowLabel(WITHOUT_SETUP)).toBe(localDate(WITHOUT_SETUP.created_at));
+    const before = calls.length;
+
+    await setWorkspace(workspace, [
+      WITH_SETUP,
+      { ...WITHOUT_SETUP, name: "Lantern Row", updated_at: SYNC_STAMP },
+    ]);
+
+    expect(rowLabel(WITHOUT_SETUP)).toBe("Lantern Row");
+    expect(rowLabel(WITH_SETUP)).toBe(localDate(WITH_SETUP.created_at));
+    expect(listedHrefs()).toEqual([sessionHref(WITH_SETUP), sessionHref(WITHOUT_SETUP)]);
+    expect(calls.length).toBe(before);
+  });
+
+  it("the menu trigger follows the new label — S034_006_DoD7", async () => {
+    const { workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    await setWorkspace(workspace, [{ ...WITH_SETUP, name: "Lantern Row", updated_at: SYNC_STAMP }]);
+
+    expect(
+      within(row(WITH_SETUP)).getByRole("button", { name: "Actions for Lantern Row" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a cleared name from a newer copy returns the row to its local start date — S034_006_DoD7", async () => {
+    const named: Session = { ...WITHOUT_SETUP, name: "Harbour at dusk" };
+    const { workspace } = await renderListed({ sessions: [WITH_SETUP, named] });
+    expect(rowLabel(named)).toBe("Harbour at dusk");
+
+    await setWorkspace(workspace, [{ ...named, name: null, updated_at: SYNC_STAMP }]);
+
+    expect(rowLabel(named)).toBe(localDate(named.created_at));
+  });
+
+  it("a workspace copy with an equal updated_at does not relabel the row — S034_006_DoD7", async () => {
+    const { workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    await setWorkspace(workspace, [{ ...WITHOUT_SETUP, name: "Same stamp" }]);
+
+    expect(rowLabel(WITHOUT_SETUP)).toBe(localDate(WITHOUT_SETUP.created_at));
+  });
+
+  it("a workspace copy with an older updated_at does not relabel the row — S034_006_DoD7", async () => {
+    const { workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    await setWorkspace(workspace, [
+      { ...WITHOUT_SETUP, name: "Stale copy", updated_at: SYNC_STALE_STAMP },
+    ]);
+
+    expect(rowLabel(WITHOUT_SETUP)).toBe(localDate(WITHOUT_SETUP.created_at));
+  });
+
+  it("keeps following: a second, still newer copy relabels the row again — S034_006_DoD7", async () => {
+    const { workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    await setWorkspace(workspace, [{ ...WITHOUT_SETUP, name: "First", updated_at: SYNC_STAMP }]);
+    expect(rowLabel(WITHOUT_SETUP)).toBe("First");
+
+    await setWorkspace(workspace, [
+      { ...WITHOUT_SETUP, name: "Second", updated_at: "2026-07-02T12:00:00.000000+00:00" },
+    ]);
+    expect(rowLabel(WITHOUT_SETUP)).toBe("Second");
+  });
+});
+
+describe("034 step 006 — the section sync never adds, removes or reorders rows", () => {
+  it("a workspace session the section does not list never appears in it — S034_006_DoD8", async () => {
+    const { workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    await setWorkspace(workspace, [OUTSIDER, WITH_SETUP, WITHOUT_SETUP]);
+
+    expect(listedHrefs()).toEqual([sessionHref(WITH_SETUP), sessionHref(WITHOUT_SETUP)]);
+    expect(queryRow(OUTSIDER)).toBeNull();
+    expect(within(region()).queryByText(OUTSIDER.name ?? "")).toBeNull();
+  });
+
+  it("a section row missing from the workspace list stays listed — S034_006_DoD8", async () => {
+    const { workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    await setWorkspace(workspace, [{ ...WITH_SETUP, name: "Only me", updated_at: SYNC_STAMP }]);
+
+    expect(listedHrefs()).toEqual([sessionHref(WITH_SETUP), sessionHref(WITHOUT_SETUP)]);
+    expect(rowLabel(WITH_SETUP)).toBe("Only me");
+    expect(rowLabel(WITHOUT_SETUP)).toBe(localDate(WITHOUT_SETUP.created_at));
+  });
+
+  it("an emptied workspace list removes nothing — S034_006_DoD8", async () => {
+    const { workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+    await setWorkspace(workspace, [WITH_SETUP, WITHOUT_SETUP]);
+
+    await setWorkspace(workspace, []);
+
+    expect(listedHrefs()).toEqual([sessionHref(WITH_SETUP), sessionHref(WITHOUT_SETUP)]);
+  });
+
+  it("the workspace's order, or a moved last use, never reorders the section — S034_006_DoD8", async () => {
+    const { workspace } = await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
+
+    await setWorkspace(workspace, [
+      {
+        ...WITHOUT_SETUP,
+        name: "Moved up",
+        last_used_at: SYNC_STAMP,
+        updated_at: SYNC_STAMP,
+      },
+      { ...WITH_SETUP, name: "Moved down", updated_at: SYNC_STAMP },
+    ]);
+
+    expect(listedHrefs()).toEqual([sessionHref(WITH_SETUP), sessionHref(WITHOUT_SETUP)]);
+    expect(rowLabel(WITH_SETUP)).toBe("Moved down");
+    expect(rowLabel(WITHOUT_SETUP)).toBe("Moved up");
   });
 });

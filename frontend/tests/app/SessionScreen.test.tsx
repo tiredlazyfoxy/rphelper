@@ -84,6 +84,14 @@
 // stored name, else the local start date with no time (DEC-034-9). Every `Session` fixture gains
 // `name: null`, so the 011 title shape becomes `YYYY-MM-DD` (START_LABEL_HEADING /
 // START_LABEL_ANYWHERE below). The named-session clauses are in the last block.
+//
+// Amended by feature 034, step 006 (S034_006_DoD5, S034_006_DoD6; DEC-034-10, -11, -14):
+// `SessionScreenProps` / `SessionRouteProps` gained a required `sessions: SessionsState`, so
+// `renderRoute` / `renderScreen` pass one (a fresh store unless a test supplies its own). The
+// header now offers "Rename session" beside its title (also on an archived session); activating
+// it swaps the title for the "Session name" editor; a committed name is applied from the server's
+// answer to the header and to the workspace store; a failure shows "Could not rename the
+// session." inline. Those clauses are the last block. No earlier assertion changes.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
@@ -96,6 +104,7 @@ import type { EnabledModel, ModelRef, SessionConfiguration, Setting } from "../.
 import { CharactersState } from "../../src/app/charactersState";
 import type { Memo, MemoChainLevel, MemoScope } from "../../src/app/memosApi";
 import type { Session } from "../../src/app/sessionsApi";
+import { SessionsState } from "../../src/app/sessionsState";
 import type { Message, MessageKind } from "../../src/app/streamApi";
 import type { LayoutStorage } from "../../src/app/workspaceLayout";
 import { AppProviders } from "../../src/shared/AppProviders";
@@ -480,6 +489,8 @@ function renderRoute(
   characters: CharactersState,
   probeTo = initialPath,
   storage: LayoutStorage | null = null, // 016 step 006: the required layout storage
+  // 034 step 006 (DEC-034-14): the required workspace sessions store; a fresh one by default.
+  sessions: SessionsState = new SessionsState(),
 ) {
   const view = render(
     <AppProviders>
@@ -488,7 +499,9 @@ function renderRoute(
           <Routes>
             <Route
               path="/sessions/:id"
-              element={<SessionRoute characters={characters} storage={storage} />}
+              element={
+                <SessionRoute characters={characters} sessions={sessions} storage={storage} />
+              }
             />
           </Routes>
         </main>
@@ -496,7 +509,7 @@ function renderRoute(
       </MemoryRouter>
     </AppProviders>,
   );
-  return { characters, view };
+  return { characters, sessions, view };
 }
 
 /** The component on its own, bound to its props (no route in between). */
@@ -504,17 +517,24 @@ function renderScreen(
   sessionId: string,
   characters: CharactersState,
   storage: LayoutStorage | null = null, // 016 step 006: the required layout storage
+  // 034 step 006 (DEC-034-14): the required workspace sessions store; a fresh one by default.
+  sessions: SessionsState = new SessionsState(),
 ) {
   const view = render(
     <AppProviders>
       <MemoryRouter initialEntries={[sessionRoutePath(sessionId)]}>
         <main>
-          <SessionScreen sessionId={sessionId} characters={characters} storage={storage} />
+          <SessionScreen
+            sessionId={sessionId}
+            characters={characters}
+            sessions={sessions}
+            storage={storage}
+          />
         </main>
       </MemoryRouter>
     </AppProviders>,
   );
-  return { characters, view };
+  return { characters, sessions, view };
 }
 
 // ---------------------------------------------------------------- queries
@@ -2111,5 +2131,254 @@ describe("034 step 004 — the session header title is the session label", () =>
       await within(mainRegion()).findByRole("heading", { name: localDate(STAMP_B) }),
     ).toBeInTheDocument();
     expect(within(mainRegion()).queryByRole("heading", { name: "Harbour at dusk" })).toBeNull();
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 006 — renaming from the session header (S034_006_DoD5, S034_006_DoD6).
+// Expected values: the step's Interface intent and DoD; DEC-034-10 (an "Rename session" button
+// beside the Title, offered on archived sessions too; the editor replaces the title); DEC-034-11
+// (never optimistic; the returned session applied to the screen and to the workspace store; an
+// inline failure that keeps the draft); DEC-034-14 (the workspace store arrives as a prop).
+// The tree row's side of DoD-5 is asserted in App.test.tsx, where both surfaces share one store.
+// ===========================================================================
+
+const RENAME_BUTTON = /^rename session$/i;
+const NAME_INPUT = /^session name$/i;
+const RENAME_FAILED_TEXT = "Could not rename the session.";
+/** Strictly newer than every fixture's `updated_at` — the rename answer's stamp. */
+const RENAME_STAMP = "2026-08-01T12:00:00.000000+00:00";
+const NEW_NAME = "Lantern Row";
+
+/**
+ * A's session (or `row`) by id with its stream reads, plus `PATCH /api/sessions/<id>`: a success
+ * answers the row with the trimmed name (blank → null) and `updated_at` advanced, `last_used_at`
+ * unchanged; `gate` holds the answer; `fail` answers 500. Every request is recorded with its body.
+ */
+function serveRenamable(row: Session, options: { fail?: boolean; gate?: Promise<void> } = {}) {
+  let held: Session = { ...row };
+  return stubBackend(async (request) => {
+    if (request.method === "GET" && request.path === sessionPath(held.id)) {
+      return jsonResponse(held, 200);
+    }
+    if (request.method === "PATCH" && request.path === sessionPath(held.id)) {
+      if (options.gate !== undefined) await options.gate;
+      if (options.fail === true) return serverError();
+      const sent = (request.body ?? {}) as { name?: unknown };
+      const name =
+        typeof sent.name === "string" && sent.name.trim() !== "" ? sent.name.trim() : null;
+      held = { ...held, name, updated_at: RENAME_STAMP };
+      return jsonResponse(held, 200);
+    }
+    return streamAnswer(request, [held.id]) ?? notFoundResponse();
+  });
+}
+
+/** A workspace sessions store already holding `rows`, as the tree would after its load. */
+function sessionsWith(...rows: Session[]): SessionsState {
+  const sessions = new SessionsState();
+  runInAction(() => {
+    sessions.sessions = rows.map((row) => ({ ...row }));
+    sessions.status = "ready";
+  });
+  return sessions;
+}
+
+function storedRow(sessions: SessionsState, sessionId: string): Session | undefined {
+  return sessions.sessions.find((row) => row.id === sessionId);
+}
+
+function headerRenameButton(): HTMLElement {
+  return within(mainRegion()).getByRole("button", { name: RENAME_BUTTON });
+}
+
+function headerNameInput(): HTMLElement {
+  return within(mainRegion()).getByRole("textbox", { name: NAME_INPUT });
+}
+
+function patchesOf(calls: Seen[], sessionId: string): Seen[] {
+  return calls.filter((call) => call.method === "PATCH" && call.path === sessionPath(sessionId));
+}
+
+/** Whether `first` comes before `second` in document order. */
+function comesBefore(first: Node, second: Node): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
+describe("034 step 006 — the session header offers Rename session (DEC-034-10)", () => {
+  it("the header carries a Rename session button beside its title — S034_006_DoD5", async () => {
+    serveRenamable(SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    const title = within(mainRegion()).getByRole("heading", { name: localDate(STAMP_A) });
+    const button = headerRenameButton();
+    expect(headerBlock().contains(button)).toBe(true);
+    expect(title.contains(button)).toBe(false);
+  });
+
+  it("an archived session's header offers it too — S034_006_DoD5", async () => {
+    serveRenamable(ARCHIVED_SESSION);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
+    expect(headerRenameButton()).toBeInTheDocument();
+  });
+
+  it("activating it swaps the title for an empty Session name input on a never-renamed session — S034_006_DoD5", async () => {
+    const user = newUser();
+    serveRenamable(SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    await user.click(headerRenameButton());
+    await flush();
+
+    expect(headerNameInput()).toHaveValue("");
+    expect(within(mainRegion()).queryByRole("heading", { name: localDate(STAMP_A) })).toBeNull();
+  });
+
+  it("on a renamed session the input is pre-filled with the current name — S034_006_DoD5", async () => {
+    const user = newUser();
+    serveRenamable(NAMED_SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    await user.click(headerRenameButton());
+    await flush();
+
+    expect(headerNameInput()).toHaveValue("Harbour at dusk");
+  });
+});
+
+describe("034 step 006 — committing a name from the header (US-150.AC-2, US-150.AC-3)", () => {
+  it("Enter sends one PATCH with { name } and the title shows the server's answer — S034_006_DoD5", async () => {
+    const user = newUser();
+    const { calls } = serveRenamable(SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A), undefined, null, sessionsWith(SESSION_A));
+    await flush();
+
+    await user.click(headerRenameButton());
+    await user.type(headerNameInput(), `  ${NEW_NAME}  {Enter}`);
+    await flush();
+
+    expect(patchesOf(calls, SESSION_A_ID).map((call) => call.body)).toEqual([{ name: NEW_NAME }]);
+    expect(within(mainRegion()).getByRole("heading", { name: NEW_NAME })).toBeInTheDocument();
+    expect(within(mainRegion()).queryByRole("textbox", { name: NAME_INPUT })).toBeNull();
+  });
+
+  it("the answered session is applied to the workspace store, at its place — S034_006_DoD5", async () => {
+    const user = newUser();
+    serveRenamable(SESSION_A);
+    const sessions = sessionsWith(SESSION_B, SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A, CHAR_B), undefined, null, sessions);
+    await flush();
+
+    await user.click(headerRenameButton());
+    await user.type(headerNameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+
+    expect(storedRow(sessions, SESSION_A_ID)).toEqual({
+      ...SESSION_A,
+      name: NEW_NAME,
+      updated_at: RENAME_STAMP,
+    });
+    expect(sessions.sessions.map((row) => row.id)).toEqual([SESSION_B_ID, SESSION_A_ID]);
+  });
+
+  it("the title and the store change only after the server answers — S034_006_DoD5", async () => {
+    const user = newUser();
+    const gate = deferred<void>();
+    const { calls } = serveRenamable(SESSION_A, { gate: gate.promise });
+    const sessions = sessionsWith(SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A), undefined, null, sessions);
+    await flush();
+
+    await user.click(headerRenameButton());
+    await user.type(headerNameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+
+    expect(patchesOf(calls, SESSION_A_ID)).toHaveLength(1);
+    expect(within(mainRegion()).queryByRole("heading", { name: NEW_NAME })).toBeNull();
+    expect(storedRow(sessions, SESSION_A_ID)?.name).toBeNull();
+
+    await act(async () => {
+      gate.resolve();
+    });
+    await flush();
+
+    expect(within(mainRegion()).getByRole("heading", { name: NEW_NAME })).toBeInTheDocument();
+    expect(storedRow(sessions, SESSION_A_ID)?.name).toBe(NEW_NAME);
+  });
+
+  it("committing an empty name returns the title to the local start date and clears the stored name — S034_006_DoD5", async () => {
+    const user = newUser();
+    const { calls } = serveRenamable(NAMED_SESSION_A);
+    const sessions = sessionsWith(NAMED_SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A), undefined, null, sessions);
+    await flush();
+    expect(within(mainRegion()).getByRole("heading", { name: "Harbour at dusk" })).toBeInTheDocument();
+
+    await user.click(headerRenameButton());
+    await user.clear(headerNameInput());
+    await user.type(headerNameInput(), "{Enter}");
+    await flush();
+
+    expect(patchesOf(calls, SESSION_A_ID).map((call) => call.body)).toEqual([{ name: null }]);
+    const title = within(mainRegion()).getByRole("heading", { name: localDate(STAMP_A) });
+    expect((title.textContent ?? "").trim()).toBe(localDate(STAMP_A));
+    expect(within(mainRegion()).queryByRole("heading", { name: "Harbour at dusk" })).toBeNull();
+    expect(storedRow(sessions, SESSION_A_ID)?.name).toBeNull();
+  });
+
+  it("an archived session can be renamed from its header — S034_006_DoD5", async () => {
+    const user = newUser();
+    const { calls } = serveRenamable(ARCHIVED_SESSION);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    await user.click(headerRenameButton());
+    await user.type(headerNameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+
+    expect(patchesOf(calls, SESSION_A_ID).map((call) => call.body)).toEqual([{ name: NEW_NAME }]);
+    expect(within(mainRegion()).getByRole("heading", { name: NEW_NAME })).toBeInTheDocument();
+    expect(within(mainRegion()).getByText(ARCHIVED_BADGE)).toBeInTheDocument();
+  });
+});
+
+describe("034 step 006 — a failed rename from the header (DEC-034-11)", () => {
+  it("shows Could not rename the session. under the editor and keeps the typed text — S034_006_DoD6", async () => {
+    const user = newUser();
+    const { calls } = serveRenamable(SESSION_A, { fail: true });
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    await user.click(headerRenameButton());
+    await user.type(headerNameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+
+    expect(patchesOf(calls, SESSION_A_ID)).toHaveLength(1);
+    const input = headerNameInput();
+    expect(input).toHaveValue(NEW_NAME);
+    const sentence = within(mainRegion()).getByText(RENAME_FAILED_TEXT);
+    expect(comesBefore(input, sentence)).toBe(true);
+    expect(notificationsShown()).toEqual([]);
+  });
+
+  it("the label elsewhere stays the old one: no title and no stored row carries the typed name — S034_006_DoD6", async () => {
+    const user = newUser();
+    serveRenamable(SESSION_A, { fail: true });
+    const sessions = sessionsWith(SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A), undefined, null, sessions);
+    await flush();
+
+    await user.click(headerRenameButton());
+    await user.type(headerNameInput(), `${NEW_NAME}{Enter}`);
+    await flush();
+
+    expect(within(mainRegion()).queryByRole("heading", { name: NEW_NAME })).toBeNull();
+    expect(storedRow(sessions, SESSION_A_ID)).toEqual(SESSION_A);
   });
 });

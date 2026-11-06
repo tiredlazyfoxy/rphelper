@@ -160,6 +160,14 @@
 // arrival queries with `{ hidden: true }`. Header controls (Archive / Restore) and the Sessions
 // tab's regions are visible on arrival, so those clauses are unchanged. No other assertion
 // changes.
+//
+// Amended by feature 034, step 006 (S034_006_DoD5, DoD6, DoD7; DEC-034-11, -13, -14): `App` now
+// hands its workspace `SessionsState` to the session route, so a rename from the header shows in
+// the tree and a rename from the tree shows in the character page's Sessions section.
+// `stubWorkspace` gained one branch — `PATCH /api/sessions/<id>` by exact pathname, answering the
+// held row with the trimmed name (blank → null), `updated_at` advanced to a stamp newer than every
+// fixture and `last_used_at` unchanged — and an optional `{ failRename }` that answers it 500. The
+// 034 clauses are the last block; no other assertion changes.
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
@@ -420,6 +428,12 @@ const SESSION_A: Session = {
   updated_at: "2026-05-10T09:00:00.000000+00:00",
 };
 
+/**
+ * 034 step 006: the rename answer's `updated_at` — strictly newer than every fixture's, so the
+ * Sessions section's apply-a-row sync accepts it (DEC-034-13).
+ */
+const RENAME_STAMP = "2026-08-01T12:00:00.000000+00:00";
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -517,7 +531,12 @@ const EMPTY_SETUPS = { setups: [] };
  * every request recorded in order. Only the listing honours the include-archived flag; a
  * mutation answers the single row it changed.
  */
-function stubWorkspace(rows: Character[], sessions: Session[] = []) {
+function stubWorkspace(
+  rows: Character[],
+  sessions: Session[] = [],
+  // 034 step 006: `failRename` answers every rename 500 (DoD-6).
+  options: { failRename?: boolean } = {},
+) {
   const store = new Map<string, Character>(rows.map((row) => [row.id, row]));
   /** 011 step 008: the sessions the wire holds, mutated by start / archive / restore. */
   const sessionOrder: Session[] = [...sessions];
@@ -620,6 +639,24 @@ function stubWorkspace(rows: Character[], sessions: Session[] = []) {
         return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
       }
       return jsonResponse(row, 200);
+    }
+
+    // 034 step 006: the rename — `PATCH /api/sessions/<id>` with `{ name }`, by exact pathname.
+    // It writes `name` and `updated_at` only (context.md), so every list order is unchanged.
+    if (sessionItem !== null && method === "PATCH") {
+      if (options.failRename === true) {
+        return jsonResponse({ error: { code: "internal_error", message: "", detail: {} } }, 500);
+      }
+      const index = sessionOrder.findIndex((candidate) => candidate.id === sessionItem[1]);
+      if (index < 0) {
+        return jsonResponse({ error: { code: "session_not_found", message: "", detail: {} } }, 404);
+      }
+      const sent = (body ?? {}) as { name?: unknown };
+      const name =
+        typeof sent.name === "string" && sent.name.trim() !== "" ? sent.name.trim() : null;
+      const next: Session = { ...sessionOrder[index], name, updated_at: RENAME_STAMP };
+      sessionOrder[index] = next;
+      return jsonResponse(next, 200);
     }
 
     // 013 step 007: the session screen's ready render mounts the stream, which reads that
@@ -1712,5 +1749,175 @@ describe("029 step 005 — the two route-set amendments this step owns (005.cont
     expect(screen.queryAllByRole("complementary", { hidden: true })).toHaveLength(0);
     expect(document.querySelector(`[aria-label="${WALL_NAME}"]`)).toBeNull();
     expect(screen.queryByRole("button", { name: OPEN_NOTES_NAME, hidden: true })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature 034, step 006 — the two rename surfaces share the one workspace store `App` owns
+// (DEC-034-11, -13, -14). Expected values: the step's DoD-5..DoD-7 and DEC-034-9 (label = name,
+// else the local `YYYY-MM-DD` of `created_at`). "— S034_006_DoDn" tags are 034 step 006's.
+const RENAME_BUTTON = /^rename session$/i;
+const SESSION_NAME_INPUT = /^session name$/i;
+const RENAME_FAILED_TEXT = "Could not rename the session.";
+const NEW_SESSION_NAME = "Lantern Row";
+
+/** The local `YYYY-MM-DD` of `instant` in the runtime's zone — an Intl oracle for the label. */
+function localDate(instant: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+/** A tree session row's whole block: the `li` holding its link. */
+function treeSessionItem(sessionId: string): HTMLElement {
+  const link = queryTreeSessionRow(sessionId);
+  if (link === null) throw new Error(`no tree row for /sessions/${sessionId}`);
+  const item = link.closest("li");
+  if (item === null) throw new Error(`the tree row for /sessions/${sessionId} is not in a li`);
+  return item;
+}
+
+/** A Sessions section row's link text — its label. */
+function sectionRowLabel(sessionId: string): string {
+  return (within(sectionRow(sessionId)).getByRole("link").textContent ?? "").trim();
+}
+
+/** Every rename of one session, by exact method and pathname. */
+function renames(calls: Seen[], sessionId: string): Seen[] {
+  return calls.filter((call) => call.method === "PATCH" && call.path === `/api/sessions/${sessionId}`);
+}
+
+/** Opens one tree row's editor and commits `typed` (empty: commits the cleared input). */
+async function renameFromTree(user: User, sessionId: string, typed: string): Promise<void> {
+  await user.click(within(treeSessionItem(sessionId)).getByRole("button", { name: RENAME_BUTTON }));
+  const input = within(navElement()).getByRole("textbox", { name: SESSION_NAME_INPUT });
+  await user.clear(input);
+  await user.type(input, `${typed}{Enter}`);
+  await flush();
+}
+
+/** Opens the header's editor and commits `typed` (empty: commits the cleared input). */
+async function renameFromHeader(user: User, typed: string): Promise<void> {
+  await user.click(within(mainElement()).getByRole("button", { name: RENAME_BUTTON }));
+  const input = within(mainElement()).getByRole("textbox", { name: SESSION_NAME_INPUT });
+  await user.clear(input);
+  await user.type(input, `${typed}{Enter}`);
+  await flush();
+}
+
+describe("034 step 006 — a header rename shows in the header and the tree (US-150.AC-2, US-150.AC-3)", () => {
+  it("committing a name updates the header title and the session's tree row from the answer, with no re-read — S034_006_DoD5", async () => {
+    const user = newUser();
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_A]);
+    renderApp(`/sessions/${SESSION_A_ID}`);
+    await flush();
+    expect(
+      within(mainElement()).getByRole("heading", { name: localDate(SESSION_A.created_at) }),
+    ).toBeInTheDocument();
+
+    await renameFromHeader(user, NEW_SESSION_NAME);
+
+    expect(renames(calls, SESSION_A_ID).map((call) => call.body)).toEqual([
+      { name: NEW_SESSION_NAME },
+    ]);
+    expect(
+      within(mainElement()).getByRole("heading", { name: NEW_SESSION_NAME }),
+    ).toBeInTheDocument();
+    expect(treeSessionItem(SESSION_A_ID).textContent ?? "").toContain(NEW_SESSION_NAME);
+    expect(sessionsListRequests(calls)).toHaveLength(1);
+    expect(sessionItemRequests(calls, SESSION_A_ID)).toHaveLength(1);
+  });
+
+  it("committing an empty name returns both the title and the tree row to the local start date — S034_006_DoD5", async () => {
+    const user = newUser();
+    const named: Session = { ...SESSION_A, name: "Harbour at dusk" };
+    const { calls } = stubWorkspace([CHAR_A], [named]);
+    renderApp(`/sessions/${SESSION_A_ID}`);
+    await flush();
+    expect(within(mainElement()).getByRole("heading", { name: "Harbour at dusk" })).toBeInTheDocument();
+    expect(treeSessionItem(SESSION_A_ID).textContent ?? "").toContain("Harbour at dusk");
+
+    await renameFromHeader(user, "");
+
+    expect(renames(calls, SESSION_A_ID).map((call) => call.body)).toEqual([{ name: null }]);
+    const date = localDate(SESSION_A.created_at);
+    expect(within(mainElement()).getByRole("heading", { name: date })).toBeInTheDocument();
+    expect(within(mainElement()).queryByRole("heading", { name: "Harbour at dusk" })).toBeNull();
+    const rowText = treeSessionItem(SESSION_A_ID).textContent ?? "";
+    expect(rowText).toContain(date);
+    expect(rowText).not.toContain("Harbour at dusk");
+  });
+
+});
+
+describe("034 step 006 — a failed rename leaves the other surface's label alone (DEC-034-11)", () => {
+  it("from the header: the sentence shows under the editor with the typed text, and the tree row keeps its old label — S034_006_DoD6", async () => {
+    const user = newUser();
+    stubWorkspace([CHAR_A], [SESSION_A], { failRename: true });
+    renderApp(`/sessions/${SESSION_A_ID}`);
+    await flush();
+
+    await renameFromHeader(user, NEW_SESSION_NAME);
+
+    const input = within(mainElement()).getByRole("textbox", { name: SESSION_NAME_INPUT });
+    expect(input).toHaveValue(NEW_SESSION_NAME);
+    const sentence = within(mainElement()).getByText(RENAME_FAILED_TEXT);
+    expect(input.compareDocumentPosition(sentence) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    const rowText = treeSessionItem(SESSION_A_ID).textContent ?? "";
+    expect(rowText).toContain(localDate(SESSION_A.created_at));
+    expect(rowText).not.toContain(NEW_SESSION_NAME);
+  });
+
+  it("from the tree: the sentence shows under the tree editor with the typed text, and the header keeps its old title — S034_006_DoD6", async () => {
+    const user = newUser();
+    stubWorkspace([CHAR_A], [SESSION_A], { failRename: true });
+    renderApp(`/sessions/${SESSION_A_ID}`);
+    await flush();
+
+    await renameFromTree(user, SESSION_A_ID, NEW_SESSION_NAME);
+
+    const input = within(navElement()).getByRole("textbox", { name: SESSION_NAME_INPUT });
+    expect(input).toHaveValue(NEW_SESSION_NAME);
+    const sentence = within(navElement()).getByText(RENAME_FAILED_TEXT);
+    expect(input.compareDocumentPosition(sentence) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(
+      within(mainElement()).getByRole("heading", { name: localDate(SESSION_A.created_at) }),
+    ).toBeInTheDocument();
+    expect(within(mainElement()).queryByRole("heading", { name: NEW_SESSION_NAME })).toBeNull();
+  });
+});
+
+describe("034 step 006 — a tree rename relabels the character page's Sessions row (US-150.AC-2, DEC-034-13)", () => {
+  it("with the character page beside the tree, a rename from the tree relabels that row in the Sessions section, with no re-read — S034_006_DoD7", async () => {
+    const user = newUser();
+    const { calls } = stubWorkspace([CHAR_A], [SESSION_A]);
+    renderApp(`/characters/${ID_A}`);
+    await flush();
+    expect(sectionRowLabel(SESSION_A_ID)).toBe(localDate(SESSION_A.created_at));
+    const sectionListings = () =>
+      calls.filter((call) => call.method === "GET" && call.path === characterSessionsPath(ID_A));
+    const listedBefore = sectionListings().length;
+
+    await renameFromTree(user, SESSION_A_ID, NEW_SESSION_NAME);
+
+    expect(renames(calls, SESSION_A_ID)).toHaveLength(1);
+    expect(sectionRowLabel(SESSION_A_ID)).toBe(NEW_SESSION_NAME);
+    expect(sectionListings()).toHaveLength(listedBefore);
+  });
+
+  it("a failed tree rename leaves the Sessions row's label as it was — S034_006_DoD7", async () => {
+    const user = newUser();
+    stubWorkspace([CHAR_A], [SESSION_A], { failRename: true });
+    renderApp(`/characters/${ID_A}`);
+    await flush();
+
+    await renameFromTree(user, SESSION_A_ID, NEW_SESSION_NAME);
+
+    expect(sectionRowLabel(SESSION_A_ID)).toBe(localDate(SESSION_A.created_at));
   });
 });

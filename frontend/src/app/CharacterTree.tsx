@@ -4,6 +4,8 @@
 // create / save / archive / restore on the character screen shows here without a refetch.
 // It sits outside `<Routes>`, so the current character is read from the location
 // (`useMatch("/characters/:id")`), not from `useParams`. Ids are strings throughout.
+// Feature 034, step 006: a session row is two lines (label; last use · setup, DEC-034-9) with
+// a sibling "Rename session" button that swaps the link for the in-place name editor.
 import type * as React from "react";
 import { useEffect, useRef, useState } from "react";
 import { observer } from "mobx-react-lite";
@@ -20,7 +22,7 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { IconChevronDown, IconPlus } from "@tabler/icons-react";
+import { IconChevronDown, IconEdit, IconPlus } from "@tabler/icons-react";
 
 import { IconButton } from "../shared/IconButton";
 import type { IconButtonProps } from "../shared/IconButton";
@@ -28,7 +30,9 @@ import { isArchived } from "./charactersApi";
 import type { CharactersState } from "./charactersState";
 import { loadCharacters, setShowArchived } from "./charactersState";
 import { searchHref } from "./searchState";
-import { sessionLabel } from "./sessionLabel";
+import { formatLocalDateTime, sessionLabel } from "./sessionLabel";
+import { SessionNameEditor } from "./SessionNameEditor";
+import { SessionRenameState, beginRename, commitRename } from "./sessionRenameState";
 import type { SessionsState } from "./sessionsState";
 import { loadSessions, orderCharactersByUse, sessionsOfCharacter } from "./sessionsState";
 import {
@@ -124,9 +128,11 @@ export type CharacterTreeProps = {
  * 011 step 006 adds the session level on top of that: the rows are ordered by newest
  * session use (D6); a character that has at least one working session carries a chevron
  * before its link (D7) and, while expanded, a nested "Sessions of <name>" list of
- * `/sessions/<id>` links labelled with the session label (US-150) plus the setup label
- * (D16). The sessions load is its own effect — the "Show archived" switch never reloads it — and its
- * failure is one inline line plus "Retry", again with nothing notified (D18).
+ * two-line `/sessions/<id>` rows — the session label, then the last use and setup label
+ * (US-151, DEC-034-9) — each with a sibling "Rename session" button that swaps the link for
+ * the in-place name editor (DEC-034-10/-11). The sessions load is its own effect — the
+ * "Show archived" switch never reloads it — and its failure is one inline line plus
+ * "Retry", again with nothing notified (D18).
  */
 export const CharacterTree = observer(function CharacterTree(
   props: CharacterTreeProps,
@@ -135,6 +141,11 @@ export const CharacterTree = observer(function CharacterTree(
   const navigate = useNavigate();
   const controllerRef = useRef<AbortController | null>(null);
   const sessionsControllerRef = useRef<AbortController | null>(null);
+  // DEC-034-11: the tree's one rename state, fresh per mount (the tree remounts on expand).
+  // An aborted commit leaves `pending` set, so the state is never reused after its controller
+  // aborts — that happens only on unmount, which discards the state too.
+  const [renameState] = useState(() => new SessionRenameState());
+  const renameControllerRef = useRef<AbortController | null>(null);
 
   // D7: the collapsed set is component-local view state, seeded once from its own persisted
   // record. The tree remounts whenever the column expands, so the read re-runs then — which
@@ -185,6 +196,19 @@ export const CharacterTree = observer(function CharacterTree(
     };
   }, [sessions]);
 
+  // The rename's own controller, aborted on unmount (collapsing the column) so a late answer
+  // writes nothing to the workspace list or the editor.
+  useEffect(() => {
+    const controller = new AbortController();
+    renameControllerRef.current = controller;
+    return () => {
+      controller.abort();
+      if (renameControllerRef.current === controller) {
+        renameControllerRef.current = null;
+      }
+    };
+  }, [renameState]);
+
   // Outside `<Routes>`: the current row comes from the location, and only from a real id.
   const match = useMatch("/characters/:id");
   const matchedId = match?.params.id ?? null;
@@ -200,6 +224,15 @@ export const CharacterTree = observer(function CharacterTree(
 
   const retrySessions = (): void => {
     void loadSessions(sessions, sessionsControllerRef.current?.signal);
+  };
+
+  /**
+   * The tree editor's commit wiring (Enter / blur): `commitRename` applies the server's row
+   * to the workspace list, which relabels this row in place (a rename never moves
+   * `last_used_at`, DEC-034-12). The tree needs no success callback of its own.
+   */
+  const commitTreeRename = (): void => {
+    void commitRename(renameState, sessions, undefined, renameControllerRef.current?.signal);
   };
 
   // One press: the next set, the local state, and the record — in that order (D7).
@@ -291,20 +324,55 @@ export const CharacterTree = observer(function CharacterTree(
                 >
                   {own.map((session) => {
                     const sessionActive = session.id === currentSessionId;
+                    // DEC-034-11: the row being renamed shows the editor in the link's place.
+                    if (renameState.editingId === session.id) {
+                      return (
+                        <Box component="li" key={session.id}>
+                          <SessionNameEditor state={renameState} onCommit={commitTreeRename} />
+                        </Box>
+                      );
+                    }
                     return (
                       <Box component="li" key={session.id}>
-                        <NavLink
-                          component={Link}
-                          to={`/sessions/${session.id}`}
-                          label={sessionLabel(session)}
-                          // US-150: line 1 is the session label (its name, else its local
-                          // start date); the two-line row is step 006. US-088: the setup's
-                          // name as dimmed small text beside it, and nothing at all where it
-                          // would be when there is none.
-                          description={session.setup_name ?? undefined}
-                          active={sessionActive}
-                          aria-current={sessionActive ? "page" : undefined}
-                        />
+                        {/* DEC-034-10: the rename button is the link's sibling — an
+                            interactive control may not nest inside an anchor. */}
+                        <Group gap={4} wrap="nowrap">
+                          <NavLink
+                            component={Link}
+                            to={`/sessions/${session.id}`}
+                            // US-150 / US-151.AC-1: line 1 is the session label (its name,
+                            // else its local start date), one line, ellipsis-truncated at
+                            // the 252px column (workspace-shell.md § Geometry).
+                            label={
+                              <Text component="span" inherit truncate="end" display="block">
+                                {sessionLabel(session)}
+                              </Text>
+                            }
+                            // DEC-034-9 / US-088: line 2 is one element — the last use, then
+                            // " · " and the setup name, or the time alone with no setup. The
+                            // NavLink description is already the smaller, dimmed text; the
+                            // span keeps time and setup together and never wraps.
+                            description={
+                              <Text component="span" inherit truncate="end" display="block">
+                                {session.setup_name === null
+                                  ? formatLocalDateTime(session.last_used_at)
+                                  : `${formatLocalDateTime(session.last_used_at)} · ${session.setup_name}`}
+                              </Text>
+                            }
+                            active={sessionActive}
+                            aria-current={sessionActive ? "page" : undefined}
+                            flex={1}
+                            miw={0}
+                          />
+                          <IconButton
+                            icon={IconEdit}
+                            label="Rename session"
+                            sizeVariant="inline"
+                            onClick={() => {
+                              beginRename(renameState, session);
+                            }}
+                          />
+                        </Group>
                       </Box>
                     );
                   })}

@@ -7,7 +7,7 @@
 | 003  | `003.my-search-names.md`          | done    | PASS     | 2026-11-06 |
 | 004  | `004.session-label-surfaces.md`   | done    | PASS     | 2026-11-06 |
 | 005  | `005.rename-editor.md`            | done    | PASS     | 2026-11-06 |
-| 006  | `006.rename-surfaces.md`          | pending | —        | —    |
+| 006  | `006.rename-surfaces.md`          | done    | PASS     | 2026-11-06 |
 
 ## Files Changed
 
@@ -44,11 +44,19 @@
 - `frontend/src/app/SessionNameEditor.tsx` — Mantine `TextInput` "Session name": autofocus, draft via `runInAction`, Enter/blur commit, Escape cancel, read-only while pending, inline error
 - `frontend/src/app/sessionsState.ts` — `applySession` ties on `last_used_at` ordered by id descending (numeric, length-then-text `compareIds`); header and comments updated
 
+### Step 006 — rename-surfaces
+- `frontend/src/app/sessionsSectionState.ts` — `syncSectionSessions` body (replace in place on strictly newer `updated_at`; writes only on change; never adds/removes/reorders)
+- `frontend/src/app/SessionsSection.tsx` — mounted MobX `reaction` (fireImmediately) on the workspace list calling `syncSectionSessions`, disposed on unmount; header/prop docs
+- `frontend/src/app/CharacterTree.tsx` — two-line session row (truncated label; `formatLocalDateTime(last_used_at)` + ` · setup` as one nowrap description span), sibling `IconEdit` "Rename session" `IconButton`, tree-owned `SessionRenameState` + unmount-aborted controller, editor swap
+- `frontend/src/app/SessionScreen.tsx` — header "Rename session" `IconButton` (archived too), Title/editor swap, own `SessionRenameState` + unmount-aborted controller, `onRenamed` writes `state.session`; reads `sessions` prop
+- `frontend/src/app/App.tsx` — no change beyond the skeleton
+
 ## Notes & Issues
 
 - Step 001: the frozen skeleton declares `RpSession.name` right after `setup_name` with **no default**, not last-with-default-None as DEC-034-6 states. Left as frozen; any test outside this step's list that constructs `RpSession` positionally or without `name` would break (none in `app/`).
 - Step 002 (orchestrator, 2026-11-06): verify run found `backend/tests/test_configuration_router.py::test_patch_on_the_session_itself_still_answers_405__S017_005_DoD9` asserting 405 on `PATCH /api/sessions/{id}` — obsolete once step 002 adds the route (DoD-4 requires 422). The file was missing from step 002's Test files; the orchestrator widened step 002's test scope to that one test (step file not edited).
 - Step 005 (orchestrator, from verifier concerns, 2026-11-06): for step 006 hosts — keep `onRenamed` non-throwing (a throw after `applySession` leaves the list updated while the editor shows the failure sentence); an aborted commit leaves `pending` true, so a host must not reuse its `SessionRenameState` after aborting (fresh state per host lifetime).
+- Step 006 (orchestrator, 2026-11-06): the skeleton's required `sessions` prop on `SessionRoute`/`SessionScreen` breaks typecheck in `frontend/tests/app/searchLanding.test.tsx` (:324) and `frontend/tests/app/sessionFirstReply.test.tsx` (:381), which are not in step 006's Test files; the orchestrator widened step 006's test scope to those two mechanical prop additions (step file not edited).
 
 ## Skeleton
 
@@ -103,6 +111,15 @@
 - `frontend/src/app/sessionsState.ts` — `applySession(state: SessionsState, session: Session): void` — signature unchanged; **behaviour change left to the coder** (ties on `last_used_at` ordered by id descending, compared numerically on decimal strings — DEC-034-12). The module header ("Ordering compares ... never an id") and the inline comment in `applySession` still describe the old rule and need updating by the coder.
 - Caller-compile edits (out of Source-files scope): None.
 - Typecheck (`npm run typecheck`): clean.
+
+### Step 006 — frozen interface (2026-11-06)
+- `frontend/src/app/sessionsSectionState.ts` — `export function syncSectionSessions(state: SessionsSectionState, workspaceSessions: readonly Session[]): void` — new (STUB: throws `Error("not implemented")`; placed last in the module). Contract: each section row whose id matches a workspace session with a strictly newer `updated_at` is replaced in place by it; never adds, removes or reorders (DEC-034-13). Coder writes via `runInAction` like the module's other free functions.
+- `frontend/src/app/SessionScreen.tsx` — `SessionScreenProps` gains `sessions: SessionsState` (required, between `characters` and `storage`) — changed, final (data shape). `SessionScreen` does not read it yet (the coder destructures it when wiring the header rename).
+- `frontend/src/app/SessionScreen.tsx` — `SessionRouteProps` gains `sessions: SessionsState` (required) and `SessionRoute` passes it through to `SessionScreen` — changed, final.
+- `frontend/src/app/App.tsx` — `<SessionRoute characters={characters} sessions={sessions} storage={storage} />` (the workspace `SessionsState` it already owns) — changed, final (DEC-034-14).
+- Left to the coder (behaviour, not wired, so existing render tests stay green): the tree row's two-line layout (`sessionLabel` line 1 truncated; `formatLocalDateTime(last_used_at)` + ` · ` + setup name line 2), the "Rename session" `IconEdit` `IconButton` (sizeVariant "inline", sibling of the `NavLink` in a `Group`) and the `SessionNameEditor` swap in `CharacterTree.tsx` with one tree-owned `SessionRenameState`; the header `IconButton` + editor swap in `SessionScreen.tsx` with `onRenamed` applying the session to `state.session` (workspace apply already done by `commitRename`); the `SessionsSection.tsx` MobX `reaction` calling `syncSectionSessions(state, sessions.sessions)`, disposed on unmount. Step 005 note applies: fresh `SessionRenameState` per host lifetime, non-throwing `onRenamed`.
+- Caller-compile edits (out of Source-files scope): None (`App.tsx` is a Source file).
+- Typecheck (`npm run typecheck`): `src` clean. 4 errors in tests, all "Property 'sessions' is missing" on `SessionRoute`/`SessionScreen` renders: `tests/app/SessionScreen.test.tsx` (:491, :512 — in this step's Test files) and **two files NOT in this step's Test files**: `tests/app/searchLanding.test.tsx` (:324) and `tests/app/sessionFirstReply.test.tsx` (:381). Only the test-coder can fix these; the orchestrator must widen the test scope to those two files (mechanical: pass a `new SessionsState()`).
 
 ## Tests
 
@@ -160,3 +177,19 @@
 - `frontend/tests/app/SessionNameEditor.test.tsx` — covers DoD-8 (and DoD-4, DoD-6 through the editor) — one single-line textbox "Session name", pre-filled, empty for unnamed, focused on mount, typing writes the draft, read-only while pending; Enter and blur call `onCommit`, typing alone does not; Escape closes with no request and no commit; Enter wired to the real `commitRename` sends one PATCH and closes; Enter then blur while pending sends one request; error renders after the input with `aria-invalid`, appears reactively, absent when null; a failed real commit shows the sentence inline, keeps the typed text, and no `.mantine-Notification-root`.
 - `frontend/tests/app/sessionsState.test.ts` — covers DoD-9 — 011 DoD-5 tie clause replaced (TIED, higher id, now lands before SECOND; header and fixture comments updated); re-applying a renamed row keeps its index at every position incl. three equal-`last_used_at` rows, repeatedly and with a null name; absent tied rows land by id descending; 18- vs 19-digit ids compare numerically (re-apply stable, mid-length id lands between); ids colliding as `Number` past 2^53 order exactly; a newer `last_used_at` moves a tied/bottom row to the top; archived tied rows dropped / not inserted.
 - Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓, DoD-9 ✓
+
+### Step 006 — tests (2026-11-06)
+- `frontend/tests/app/CharacterTree.test.tsx` — covers DoD-1, DoD-2, DoD-3, DoD-4, DoD-6. Line 1 is the label (name, or the local date of `created_at`). Line 2 is exactly `<local YYYY-MM-DD HH:MM of last_used_at> · <setup>`, or the time alone with no `·`. Line 1 comes before line 2, and line 2 shows the last use, not the start. Three rows under one character are in last-use order and their line-2 times descend. Every row has "Rename session" beside its link, never inside it. Activating it replaces only that row's link with a "Session name" input: empty when never renamed, pre-filled when named. Enter sends one `PATCH /api/sessions/<id>` with `{ name }` (trimmed). Nothing shows the new name and the store is unchanged until the answer arrives; then the editor closes and the row reads the new name. The row keeps its place (middle row) and the character order holds. Escape restores the old label (named or date) and sends nothing. On a 500, "Could not rename the session." appears after the input in the same `li`, the typed text is kept, the store keeps the old name, no notification is raised, and a later Escape restores the label. Amended: 011 DoD-3's two setup/unnamed clauses and five 004 clauses (whole-row-text and setup-as-own-element) now read the label as "row text minus the expected line 2" (`rowLabelText`) and look for the setup name inside line 2.
+- `frontend/tests/app/SessionScreen.test.tsx` — covers DoD-5, DoD-6. `renderRoute`/`renderScreen` pass the new required `sessions` prop (fresh `SessionsState` by default; :491, :512 fixed). The header has "Rename session" inside the header block and outside the title, on archived sessions too. Activating it swaps the title for the input (empty, or pre-filled). Enter sends one PATCH with the trimmed `{ name }`, and the title then reads the answered name. The answered row lands in the workspace store at its index. Title and store change only after the answer (gated). An empty commit sends `{ name: null }`, the title goes back to the local start date, and the stored name is cleared. An archived session can be renamed. On failure the sentence appears after the input, the typed text is kept, no notification is raised, no heading carries the typed name, and the store row is unchanged.
+- `frontend/tests/app/App.test.tsx` — covers DoD-5, DoD-6, DoD-7. `stubWorkspace` gains a `PATCH /api/sessions/<id>` branch (trimmed name, `updated_at` → a stamp newer than every fixture, `last_used_at` unchanged) and an optional `{ failRename }`. A header rename updates the title and the tree row with no extra `GET /api/sessions` or session GET. An empty header commit sends `{ name: null }` and both surfaces go back to the local date. A failed header rename leaves the tree row's old label. A failed tree rename leaves the header title. On `/characters/<id>`, a tree rename relabels that session's Sessions-section row with no re-list. A failed one leaves it.
+- `frontend/tests/app/SessionsSection.test.tsx` — covers DoD-7, DoD-8. With the section mounted, writing the workspace store causes these effects:
+  - A strictly newer copy relabels the row and its `Actions for <label>` trigger, with no request.
+  - A newer copy with a cleared name brings back the date.
+  - A second, newer copy relabels the row again.
+  - A copy with an equal or older `updated_at` does nothing.
+  - A workspace-only session never appears.
+  - A row missing from the workspace stays, and an emptied workspace removes nothing.
+  - Neither the workspace order nor a moved `last_used_at` reorders the section.
+- `frontend/tests/app/sessionsSectionState.test.ts` — covers DoD-7, DoD-8 — `syncSectionSessions` (pure) replaces a row in place only from a strictly newer copy, taking the whole row (including a cleared name). Several rows are replaced at their own indexes. A copy with an equal or older stamp changes nothing. An observer sees the change. The other fields are untouched. It never adds a row, never drops one (empty workspace, missing rows, archived rows under show-archived), and never reorders (reversed workspace order, a moved `last_used_at`). It issues no request.
+- Mechanical (orchestrator-widened scope): `frontend/tests/app/searchLanding.test.tsx` and `frontend/tests/app/sessionFirstReply.test.tsx` pass `sessions={new SessionsState()}` (plus the `SessionsState` import in searchLanding). Nothing else changed.
+- Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓, DoD-9 [manual/live, no test]

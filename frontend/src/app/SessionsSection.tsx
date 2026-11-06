@@ -36,8 +36,12 @@
 //                   a `Badge` reading exactly "Archived" when archived, and one overflow
 //                   `Menu` offering "Archive" or "Restore" with no confirm (D5), plus an
 //                   "Export" item present in both states (030 006, also with no confirm).
+//   sync            (034 006, DEC-034-13) a MobX `reaction` on the workspace list, live while
+//                   mounted, relabels a row renamed elsewhere (the tree) via
+//                   `syncSectionSessions`; it never adds, removes or reorders rows.
 import type * as React from "react";
 import { useEffect, useId, useRef, useState } from "react";
+import { reaction } from "mobx";
 import { observer } from "mobx-react-lite";
 import {
   Alert,
@@ -76,6 +80,7 @@ import {
   loadSectionSessions,
   restoreSectionRow,
   setShowArchived,
+  syncSectionSessions,
 } from "./sessionsSectionState";
 
 /**
@@ -97,7 +102,8 @@ export type SessionsSectionProps = {
   characterId: string;
   /**
    * The one workspace sessions state `App` creates (D15). Passed straight to 007's
-   * row-action effects and the import so a mutated row lands in the tree with no refetch.
+   * row-action effects and the import so a mutated row lands in the tree with no refetch,
+   * and read by the section sync (DEC-034-13) so a rename from the tree lands here.
    */
   sessions: SessionsState;
 };
@@ -143,6 +149,23 @@ export const SessionsSection = observer(function SessionsSection(
       }
     };
   }, [state, showArchived]);
+
+  // DEC-034-13: while mounted, follow the workspace list so a rename made in the tree
+  // relabels this section's row. The expression copies the array so the reaction tracks its
+  // elements (an `applySession` swaps one row object) and not just the array reference;
+  // `fireImmediately` covers a workspace change that landed before mount. The sync itself
+  // decides "strictly newer", writes only on a real change, and never adds, removes or
+  // reorders rows. Disposed on unmount, so an unmounted section is never written to.
+  useEffect(() => {
+    const dispose = reaction(
+      () => [...props.sessions.sessions],
+      (workspaceSessions) => {
+        syncSectionSessions(state, workspaceSessions);
+      },
+      { fireImmediately: true },
+    );
+    return dispose;
+  }, [state, props.sessions]);
 
   const retry = (): void => {
     void loadSectionSessions(state, listControllerRef.current?.signal);

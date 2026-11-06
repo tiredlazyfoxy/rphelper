@@ -214,3 +214,48 @@ export async function restoreSectionRow(
 ): Promise<void> {
   await runRowAction(state, workspace, sessionId, restoreSession, RESTORE_FAILED, signal);
 }
+
+/**
+ * Section sync (DEC-034-13): bring the section's rows in step with the workspace sessions
+ * list, so a rename made elsewhere (the tree) relabels this section's row. Every section row
+ * whose id matches a workspace session with a strictly newer `updated_at` is replaced in place
+ * by that workspace session; an older or equal `updated_at` leaves the section's row as it is
+ * (the apply-a-row rule, `forms-and-lists.md`). Never adds a row the section does not hold,
+ * never removes one, never changes the section's order. Issues no request; the workspace list
+ * is only read. `SessionsSection` runs it reactively for as long as it is mounted.
+ *
+ * @param state The section state whose `sessions` rows may be replaced in place.
+ * @param workspaceSessions The workspace `SessionsState.sessions` list, read only.
+ */
+export function syncSectionSessions(
+  state: SessionsSectionState,
+  workspaceSessions: readonly Session[],
+): void {
+  // Index the workspace once so the pass is linear; ids are compared verbatim, never parsed.
+  const byId = new Map<string, Session>();
+  for (const session of workspaceSessions) {
+    byId.set(session.id, session);
+  }
+
+  let changed = false;
+  const next = state.sessions.map((row) => {
+    const fresh = byId.get(row.id);
+    // Strictly newer only (DEC-034-13): an equal `updated_at` is the same row (or an echo of
+    // this section's own apply) and an older one must never overwrite a newer copy.
+    // Fixed-width ISO timestamps compare as text, as the rest of this module does.
+    if (fresh === undefined || fresh.updated_at <= row.updated_at) {
+      return row;
+    }
+    changed = true;
+    return fresh;
+  });
+
+  // Write only when a row was replaced: the sync runs from a reaction, so a no-op pass must
+  // not touch the observable list (no spurious re-render, no feedback loop).
+  if (!changed) {
+    return;
+  }
+  runInAction(() => {
+    state.sessions = next;
+  });
+}
