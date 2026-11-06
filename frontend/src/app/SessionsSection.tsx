@@ -31,7 +31,7 @@
 //   the list        idle/loading to a `Loader`; failed to "Could not load sessions" plus a
 //                   "Retry" button; ready-and-empty to the neutral line "No sessions yet."
 //                   (no prompt to start one); ready-with-rows to a `Table` in state order.
-//   a row           a router `Link` to `/sessions/<id>` whose text is the start-time label,
+//   a row           a router `Link` to `/sessions/<id>` whose text is the session label,
 //                   the `setup_name` beside it or nothing at all (US-088.AC-2), dimmed with
 //                   a `Badge` reading exactly "Archived" when archived, and one overflow
 //                   `Menu` offering "Archive" or "Restore" with no confirm (D5), plus an
@@ -66,7 +66,7 @@ import { Link } from "react-router-dom";
 import { IconButton } from "../shared/IconButton";
 import { runExport, sessionExportPath } from "./exportDownloads";
 import { runSessionImport } from "./importUploads";
-import { formatSessionStart } from "./sessionLabel";
+import { sessionLabel } from "./sessionLabel";
 import { isSessionArchived } from "./sessionsApi";
 import type { Session } from "./sessionsApi";
 import type { SessionsState } from "./sessionsState";
@@ -176,7 +176,9 @@ export const SessionsSection = observer(function SessionsSection(
 
   const renderRow = (session: Session): React.JSX.Element => {
     const archived = isSessionArchived(session);
-    const label = formatSessionStart(session.created_at);
+    // One label (US-150, DEC-034-9) for both the row link and the `Actions for <label>`
+    // menu name; this tab deliberately offers no rename control (DEC-arch-session-names-4).
+    const label = sessionLabel(session);
     return (
       <Table.Tr key={session.id}>
         <Table.Td>
@@ -188,7 +190,7 @@ export const SessionsSection = observer(function SessionsSection(
             >
               {label}
             </Text>
-            {/* US-088: the setup's name beside the start time, and nothing at all where it
+            {/* US-088: the setup's name beside the label, and nothing at all where it
                 would be when the session has none. */}
             {session.setup_name !== null && (
               <Text size="sm" c="dimmed">

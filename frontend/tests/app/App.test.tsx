@@ -373,7 +373,12 @@ const OPENING_MESSAGE_ID = "9007199254740997";
 
 const SESSION_NOT_FOUND_TEXT = "Session not found";
 const NO_ENTRIES_TEXT = "No entries yet.";
-const START_LABEL_HEADING = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+/**
+ * The session header title of a never-renamed session. 034 step 004 (S034_004_DoD7,
+ * DEC-034-9): the title is the session label, so for `name: null` it is the local start date
+ * `YYYY-MM-DD` with no time (was 011's `YYYY-MM-DD HH:MM`).
+ */
+const START_LABEL_HEADING = /^\d{4}-\d{2}-\d{2}$/;
 
 /** DoD-11's own route: `/sessions/1`, the entry `EMPTY_CENTRE_ROUTES` no longer lists. */
 const SESSION_ONE_ROUTE = "/sessions/1";
@@ -396,6 +401,7 @@ const SESSION_ONE: Session = {
   character_id: ID_A,
   setup_id: null,
   setup_name: null,
+  name: null, // 034 step 004: a required Session key.
   archived_at: null,
   last_used_at: "2026-05-09T08:00:00.000000+00:00",
   created_at: "2026-05-09T08:00:00.000000+00:00",
@@ -407,6 +413,7 @@ const SESSION_A: Session = {
   character_id: ID_A,
   setup_id: null,
   setup_name: null,
+  name: null,
   archived_at: null,
   last_used_at: "2026-05-10T09:00:00.000000+00:00",
   created_at: "2026-05-10T09:00:00.000000+00:00",
@@ -568,6 +575,7 @@ function stubWorkspace(rows: Character[], sessions: Session[] = []) {
           character_id: characterId,
           setup_id: sent.setup_id ?? null,
           setup_name: null,
+          name: null,
           archived_at: null,
           last_used_at: STARTED_STAMP,
           created_at: STARTED_STAMP,

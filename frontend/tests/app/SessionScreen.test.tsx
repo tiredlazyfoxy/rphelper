@@ -79,6 +79,11 @@
 // named like), so there is nothing else to exclude. The 017 clauses are in the last block, under a
 // describe naming 017 step 011, so their "— DoD-N" tags are 017 step 011's. No other 011 / 013 /
 // 015 / 016 assertion changes.
+//
+// Amended by feature 034, step 004 (S034_004_DoD7): the header title is the session label — the
+// stored name, else the local start date with no time (DEC-034-9). Every `Session` fixture gains
+// `name: null`, so the 011 title shape becomes `YYYY-MM-DD` (START_LABEL_HEADING /
+// START_LABEL_ANYWHERE below). The named-session clauses are in the last block.
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { runInAction } from "mobx";
@@ -142,9 +147,14 @@ const ARCHIVE_NAME = /^archive$/i;
 const RESTORE_NAME = /^restore$/i;
 const ROW_ACTIONS_NAME = /^actions for /i;
 
-/** D4 / "Test conventions": the start-time label is only ever asserted by this shape. */
-const START_LABEL_HEADING = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
-const START_LABEL_ANYWHERE = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/;
+/**
+ * D4 / "Test conventions": the never-renamed session's header title is asserted by its shape.
+ * 034 step 004 (S034_004_DoD7, DEC-034-9): the title is now the session label — for these
+ * fixtures (`name: null`) the local start DATE, `YYYY-MM-DD`, with no time — so the 011 shape
+ * `YYYY-MM-DD HH:MM` is replaced by the date-only shape.
+ */
+const START_LABEL_HEADING = /^\d{4}-\d{2}-\d{2}$/;
+const START_LABEL_ANYWHERE = /\d{4}-\d{2}-\d{2}/;
 
 const LOADER = ".mantine-Loader-root";
 const NOTIFICATION = ".mantine-Notification-root";
@@ -201,6 +211,7 @@ const SESSION_A: Session = {
   character_id: CHAR_A_ID,
   setup_id: SETUP_ID,
   setup_name: SETUP_NAME,
+  name: null,
   archived_at: null,
   last_used_at: STAMP_A,
   created_at: STAMP_A,
@@ -227,6 +238,7 @@ const SESSION_B: Session = {
   character_id: CHAR_B_ID,
   setup_id: SETUP_ID,
   setup_name: OTHER_SETUP_NAME,
+  name: null,
   archived_at: null,
   last_used_at: STAMP_B,
   created_at: STAMP_B,
@@ -2003,5 +2015,101 @@ describe("017 step 011 — the header bar and the Send gate on the ready screen 
       expect(shownModel()).toBe(LABEL_B);
     });
     expect(within(mainRegion()).getAllByRole("group", { name: BAR_NAME })).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 004 — S034_004_DoD7 on the session header: the title is the session label —
+// the stored name when renamed, else the local start date with no time (US-150.AC-1/AC-2,
+// DEC-034-9). The local date is computed with Intl in the runtime's zone (`localDate`), never
+// with the module under test, so this file still never calls the formatter for an expectation.
+// ===========================================================================
+
+/** The local `YYYY-MM-DD` of `instant` in the runtime's zone — an independent oracle. */
+function localDate(instant: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+/** A's session, renamed: the server answers its stored name. */
+const NAMED_SESSION_A: Session = { ...SESSION_A, name: "Harbour at dusk" };
+/** A's session renamed to something date-like — still shown verbatim. */
+const DATE_NAMED_SESSION_A: Session = { ...SESSION_A, name: "1999-12-31" };
+
+describe("034 step 004 — the session header title is the session label", () => {
+  it("a renamed session's header title is its name — S034_004_DoD7", async () => {
+    serveSessions(NAMED_SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    expect(
+      within(mainRegion()).getByRole("heading", { name: "Harbour at dusk" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a renamed session's header shows neither its start date nor a start time — S034_004_DoD7", async () => {
+    serveSessions(NAMED_SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    // Positive half: the named title is there.
+    expect(
+      within(mainRegion()).getByRole("heading", { name: "Harbour at dusk" }),
+    ).toBeInTheDocument();
+    expect(
+      within(mainRegion()).queryByRole("heading", { name: localDate(STAMP_A) }),
+    ).toBeNull();
+    expect(
+      within(mainRegion()).queryByRole("heading", { name: /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/ }),
+    ).toBeNull();
+  });
+
+  it("a date-like name is the title verbatim — S034_004_DoD7", async () => {
+    serveSessions(DATE_NAMED_SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    expect(within(mainRegion()).getByRole("heading", { name: "1999-12-31" })).toBeInTheDocument();
+    expect(
+      within(mainRegion()).queryByRole("heading", { name: localDate(STAMP_A) }),
+    ).toBeNull();
+  });
+
+  it("a never-renamed session's header title is its local start date exactly, no time — S034_004_DoD7", async () => {
+    serveSessions(SESSION_A);
+    renderRoute(sessionRoutePath(SESSION_A_ID), workspaceWith(CHAR_A));
+    await flush();
+
+    const title = within(mainRegion()).getByRole("heading", { name: localDate(STAMP_A) });
+    expect((title.textContent ?? "").trim()).toBe(localDate(STAMP_A));
+    expect(title.textContent ?? "").not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  it("navigating from a renamed session to a never-renamed one switches the title to the date — S034_004_DoD7", async () => {
+    const user = newUser();
+    serveSessions(NAMED_SESSION_A, SESSION_B);
+    renderRoute(
+      sessionRoutePath(SESSION_A_ID),
+      workspaceWith(CHAR_A, CHAR_B),
+      sessionRoutePath(SESSION_B_ID),
+    );
+    await flush();
+    expect(
+      within(mainRegion()).getByRole("heading", { name: "Harbour at dusk" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^probe navigate$/i }));
+    await flush();
+
+    expect(
+      await within(mainRegion()).findByRole("heading", { name: localDate(STAMP_B) }),
+    ).toBeInTheDocument();
+    expect(within(mainRegion()).queryByRole("heading", { name: "Harbour at dusk" })).toBeNull();
   });
 });

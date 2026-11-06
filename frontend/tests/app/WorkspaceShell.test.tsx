@@ -116,6 +116,7 @@ const TREE_SESSION: Session = {
   character_id: TREE_CHARACTER.id,
   setup_id: null,
   setup_name: null,
+  name: null, // 034 step 004: a required Session key.
   archived_at: null,
   last_used_at: "2026-05-10T09:00:00.000000+00:00",
   created_at: "2026-05-10T09:00:00.000000+00:00",

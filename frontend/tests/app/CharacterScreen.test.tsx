@@ -1182,6 +1182,7 @@ const SESSION_OF_A: Session = {
   character_id: ID_A,
   setup_id: null,
   setup_name: null,
+  name: null, // 034 step 004: a required Session key.
   archived_at: null,
   last_used_at: "2026-05-10T09:26:53.000000+00:00",
   created_at: "2026-05-10T09:26:53.000000+00:00",
@@ -1193,6 +1194,7 @@ const SESSION_OF_B: Session = {
   character_id: ID_B,
   setup_id: null,
   setup_name: null,
+  name: null,
   archived_at: null,
   last_used_at: "2026-04-02T08:15:42.000000+00:00",
   created_at: "2026-04-02T08:15:42.000000+00:00",
@@ -1207,6 +1209,7 @@ const STARTED_UNDER_A: Session = {
   character_id: ID_A,
   setup_id: null,
   setup_name: null,
+  name: null,
   archived_at: null,
   last_used_at: "2026-06-01T12:00:00.000000+00:00",
   created_at: "2026-06-01T12:00:00.000000+00:00",

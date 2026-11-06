@@ -5,7 +5,7 @@
 | 001  | `001.session-name-column.md`      | done    | PASS     | 2026-11-06 |
 | 002  | `002.rename-route.md`             | done    | PASS     | 2026-11-06 |
 | 003  | `003.my-search-names.md`          | done    | PASS     | 2026-11-06 |
-| 004  | `004.session-label-surfaces.md`   | pending | —        | —    |
+| 004  | `004.session-label-surfaces.md`   | done    | PASS     | 2026-11-06 |
 | 005  | `005.rename-editor.md`            | pending | —        | —    |
 | 006  | `006.rename-surfaces.md`          | pending | —        | —    |
 
@@ -28,6 +28,16 @@
 ### Step 003 — my-search-names
 - `backend/app/services/search/my_search.py` — `search_session_names` body (strip, blank → [] with no SQL; owner-scoped, non-NULL, `_folded_contains` on `sessions.name`, archived included, name/id order, `limit`, inside `_reading`); `merge_session_hits` body (name ids, then unseen vector ids, capped); `run_my_search` calls the name arm after `search_setups` and hydrates the merged order; module docstring records the unnamed-session-by-date limitation
 - `backend/app/models/search.py`, `backend/app/routers/search.py` — no change beyond the skeleton
+
+### Step 004 — session-label-surfaces
+- `frontend/src/app/sessionsApi.ts` — `renameSession` body (`apiPatch<Session>(sessionPath(id), { name }, signal)`), `apiPatch` import
+- `frontend/src/app/sessionLabel.ts` — `sessionLabel` body (name, else `formatLocalDate`); `formatLocalDate` body (Intl `formatToParts`, local `YYYY-MM-DD`)
+- `frontend/src/app/CharacterTree.tsx` — tree row label (line 1) uses `sessionLabel`; comments updated
+- `frontend/src/app/SessionScreen.tsx` — header `Title` uses `sessionLabel`; comments updated
+- `frontend/src/app/SessionsSection.tsx` — row label and `Actions for <label>` use `sessionLabel`; no rename control; comments updated
+- `frontend/src/app/SearchScreen.tsx` — session row primary and entry row session text use `sessionLabel` (entry via `{ name: session_name, created_at: session_created_at }`)
+- `frontend/src/app/searchApi.ts` — no change beyond the skeleton
+- `frontend/src/app/characterComposerState.ts` — skeleton's caller-compile edit only (`name: started.name`); no coder change
 
 ## Notes & Issues
 
@@ -64,6 +74,18 @@
 - `backend/app/models/search.py` — `SessionHitResponse` gains `name: str | None` (after `setup_name`); `EntryHitResponse` gains `session_name: str | None` (after `character_name`) — changed, final.
 - `backend/app/routers/search.py` — no change (`_to_response` converts via `from_attributes`, so the new fields flow through).
 - Caller-compile edits (out of Source-files scope): None.
+
+### Step 004 — frozen interface (2026-11-06)
+- `frontend/src/app/sessionsApi.ts` — `Session` gains `name: string | null` (required key, after `setup_name`; nine keys) — changed, final. `toSession` copies `name` — final. Header comment now "one update call (rename), no delete"; "eight keys" doc mentions → nine.
+- `frontend/src/app/sessionsApi.ts` — `export async function renameSession(sessionId: string, name: string | null, signal?: AbortSignal): Promise<Session>` — new (STUB: throws `Error("not implemented")`; placed before `archiveSession`). Coder: `return apiPatch<Session>(sessionPath(sessionId), { name }, signal);` and add `apiPatch` to the `../shared/api` import (left out of the stub because `noUnusedLocals` rejects an unused import).
+- `frontend/src/app/sessionLabel.ts` — `export type SessionLabelSource = { name: string | null; created_at: string }` — new, final.
+- `frontend/src/app/sessionLabel.ts` — `export function sessionLabel(source: SessionLabelSource, timeZone?: string): string` — new (STUB: throws). An `EntryHit` is labelled by passing `{ name: hit.session_name, created_at: hit.session_created_at }`.
+- `frontend/src/app/sessionLabel.ts` — `export function formatLocalDate(timestamp: string, timeZone?: string): string` — new, the label's local `YYYY-MM-DD` fallback (STUB: throws).
+- `frontend/src/app/sessionLabel.ts` — `export function formatLocalDateTime(createdAt: string, timeZone?: string): string` — changed (was `formatSessionStart(createdAt: string, timeZone?: string): string`); body unchanged, already final.
+- `frontend/src/app/searchApi.ts` — `SessionHit` gains `name: string | null` (after `setup_name`); `EntryHit` gains `session_name: string | null` (before `session_created_at`) — changed, final.
+- `CharacterTree.tsx`, `SessionScreen.tsx`, `SessionsSection.tsx`, `SearchScreen.tsx` — STUB STATE: import and call sites only renamed mechanically to `formatLocalDateTime(...)`; they still show the start date-time. The **call-site switch to `sessionLabel` is the coder's** (tree row label :299, header `Title` :217, Sessions row `label` :179 incl. `Actions for ${label}`, search session primary :282, entry secondary :302). It was not wired because `sessionLabel` throws and would crash every existing render test. After the switch, these four files should no longer import `formatLocalDateTime` (step 006 brings it back in the tree's line 2).
+- Caller-compile edits (out of Source-files scope): `frontend/src/app/characterComposerState.ts` (~:130) — the explicit `Session` literal built from `startSessionWithMessage`'s result gains `name: started.name` and its comment reads "nine" keys. This is a mechanical change: without it the `src` typecheck fails.
+- Typecheck (`npm run typecheck`): `src` is clean. 43 errors remain, all in this step's listed Test files: `Session` fixture literals are missing `name`, `SessionHit`/`EntryHit` fixtures are missing `name`/`session_name`, and `SearchScreen.test.tsx` and `sessionLabel.test.ts` still import `formatSessionStart`. Only the test-coder can fix these. No unlisted test file is flagged.
 
 ## Tests
 
@@ -103,3 +125,15 @@
 - `backend/tests/test_privacy_audit_search_tools.py` — covers DoD-10, DoD-11 — DoD-1 sweep gains the `sessions.name` target (22 targets); new world test: a search for the shared name stem returns each user's own renamed session with its name and no sentinel/id of the other; the `session_search` tool run in B's other session returns B's renamed session (positive control) and its output carries neither the sentinel nor the full name.
 - `backend/tests/test_session_search_excerpts.py` — covers DoD-10 — a renamed session's `SessionExcerpt` still has exactly four fields and no field carries the name (guard).
 - Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓, DoD-9 ✓, DoD-10 ✓, DoD-11 ✓
+
+### Step 004 — tests (2026-11-06)
+- `frontend/tests/app/sessionLabel.test.ts` — covers DoD-1, DoD-2, DoD-3 — 011 clauses now call `formatLocalDateTime` (values unchanged); `sessionLabel` returns a non-null name verbatim (plain, date-like, date-time-like, Cyrillic, no zone); null name → local `YYYY-MM-DD` of `created_at` (`2026-11-05T23:30:00Z` Berlin → `2026-11-06`, UTC → `2026-11-05`, New York rolls back, Tokyo), date-only shape / length 10 / no `:` in four zones, zone-less = resolved zone, extra keys ignored, `formatLocalDate` agrees; `formatLocalDateTime` zero-padded, 24-hour, midnight `00`, exactly 16 characters.
+- `frontend/tests/app/sessionsApi.test.ts` — covers DoD-4, DoD-5 — fixtures gain `name`; `SESSION_KEYS` is nine keys (018 clauses retitled nine/ten); every read (both listings, get, archive, restore, start, start-with-message) carries `name` string or null as served; `startSession` yields exactly nine keys; `renameSession` sends one `PATCH /api/sessions/<id>` with body exactly `{ name }` (string as given incl. spaces, `null` not omitted), resolves to the server's session, id verbatim, 404 `session_not_found` and 422 reject as `ApiError`.
+- `frontend/tests/app/searchApi.test.ts` — covers DoD-6 — fixtures gain `name`/`session_name`; session hit `name` and entry hit `session_name` arrive as sent (string and null), whole payload unchanged.
+- `frontend/tests/app/SearchScreen.test.tsx` — covers DoD-7 — `formatSessionStart` import dropped; expected unnamed labels from an Intl `localDate` oracle (runtime zone); 029 DoD-5 clauses now expect the local date; named session row shows its name (and a date-like name verbatim) without the start date/time; unnamed row date with no `HH:MM`; entry row `<character> · <name>` / `<character> · <local date>`.
+- `frontend/tests/app/SessionsSection.test.tsx` — covers DoD-7, DoD-8 — fixtures `name: null`; 011 shape clause now date-only and equal to `localDate(created_at)`; named row link text is the name, no date/time; `Actions for <name>` / `Actions for <local date>` trigger names; no rename-named button/label/title, no textbox in rows, no Rename menu item (active and archived), no PATCH issued.
+- `frontend/tests/app/SessionScreen.test.tsx` — covers DoD-7 — `START_LABEL_HEADING`/`_ANYWHERE` now date-only; named session's heading is its name (date-like verbatim), no start-date heading; unnamed heading text equals `localDate(created_at)` with no time; navigating named → unnamed switches the title.
+- `frontend/tests/app/CharacterTree.test.tsx` — covers DoD-7 — `session()` builder gains optional `name` (default null); 011 DoD-3 shape clauses date-only, unnamed row text = local date of `created_at` (not `last_used_at`); named row text is the name with no date/time; date-like name verbatim beside the setup label; applying a renamed row relabels with no fetch.
+- `frontend/tests/app/characterComposerState.test.ts` — covers DoD-4 — `SESSION_KEYS` nine keys; workspace row holds exactly the nine keys.
+- Fixture-only (`name: null` / `session_name: null`, typecheck): `searchState.test.ts`, `searchLanding.test.tsx`, `SessionsSection.export.test.tsx` (header comment: labels are dates now), `SessionsSection.import.test.tsx`, `sessionsState.test.ts`, `sessionsSectionState.test.ts`, `sessionScreenState.test.ts`, `App.test.tsx` (also `START_LABEL_HEADING` date-only), `WorkspaceShell.test.tsx`, `CharacterScreen.test.tsx`, `CharacterComposer.test.tsx`, `CharacterComposer.setup.test.tsx`, `sessionFirstReply.test.tsx`.
+- Coverage: DoD-1 ✓, DoD-2 ✓, DoD-3 ✓, DoD-4 ✓, DoD-5 ✓, DoD-6 ✓, DoD-7 ✓, DoD-8 ✓

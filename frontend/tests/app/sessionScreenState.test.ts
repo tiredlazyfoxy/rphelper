@@ -36,6 +36,7 @@ const LOADED: Session = {
   character_id: PAYLOAD_CHARACTER_ID,
   setup_id: PAYLOAD_SETUP_ID,
   setup_name: "Tavern",
+  name: null, // 034 step 004: a required Session key.
   archived_at: null,
   last_used_at: STAMP,
   created_at: STAMP,

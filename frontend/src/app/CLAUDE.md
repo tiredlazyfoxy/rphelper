@@ -70,9 +70,9 @@ The `app` Vite entry — the roleplayer's workspace: the shell and tree, charact
 - `searchState.ts` — the results page's state and helpers.
 - `sessionConfigDraft.ts` — the session configuration modal's draft.
 - `sessionConfigState.ts` — the session configuration state shared by the header bar and Send gate.
-- `sessionLabel.ts` — the session start-time label formatter.
+- `sessionLabel.ts` — the session display-label module: `sessionLabel` (the stored name, else the local start date), `formatLocalDate`, `formatLocalDateTime`.
 - `sessionScreenState.ts` — the session screen's state and load.
-- `sessionsApi.ts` — the sessions wire surface.
+- `sessionsApi.ts` — the sessions wire surface (list, read, start, `renameSession`, archive / restore).
 - `sessionsSectionState.ts` — the Sessions section's state and effects.
 - `sessionsState.ts` — the one workspace sessions list for the tree.
 - `settingsState.ts` — the settings languages form state.

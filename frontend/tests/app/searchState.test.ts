@@ -70,6 +70,7 @@ const SESSION_HIT: SessionHit = {
   id: SESSION_ID,
   character_name: "Corvin Hale",
   setup_name: "Harbour nights",
+  name: null,
   created_at: "2026-03-14T09:26:53.000000+00:00",
   archived: false,
 };
@@ -78,6 +79,7 @@ const ENTRY_HIT: EntryHit = {
   session_id: ENTRY_SESSION_ID,
   snippet: "…and then Mira left the harbour…",
   character_name: "Dask Orrery",
+  session_name: null,
   session_created_at: "2026-03-10T11:00:00.000000+00:00",
 };
 const MEMO_HIT: MemoHit = {

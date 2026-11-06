@@ -137,6 +137,7 @@ const SESSION: Session = {
   character_id: CHAR_ID,
   setup_id: SETUP_ID,
   setup_name: "Tavern",
+  name: null,
   archived_at: null,
   last_used_at: STAMP,
   created_at: STAMP,

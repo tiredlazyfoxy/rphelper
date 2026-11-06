@@ -54,6 +54,13 @@
 // The location probe also renders `location.search`, so a clause can read the submitted `q`
 // back **decoded** (`URLSearchParams.get`), never as a pinned `%`-encoding. No other
 // assertion is dropped or weakened.
+//
+// Amended by feature 034, step 004 (S034_004_DoD7): a session row's label is the session
+// LABEL — the stored name, else the local `YYYY-MM-DD` of `created_at` with no time
+// (DEC-034-9). `Session` gains a required `name`; the `session()` builder defaults it to null.
+// 011 DoD-3's two shape clauses now expect the date-only shape (START_LABEL_SHAPE /
+// START_LABEL_IN_TEXT). The named-row clauses are in the last block. Expected local dates are
+// computed with Intl in the runtime zone (`localDate`), never by calling the module under test.
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -86,9 +93,25 @@ const NOTIFICATION = ".mantine-Notification-root";
 
 // 011 step 006 (D7, D16, D18): the session level's own names.
 const SESSIONS_FAILED_TEXT = "Could not load sessions";
-const START_LABEL_SHAPE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+// 034 step 004: a never-renamed session's label is the local start DATE, no time (DEC-034-9).
+const START_LABEL_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 /** The same shape, matched inside a row that also carries a setup label. */
-const START_LABEL_IN_TEXT = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/;
+const START_LABEL_IN_TEXT = /\d{4}-\d{2}-\d{2}/;
+
+/**
+ * 034 step 004: the local `YYYY-MM-DD` of `instant` in the runtime's zone — the expected label
+ * of a never-renamed session, from Intl directly (independent of the code under test).
+ */
+function localDate(instant: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
 
 const COLLECTION_PATH = "/api/characters";
 const SESSIONS_PATH = "/api/sessions";
@@ -169,6 +192,8 @@ function session(fields: {
   createdAt: string;
   setupName?: string;
   archivedAt?: string;
+  /** 034 step 004: the stored session name; omitted means never renamed (null). */
+  name?: string;
 }): Session {
   const named = fields.setupName !== undefined;
   return {
@@ -176,6 +201,7 @@ function session(fields: {
     character_id: fields.characterId,
     setup_id: named ? SETUP_ID : null,
     setup_name: named ? fields.setupName ?? null : null,
+    name: fields.name ?? null,
     archived_at: fields.archivedAt ?? null,
     last_used_at: fields.lastUsedAt,
     created_at: fields.createdAt,
@@ -936,19 +962,20 @@ describe("a session row shows its setup as a label, or nothing (US-088.AC-1, US-
     expect(within(row).getByText(SETUP_NAME)).toBeInTheDocument();
   });
 
-  it("a session with no setup shows only a start-time label of the fixed shape — DoD-3", async () => {
+  it("a session with no setup shows only its label, the local start date — DoD-3, S034_004_DoD7", async () => {
     serveListing(PAYLOAD_ABC, [], SESSIONS_PAYLOAD);
     renderTree();
     await flush();
 
-    // The exact local-time value is 005's formatter's business; here only the shape is the
-    // contract (011 context.md "Start-time labels").
+    // 034: never renamed, so the label is the local date of created_at (not of last_used_at,
+    // which this fixture deliberately puts on another day), with no time.
     const text = (sessionRow(SID_A_OLD).textContent ?? "").trim();
     expect(text).toMatch(START_LABEL_SHAPE);
+    expect(text).toBe(localDate(SESSION_A_OLD.created_at));
     expect(within(sessionRow(SID_A_OLD)).queryByText(SETUP_NAME)).toBeNull();
   });
 
-  it("the labelled row also carries a start-time label of the fixed shape — DoD-3", async () => {
+  it("the labelled row also carries its date label — DoD-3, S034_004_DoD7", async () => {
     serveListing(PAYLOAD_ABC, [], SESSIONS_PAYLOAD);
     renderTree();
     await flush();
@@ -956,6 +983,7 @@ describe("a session row shows its setup as a label, or nothing (US-088.AC-1, US-
     // Beside the setup label, so the shape is matched inside the row's text rather than over
     // the whole of it; the exact value stays 005's formatter's business.
     expect(sessionRow(SID_A_NEW).textContent ?? "").toMatch(START_LABEL_IN_TEXT);
+    expect(sessionRow(SID_A_NEW).textContent ?? "").toContain(localDate(SESSION_A_NEW.created_at));
   });
 });
 
@@ -1215,6 +1243,77 @@ describe("applying a row to the workspace state re-renders the tree with no fetc
 
     expect(querySessionRow(SID_C)).toBeNull();
     expect(querySessionRow(SID_A_NEW)).not.toBeNull();
+    expect(sessionsRequests(calls)).toHaveLength(before);
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 004 — S034_004_DoD7 on the tree row: a renamed session's row shows its
+// name, a never-renamed one its local start date with no time (US-150.AC-1, US-150.AC-2,
+// DEC-034-9). Only the row's label is asserted here; the two-line row is step 006's.
+// ===========================================================================
+describe("034 step 004 — a tree session row shows the session label", () => {
+  /** A's older session, renamed (no setup, so the row's only text is the label). */
+  const NAMED_A_OLD: Session = { ...SESSION_A_OLD, name: "Harbour at dusk" };
+  /** A's newer session (with the Tavern setup), renamed to something date-like. */
+  const DATE_NAMED_A_NEW: Session = { ...SESSION_A_NEW, name: "1999-12-31" };
+
+  it("a renamed session's row shows its name — S034_004_DoD7", async () => {
+    serveListing(PAYLOAD_ABC, [], [SESSION_C, SESSION_A_NEW, NAMED_A_OLD]);
+    renderTree();
+    await flush();
+
+    expect(within(sessionRow(SID_A_OLD)).getByText("Harbour at dusk")).toBeInTheDocument();
+    expect((sessionRow(SID_A_OLD).textContent ?? "").trim()).toBe("Harbour at dusk");
+  });
+
+  it("a renamed session's row shows neither its start date nor a time — S034_004_DoD7", async () => {
+    serveListing(PAYLOAD_ABC, [], [SESSION_C, SESSION_A_NEW, NAMED_A_OLD]);
+    renderTree();
+    await flush();
+
+    const text = sessionRow(SID_A_OLD).textContent ?? "";
+    expect(text).toContain("Harbour at dusk");
+    expect(text).not.toContain(localDate(NAMED_A_OLD.created_at));
+    expect(text).not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  it("a date-like name is shown verbatim beside the setup label — S034_004_DoD7", async () => {
+    serveListing(PAYLOAD_ABC, [], [SESSION_C, DATE_NAMED_A_NEW, SESSION_A_OLD]);
+    renderTree();
+    await flush();
+
+    const row = sessionRow(SID_A_NEW);
+    expect(within(row).getByText("1999-12-31")).toBeInTheDocument();
+    expect(within(row).getByText(SETUP_NAME)).toBeInTheDocument();
+    expect(row.textContent ?? "").not.toContain(localDate(SESSION_A_NEW.created_at));
+  });
+
+  it("a never-renamed session's row beside a renamed one shows its local start date, no time — S034_004_DoD7", async () => {
+    serveListing(PAYLOAD_ABC, [], [SESSION_C, SESSION_A_NEW, NAMED_A_OLD]);
+    renderTree();
+    await flush();
+
+    const text = (sessionRow(SID_C).textContent ?? "").trim();
+    expect(text).toBe(localDate(SESSION_C.created_at));
+    expect(text).not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  it("applying the renamed version of a listed session relabels its row with no fetch — S034_004_DoD7", async () => {
+    const { calls } = serveListing(PAYLOAD_ABC, [], SESSIONS_PAYLOAD);
+    const { sessions } = renderTree();
+    await flush();
+    expect((sessionRow(SID_A_OLD).textContent ?? "").trim()).toBe(
+      localDate(SESSION_A_OLD.created_at),
+    );
+    const before = sessionsRequests(calls).length;
+
+    await act(async () => {
+      applySession(sessions, NAMED_A_OLD);
+    });
+    await flush();
+
+    expect((sessionRow(SID_A_OLD).textContent ?? "").trim()).toBe("Harbour at dusk");
     expect(sessionsRequests(calls)).toHaveLength(before);
   });
 });

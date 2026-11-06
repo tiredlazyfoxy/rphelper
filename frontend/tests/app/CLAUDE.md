@@ -90,7 +90,7 @@ Vitest suites for the `app` entry (`src/app/`): one or more modules per componen
 - `sessionConfigDraft.test.ts` — the session configuration draft.
 - `sessionConfigState.test.ts` — the session configuration state.
 - `sessionFirstReply.test.tsx` — first reply after starting from the character page (component / router level).
-- `sessionLabel.test.ts` — the start-time label formatter.
+- `sessionLabel.test.ts` — the session display-label module (name-or-date label, local date / date-time formatters).
 - `sessionScreenState.test.ts` — the session screen state.
 - `sessionsApi.test.ts` — the sessions API client.
 - `sessionsSectionState.test.ts` — the Sessions section state.

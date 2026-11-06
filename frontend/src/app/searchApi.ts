@@ -23,11 +23,12 @@ export type SetupHit = {
   archived: boolean;
 };
 
-/** One session hit: no snippet — the row is labelled by its start and its owners. */
+/** One session hit: no snippet — the row is labelled by `sessionLabel` and its owners. */
 export type SessionHit = {
   id: string;
   character_name: string;
   setup_name: string | null; // null when the session has no setup
+  name: string | null; // the session's stored name; null until renamed (DEC-034-8)
   created_at: string; // fixed-width UTC text, as every other response sends it
   archived: boolean;
 };
@@ -38,6 +39,7 @@ export type EntryHit = {
   session_id: string;
   snippet: string;
   character_name: string;
+  session_name: string | null; // the owning session's stored name, or null (DEC-034-8)
   session_created_at: string;
 };
 

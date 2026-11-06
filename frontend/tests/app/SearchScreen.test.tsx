@@ -14,9 +14,15 @@
 //
 // Binding: `SearchScreen` takes **no props** (it owns its own `SearchState`), so each render
 // is `<SearchScreen />` inside `<AppProviders>` then `<MemoryRouter>`, with a `useLocation`
-// probe reading `pathname + search`. Ids are strings throughout. The session start is never
-// pinned to a literal local time: it is computed with `formatSessionStart`, the very function
-// DoD-5 names.
+// probe reading `pathname + search`. Ids are strings throughout.
+//
+// Feature 034, step 004 (S034_004_DoD7): a session row's primary text and an entry row's
+// session text are now the session LABEL — the stored name, else the local `YYYY-MM-DD` of the
+// start with no time (DEC-034-9, US-150.AC-1/AC-2, US-152.AC-2). The 029 DoD-5 clauses below
+// assert that rule for never-renamed hits (name / session_name null). The local date is never
+// pinned to a literal: `localDate` below computes it with Intl in the runtime's own zone, an
+// oracle independent of the component and of `sessionLabel` (exact zone values are asserted
+// only in tests/app/sessionLabel.test.ts).
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -30,7 +36,6 @@ import type {
   SessionHit,
   SetupHit,
 } from "../../src/app/searchApi";
-import { formatSessionStart } from "../../src/app/sessionLabel";
 import { AppProviders } from "../../src/shared/AppProviders";
 
 type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -82,10 +87,39 @@ const SESSION_MEMO_SESSION_ID = "7250000000000000058";
 const SESSION_STAMP = "2026-05-09T08:00:00.000000+00:00";
 const OTHER_STAMP = "2026-05-10T09:30:00.000000+00:00";
 const ENTRY_STAMP = "2026-05-11T19:45:00.000000+00:00";
-/** DoD-5 names `formatSessionStart(created_at)` itself, so it is the expected value. */
-const SESSION_START = formatSessionStart(SESSION_STAMP);
-const OTHER_START = formatSessionStart(OTHER_STAMP);
-const ENTRY_START = formatSessionStart(ENTRY_STAMP);
+/** Reads one Intl part of `instant` in the runtime's own zone. */
+function localPart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): string {
+  return parts.find((part) => part.type === type)?.value ?? "";
+}
+
+/**
+ * The local `YYYY-MM-DD` of `instant` in the runtime's zone — the expected label of a
+ * never-renamed session (S034_004_DoD7). Built with Intl directly, not with the module under
+ * test, so the suite passes in any zone without trusting the code it checks.
+ */
+function localDate(instant: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(instant));
+  return `${localPart(parts, "year")}-${localPart(parts, "month")}-${localPart(parts, "day")}`;
+}
+
+/** The local `HH:MM` (24-hour) of `instant` — used only to assert that NO time is shown. */
+function localTime(instant: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(instant));
+  return `${localPart(parts, "hour")}:${localPart(parts, "minute")}`;
+}
+
+/** 034: a never-renamed session's label is its local start date, with no time. */
+const SESSION_START = localDate(SESSION_STAMP);
+const OTHER_START = localDate(OTHER_STAMP);
+const ENTRY_START = localDate(ENTRY_STAMP);
 
 // ------------------------------------------------------------------- the hits
 const CHARACTER_HIT: CharacterHit = { id: CHARACTER_ID, name: "Mira Vane", archived: false };
@@ -115,6 +149,7 @@ const SESSION_HIT: SessionHit = {
   id: SESSION_ID,
   character_name: "Mirabel Ash",
   setup_name: "Harbour nights",
+  name: null,
   created_at: SESSION_STAMP,
   archived: false,
 };
@@ -123,6 +158,7 @@ const SOLO_SESSION_HIT: SessionHit = {
   id: SOLO_SESSION_ID,
   character_name: "Perrin Vale",
   setup_name: null,
+  name: null,
   created_at: OTHER_STAMP,
   archived: false,
 };
@@ -130,6 +166,7 @@ const ARCHIVED_SESSION_HIT: SessionHit = {
   id: ARCHIVED_SESSION_ID,
   character_name: "Yewen Marsh",
   setup_name: null,
+  name: null,
   created_at: OTHER_STAMP,
   archived: true,
 };
@@ -140,6 +177,7 @@ const ENTRY_HIT: EntryHit = {
   session_id: ENTRY_SESSION_ID,
   snippet: "A **bold** cut of the reply",
   character_name: "Tamsin Reed",
+  session_name: null,
   session_created_at: ENTRY_STAMP,
 };
 
@@ -482,7 +520,7 @@ describe("029 step 005 — what each row says (D4, D7)", () => {
     expect(within(row).getByText(SETUP_HIT.character_name)).toBeInTheDocument();
   });
 
-  it("the session row shows its formatted start and <character> · <setup>, and only the character when setup_name is null — DoD-5", async () => {
+  it("the session row shows its label (local start date for a null name) and <character> · <setup>, and only the character when setup_name is null — DoD-5, S034_004_DoD7", async () => {
     serve(PAYLOAD);
     renderScreen(`${SEARCH_PATH}?q=harbour`);
     await flush();
@@ -501,7 +539,7 @@ describe("029 step 005 — what each row says (D4, D7)", () => {
     expect(withoutSetup.textContent ?? "").not.toContain("·");
   });
 
-  it("the entry row shows its snippet and <character> · <formatted session start> — DoD-5", async () => {
+  it("the entry row shows its snippet and <character> · <session label> (local start date for a null session_name) — DoD-5, S034_004_DoD7", async () => {
     serve(PAYLOAD);
     renderScreen(`${SEARCH_PATH}?q=harbour`);
     await flush();
@@ -718,5 +756,93 @@ describe("029 step 005 — the box is focused on every arrival at /search (D9)",
 
     expect(currentHref()).toBe(SEARCH_PATH);
     expect(searchBox()).toHaveFocus();
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 004 — S034_004_DoD7 on my-search: a renamed session's session row and
+// entry row show its name; a never-renamed one shows its local start date with no time
+// (US-150.AC-1, US-150.AC-2, US-152.AC-2; DEC-034-8, DEC-034-9).
+// ===========================================================================
+describe("034 step 004 — my-search rows show the session label", () => {
+  /** A renamed session whose name looks like nothing date-ish. */
+  const NAMED_SESSION_HIT: SessionHit = { ...SESSION_HIT, name: "Harbour at dusk" };
+  /** A renamed session whose name looks like a date — it is still shown verbatim. */
+  const DATE_NAMED_SESSION_HIT: SessionHit = { ...SOLO_SESSION_HIT, name: "1999-12-31" };
+  /** An entry of a renamed session. */
+  const NAMED_ENTRY_HIT: EntryHit = { ...ENTRY_HIT, session_name: "Harbour at dusk" };
+
+  it("a renamed session's row shows its name and not its start date — S034_004_DoD7", async () => {
+    serve(results({ sessions: [NAMED_SESSION_HIT] }));
+    renderScreen(`${SEARCH_PATH}?q=harbour`);
+    await flush();
+
+    const sessions = await page().findByRole("region", { name: "Sessions" });
+    const row = rowBlock(sessions, NAMED_SESSION_HIT.character_name);
+    expect(within(row).getByText("Harbour at dusk")).toBeInTheDocument();
+    expect(row.textContent ?? "").not.toContain(SESSION_START);
+    expect(row.textContent ?? "").not.toContain(localTime(SESSION_STAMP));
+  });
+
+  it("a name that looks like a date is shown verbatim in place of the start date — S034_004_DoD7", async () => {
+    serve(results({ sessions: [DATE_NAMED_SESSION_HIT] }));
+    renderScreen(`${SEARCH_PATH}?q=1999`);
+    await flush();
+
+    const sessions = await page().findByRole("region", { name: "Sessions" });
+    const row = rowBlock(sessions, DATE_NAMED_SESSION_HIT.character_name);
+    expect(within(row).getByText("1999-12-31")).toBeInTheDocument();
+    expect(row.textContent ?? "").not.toContain(OTHER_START);
+  });
+
+  it("a never-renamed session's row shows its local start date with no time — S034_004_DoD7", async () => {
+    serve(results({ sessions: [SESSION_HIT] }));
+    renderScreen(`${SEARCH_PATH}?q=harbour`);
+    await flush();
+
+    const sessions = await page().findByRole("region", { name: "Sessions" });
+    const row = rowBlock(sessions, SESSION_HIT.character_name);
+    expect(within(row).getByText(SESSION_START)).toBeInTheDocument();
+    expect(row.textContent ?? "").not.toContain(localTime(SESSION_STAMP));
+    expect(row.textContent ?? "").not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  it("a renamed and a never-renamed session side by side each show their own label — S034_004_DoD7", async () => {
+    serve(results({ sessions: [NAMED_SESSION_HIT, SOLO_SESSION_HIT] }));
+    renderScreen(`${SEARCH_PATH}?q=harbour`);
+    await flush();
+
+    const sessions = await page().findByRole("region", { name: "Sessions" });
+    expect(
+      within(rowBlock(sessions, NAMED_SESSION_HIT.character_name)).getByText("Harbour at dusk"),
+    ).toBeInTheDocument();
+    expect(
+      within(rowBlock(sessions, SOLO_SESSION_HIT.character_name)).getByText(OTHER_START),
+    ).toBeInTheDocument();
+  });
+
+  it("an entry of a renamed session shows <character> · <name> — S034_004_DoD7", async () => {
+    serve(results({ entries: [NAMED_ENTRY_HIT] }));
+    renderScreen(`${SEARCH_PATH}?q=bold`);
+    await flush();
+
+    const row = rowBlock(await page().findByRole("region", { name: "Entries" }), ENTRY_HIT.snippet);
+    expect(
+      within(row).getByText(`${ENTRY_HIT.character_name}${SEPARATOR}Harbour at dusk`),
+    ).toBeInTheDocument();
+    expect(row.textContent ?? "").not.toContain(ENTRY_START);
+  });
+
+  it("an entry of a never-renamed session shows <character> · <local date> with no time — S034_004_DoD7", async () => {
+    serve(results({ entries: [ENTRY_HIT] }));
+    renderScreen(`${SEARCH_PATH}?q=bold`);
+    await flush();
+
+    const row = rowBlock(await page().findByRole("region", { name: "Entries" }), ENTRY_HIT.snippet);
+    expect(
+      within(row).getByText(`${ENTRY_HIT.character_name}${SEPARATOR}${ENTRY_START}`),
+    ).toBeInTheDocument();
+    expect(row.textContent ?? "").not.toContain(localTime(ENTRY_STAMP));
+    expect(row.textContent ?? "").not.toMatch(/\d{2}:\d{2}/);
   });
 });

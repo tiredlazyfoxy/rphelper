@@ -1,4 +1,6 @@
 // Feature 011, step 004 — the sessions API client (DoD-1..DoD-3).
+// Feature 034, step 004 — `name` on every session (S034_004_DoD4) and renameSession
+// (S034_004_DoD5); see the block at the end of the file.
 //
 // Expected behaviour comes from the step file's Interface intent and Definition of done,
 // 004.context.md ("Why startSession always sends a body") and context.md's "Wire contract —
@@ -16,6 +18,7 @@ import {
   fetchSession,
   fetchSessions,
   isSessionArchived,
+  renameSession,
   restoreSession,
   type Session,
   type StartedSession,
@@ -42,6 +45,7 @@ const TAVERN_RUN: Session = {
   character_id: CHARACTER_ID,
   setup_id: SETUP_ID,
   setup_name: "The Gilded Tavern",
+  name: null,
   archived_at: null,
   last_used_at: "2026-03-14T09:26:53.000000+00:00",
   created_at: "2026-03-14T09:26:53.000000+00:00",
@@ -53,6 +57,7 @@ const BARE_RUN: Session = {
   character_id: CHARACTER_ID,
   setup_id: null,
   setup_name: null,
+  name: null,
   archived_at: "2026-03-20T18:04:11.000000+00:00",
   last_used_at: "2026-03-10T11:00:00.000000+00:00",
   created_at: "2026-03-10T11:00:00.000000+00:00",
@@ -343,6 +348,8 @@ describe("failures are the shared client's ApiErrors, rethrown unchanged", () =>
 // (DoD-1, DoD-2). Expected values: the step's Interface intent and DoD plus 018 context.md's
 // Wire contract (StartedSession = the eight Session keys + opening_message, Message | null)
 // and D5 (startSession resolves to exactly the eight Session keys).
+// Feature 034, step 004 (S034_004_DoD4): `Session` gains `name`, so the Session key set is
+// now nine keys and a StartedSession ten; the 018 clauses below assert the widened sets.
 
 const SESSION_KEYS = [
   "archived_at",
@@ -350,6 +357,7 @@ const SESSION_KEYS = [
   "created_at",
   "id",
   "last_used_at",
+  "name",
   "setup_id",
   "setup_name",
   "updated_at",
@@ -359,12 +367,13 @@ const S018_SESSION_ID = "7270000000000000101";
 const S018_MESSAGE_ID = "7280000000000000101";
 const S018_STAMP = "2026-10-03T09:26:53.000000+00:00";
 
-/** The served session's eight keys (no setup: the page composer sends none, D1). */
+/** The served session's nine keys (no setup: the page composer sends none, D1; never renamed). */
 const S018_SESSION: Session = {
   id: S018_SESSION_ID,
   character_id: CHARACTER_ID,
   setup_id: null,
   setup_name: null,
+  name: null,
   archived_at: null,
   last_used_at: S018_STAMP,
   created_at: S018_STAMP,
@@ -385,7 +394,7 @@ function openingMessage(text: string): Message {
   };
 }
 
-/** A served StartedSession with all nine keys. */
+/** A served StartedSession with all ten keys (the nine Session keys plus opening_message). */
 function startedSession(opening: Message | null): StartedSession {
   return { ...S018_SESSION, opening_message: opening };
 }
@@ -404,7 +413,7 @@ describe("startSessionWithMessage (018 step 004)", () => {
     expect(bodyKeys(mock)).not.toContain("setup_id");
   });
 
-  it("resolves to the served nine-key StartedSession unchanged, ids the identical strings — DoD-1", async () => {
+  it("resolves to the served ten-key StartedSession unchanged, ids the identical strings — DoD-1, S034_004_DoD4", async () => {
     const served = startedSession(openingMessage("  Hello\n"));
     serve(served, 201);
 
@@ -433,8 +442,8 @@ describe("startSessionWithMessage (018 step 004)", () => {
   });
 });
 
-describe("startSession resolves to exactly the eight Session keys (018 step 004, D5)", () => {
-  it("against a served nine-key StartedSession with opening_message null it resolves to exactly the eight Session keys — DoD-2", async () => {
+describe("startSession resolves to exactly the nine Session keys (018 step 004, D5; 034 step 004)", () => {
+  it("against a served ten-key StartedSession with opening_message null it resolves to exactly the nine Session keys — DoD-2, S034_004_DoD4", async () => {
     serve(startedSession(null), 201);
 
     const result = await startSession(CHARACTER_ID, null);
@@ -454,7 +463,7 @@ describe("startSession resolves to exactly the eight Session keys (018 step 004,
     expect(bodyKeys(mock)).toEqual(["setup_id"]);
   });
 
-  it("with a chosen setup, the nine-key answer still resolves to exactly the eight keys and the body stays { setup_id } — DoD-2", async () => {
+  it("with a chosen setup, the ten-key answer still resolves to exactly the nine keys and the body stays { setup_id } — DoD-2, S034_004_DoD4", async () => {
     const served: StartedSession = {
       ...S018_SESSION,
       setup_id: SETUP_ID,
@@ -479,5 +488,144 @@ describe("isSessionArchived", () => {
 
   it("is false when archived_at is null — DoD-3", () => {
     expect(isSessionArchived(TAVERN_RUN)).toBe(false);
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 004 — `name` on every session read (S034_004_DoD4) and the rename call
+// (S034_004_DoD5). Expected values: the step's Interface intent and DoD, 034 context.md's
+// "Wire shape of a session" (every session payload carries `name`, a string or null) and
+// DEC-arch-session-names-2 (PATCH /api/sessions/{id} with a body of exactly { name }).
+// ===========================================================================
+
+/** A renamed session: the server answers its stored name verbatim. */
+const NAMED_RUN: Session = { ...TAVERN_RUN, name: "Harbour at dusk" };
+/** A second renamed session whose name looks like a date (it must not be reinterpreted). */
+const DATE_NAMED_RUN: Session = { ...BARE_RUN, name: "2026-01-01" };
+
+describe("every sessions-API read carries name as received (034 step 004)", () => {
+  it("fetchSessions keeps each row's name, string or null — S034_004_DoD4", async () => {
+    serve({ sessions: [NAMED_RUN, DATE_NAMED_RUN, { ...TAVERN_RUN, id: "7270000000000000003" }] });
+    const rows = await fetchSessions(true);
+    expect(rows.map((row) => row.name)).toEqual(["Harbour at dusk", "2026-01-01", null]);
+  });
+
+  it("fetchCharacterSessions keeps each row's name, string or null — S034_004_DoD4", async () => {
+    serve({ sessions: [BARE_RUN, NAMED_RUN] });
+    const rows = await fetchCharacterSessions(CHARACTER_ID, true);
+    expect(rows.map((row) => row.name)).toEqual([null, "Harbour at dusk"]);
+  });
+
+  it("fetchSession resolves to the session with its name — S034_004_DoD4", async () => {
+    serve(NAMED_RUN);
+    const session = await fetchSession(SESSION_ID);
+    expect(session.name).toBe("Harbour at dusk");
+    expect(session).toEqual(NAMED_RUN);
+  });
+
+  it("fetchSession keeps a null name null — S034_004_DoD4", async () => {
+    serve(TAVERN_RUN);
+    const session = await fetchSession(SESSION_ID);
+    expect(session.name).toBeNull();
+  });
+
+  it("archiveSession and restoreSession resolve to the session with its name — S034_004_DoD4", async () => {
+    serve({ ...NAMED_RUN, archived_at: "2026-04-05T10:00:00.000000+00:00" });
+    expect((await archiveSession(SESSION_ID)).name).toBe("Harbour at dusk");
+    vi.unstubAllGlobals();
+    serve(DATE_NAMED_RUN);
+    expect((await restoreSession(OTHER_SESSION_ID)).name).toBe("2026-01-01");
+  });
+
+  it("startSession yields exactly the nine Session keys, name included as received — S034_004_DoD4", async () => {
+    // A just-started session is never renamed; the server answers name null (034 step 001).
+    serve(startedSession(null), 201);
+    const result = await startSession(CHARACTER_ID, null);
+    expect(Object.keys(result).sort()).toEqual(SESSION_KEYS);
+    expect(Object.keys(result)).toHaveLength(9);
+    expect(result).toHaveProperty("name", null);
+  });
+
+  it("startSession copies a served string name through unchanged — S034_004_DoD4", async () => {
+    // The wire value is copied, never derived: a string served is a string resolved.
+    serve({ ...startedSession(null), name: "Served name" }, 201);
+    const result = await startSession(CHARACTER_ID, null);
+    expect(result.name).toBe("Served name");
+    expect(Object.keys(result).sort()).toEqual(SESSION_KEYS);
+  });
+
+  it("startSessionWithMessage keeps the served name — S034_004_DoD4", async () => {
+    serve(startedSession(openingMessage("Hi")), 201);
+    const result = await startSessionWithMessage(CHARACTER_ID, "Hi");
+    expect(result.name).toBeNull();
+    expect(Object.keys(result).sort()).toEqual([...SESSION_KEYS, "opening_message"].sort());
+  });
+});
+
+describe("renameSession (034 step 004)", () => {
+  it("sends exactly one PATCH /api/sessions/<id> — S034_004_DoD5", async () => {
+    const mock = serve(NAMED_RUN);
+    await renameSession(SESSION_ID, "Harbour at dusk");
+    expect(seen(mock)).toEqual([{ method: "PATCH", path: SESSION_PATH, search: "" }]);
+  });
+
+  it("the body's only key is name, holding the given string exactly — S034_004_DoD5", async () => {
+    const mock = serve(NAMED_RUN);
+    await renameSession(SESSION_ID, "Harbour at dusk");
+    expect(sentBody(mock)).toEqual({ name: "Harbour at dusk" });
+    expect(bodyKeys(mock)).toEqual(["name"]);
+  });
+
+  it("the string is sent as given, surrounding spaces included — S034_004_DoD5", async () => {
+    // The server trims (DEC-034-1); the client sends exactly what it was handed.
+    const mock = serve(NAMED_RUN);
+    await renameSession(SESSION_ID, "  Harbour at dusk ");
+    expect(sentBody(mock)).toEqual({ name: "  Harbour at dusk " });
+  });
+
+  it("a null name is sent as name: null, not omitted — S034_004_DoD5", async () => {
+    const mock = serve(TAVERN_RUN);
+    await renameSession(SESSION_ID, null);
+    expect(sentBody(mock)).toEqual({ name: null });
+    expect(bodyKeys(mock)).toEqual(["name"]);
+  });
+
+  it("resolves to the server's session, not to a locally built one — S034_004_DoD5", async () => {
+    // The server's answer differs from the request (trimmed name, advanced updated_at).
+    const answered: Session = {
+      ...TAVERN_RUN,
+      name: "Harbour at dusk",
+      updated_at: "2026-04-01T08:00:00.000000+00:00",
+    };
+    serve(answered);
+    await expect(renameSession(SESSION_ID, "  Harbour at dusk ")).resolves.toEqual(answered);
+  });
+
+  it("resolves to the server's null name after a clear — S034_004_DoD5", async () => {
+    serve(TAVERN_RUN);
+    const result = await renameSession(SESSION_ID, null);
+    expect(result).toEqual(TAVERN_RUN);
+    expect(result.name).toBeNull();
+  });
+
+  it("addresses an id beyond MAX_SAFE_INTEGER verbatim — S034_004_DoD5", async () => {
+    const mock = serve(DATE_NAMED_RUN);
+    await renameSession(OTHER_SESSION_ID, "2026-01-01");
+    expect(seen(mock)[0].path).toBe(`/api/sessions/${OTHER_SESSION_ID}`);
+  });
+
+  it("a 404 session_not_found envelope rejects with that ApiError — S034_004_DoD5", async () => {
+    serve(envelope("session_not_found", "That session does not exist."), 404);
+    const error = await rejection(() => renameSession(SESSION_ID, "Harbour at dusk"));
+    expect(isApiError(error)).toBe(true);
+    expect(isApiError(error) ? error.code : null).toBe("session_not_found");
+    expect(isApiError(error) ? error.status : null).toBe(404);
+  });
+
+  it("a 422 validation envelope rejects with an ApiError carrying status 422 — S034_004_DoD5", async () => {
+    serve(envelope("validation_error", "The request is invalid."), 422);
+    const error = await rejection(() => renameSession(SESSION_ID, "Harbour at dusk"));
+    expect(isApiError(error)).toBe(true);
+    expect(isApiError(error) ? error.status : null).toBe(422);
   });
 });

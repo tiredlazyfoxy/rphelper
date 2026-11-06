@@ -81,6 +81,7 @@ function servedSession(setup: Setup | null): Session {
     character_id: CHARACTER_ID,
     setup_id: setup === null ? null : setup.id,
     setup_name: setup === null ? null : setup.name,
+    name: null, // 034 step 004: a required Session key.
     archived_at: null,
     last_used_at: STAMP,
     created_at: STAMP,

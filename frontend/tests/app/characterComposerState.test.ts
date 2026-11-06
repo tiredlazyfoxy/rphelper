@@ -4,7 +4,8 @@
 // context.md's Wire contract and D5:
 //   - can-send: the draft is not blank and nothing is sending;
 //   - the send effect posts the draft once through the start-with-message call; on success it
-//     applies the response's eight session keys to the workspace SessionsState, clears the
+//     applies the response's session keys (eight in 018; nine since 034 step 004 added `name`)
+//     to the workspace SessionsState, clears the
 //     draft and calls the callback with the response's id exactly as received; on failure it
 //     keeps the draft, calls notifyFailure once with the thrown error, does not call the
 //     callback and leaves the workspace state unchanged; either way it clears sending; it
@@ -40,23 +41,26 @@ const START_PATH = `/api/characters/${CHARACTER_ID}/sessions`;
 const STAMP = "2026-10-03T09:26:53.000000+00:00";
 const OLDER = "2026-09-01T08:00:00.000000+00:00";
 
+// 034 step 004 (S034_004_DoD4): `Session` gains `name`, so a session carries nine keys.
 const SESSION_KEYS = [
   "archived_at",
   "character_id",
   "created_at",
   "id",
   "last_used_at",
+  "name",
   "setup_id",
   "setup_name",
   "updated_at",
 ];
 
-/** The served session's eight keys. */
+/** The served session's nine keys (never renamed: name null). */
 const SERVED_SESSION: Session = {
   id: SESSION_ID,
   character_id: CHARACTER_ID,
   setup_id: null,
   setup_name: null,
+  name: null,
   archived_at: null,
   last_used_at: STAMP,
   created_at: STAMP,
@@ -69,6 +73,7 @@ const EXISTING_SESSION: Session = {
   character_id: OTHER_CHARACTER_ID,
   setup_id: null,
   setup_name: null,
+  name: null,
   archived_at: null,
   last_used_at: OLDER,
   created_at: OLDER,
@@ -88,7 +93,7 @@ function openingMessage(text: string): Message {
   };
 }
 
-/** The 201 answer: all nine keys. */
+/** The 201 answer: all ten keys (the nine session keys plus opening_message). */
 function started(text: string): StartedSession {
   return { ...SERVED_SESSION, opening_message: openingMessage(text) };
 }
@@ -250,7 +255,7 @@ describe("the send effect on a 201 (US-117.AC-1, D5)", () => {
     expect(state.sending).toBe(false);
   });
 
-  it("the workspace SessionsState then lists the served session holding exactly its eight keys — DoD-4", async () => {
+  it("the workspace SessionsState then lists the served session holding exactly its nine keys — DoD-4, S034_004_DoD4", async () => {
     serveStart(started("Hello there"), 201);
     const sessions = new SessionsState();
 
@@ -262,7 +267,7 @@ describe("the send effect on a 201 (US-117.AC-1, D5)", () => {
     expect(rows[0]).not.toHaveProperty("opening_message");
   });
 
-  it("with a row already in the workspace, the served session joins it with exactly eight keys — DoD-4", async () => {
+  it("with a row already in the workspace, the served session joins it with exactly nine keys — DoD-4, S034_004_DoD4", async () => {
     serveStart(started("Hello there"), 201);
     const sessions = workspaceWith([EXISTING_SESSION]);
 

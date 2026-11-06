@@ -9,13 +9,16 @@
 // success toast) and a failure in the `app` entry goes through `notifyFailure`, and no export
 // opens a confirm dialog. Bindings come from the frozen `### Step 006` record: the item's
 // accessible name is exactly `Export`, it is reached through the row trigger `Actions for
-// <label>` whose label is the formatted start (never the id), and the route is
+// <label>` whose label is the session label (never the id), and the route is
 // `GET /api/sessions/{session_id}/export` (context.md "Routes").
 //
+// Feature 034, step 004: the label is now the stored name, else the local start DATE (no time,
+// DEC-034-9). The fixtures are never renamed (`name: null`), so their labels are dates.
+//
 // Harness conventions (006.context.md, 004.context.md, and 011's own conventions):
-// - A session row is identified by its link's `href` (`/sessions/<id>`), never by its start-time
-//   label: two rows started in the same minute would share a label and a trigger name. The three
-//   fixtures below start in different minutes on purpose, so each trigger name is unique.
+// - A session row is identified by its link's `href` (`/sessions/<id>`), never by its label:
+//   two unnamed rows started on the same day would share a label and a trigger name. The three
+//   fixtures below start on different days on purpose, so each trigger name is unique.
 // - The section renders inside `AppProviders` + `MemoryRouter`, so the notifications outlet
 //   exists and "nothing was notified" / "one notification carrying the message" are observable
 //   through `.mantine-Notification-root`. `notifyFailure` is deliberately NOT mocked: the clause
@@ -72,6 +75,7 @@ function activeRow(id: string, createdAt: string): Session {
     character_id: CHARACTER_ID,
     setup_id: null,
     setup_name: null,
+    name: null,
     archived_at: null,
     last_used_at: createdAt,
     created_at: createdAt,

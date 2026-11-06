@@ -126,12 +126,13 @@ export async function sendCharacterComposer(
       state.draft,
       state.selectedSetupId,
     );
-    // Only the eight `Session` keys reach the store; `opening_message` is dropped (D5).
+    // Only the nine `Session` keys reach the store; `opening_message` is dropped (D5).
     const session: Session = {
       id: started.id,
       character_id: started.character_id,
       setup_id: started.setup_id,
       setup_name: started.setup_name,
+      name: started.name,
       archived_at: started.archived_at,
       last_used_at: started.last_used_at,
       created_at: started.created_at,

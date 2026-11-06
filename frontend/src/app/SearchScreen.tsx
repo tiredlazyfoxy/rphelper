@@ -24,7 +24,7 @@ import {
 } from "@mantine/core";
 
 import type { MemoScope } from "./memosApi";
-import { formatSessionStart } from "./sessionLabel";
+import { sessionLabel } from "./sessionLabel";
 import {
   SearchState,
   characterTarget,
@@ -279,7 +279,8 @@ export const SearchScreen = observer(function SearchScreen(): React.JSX.Element 
               <SearchRow
                 key={hit.id}
                 href={sessionTarget(hit)}
-                primary={formatSessionStart(hit.created_at)}
+                // US-150 / DEC-034-8: the session's label (name, else local start date).
+                primary={sessionLabel(hit)}
                 // The setup's name joins the character's only when the session has one.
                 secondary={
                   hit.setup_name === null
@@ -299,9 +300,12 @@ export const SearchScreen = observer(function SearchScreen(): React.JSX.Element 
                 key={hit.id}
                 href={entryTarget(hit)}
                 primary={hit.snippet}
-                secondary={`${hit.character_name}${SECONDARY_SEPARATOR}${formatSessionStart(
-                  hit.session_created_at,
-                )}`}
+                // An entry hit carries its session's name and start under prefixed keys, so
+                // they are mapped onto the label source (DEC-034-8).
+                secondary={`${hit.character_name}${SECONDARY_SEPARATOR}${sessionLabel({
+                  name: hit.session_name,
+                  created_at: hit.session_created_at,
+                })}`}
               />
             ))}
           </SearchGroup>

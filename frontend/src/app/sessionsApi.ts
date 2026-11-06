@@ -1,11 +1,12 @@
-// The sessions wire surface (feature 011, step 004): the `Session` row as the server sends
-// it, one pure predicate, and the six calls over the shared client. Two path families, as the
-// wire contract has them: `/api/characters/<character_id>/sessions` for the character listing
-// and the start, `/api/sessions` plus `/api/sessions/<session_id>…` for the workspace listing,
-// the single read and the two actions. There is no update and no delete call (R6).
+// The sessions wire surface (feature 011, step 004; feature 034, step 004): the `Session` row
+// as the server sends it, one pure predicate, and the calls over the shared client. Two path
+// families, as the wire contract has them: `/api/characters/<character_id>/sessions` for the
+// character listing and the start, `/api/sessions` plus `/api/sessions/<session_id>…` for the
+// workspace listing, the single read, the rename and the two actions. There is one update call
+// (rename), no delete.
 // Ids are decimal strings and are never parsed, coerced or compared numerically.
 // Failures are the shared client's `ApiError`s, rethrown unchanged.
-import { apiGet, apiPost } from "../shared/api";
+import { apiGet, apiPatch, apiPost } from "../shared/api";
 import type { Message } from "./streamApi";
 
 /** One session, exactly as the sessions routes send it. No renaming layer. */
@@ -14,6 +15,7 @@ export type Session = {
   character_id: string;
   setup_id: string | null;
   setup_name: string | null; // the setup's current name, present even when it is archived
+  name: string | null; // the session's own stored name; null until renamed (never blank)
   archived_at: string | null; // fixed-width UTC text, or null while working
   last_used_at: string;
   created_at: string;
@@ -21,7 +23,7 @@ export type Session = {
 };
 
 /**
- * The start route's body (018 D5): the eight `Session` keys plus the seeded opening message,
+ * The start route's body (018 D5): the nine `Session` keys plus the seeded opening message,
  * or null when no opening text was sent.
  */
 export type StartedSession = Session & {
@@ -94,7 +96,7 @@ export async function fetchSession(sessionId: string, signal?: AbortSignal): Pro
 /**
  * `POST /api/characters/<characterId>/sessions` with the JSON body `{ setup_id: <id or null> }`
  * — always sent, so the request states "no setup" rather than implying it. Resolves to the
- * created session's eight `Session` keys only: the route's `opening_message: null` never
+ * created session's nine `Session` keys only: the route's `opening_message: null` never
  * reaches a store (018 D5).
  */
 export async function startSession(
@@ -110,13 +112,14 @@ export async function startSession(
   return toSession(started);
 }
 
-/** The eight `Session` keys of a started session, named explicitly; drops `opening_message`. */
+/** The nine `Session` keys of a started session, named explicitly; drops `opening_message`. */
 function toSession(started: Session): Session {
   return {
     id: started.id,
     character_id: started.character_id,
     setup_id: started.setup_id,
     setup_name: started.setup_name,
+    name: started.name,
     archived_at: started.archived_at,
     last_used_at: started.last_used_at,
     created_at: started.created_at,
@@ -142,6 +145,26 @@ export async function startSessionWithMessage(
       ? { opening_message: openingText }
       : { opening_message: openingText, setup_id: setupId };
   return apiPost<StartedSession>(characterSessionsPath(characterId), body, signal);
+}
+
+/**
+ * `PATCH /api/sessions/<sessionId>` through the shared `apiPatch`, with a JSON body whose only
+ * key is `name`, holding the given string or `null` exactly as passed (no client-side trim;
+ * the server normalises blank to null). Resolves to the server's `Session`. Rejects with the
+ * shared client's `ApiError` unchanged (e.g. `session_not_found` 404, 422).
+ *
+ * @param sessionId - the session id, escaped into the path and never parsed.
+ * @param name - the new name, or `null` to clear it.
+ * @param signal - optional abort signal.
+ */
+export async function renameSession(
+  sessionId: string,
+  name: string | null,
+  signal?: AbortSignal,
+): Promise<Session> {
+  // The body is built from `name` alone so no other key can ever reach the narrow PATCH
+  // (DEC-arch-session-names-2); `null` is sent, never omitted, because it means "clear".
+  return apiPatch<Session>(sessionPath(sessionId), { name }, signal);
 }
 
 /** `POST /api/sessions/<sessionId>/archive` — resolves to the session. */

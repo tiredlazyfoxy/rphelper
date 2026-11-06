@@ -29,6 +29,12 @@
 //   start-time label. A start-time label is asserted only by its fixed shape `YYYY-MM-DD HH:MM`.
 // - A notification: `.mantine-Notification-root` (the repo's convention).
 // - The router location: a probe rendered beside the section inside the same MemoryRouter.
+//
+// Amended by feature 034, step 004: a row's link text and its trigger's "Actions for <label>"
+// name are now the session LABEL — the stored name, else the local `YYYY-MM-DD` of `created_at`
+// with no time (DEC-034-9). The 011 shape clause now expects the date-only shape for the
+// never-renamed fixtures (`name: null`). The 034 block at the end covers S034_004_DoD7 (named
+// and unnamed rows) and S034_004_DoD8 (no rename control in this tab, DEC-arch-session-names-4).
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -65,8 +71,27 @@ const LOAD_FAILED_TEXT = "Could not load sessions";
 const ARCHIVE_FAILED_TEXT = "Could not archive the session.";
 const ARCHIVED_BADGE = "Archived";
 
-/** D4: the label's fixed shape — 24-hour, zero-padded, one space. Never an exact value. */
-const LABEL_SHAPE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
+/**
+ * 034 (DEC-034-9): a never-renamed row's label is the local date only, `YYYY-MM-DD` — it
+ * replaces 011 D4's `YYYY-MM-DD HH:MM` shape for this row.
+ */
+const DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The local `YYYY-MM-DD` of `instant` in the runtime's zone — the expected label of a
+ * never-renamed session. Computed with Intl, independent of the module under test, so the
+ * suite holds in any zone (exact zone values live in tests/app/sessionLabel.test.ts).
+ */
+function localDate(instant: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
 
 const NOTIFICATION = ".mantine-Notification-root";
 
@@ -95,6 +120,7 @@ const WITH_SETUP: Session = {
   character_id: CHARACTER_ID,
   setup_id: TAVERN.id,
   setup_name: TAVERN.name,
+  name: null,
   archived_at: null,
   last_used_at: "2026-05-10T09:26:53.000000+00:00",
   created_at: "2026-05-10T09:26:53.000000+00:00",
@@ -107,6 +133,7 @@ const WITHOUT_SETUP: Session = {
   character_id: CHARACTER_ID,
   setup_id: null,
   setup_name: null,
+  name: null,
   archived_at: null,
   last_used_at: "2026-04-02T08:15:42.000000+00:00",
   created_at: "2026-04-02T08:15:42.000000+00:00",
@@ -212,6 +239,7 @@ function serveSection(config: Config = {}) {
         character_id: CHARACTER_ID,
         setup_id: null,
         setup_name: null,
+        name: null,
         archived_at: null,
         last_used_at: CREATED_STAMP,
         created_at: CREATED_STAMP,
@@ -348,7 +376,7 @@ function row(session: Session): HTMLElement {
   return found;
 }
 
-/** A row's link text — the start-time label, asserted by shape only. */
+/** A row's link text — the session label (034: name, else the local start date). */
 function rowLabel(session: Session): string {
   return (within(row(session)).getByRole("link").textContent ?? "").trim();
 }
@@ -429,13 +457,16 @@ describe("the section loads the character's sessions on mount (US-028.AC-1, US-0
     expect(importButton()).toBeEnabled();
   });
 
-  it("lists one row per session in the payload's order, each linking to /sessions/<id> — DoD-1 (and 033 step 005 DoD-5)", async () => {
+  it("lists one row per session in the payload's order, each linking to /sessions/<id> — DoD-1 (and 033 step 005 DoD-5, S034_004_DoD7)", async () => {
     await renderListed({ sessions: [WITH_SETUP, WITHOUT_SETUP] });
 
     expect(table()).toBeInTheDocument();
     expect(listedHrefs()).toEqual([sessionHref(WITH_SETUP), sessionHref(WITHOUT_SETUP)]);
-    expect(rowLabel(WITH_SETUP)).toMatch(LABEL_SHAPE);
-    expect(rowLabel(WITHOUT_SETUP)).toMatch(LABEL_SHAPE);
+    // 034: both fixtures are never renamed, so each label is the local start date, no time.
+    expect(rowLabel(WITH_SETUP)).toMatch(DATE_SHAPE);
+    expect(rowLabel(WITHOUT_SETUP)).toMatch(DATE_SHAPE);
+    expect(rowLabel(WITH_SETUP)).toBe(localDate(WITH_SETUP.created_at));
+    expect(rowLabel(WITHOUT_SETUP)).toBe(localDate(WITHOUT_SETUP.created_at));
   });
 
   it("shows the first row's setup name and no other text on the second row — DoD-1", async () => {
@@ -687,5 +718,124 @@ describe("033 step 005: the row menu still offers Export (D8)", () => {
     expect(screen.getByRole("menuitem", { name: EXPORT_ITEM })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: RESTORE_ITEM })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 004 — the Sessions tab shows the session label (S034_004_DoD7) and offers
+// no rename (S034_004_DoD8). Expected values: US-150.AC-1/AC-2, DEC-034-9 (label = name, else
+// local YYYY-MM-DD of created_at), the step's Interface intent ("the Sessions tab row label and
+// its `Actions for <label>` menu name") and DEC-arch-session-names-4 ("Rename is not offered in
+// the character page's Sessions tab").
+// ===========================================================================
+
+/** A renamed row: its label is its stored name. */
+const NAMED_ROW: Session = { ...WITH_SETUP, name: "Harbour at dusk" };
+/** A renamed row whose name looks like a date — still shown verbatim. */
+const DATE_NAMED_ROW: Session = { ...WITHOUT_SETUP, name: "1999-12-31" };
+/** Any accessible name that offers a rename. */
+const RENAME_NAME = /rename/i;
+
+describe("034 step 004: a Sessions row shows the session label", () => {
+  it("a renamed row's link text is its name — S034_004_DoD7", async () => {
+    await renderListed({ sessions: [NAMED_ROW, WITHOUT_SETUP] });
+
+    expect(rowLabel(NAMED_ROW)).toBe("Harbour at dusk");
+  });
+
+  it("a renamed row shows neither its start date nor a time — S034_004_DoD7", async () => {
+    await renderListed({ sessions: [NAMED_ROW] });
+
+    const text = row(NAMED_ROW).textContent ?? "";
+    expect(text).not.toContain(localDate(NAMED_ROW.created_at));
+    expect(text).not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  it("a date-like name is shown verbatim — S034_004_DoD7", async () => {
+    await renderListed({ sessions: [DATE_NAMED_ROW] });
+
+    expect(rowLabel(DATE_NAMED_ROW)).toBe("1999-12-31");
+  });
+
+  it("a never-renamed row's link text is its local start date, with no time — S034_004_DoD7", async () => {
+    await renderListed({ sessions: [NAMED_ROW, WITHOUT_SETUP] });
+
+    expect(rowLabel(WITHOUT_SETUP)).toBe(localDate(WITHOUT_SETUP.created_at));
+    expect(row(WITHOUT_SETUP).textContent ?? "").not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  it("a renamed row's menu trigger is named Actions for <name> — S034_004_DoD7", async () => {
+    await renderListed({ sessions: [NAMED_ROW, WITHOUT_SETUP] });
+
+    expect(
+      within(row(NAMED_ROW)).getByRole("button", { name: "Actions for Harbour at dusk" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a never-renamed row's menu trigger is named Actions for <local date> — S034_004_DoD7", async () => {
+    await renderListed({ sessions: [NAMED_ROW, WITHOUT_SETUP] });
+
+    expect(
+      within(row(WITHOUT_SETUP)).getByRole("button", {
+        name: `Actions for ${localDate(WITHOUT_SETUP.created_at)}`,
+      }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("034 step 004: the Sessions tab offers no rename (DEC-arch-session-names-4)", () => {
+  it("no control in the section is named for a rename, for a named or an unnamed row — S034_004_DoD8", async () => {
+    await renderListed({ sessions: [NAMED_ROW, WITHOUT_SETUP] });
+
+    // The positive half: the rows are rendered, so the absence is not vacuous.
+    expect(listedHrefs()).toEqual([sessionHref(NAMED_ROW), sessionHref(WITHOUT_SETUP)]);
+    expect(within(region()).queryAllByRole("button", { name: RENAME_NAME, hidden: true })).toEqual(
+      [],
+    );
+    expect(within(region()).queryAllByLabelText(RENAME_NAME)).toEqual([]);
+    expect(within(region()).queryAllByTitle(RENAME_NAME)).toEqual([]);
+  });
+
+  it("no row holds an editable text field — S034_004_DoD8", async () => {
+    await renderListed({ sessions: [NAMED_ROW, WITHOUT_SETUP] });
+
+    for (const session of [NAMED_ROW, WITHOUT_SETUP]) {
+      expect(within(row(session)).queryAllByRole("textbox", { hidden: true })).toEqual([]);
+    }
+  });
+
+  it("an active row's menu offers no Rename item — S034_004_DoD8", async () => {
+    const user = newUser();
+    await renderListed({ sessions: [NAMED_ROW, WITHOUT_SETUP] });
+
+    await openRowMenu(user, NAMED_ROW);
+
+    // Positive half: the menu is open with its known items.
+    expect(await screen.findByRole("menuitem", { name: ARCHIVE_ITEM })).toBeInTheDocument();
+    expect(screen.queryAllByRole("menuitem", { name: RENAME_NAME })).toEqual([]);
+  });
+
+  it("an archived row's menu offers no Rename item either — S034_004_DoD8", async () => {
+    const user = newUser();
+    await renderListed({ sessions: [NAMED_ROW, WITHOUT_SETUP] });
+
+    await openRowMenu(user, NAMED_ROW);
+    await chooseMenuItem(user, ARCHIVE_ITEM);
+    await toggleArchivedSwitch(user);
+    await openRowMenu(user, NAMED_ROW);
+
+    expect(await screen.findByRole("menuitem", { name: RESTORE_ITEM })).toBeInTheDocument();
+    expect(screen.queryAllByRole("menuitem", { name: RENAME_NAME })).toEqual([]);
+  });
+
+  it("the section issues no PATCH while it is used — S034_004_DoD8", async () => {
+    const user = newUser();
+    const { calls } = await renderListed({ sessions: [NAMED_ROW, WITHOUT_SETUP] });
+
+    await toggleArchivedSwitch(user);
+    await openRowMenu(user, WITHOUT_SETUP);
+    await chooseMenuItem(user, ARCHIVE_ITEM);
+
+    expect(calls.filter((call) => call.method === "PATCH")).toEqual([]);
   });
 });

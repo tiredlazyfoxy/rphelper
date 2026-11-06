@@ -28,7 +28,7 @@ import { isArchived } from "./charactersApi";
 import type { CharactersState } from "./charactersState";
 import { loadCharacters, setShowArchived } from "./charactersState";
 import { searchHref } from "./searchState";
-import { formatSessionStart } from "./sessionLabel";
+import { sessionLabel } from "./sessionLabel";
 import type { SessionsState } from "./sessionsState";
 import { loadSessions, orderCharactersByUse, sessionsOfCharacter } from "./sessionsState";
 import {
@@ -124,8 +124,8 @@ export type CharacterTreeProps = {
  * 011 step 006 adds the session level on top of that: the rows are ordered by newest
  * session use (D6); a character that has at least one working session carries a chevron
  * before its link (D7) and, while expanded, a nested "Sessions of <name>" list of
- * `/sessions/<id>` links labelled with the start time plus the setup label (D16). The
- * sessions load is its own effect — the "Show archived" switch never reloads it — and its
+ * `/sessions/<id>` links labelled with the session label (US-150) plus the setup label
+ * (D16). The sessions load is its own effect — the "Show archived" switch never reloads it — and its
  * failure is one inline line plus "Retry", again with nothing notified (D18).
  */
 export const CharacterTree = observer(function CharacterTree(
@@ -296,9 +296,11 @@ export const CharacterTree = observer(function CharacterTree(
                         <NavLink
                           component={Link}
                           to={`/sessions/${session.id}`}
-                          label={formatSessionStart(session.created_at)}
-                          // US-088: the setup's name as dimmed small text beside the start
-                          // time, and nothing at all where it would be when there is none.
+                          label={sessionLabel(session)}
+                          // US-150: line 1 is the session label (its name, else its local
+                          // start date); the two-line row is step 006. US-088: the setup's
+                          // name as dimmed small text beside it, and nothing at all where it
+                          // would be when there is none.
                           description={session.setup_name ?? undefined}
                           active={sessionActive}
                           aria-current={sessionActive ? "page" : undefined}

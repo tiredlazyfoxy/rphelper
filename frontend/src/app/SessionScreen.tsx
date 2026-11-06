@@ -44,7 +44,7 @@ import {
 import type { CharactersState } from "./charactersState";
 import type { LayoutStorage } from "./workspaceLayout";
 import { isSessionArchived } from "./sessionsApi";
-import { formatSessionStart } from "./sessionLabel";
+import { sessionLabel } from "./sessionLabel";
 import { SessionScreenState, loadSessionScreen } from "./sessionScreenState";
 import { SessionStream } from "./SessionStream";
 import { MemoChainSection } from "./MemoChainSection";
@@ -86,7 +86,7 @@ export type SessionScreenProps = {
 };
 
 /**
- * The session's own screen: the header (character link, start-time heading, setup label and
+ * The session's own screen: the header (character link, session-label heading, setup label and
  * the "Archived" badge) plus the session stream, with the loading, not-found and failed
  * branches. Keyed by the session id by `SessionRoute`, so each session gets fresh state.
  */
@@ -212,10 +212,10 @@ export const SessionScreen = observer(function SessionScreen(
             {characterName}
           </Anchor>
           <Group gap="sm">
-            {/* D4: a session has no title, so its heading is the start-time label, in the
-                browser's own zone — the formatter is called with no zone argument. */}
-            <Title order={2}>{formatSessionStart(session.created_at)}</Title>
-            {/* US-088: the setup's name beside the start time, and nothing at all where it
+            {/* US-150: the heading is the session label — its name, else its local start
+                date in the browser's own zone (no zone argument is passed). */}
+            <Title order={2}>{sessionLabel(session)}</Title>
+            {/* US-088: the setup's name beside the label, and nothing at all where it
                 would be when the session has none. */}
             {session.setup_name !== null && (
               <Text size="sm" c="dimmed">

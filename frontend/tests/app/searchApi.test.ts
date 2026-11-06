@@ -55,6 +55,7 @@ const SESSION_HIT: SessionHit = {
   id: SESSION_ID,
   character_name: "Corvin Hale",
   setup_name: null,
+  name: null,
   created_at: "2026-03-14T09:26:53.000000+00:00",
   archived: false,
 };
@@ -63,6 +64,7 @@ const ENTRY_HIT: EntryHit = {
   session_id: ENTRY_SESSION_ID,
   snippet: "…and then Mira & co left the harbour…",
   character_name: "Dask Orrery",
+  session_name: null,
   session_created_at: "2026-03-10T11:00:00.000000+00:00",
 };
 const MEMO_HIT: MemoHit = {
@@ -194,5 +196,61 @@ describe("fetchMySearch — an embedding failure fails the whole search (U1)", (
 
     expect(isApiError(error)).toBe(true);
     expect((error as ApiError).code).toBe("no_embedding_model");
+  });
+});
+
+// ===========================================================================
+// Feature 034, step 004 — S034_004_DoD6: a session hit exposes `name` and an entry hit
+// `session_name`, each a string or null, as received (DEC-034-8).
+// ===========================================================================
+
+describe("fetchMySearch — session and entry hits carry the session name (034 step 004)", () => {
+  /** A renamed session's hit: the name is a string. */
+  const NAMED_SESSION_HIT: SessionHit = { ...SESSION_HIT, name: "Harbour at dusk" };
+  /** A never-renamed session's hit, a second row: the name is null. */
+  const UNNAMED_SESSION_HIT: SessionHit = {
+    ...SESSION_HIT,
+    id: "7250000000000000020",
+    name: null,
+  };
+  /** An entry of a renamed session: session_name is the name, with a date-like value. */
+  const NAMED_ENTRY_HIT: EntryHit = { ...ENTRY_HIT, session_name: "2026-01-01" };
+  /** An entry of a never-renamed session: session_name is null. */
+  const UNNAMED_ENTRY_HIT: EntryHit = {
+    ...ENTRY_HIT,
+    id: "7250000000000000021",
+    session_name: null,
+  };
+
+  const NAMED_RESULTS: MySearchResults = {
+    ...RESULTS,
+    sessions: [NAMED_SESSION_HIT, UNNAMED_SESSION_HIT],
+    entries: [NAMED_ENTRY_HIT, UNNAMED_ENTRY_HIT],
+  };
+
+  it("a session hit's name is the string or null the server sent — S034_004_DoD6", async () => {
+    serveSearch(NAMED_RESULTS);
+
+    const results = await fetchMySearch(QUERY);
+
+    expect(results.sessions.map((hit) => hit.name)).toEqual(["Harbour at dusk", null]);
+  });
+
+  it("an entry hit's session_name is the string or null the server sent — S034_004_DoD6", async () => {
+    serveSearch(NAMED_RESULTS);
+
+    const results = await fetchMySearch(QUERY);
+
+    expect(results.entries.map((hit) => hit.session_name)).toEqual(["2026-01-01", null]);
+  });
+
+  it("the hits resolve exactly as sent, created_at and session_created_at untouched — S034_004_DoD6", async () => {
+    serveSearch(NAMED_RESULTS);
+
+    const results = await fetchMySearch(QUERY);
+
+    expect(results).toEqual(NAMED_RESULTS);
+    expect(results.entries[0]?.session_created_at).toBe(ENTRY_HIT.session_created_at);
+    expect(results.sessions[0]?.created_at).toBe(SESSION_HIT.created_at);
   });
 });

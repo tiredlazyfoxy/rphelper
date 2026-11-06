@@ -83,6 +83,7 @@ function activeRow(id: string, createdAt: string): Session {
     character_id: CHARACTER_ID,
     setup_id: null,
     setup_name: null,
+    name: null, // 034 step 004: a required Session key; never renamed here.
     archived_at: null,
     last_used_at: createdAt,
     created_at: createdAt,
