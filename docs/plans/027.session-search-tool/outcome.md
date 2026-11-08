@@ -66,7 +66,7 @@ file. "Dn" refers to decisions in this folder's `context.md`.
   `app.services.tools.session_search` in a fresh interpreter does put `fastapi` in `sys.modules`.
   026's `memo_search.py` has had the identical property since it shipped. A "no web framework"
   check over `app/services/` therefore has to read the module's own imports, never `sys.modules`.
-  Possible impact: a sentence in `backend/CLAUDE.md` (or `docs/architecture/backend-structure.md`'s
+  Possible impact: a sentence in `backend/AGENTS.md` (or `docs/architecture/backend-structure.md`'s
   layer-separation note) saying that `app/errors.py` is the framework-coupled leaf every service
   may import, and that framework-freedom is a source-level property.
 

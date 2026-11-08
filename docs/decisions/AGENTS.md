@@ -32,14 +32,14 @@ gap either.
 **Below this layer** — a choice whose only reader is one block or one file is a
 **code comment** citing the step, `DEC` id or architecture section it serves; a
 choice every file in one code folder follows is a line in that folder's
-`CLAUDE.md` `## Conventions`. Nothing is recorded twice: a comment cites a `DEC`
+`AGENTS.md` `## Conventions`. Nothing is recorded twice: a comment cites a `DEC`
 id, never restates it.
 
 ## File layout
 
 ```
 docs/decisions/
-  CLAUDE.md                 # this contract
+  AGENTS.md                 # this contract
   index.md                  # registry: one line per DEC id
   <NNN>.<feature>.md        # a multi-step feature's decisions
   fast-<NNN>.<name>.md      # a fast feature's decisions

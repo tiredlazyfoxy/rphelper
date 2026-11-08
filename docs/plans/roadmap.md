@@ -2,7 +2,7 @@
 
 Status is derived from folder contents, never stored here: `brief.md` only =
 roadmapped, `status.md` present = planned, `status.md` rows all `done` with
-verifier `PASS` = delivered. See `docs/plans/CLAUDE.md`.
+verifier `PASS` = delivered. See `docs/plans/AGENTS.md`.
 
 <!-- roadmap:start -->
 ## Stage 001.instance

@@ -24,14 +24,14 @@ structural and behavioural and stand in their own terms. This is the same situat
 
 ## Greenfield — there is no existing code
 
-`frontend/` does not exist. Only `docs/`, the root `CLAUDE.md` and feature `001`'s
+`frontend/` does not exist. Only `docs/`, the root `AGENTS.md` and feature `001`'s
 planned `backend/` are in play. **Every file named in every step's Source files list is
 a new file.** Nothing in this plan modifies anything, and no step may assume a module,
 a dependency or a fixture that an earlier step in this same feature did not create.
 
 ## Commands
 
-From the root `CLAUDE.md`, run from `frontend/`:
+From the root `AGENTS.md`, run from `frontend/`:
 
 ```
 build      npm run build
@@ -401,7 +401,7 @@ version pinned against no call site and a bundle weighed down for nothing.
 convention is this feature's to fix, so the library it names belongs to the foundation.
 That is the distinction from the five above, none of which `brief.md` mentions.
 
-**`@mantine/form` is not installed.** The root `CLAUDE.md`'s stack table lists it, but
+**`@mantine/form` is not installed.** The root `AGENTS.md`'s stack table lists it, but
 `ui-conventions.md` says it is deliberately not used ("the MobX draft convention") and
 `quick-reference.md` calls it "present but unused". A dependency that the
 project-wide form convention forbids using is not an inherited dependency here — this

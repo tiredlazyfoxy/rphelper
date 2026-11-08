@@ -76,7 +76,7 @@ a **lifespan that runs no DDL**; `app/routers/health.py`, whose docstring alread
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)

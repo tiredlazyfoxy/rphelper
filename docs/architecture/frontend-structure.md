@@ -9,7 +9,7 @@ library, state library and icon set are fixed in `overview.md`.
 
 **TypeScript only.** No `.js` / `.jsx` / `.mjs` / `.cjs` file is authored anywhere
 under `frontend/` — config included — and neither tsconfig enables `allowJs` or
-`checkJs`. Reason in `overview.md`; the rule itself is in the root `CLAUDE.md`.
+`checkJs`. Reason in `overview.md`; the rule itself is in the root `AGENTS.md`.
 
 **No two module paths may differ only in letter case.** This is a second
 project-wide naming rule, and it is here because `npm run typecheck` **cannot

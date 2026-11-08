@@ -130,5 +130,5 @@ composer's setup choice is sourced from D8. `outcome.md` routes the amendment to
   so the test-coder can adjust an existing assertion that the step's own change
   invalidates (a renamed control, a removed control, a request count). Source and
   Test lists remain disjoint within every step.
-- Commands (root `CLAUDE.md`, run from `frontend/`): `npm test`,
+- Commands (root `AGENTS.md`, run from `frontend/`): `npm test`,
   `npm run typecheck`, `npm run build`.

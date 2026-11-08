@@ -326,7 +326,7 @@ step's context file.
 ## Cross-cutting constraints
 
 - Backend fully typed; `mypy app` and `ruff check .` green after every step (commands in
-  the root `CLAUDE.md`).
+  the root `AGENTS.md`).
 - Services import no `fastapi` and read no settings. Only `routers/stream.py` reads the two
   settings (D3).
 - No new dependency. `httpx` only, a fresh `AsyncClient` per call, with `transport=`

@@ -171,7 +171,7 @@ parent item, and honours an `exact` flag for the root item (otherwise `/` matche
 everything). Deliberately **not** react-router's `end` prop: a pure function of
 two plain arguments is unit-testable with no router, no DOM and no render, which
 is precisely what the pipeline's test-coder can write against from the spec alone
-(`docs/plans/CLAUDE.md`). Every `/`-prefix matcher gets the `/database` vs
+(`docs/plans/AGENTS.md`). Every `/`-prefix matcher gets the `/database` vs
 `/database-backups` case wrong the first time; the point of extracting it is that
 the wrong answer is a failing test rather than a mis-highlighted link nobody
 files.

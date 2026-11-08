@@ -165,7 +165,7 @@ An **archived** character, setup or session is a valid target for list, create a
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)

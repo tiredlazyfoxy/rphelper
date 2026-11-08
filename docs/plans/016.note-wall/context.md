@@ -152,7 +152,7 @@ be expressed (US-103.AC-2).
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)

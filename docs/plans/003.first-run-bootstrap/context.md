@@ -52,7 +52,7 @@ order is `001 → 002 → fast/001 → 003`. Therefore:
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)

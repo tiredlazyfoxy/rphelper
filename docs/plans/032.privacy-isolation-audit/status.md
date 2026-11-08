@@ -1378,7 +1378,7 @@ The two `_TBD` rows name surfaces that **do not exist in the application**:
 - **Row 5** — `_TBD: fast/003 bootstrap-from-export path_`, class `public`, swept by step 005.
 - **Row 74** — `_TBD: fast/002 vector-rebuild route(s)_`, class `admin`, swept by step 006.
 
-`docs/plans/CLAUDE.md` forbids inventing a requirement to close a gap, and `002.context.md`'s skeleton
+`docs/plans/AGENTS.md` forbids inventing a requirement to close a gap, and `002.context.md`'s skeleton
 job 3 ("record the exact method + path of rows 5 and 74 from `fast/003.*/plan.md` and
 `fast/002.*/plan.md`") is **unresolvable** — those files do not exist. I will not guess a route, a
 payload shape or a response for either.
@@ -2121,7 +2121,7 @@ feature** — no blast-radius edits at all, the only feature of the run with non
    `allowed_paths`, a non-empty route walk, and that row 74's pattern matches two synthetic rebuild
    paths). Rows 5 and 74 stay excluded **by name with a full prose reason**, and step 002 DoD-1 remains
    **exact two-way set equality** over the other 72 rows with both difference directions reported.
-   `docs/plans/CLAUDE.md` forbids inventing a requirement to close a gap; `context.md`'s "a route that
+   `docs/plans/AGENTS.md` forbids inventing a requirement to close a gap; `context.md`'s "a route that
    does not exist ⇒ SPEC" is scoped to a route a *built* feature was believed to deliver, and raising
    SPEC would have blocked all seven steps to restate what the table already marks `_TBD`. Failing them
    would have been a false negative, passing them silently would have been vacuous; the armed-absence

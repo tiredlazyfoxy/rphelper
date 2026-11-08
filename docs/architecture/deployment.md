@@ -6,7 +6,7 @@ UC-066, US-035.AC-1, US-035.AC-2
 
 Ports, the dev and prod topologies, every nginx directive with its reason, the
 configuration conventions, and the logging posture. Build and test commands live
-in the root `CLAUDE.md`.
+in the root `AGENTS.md`.
 
 ---
 

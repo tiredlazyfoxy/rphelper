@@ -77,7 +77,7 @@ are the user-confirmed decisions it records.
   the `app.services.tools` package — the package's twelve re-exports were out of scope here
   (orchestrator decision 3). Possible impact: either add the builder to
   `app/services/tools/__init__.py`'s `__all__` in a later feature, or record in
-  `backend/CLAUDE.md` / `backend-structure.md` that importing a tools module directly is allowed.
+  `backend/AGENTS.md` / `backend-structure.md` that importing a tools module directly is allowed.
 - Step 001 (scope extension, `app/logging.py`): `deployment.md`'s redaction rule now has a named
   mechanism — **a URL can carry message text**, so the HTTP client's *own* request log is part of
   the rule's surface, not just the log lines this codebase writes. 028 is the first feature to put

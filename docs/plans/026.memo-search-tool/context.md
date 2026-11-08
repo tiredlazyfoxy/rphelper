@@ -226,7 +226,7 @@ open on success **and** on failure.
   `fastapi` and nothing from `app.services.tools`. `services/tools/memo_search.py` imports no
   `fastapi`.
 - Backend fully typed; `mypy app` and `ruff check .` green after every step (commands in the
-  root `CLAUDE.md`).
+  root `AGENTS.md`).
 - R3 ordering survives into the predicate as written: `is_enabled` before `is_forced`.
 - Absences are tested as absences, with data that **would** match: every excluded note
   carries the same distinctive token as the included ones, in its body (so it hits

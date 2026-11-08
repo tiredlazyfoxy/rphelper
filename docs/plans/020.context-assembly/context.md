@@ -145,7 +145,7 @@ content is the stored text verbatim. The chat role is always the row's stored ro
 
 ## Commands
 
-From the root `CLAUDE.md` (run from `backend/`):
+From the root `AGENTS.md` (run from `backend/`):
 
 ```
 test       .venv/Scripts/python -m pytest

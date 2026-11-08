@@ -119,7 +119,7 @@ Failures: an id that addresses no row **or another user's row** → **404**
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)

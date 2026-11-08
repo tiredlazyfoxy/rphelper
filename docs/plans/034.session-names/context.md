@@ -38,7 +38,7 @@ A session gets a name that the roleplayer can change. A session that has never b
 
 ## Working rules for every downstream agent
 
-- **Read the folder `CLAUDE.md` glossaries first**: `backend/app/*/CLAUDE.md`, `frontend/src/app/CLAUDE.md`, and the tests folders' files where present. They are the map of the code. The harvests behind this plan are `docs/.cache/harvests/034.session-names.backend.md` and `docs/.cache/harvests/034.session-names.frontend.md`.
-- Commands come from the root `CLAUDE.md` only.
+- **Read the folder `AGENTS.md` glossaries first**: `backend/app/*/AGENTS.md`, `frontend/src/app/AGENTS.md`, and the tests folders' files where present. They are the map of the code. The harvests behind this plan are `docs/.cache/harvests/034.session-names.backend.md` and `docs/.cache/harvests/034.session-names.frontend.md`.
+- Commands come from the root `AGENTS.md` only.
 - **The working tree carries unrelated uncommitted changes**: fast/014–016 and a plan-019 fix. They touch, among others, `backend/app/db/schema.py`, `backend/app/services/messages.py`, `backend/tests/privacy_audit_support.py`, `backend/tests/test_privacy_audit_*.py`, `backend/tests/test_stream_router.py`, `backend/tests/test_messages_service.py` and several `frontend/tests/app/*` files. Preserve those edits and build on top of them. Never revert, re-stage or depend on them beyond what is already in the file.
 - Existing tests that assert exact key sets or construct `Session` / `RpSession` / `SessionHit` values belong to the step that changes the shape. Each step's Test files list names them.

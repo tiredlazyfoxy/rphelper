@@ -82,7 +82,7 @@ Therefore:
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)
@@ -227,7 +227,7 @@ added to the `Table(...)` literal in `db/schema.py` and reaches a fresh instance
 without the column, which is drift and is `007`'s remediation to fix, not this feature's.
 
 **The admin area adds no stylesheet.** The project rule is exactly two hand-written
-stylesheets (root `CLAUDE.md`, `frontend-structure.md`); `shell.css` is app-entry-only
+stylesheets (root `AGENTS.md`, `frontend-structure.md`); `shell.css` is app-entry-only
 and ships empty. The admin shell is **Mantine `AppShell` and Mantine props alone** — no
 third `.css` file, no `.module.css`, no style block. `002/006` DoD-11's scan stays true.
 

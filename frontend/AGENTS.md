@@ -2,7 +2,7 @@
 
 <!-- agent-ready:start -->
 
-The React 19 + TypeScript + Vite frontend, built as four entry documents (`app`, `admin`, `login`, `bootstrap`) that call the backend same-origin under `/api/...`. TypeScript only; commands (build, test, typecheck) are in the root `CLAUDE.md`.
+The React 19 + TypeScript + Vite frontend, built as four entry documents (`app`, `admin`, `login`, `bootstrap`) that call the backend same-origin under `/api/...`. TypeScript only; commands (build, test, typecheck) are in the root `AGENTS.md`.
 
 ## Glossary
 

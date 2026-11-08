@@ -19,14 +19,14 @@ and stand in their own terms.
 
 ## Greenfield — there is no existing code
 
-`backend/` and `frontend/` do not exist. Only `docs/` and the root `CLAUDE.md` are
+`backend/` and `frontend/` do not exist. Only `docs/` and the root `AGENTS.md` are
 tracked. Every file named in every step's **Source files** list is a new file.
 Nothing in this plan is a modification of anything, and no step may assume a helper,
 a fixture or an import that an earlier step in this same feature did not create.
 
 ## Commands
 
-From the root `CLAUDE.md`, run from `backend/`:
+From the root `AGENTS.md`, run from `backend/`:
 
 ```
 test       .venv/Scripts/python -m pytest
@@ -130,7 +130,7 @@ way a container build and a developer machine resolve the same tree.
 **D2 — Registry shape: one module-level `metadata = MetaData()` in `db/schema.py`.**
 Every future table is declared as a `Table(...)` literal **in that same file**; `007`
 walks `metadata.tables`. No per-feature table modules, no import-side-effect
-registration, no `build_registry()` callable. Reason: the root `CLAUDE.md` says
+registration, no `build_registry()` callable. Reason: the root `AGENTS.md` says
 `db/schema.py` *is* the source of truth; a single file has no import-order hazard, and
 nothing can be silently absent from the drift report because it was never imported. In
 this feature the file ships with the `MetaData` and **zero** `Table` objects.

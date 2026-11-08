@@ -156,7 +156,7 @@ the count is not mistaken for an unexamined omission.
 - **Writer**: the `/architect` agent only. Planners, skeletons, coders,
   test-coders and verifiers read these files and never edit them.
 - **Never write outside this folder**, with two named exceptions the briefing
-  must grant: the root `CLAUDE.md` and `docs/plans/CLAUDE.md` during bootstrap,
+  must grant: the root `AGENTS.md` and `docs/plans/AGENTS.md` during bootstrap,
   and an `Applied` status footer on a plan's `outcome.md` during finalization.
 - **Never write into `docs/product/`.** A requirement you disagree with is a
   hand-back concern, not an edit.
@@ -218,5 +218,5 @@ hand-written stylesheets, not one**: `global.css` for resets across every entry,
 `shell.css` for the `app` workspace's layout alone — the grid, the `--navw` rail,
 the 820px threshold (`frontend-structure.md`). Everything else is Mantine;
 Tailwind, CSS Modules and styled-components stay forbidden.
-Build and test commands live in the **root `CLAUDE.md`** and are never duplicated
+Build and test commands live in the **root `AGENTS.md`** and are never duplicated
 here.

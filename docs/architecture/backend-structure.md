@@ -13,7 +13,7 @@ US-140, US-143
 FastAPI application layout, the routers/services split, the id and JSON
 boundaries, the roleplayer and admin route surfaces, configuration and secrets,
 persistence access, and the error model that carries typed failures to the SPA.
-Commands (`pytest`, `mypy app`, `ruff check .`) are in the root `CLAUDE.md`.
+Commands (`pytest`, `mypy app`, `ruff check .`) are in the root `AGENTS.md`.
 
 Two subjects were split out of this doc at the finalization of plans 008..032:
 **`session-stream.md`** holds the stream routes, settle and re-open, the `(( ))`
@@ -336,7 +336,7 @@ Two reasons this is worth being strict about here:
   scoped by owning user in the query itself. That is auditable only if all SQL is
   in one layer — a single `SELECT` that leaked into a router would sit outside
   wherever the scoping convention is reviewed.
-- **The pipeline's air gap** (`docs/plans/CLAUDE.md`) wants domain rules testable
+- **The pipeline's air gap** (`docs/plans/AGENTS.md`) wants domain rules testable
   without a transport. Services that take plain arguments are testable from the
   spec alone; router-embedded rules force a test-coder to reason about HTTP to
   test a memo-chain rule.
@@ -1714,7 +1714,7 @@ Three reasons, in the order they decided it:
 `metadata = MetaData()` in `db/schema.py`, with every table declared as a
 `Table(...)` literal in that same file.** (Closed by plan 001.) No per-feature table modules, no
 import-side-effect registration, no `build_registry()` callable; FEAT-005's drift
-check walks `metadata.tables`. Reason: the root `CLAUDE.md` already makes
+check walks `metadata.tables`. Reason: the root `AGENTS.md` already makes
 `db/schema.py` *the* source of truth, a single file has no import-order hazard,
 and nothing can be silently absent from the drift report because the module that
 declared it was never imported. Plan 001 shipped the file with the `MetaData` and

@@ -94,7 +94,7 @@ assumes, that is a **skeleton hand-back**, not something a coder improvises arou
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)

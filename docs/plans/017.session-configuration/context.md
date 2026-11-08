@@ -175,7 +175,7 @@ Failures (`{ error: { code, message, detail } }`):
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)

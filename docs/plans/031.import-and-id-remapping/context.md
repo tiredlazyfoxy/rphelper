@@ -292,7 +292,7 @@ deliberately from `data-model.md`'s "mint unconditionally" rule, as recorded in
     `(connection, envelope)`.
 - **Backend is fully typed.** `mypy app` and `ruff check .` stay green after every
   step. **Frontend:** `npm run typecheck` stays green. There is no ESLint.
-- **Commands** come only from the root `CLAUDE.md`.
+- **Commands** come only from the root `AGENTS.md`.
 
 ## Files touched across steps
 

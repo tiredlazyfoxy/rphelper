@@ -107,7 +107,7 @@ around.
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)
@@ -387,7 +387,7 @@ The consequence, which is the whole of what the administrator is agreeing to:
 
 ### D6 — `alembic` becomes a runtime dependency, with four explicit negatives
 
-`alembic` is named in the root `CLAUDE.md` stack table and throughout the architecture but
+`alembic` is named in the root `AGENTS.md` stack table and throughout the architecture but
 is **not currently a dependency**, and there is no `alembic.ini`, no `migrations/` and no
 `env.py` anywhere in the tree. This feature adds it to `backend/pyproject.toml`'s runtime
 `dependencies` with a compatible constraint. That is a deliberate `pyproject.toml` edit

@@ -306,7 +306,7 @@ from 024's `compose_session_text` (a verified 024 contract, not the code under t
 
 - Sync SQLAlchemy Core; `connection` first, then `user_id`.
 - Backend fully typed; `mypy app` and `ruff check .` green after every step (commands in the
-  root `CLAUDE.md`).
+  root `AGENTS.md`).
 - Vector arm only: 027 passes no flag, builds no FTS query and never touches `session_fts`.
 - Absences are tested with data that **would** match: every excluded session has the same
   persona text and the same settled entries as an included one, so its composed text — and

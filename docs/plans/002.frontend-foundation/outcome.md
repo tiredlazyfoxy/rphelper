@@ -233,7 +233,7 @@ user chose; what changes here is only the getters. **Land this with the
 **Change.** Change "`@mantine/form` is a listed dependency and is deliberately not used"
 to "`@mantine/form` is **not a dependency**", and make the same edit in § "Other
 inherited frontend facts" where it reads "present as an inherited dependency but
-deliberately not used". Recommend the matching edit to the root `CLAUDE.md` stack table
+deliberately not used". Recommend the matching edit to the root `AGENTS.md` stack table
 (below).
 
 **Reason.** "Inherited" described the sibling project's tree. RPHelper's frontend is
@@ -358,7 +358,7 @@ is scoped to `frontend/src` so no fixture can trip it and no exclusion list is n
 and the build's root is `src/` so nothing test-only is reachable from a bundle.
 
 **Reason.** Every later frontend feature adds a test and must know where it goes. The
-three commands themselves stay in the root `CLAUDE.md` and are not duplicated here.
+three commands themselves stay in the root `AGENTS.md` and are not duplicated here.
 
 ### Storage keys
 
@@ -409,7 +409,7 @@ dev, and a silently relocated dev server appears to work until the first API cal
 
 ---
 
-## Root `CLAUDE.md`
+## Root `AGENTS.md`
 
 ### Stack table — drop `@mantine/form` (**recommendation; the architect's briefing must grant this file**)
 
@@ -434,4 +434,4 @@ _Nothing below this line is written by the planner._
 Status: Applied 2026-10-01 — /architect finalization (with /product-spec finalization the same day)
 Applied items: 25 (all planner entries; the nginx `/` fallback entry with modification)
 Rejected items: 1 (`## Observations` — notifyFailure fallback text and ColorSchemeToggle labels are copy text, not architecture)
-Notes: applied in batch 1, except the root `CLAUDE.md` stack-table entry, held as H3 and applied in batch 3 (Components row now `@mantine/core`, `/hooks`, `/notifications`, `/tiptap`; the same grant also refreshed the root file's id range). The nginx `/` fallback is recorded as an open seam owned by `fast/001.dev-and-container-harness`, mechanism not chosen. Both MobX entries landed together.
+Notes: applied in batch 1, except the root `AGENTS.md` stack-table entry, held as H3 and applied in batch 3 (Components row now `@mantine/core`, `/hooks`, `/notifications`, `/tiptap`; the same grant also refreshed the root file's id range). The nginx `/` fallback is recorded as an open seam owned by `fast/001.dev-and-container-harness`, mechanism not chosen. Both MobX entries landed together.

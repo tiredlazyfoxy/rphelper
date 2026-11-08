@@ -203,6 +203,6 @@ placement.**
 
 ## Commands
 
-Commands come from the root `CLAUDE.md` only. Run the backend from `backend/`
+Commands come from the root `AGENTS.md` only. Run the backend from `backend/`
 (`<py> -m pytest`, `<py> -m mypy app`, `<py> -m ruff check .`) and the frontend
 from `frontend/` (`npm test`, `npm run typecheck`, `npm run build`).

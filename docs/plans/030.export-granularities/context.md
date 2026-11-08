@@ -132,7 +132,7 @@ The filename **never embeds user content**: no name, no title, no id.
 - **Frontend:** TypeScript only. Ids are `string` end to end. MobX classes hold
   observable fields only, and behaviour lives in free functions. There is no
   ESLint, so `npm run typecheck` is the gate.
-- **Commands:** from the root `CLAUDE.md` only.
+- **Commands:** from the root `AGENTS.md` only.
 
 ## Files touched across steps
 

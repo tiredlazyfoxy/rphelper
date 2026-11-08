@@ -2,7 +2,7 @@
 
 <!-- agent-ready:start -->
 
-The Python / FastAPI backend: the API the frontend calls same-origin under `/api/...`, backed by one SQLite file holding relational rows, FTS5 and vectors. Commands (test, typecheck, lint) are in the root `CLAUDE.md`.
+The Python / FastAPI backend: the API the frontend calls same-origin under `/api/...`, backed by one SQLite file holding relational rows, FTS5 and vectors. Commands (test, typecheck, lint) are in the root `AGENTS.md`.
 
 ## Glossary
 

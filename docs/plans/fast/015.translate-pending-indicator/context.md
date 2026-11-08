@@ -78,6 +78,6 @@ rule (014 D6) for the pending state only. Read them; the plan does not restate t
   mirror in the new file): `stubFetch(router)` with deferred `call(i).respond(...)`,
   `renderRecord(state, translations?)`, `partnerItem()`, `flicker(label)`, `press(label)`.
 
-## Commands (root `CLAUDE.md`, run from `frontend/`)
+## Commands (root `AGENTS.md`, run from `frontend/`)
 
 `npm test`, `npm run typecheck`.

@@ -58,7 +58,7 @@ Backend surfaces, unchanged by this feature (no backend file is touched):
 
 ## Commands
 
-From the root `CLAUDE.md` (frontend only — this feature touches no backend file):
+From the root `AGENTS.md` (frontend only — this feature touches no backend file):
 
 ```
 Frontend (run from frontend/)

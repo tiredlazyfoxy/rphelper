@@ -38,7 +38,7 @@ orderings, defaults, rejected options — are recorded in **`docs/decisions/`**
 Architecture docs cite a `DEC` id where the detail lives there.
 
 **Splitting note.** A doc splits when it has come to cover **two subjects**, not
-when it crosses a line count (`CLAUDE.md`).
+when it crosses a line count (`AGENTS.md`).
 
 **Three splits were authorized and are done** at this finalization: the twelve
 docs became fifteen. `session-stream.md` and `transfer.md` came out of
@@ -48,7 +48,7 @@ one-line pointer where the content left.
 
 **Three further splits are identified and NOT authorized** — a new top-level doc
 must come from the architect's briefing. They are recorded in
-`docs/architecture/CLAUDE.md` with their real line counts and the seam each
+`docs/architecture/AGENTS.md` with their real line counts and the seam each
 names: `backend-structure.md` (route surfaces vs the application and persistence
 layer), `workspace-shell.md` (the character page), and `llm-and-streaming.md`
 (context assembly → `context-assembly.md`). **None is done.**
@@ -69,7 +69,7 @@ anywhere (`_TBD:` in `deployment.md`).
 
 ## Commands
 
-Canonical source is the **root `CLAUDE.md`**. Repeated here for lookup only:
+Canonical source is the **root `AGENTS.md`**. Repeated here for lookup only:
 
 ```
 Backend  (run from backend/)
@@ -285,7 +285,7 @@ docs/product/                                 requirements — read-only
 docs/product/quick-reference.md               the id registry
 docs/architecture/                            this doc set
 docs/decisions/                               decisions below architecture; index.md is the DEC registry
-docs/plans/CLAUDE.md                          the pipeline contract
+docs/plans/AGENTS.md                          the pipeline contract
 docs/plans/defects.md                         the five defects' file of record (the product round's artifact)
 ```
 

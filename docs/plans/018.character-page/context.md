@@ -115,7 +115,7 @@ No other route changes. 017's character configuration routes are consumed, not c
 
 ## Commands
 
-From the root `CLAUDE.md`:
+From the root `AGENTS.md`:
 
 ```
 Backend  (run from backend/)

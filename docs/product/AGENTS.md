@@ -13,7 +13,7 @@ The product layer for RPHelper: **why** the system exists, **who** it's for, **w
 
 The product layer sits **before or alongside** `/architect`, never after — architecture reads product ids to know what it's designing for, not the reverse.
 
-RPHelper is greenfield: the repository currently holds only `.gitignore`. There is no root `CLAUDE.md`, no `docs/architecture/`, no `docs/plans/` yet. The product layer is genuinely first here — nothing downstream exists to read it until `/architect` runs.
+RPHelper is greenfield: the repository currently holds only `.gitignore`. There is no root `AGENTS.md`, no `docs/architecture/`, no `docs/plans/` yet. The product layer is genuinely first here — nothing downstream exists to read it until `/architect` runs.
 
 **Never write a technical decision here.** No schema, no library choice, no layering, no endpoint path, no storage detail. If a requirement implies one, surface the requirement (the observable behavior) and leave the decision to `docs/architecture/`.
 
@@ -96,7 +96,7 @@ This is the contract a planner turns into a `[test]` DoD item and a test-coder w
 - Existing file with markers → replace inside the matching pair only.
 - Existing file without markers → treat as fully user-authored; append one new fenced block at the end and say so in the hand-back — never rewrite unfenced content.
 - A block is never stripped, and its id is never reused, even on withdrawal.
-- `docs/product/CLAUDE.md` (this file) is orchestrator-maintained and is not itself under the fence protocol.
+- `docs/product/AGENTS.md` (this file) is orchestrator-maintained and is not itself under the fence protocol.
 
 ## Citation convention (how other layers cite this one)
 

@@ -1,7 +1,7 @@
 # Decision index
 
 Registry of every `DEC` id. Regenerated from the entries on every write — never
-edited independently of the files (`CLAUDE.md`).
+edited independently of the files (`AGENTS.md`).
 
 | Id | Title | Status | Feature | Stage |
 |---|---|---|---|---|
@@ -19,6 +19,18 @@ edited independently of the files (`CLAUDE.md`).
 | DEC-034-12 | `applySession` orders `last_used_at` ties by id descending | accepted | 034.session-names | — |
 | DEC-034-13 | The character page's Sessions list follows the workspace store by the apply-a-row rule | accepted | 034.session-names | — |
 | DEC-034-14 | The workspace `SessionsState` is threaded to the session screen as a prop | accepted | 034.session-names | — |
+| DEC-035-1 | The factory takes `kind` first; the gateway class is the production factory | accepted | 035.llm-client-gateway | — |
+| DEC-035-2 | Probe value types move to the gateway; the delta types are deleted | accepted | 035.llm-client-gateway | — |
+| DEC-035-3 | The gateway's test seam is a keyword-only map of library client classes | accepted | 035.llm-client-gateway | — |
+| DEC-035-4 | `to_wire_message` is kept and builds the library's `messages` | accepted | 035.llm-client-gateway | — |
+| DEC-035-5 | Library typing gaps are absorbed inside `gateway.py` only | accepted | 035.llm-client-gateway | — |
+| DEC-035-6 | The chat-client protocol: `complete`, `compose`, and the tool bundle | accepted | 035.llm-client-gateway | — |
+| DEC-035-7 | One unbounded queue, an end marker, and cancel-and-await on close | accepted | 035.llm-client-gateway | — |
+| DEC-035-8 | How each operation maps library failures | accepted | 035.llm-client-gateway | — |
+| DEC-035-9 | Probe builds its library client with an empty model name | accepted | 035.llm-client-gateway | — |
+| DEC-035-10 | `compose` uses the tool loop even when no tool is offered | accepted | 035.llm-client-gateway | — |
+| DEC-035-11 | Base-URL normalisation rule | accepted | 035.llm-client-gateway | — |
+| DEC-035-12 | Live tests port to the gateway, `kind` `llamaswap` | accepted | 035.llm-client-gateway | — |
 | DEC-F014-1 | Build single-message delete now; the docs follow at finalization | accepted | fast/014.message-delete | — |
 | DEC-F014-2 | Settled entries and current-zone messages are both deletable | accepted | fast/014.message-delete | — |
 | DEC-F014-3 | A settled head takes its buried group with it, in the same transaction | accepted | fast/014.message-delete | — |

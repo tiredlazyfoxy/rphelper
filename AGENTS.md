@@ -64,7 +64,7 @@ Mantine.
 
 ```
 RPHelper/
-  CLAUDE.md                 # this file
+  AGENTS.md                 # this file
   backend/
     .venv/                  # backend virtualenv
     app/                    # FastAPI application package (mypy target)
@@ -117,7 +117,7 @@ frontend never receives a backend base URL; it always calls same-origin
   Requirements are cited by id, never restated elsewhere.
 - **Design** — `docs/architecture/`. Start at
   `docs/architecture/quick-reference.md`; it indexes the other eleven docs.
-- **The work** — `docs/plans/`. `docs/plans/CLAUDE.md` is the pipeline contract
+- **The work** — `docs/plans/`. `docs/plans/AGENTS.md` is the pipeline contract
   every planning and coding agent binds to.
 
 ## Conventions every agent must hold

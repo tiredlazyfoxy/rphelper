@@ -267,7 +267,7 @@ amend this table), or the table names a route that does not exist (`SPEC`).
 - Step 007 calls the **real** `configure_logging`; every other audit step may
   no-op it as the existing router tests do.
 - Frontend tests are Vitest under `frontend/tests/`, TypeScript only.
-- Commands: root `CLAUDE.md` "Build & Test Commands".
+- Commands: root `AGENTS.md` "Build & Test Commands".
 
 ## Files touched across steps
 

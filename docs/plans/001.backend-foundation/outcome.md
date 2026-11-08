@@ -68,7 +68,7 @@ transcription.
 No per-feature table modules, no import-side-effect registration, no `build_registry()`
 callable. `007` walks `metadata.tables`.
 
-**Reason.** `brief.md`'s second open question. The root `CLAUDE.md` already says
+**Reason.** `brief.md`'s second open question. The root `AGENTS.md` already says
 `db/schema.py` *is* the source of truth; a single file has no import-order hazard, and
 nothing can be silently absent from the drift report because it was never imported. In
 this feature the file ships with the `MetaData` and zero tables.
@@ -152,7 +152,7 @@ config; virtualenv at `backend/.venv` via `uv venv`; dependencies installed with
 Minimum Python 3.12.
 
 **Reason.** Every later backend feature adds a dependency and must know where it goes
-and what regenerates the lock. Commands themselves stay in the root `CLAUDE.md` and are
+and what regenerates the lock. Commands themselves stay in the root `AGENTS.md` and are
 not duplicated here.
 
 ### Backend test conventions

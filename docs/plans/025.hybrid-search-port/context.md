@@ -195,7 +195,7 @@ embed call happens inside that read window; 025 holds no write lock.
 - Sync SQLAlchemy **Core**; functions take `connection` first; the `search` package imports
   no `fastapi`.
 - Backend fully typed; `mypy app` and `ruff check .` green after every step (commands in
-  the root `CLAUDE.md`).
+  the root `AGENTS.md`).
 - Virtual tables are named only through 024's constants, never re-typed as string literals
   in 025 modules.
 

@@ -261,7 +261,7 @@ has no argument against it. Inline style objects cannot express these rules at
 all: the grid template, the `--navw` custom property with its collapsed value,
 and the `820px` threshold are a class toggle and a media query, not per-element
 style. CSS Modules, Tailwind and styled-components are forbidden by the root
-`CLAUDE.md` and `overview.md`. A second named file is the only option left that
+`AGENTS.md` and `overview.md`. A second named file is the only option left that
 keeps the styling authority visible in one place.
 
 **What `shell.css` holds, as built, and what it must never hold.** The boundary is
@@ -443,7 +443,7 @@ true is worth naming: **the storage is passed in as a parameter** — a minimal
 `getItem` / `setItem` interface, or `null` — rather than reached for as a global
 (008 D8). So the modules touch no `document`, no `window` and no React, and every
 fallback path above is unit-testable with no DOM, which is what the pipeline's
-test-coder needs (`docs/plans/CLAUDE.md`). `App` owns the real storage and threads
+test-coder needs (`docs/plans/AGENTS.md`). `App` owns the real storage and threads
 it to the two readers: `WorkspaceShell` and, through `SessionRoute`,
 `SessionScreen` (016 D2). The composer heights add the two composer hosts as
 readers; how the storage reaches them is the building plan's call, under the same
