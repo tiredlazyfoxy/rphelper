@@ -40,6 +40,18 @@ edited independently of the files (`CLAUDE.md`).
 | DEC-F016-2 | The user-role row body is wrapped in a Mantine `Box` with `c="dimmed"` | accepted | fast/016.own-text-muted | — |
 | DEC-F016-3 | Settled entries, the live reply and accent chips keep their colours | accepted | fast/016.own-text-muted | — |
 | DEC-F016-4 | Test hook: `data-tone="muted"` on the wrapper | accepted | fast/016.own-text-muted | — |
+| DEC-arch-llm-client-library-1 | Adopt `llm-client` 0.2.0 as a git dependency; Responses clients only, selected by `kind` | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-2 | One timeout: total time per request, default 600 s | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-3 | `auth_failed` is read from the library error's message | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-4 | The tool-loop cap is `max_loops=sys.maxsize` | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-5 | Minted call ids, and the persisted `arguments` | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-6 | Each wrapper carries an explicit signature from its declaration | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-7 | The wrapper never raises a tool's exception into the library | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-8 | How a compose exchange ends | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-9 | An OpenAI server with no credential | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-10 | Logging: the `aiohttp` logger tree is silenced | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-11 | Testing: fakes at the gateway/factory level | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-12 | No reasoning options are sent by default | accepted | arch-llm-client-library | architecture revision |
 | DEC-arch-session-names-1 | Name storage: a nullable column, the default label computed by the client | accepted | arch-session-names | — |
 | DEC-arch-session-names-2 | Route shape: a general `PATCH` that accepts `name` only | accepted | arch-session-names | — |
 | DEC-arch-session-names-3 | Last-use display: local `YYYY-MM-DD HH:MM`, fixed width | accepted | arch-session-names | — |

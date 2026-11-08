@@ -53,19 +53,19 @@ after that pass's four batches landed:
 
 | Doc | Lines | |
 |---|---|---|
-| `backend-structure.md` | 1892 | **split candidate — two subjects; badly over budget** (below) |
-| `quick-reference.md` | 1412 | exempt; intentionally dense — the count is informational only |
+| `backend-structure.md` | 1966 | **split candidate — two subjects; badly over budget** (below) |
+| `quick-reference.md` | 1583 | exempt; intentionally dense — the count is informational only |
 | `workspace-shell.md` | 1338 | **split candidate — the "one screen" exception is strained** (below) |
-| `data-model.md` | 1288 | deliberate exception |
+| `data-model.md` | 1377 | deliberate exception |
 | `frontend-structure.md` | 1231 | over |
-| `llm-and-streaming.md` | 1198 | **split candidate — two subjects** (below) |
-| `search-and-retrieval.md` | 1196 | deliberate exception, **under pressure** (below) |
+| `llm-and-streaming.md` | 1393 | **split candidate — two subjects** (below) |
+| `search-and-retrieval.md` | 1257 | deliberate exception, **under pressure** (below) |
 | `domain-rules.md` | 1036 | deliberate exception |
-| `admin-surfaces.md` | 884 | over |
-| `deployment.md` | 776 | over |
-| `overview.md` | 634 | over |
+| `admin-surfaces.md` | 892 | over |
+| `deployment.md` | 932 | over |
+| `overview.md` | 657 | over |
 | `ui-conventions.md` | 580 | over |
-| `session-stream.md` | 572 | over — new at this pass |
+| `session-stream.md` | 644 | over — new at this pass |
 | `forms-and-lists.md` | 451 | over — new at this pass |
 | `transfer.md` | 394 | within budget — new at this pass |
 

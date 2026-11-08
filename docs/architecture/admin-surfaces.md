@@ -466,9 +466,10 @@ model, measures the returned vector's length and writes it to
 `models.embedding_dim`. A failed or non-embedding response **blocks the
 designation** with a typed error, and nothing is saved — the previous designation,
 if any, stands (US-015.AC-3, US-015.AC-4). The dimension is not discoverable
-from a models listing on either provider kind, which is why `LlmClient.embed`
-exists in FEAT-004 rather than only in FEAT-017's feature, and the modal's copy
-says so.
+from a models listing on either provider kind, which is why an embed operation
+existed in FEAT-004 rather than only in FEAT-017's feature, and the modal's copy
+says so. Since the 2026-11-08 revision the measuring call goes through the LLM
+gateway's `embed` (`llm-and-streaming.md`).
 
 **Clear Embedding is confirmed** (US-015.AC-2). It is offered in the **row menu,
 conditionally**, and no duplicate page-header action is built. Clearing is not a
@@ -486,8 +487,9 @@ decision 5 in `overview.md`. BookWriter tests a connection by reusing the
 model-listing probe; RPHelper does not, because FEAT-004's purpose line treats
 testing a connection as **its own capability** (UC-011), and overloading
 model-listing conflates two concerns: "can I reach this server and authenticate"
-and "what can it run". The **backend probe primitive is reused** — there is one
-piece of code that talks to an OpenAI-compatible server — but it is exposed as
+and "what can it run". The **backend probe primitive is reused** — the LLM
+gateway's `probe`, the one place that talks to a provider server
+(`llm-and-streaming.md`) — but it is exposed as
 its **own route with its own typed result**, and surfaced in the UI as a badge or
 alert **without opening the models list**. The result is recorded on
 `llm_servers.last_test_at` / `last_test_ok` / `last_test_error`
@@ -528,9 +530,12 @@ narrowed the set to the product's two.
 - **`llm_servers.last_test_error` stores the typed outcome value itself** — never
   a provider message and never prose. The **last-test badge** on the page renders
   from it.
-- **The closed value set is declared once**, in `services/llm/client.py`, and
-  reused by the registry, the router model and the frontend row type — so three
-  layers do not each re-decide it.
+- **The closed value set is declared once** in `services/llm/` and reused by the
+  registry, the router model and the frontend row type — so three layers do not
+  each re-decide it. As built by plan 006 it sat in `client.py`; that module is
+  removed by the plan that builds the 2026-11-08 gateway revision
+  (`llm-and-streaming.md`), and the declaration moves with the probe to
+  `gateway.py`. The four values and the single declaration are unchanged.
 
 **Cross-references that belong on this page, because this is where the mistakes
 get made:**

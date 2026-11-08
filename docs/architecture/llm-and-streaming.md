@@ -6,97 +6,170 @@ UC-051, UC-053, UC-055..UC-057, UC-077, UC-081, UC-083, UC-084, UC-085,
 US-044, US-073.AC-2, US-107, US-111, US-114, US-132, US-133, US-142, US-144,
 US-146
 
-One client abstraction for every provider, the SSE frame protocol, the tool loop,
-what goes into context and — just as importantly — what must never go into it.
+One gateway over a shared client library for every provider, the SSE frame
+protocol, the tool loop, what goes into context and — just as importantly — what
+must never go into it.
 
 ---
 
-## One OpenAI-compatible client
+## The LLM gateway over `llm-client`
 
 **Realizes:** FEAT-004, UC-010, UC-011, UC-012, UC-013
 
-Both provider kinds RPHelper supports — **llamaswap** and **OpenAI** — speak the
-OpenAI chat-completions and embeddings wire format. So there is **one** client, not
-one per provider, parameterised by base URL and credential:
+**Every LLM call RPHelper makes goes through the shared client library
+`llm-client` 0.2.0, and RPHelper has no HTTP code of its own for LLM
+providers.** The library (github.com/Iezious/PythonLLMClient) is a runtime
+dependency pinned to its `v0.2.0` tag and runs on `aiohttp`. The pin form and
+the alternatives weighed are `DEC-arch-llm-client-library-1`.
+
+We chose a shared library over RPHelper's own client for two reasons. It is
+**one maintained client shared with other projects**, so a provider quirk is
+fixed once. And it **already implements the OpenAI Responses protocol**, which
+RPHelper needs: OpenAI's reasoning models refuse function tools on the
+chat-completions endpoint, and only the Responses protocol carries the model's
+reasoning from one tool round to the next. Rejected: keeping the in-house
+client and adding Responses to it, which would be a second implementation of
+the same protocol to maintain; and a local path dependency on the library,
+which breaks the container build and every other machine.
+
+**`httpx` stays a runtime dependency for one consumer only: the `web_search`
+Google provider** (below). That provider is not an LLM call, and nothing in this
+section governs it.
+
+### The gateway — the one module that knows the library
+
+Both the chat client and the embedding client are built on the library, **behind
+one RPHelper module, `services/llm/gateway.py`: the LLM gateway.** It is the only
+module that imports the library (`llm`); every other part of the backend calls
+the gateway. It replaces `services/llm/client.py`, which the building plan
+removes; `chat.py` (`strip_think`) and `frames.py` (frames and the streaming
+harness) stay in `services/llm/` beside it.
+Its contract to the rest of the backend is four operations:
 
 ```
-LlmClient(base_url, api_key)
-  chat_stream(model, messages, tools) -> async iterator of provider deltas
-  embed(model, texts)                -> list[vector]
-  probe()                            -> reachability result   # UC-011
+probe()                        -> reachable | unreachable | auth_failed | model_list_empty
+embed(model, texts)            -> one vector per text
+complete(model, messages)      -> text                       # non-streamed
+compose(model, messages, tools)-> async stream of events     # text pieces + tool events
 ```
 
-One client because the difference between the two kinds is configuration, not
-protocol. Writing two adapters would create two code paths that must be kept
-behaviourally identical, with no compensating benefit. `llm_servers.kind`
-(`data-model.md`) is therefore a **label** used for admin-facing presentation and
-for provider-specific defaults, not a dispatch key that selects an implementation.
+- **`probe()`** is built on the library's model listing and implements UC-011.
+  It reports one of the four outcomes and **raises nothing** — every state,
+  total failure included, is an answer UC-011 requires to be reported, and
+  **registration is unaffected either way** (UC-011's postcondition and
+  alternate flow). The result is recorded on the row (`last_test_at`,
+  `last_test_ok`, `last_test_error`) so the admin sees the last known state
+  without re-probing on every page load.
+- **`embed()`** returns one vector per input text and **raises
+  `llm_unreachable`** on failure, because an embedding has no useful partial
+  result. **The asymmetry with `probe()` is deliberate and is kept**; it is the
+  kind of thing a later contributor would "tidy". Do not.
+- **`complete()`** returns the model's text in one piece. **Translation is its
+  caller** (below). It is non-streamed because translation was never streamed to
+  the client, and the stop for a translation is already best-effort; a stream
+  would buy nothing either path can use.
+- **`compose()`** streams one compose exchange as an ordered sequence of
+  **events — text pieces and tool events** — and is what the compose source
+  turns into frames. The library runs the tool loop inside it ("The tool-calling
+  loop" below).
 
-The credential arrives through `resolve_secret(api_key_ref)` at call time —
-the `"$ENV_VAR"` pointer pattern in `backend-structure.md`. A missing variable is
-`secret_ref_missing`, raised before any network call.
+How a library outcome becomes one of the four probe values, or an embed failure
+reason, is `DEC-arch-llm-client-library-3`.
 
-`probe()` implements UC-011: it reports reachability and **registration is
-unaffected either way** (UC-011's postcondition and alternate flow). The result is
-recorded on the row (`last_test_at`, `last_test_ok`, `last_test_error`) so the admin
-sees the last known state without re-probing on every page load.
+**A library client is built per call, never held, and closed inside the call.**
+The gateway builds one library client per operation, **inside the coroutine that
+uses it**, and closes it when the operation ends. The reason is the event loop:
+the library's HTTP session belongs to the loop it was opened on, and the sync
+embedding writes reach the gateway through a fresh `asyncio.run` each time
+(`backend-structure.md`'s "The first async code in the backend"), so a held
+client would outlive its loop. **The sync `asyncio.run` bridge in the embedding
+service is unchanged.**
 
-### As built by FEAT-004 (plan 006) — and what is deliberately absent
+**The construction path is unchanged.** The registry re-reads `api_key_ref`,
+resolves it **at call time** through `resolve_secret`, and the gateway is reached
+through an **injectable client factory** (021 D14), so tests replace it without a
+network. Rotating a key is still an environment change plus a restart, and an
+absent variable is still `secret_ref_missing`, raised before any network call.
 
-- **FEAT-004 builds construction, `probe()` and `embed()` only**; `chat_stream`
-  was deliberately **not** stubbed, because a stub with no caller is dead code
-  FEAT-009/010 would rewrite. **Plan 021 built it**, and the two absence tests
-  plan 006 shipped to pin the deliberate gap were deleted with the gap (021 D10,
-  021 step `003`).
-- **`probe()` returns its outcome and raises nothing; `embed()` raises
-  `llm_unreachable`.** Every probe state, total failure included, is an answer
-  UC-011 requires to be reported, whereas an embedding has no useful partial
-  result. The asymmetry is the kind of thing a later contributor would "tidy";
-  do not.
-- **Base-URL composition tolerates a trailing slash and an already-present
-  `/v1`**, because an administrator types the URL by hand and a wrong composition
-  presents as `unreachable` against a healthy host.
-- The client is `httpx.AsyncClient`; why, and what the async/sync mix costs, is
-  `backend-structure.md`'s "The first async code in the backend".
+**Whether to call a tool is the model's decision** (FEAT-014/015/016 all state it
+that way). The gateway offers the tools it is given and never forces a tool
+choice; doing so would be the instance deciding for the model. With no tools
+offered, it offers none.
 
-### `chat_stream` as built (plan 021)
+### One protocol; `kind` selects the library class
 
-A streaming `POST` to `…/v1/chat/completions` with `stream: true`, yielding an
-async iterator of **provider deltas** — not frames, not text:
+**Only the library's Responses-protocol clients are used: `OpenAIAPIClient` for
+`kind = 'openai'` and `LlamaSwapAPIClient` for `kind = 'llamaswap'`.**
+`llm_servers.kind` (`data-model.md`) is therefore now the **dispatch key** that
+selects the client class.
 
-- **Three delta kinds**: content, **reasoning** (from either `reasoning_content`
-  or `reasoning`, because the two provider families differ on the key), and
-  **per-chunk tool-call fragments, unaccumulated**. The client deliberately does
-  no accumulation of its own; the compose loop accumulates fragments by index
-  (below), because the loop is what knows when a round ends.
-- **`tools` is sent only when non-empty**, and **`tool_choice` is never sent** —
-  whether to call a tool is the model's decision (FEAT-014/015/016 all state it
-  that way), and a `tool_choice` would be the instance deciding for it.
-- **The iterator ends on `[DONE]` or on a clean end of body.** Either is a normal
-  completion; neither is an error.
-- **Every failure is one code.** A non-2xx, a transport error, a timeout, or an
-  unparseable `data:` line all raise **`llm_unreachable`**. One code rather than
-  four because the SPA has one rendering for "the provider did not answer", and
-  the distinctions are not ones the roleplayer can act on differently.
-- **Closing the iterator unwinds the httpx stream.** This is the upstream half of
-  a stop: the harness's `aclose()` of its source closes the provider request
-  rather than leaving it running against a client that has gone (the stop section
-  below).
+This **supersedes** the rule that there is one client and that `kind` is a
+presentation label, never a dispatch key. The reason it changed: the library has
+one class per backend, and the two backends differ in small ways the library
+already encodes — OpenAI requires a bearer token while llama-swap makes it
+optional, and reasoning-summary requests differ. Selecting the class by `kind`
+puts those differences in the library rather than in RPHelper. What happens when
+an OpenAI server has no credential is `DEC-arch-llm-client-library-9`.
 
-**The chat client is built per call, not held.** `llm_registry.open_chat_client`
-re-reads `api_key_ref`, resolves it **at call time** through
-`resolve_secret` and constructs the client through an **injectable chat-client
-factory** (021 D14). So this is a second call site of the `"$ENV_VAR"` pointer
-pattern, with the same consequence: rotating a key is an environment change plus
-a restart, and an absent variable is `secret_ref_missing` before any network
-call.
+**The library's chat-completions classes are not used.** **Flip condition:** a
+llama-swap engine that does not support the Responses endpoint has to be served.
+That would add a protocol choice per server, which is a new configuration field —
+a schema change, not a gateway tweak.
 
-`_TBD: the streaming call reuses "llm_request_timeout_seconds" — 30 s per httpx
-phase, including the READ between chunks. Whether a slow first token on a large
-context needs a longer read timeout than a connect or a write does is unmeasured
-(021 D10); no requirement states a latency bound, and splitting the one setting
-into per-phase timeouts before anything has been observed would be a guess with
-four numbers instead of one._
+### Base-URL composition stays RPHelper's
+
+**The gateway normalises the administrator's base URL to end in `/v1`**: it
+tolerates a trailing slash and a `/v1` that is already present. The library
+expects `/v1` included and appends the models, responses and embeddings paths
+itself. The tolerance is kept for the same reason as before: an administrator
+types the URL by hand, and a wrong composition presents as `unreachable` against
+a healthy host.
+
+### Errors, and what never leaves a failure
+
+- **Every library failure maps to `llm_unreachable`**, except where the probe's
+  four-value taxonomy applies. One code rather than several because the SPA has
+  one rendering for "the provider did not answer", and the distinctions are not
+  ones the roleplayer can act on differently.
+- **The provider's response body never reaches a log line, an exception message
+  or a `detail`.** The library carries that body on its error; the gateway drops
+  it. This holds the standing rule that no log line, exception message or
+  `detail` carries the credential, the authorization header or a provider body
+  (`deployment.md`'s redaction rule). The HTTP stack underneath the library logs
+  URLs and bodies like any HTTP client, so its logger tree is silenced beside
+  `httpx`'s, by the same rule (`DEC-arch-llm-client-library-10`).
+- **Library tracing is an operator debug switch, and it is privacy-breaking.**
+  When the two library tracing variables are set in the environment
+  (`deployment.md`'s configuration conventions), the library writes full
+  prompts, histories, tool arguments and tool results to files. RPHelper does
+  **not** disable it (user decision): it is **off by default**, and it exists for
+  an operator debugging **on their own instance only**. It **bypasses the logging
+  redaction rule and the privacy audit**, so it must never be set in a shared
+  deployment. Named here so that a trace file containing roleplay text is read
+  as an operator's deliberate act, not as a leak in the code.
+
+### The timeout — one setting, total time per request
+
+**`llm_request_timeout_seconds` stays the single LLM timeout**, and its meaning
+changes with the library: it is now the **total time allowed for one request**,
+and for a streamed compose that means **per tool round**. Its default rises to
+the library's own default, so that a long generation is not cut off mid-reply
+(the number and the accepted consequences are `DEC-arch-llm-client-library-2`).
+
+**Accepted knowingly:** a probe or an embedding against a host that hangs now
+waits up to that whole total before it reports.
+
+**nginx's read timeout is shorter, and both are kept.** A compose round that
+sends no frame for longer than nginx's read timeout is cut by nginx before this
+timeout fires; the total is a ceiling, not an expected duration, and the user
+judges that case extreme. The note and its flip condition sit beside the nginx
+setting in `deployment.md`.
+
+**This closes the streaming-read-timeout `_TBD:` this section carried.** There is
+no per-read timeout to split out, because the library offers only a total.
+**Flip condition:** the library gains a per-read (idle) timeout, **and** probes
+against dead hosts become a real annoyance — then a short idle bound beside a
+long total becomes worth a second setting.
 
 ### The model registry and use-time validation
 
@@ -108,7 +181,7 @@ The request path for every generation is exactly three steps, in this order:
 1. read      sessions.model_server_id / model_name
                                 → the model REFERENCE captured at session creation
 2. validate  llm_registry       → is that reference an enabled model right now?
-3. call      LlmClient          → chat_stream
+3. call      the LLM gateway    → compose (generation) / complete (translation)
 ```
 
 - **Step 1 is a read, not a resolution.** The model reference was resolved once,
@@ -205,9 +278,9 @@ Frames are `data:` lines terminated by a blank line, so the client splits on
 ```
 data: {"event":"accepted","message_id":"7250416938275332095"}                  \n\n
 data: {"event":"token","text":"..."}                                           \n\n
-data: {"event":"tool_start","tool":"memo_search","call_id":"c1","args":{...}}  \n\n
-data: {"event":"tool_result","tool":"memo_search","call_id":"c1","summary":"3 memos"} \n\n
-data: {"event":"tool_fail","tool":"web_search","call_id":"c2","code":"tool_failed"}   \n\n
+data: {"event":"tool_start","tool":"memo_search","call_id":"call_1","args":{...}}  \n\n
+data: {"event":"tool_result","tool":"memo_search","call_id":"call_1","summary":"3 memos"} \n\n
+data: {"event":"tool_fail","tool":"web_search","call_id":"call_2","code":"tool_failed"}   \n\n
 data: {"event":"error","code":"llm_unreachable","message":"...","detail":{}}   \n\n
 data: {"event":"done","message_id":"7250416938275332096"}                      \n\n
 ```
@@ -239,10 +312,13 @@ full**.
   message, `done` the assistant's.
 - **Any id inside an `error` frame's `detail` is a decimal string too** — the
   `detail` object is the JSON error body's shape and carries its rule.
-- **`call_id` is not an id in this sense.** It is the provider's own tool-call
-  identifier, an opaque string carried verbatim: not a snowflake, not minted by
-  `app/ids.py`, and no ordering may be read into it. Named so the two are not
-  confused in either direction.
+- **`call_id` is not an id in this sense.** It is an opaque string that pairs
+  one tool call with its output, and that is its whole job: not a snowflake, not
+  minted by `app/ids.py`, and no ordering may be read into it. **RPHelper mints
+  it, once per call, within the exchange**, because the client library never
+  exposes the provider's own call identifier (the tool-calling loop below; the
+  form is `DEC-arch-llm-client-library-5`). Named so the two kinds of identifier
+  are not confused in either direction.
 - **Frames are constructed in one place, `services/llm/frames.py`**
   (`backend-structure.md`), so the string conversion has one site rather than one
   per emit call. **As built** (019 D2) that module holds **seven immutable frame
@@ -320,11 +396,13 @@ does not try — see the stop section below.
 
 **Realizes:** US-114, US-146
 
-Reasoning models emit a second delta stream beside their content, and the
-protocol carries it with **no new frame type** (021 D4, U2): **provider reasoning
-deltas stream as ordinary `token` frames wrapped in `<think>` … `</think>`.** The
-open tag is emitted before the first reasoning delta of a run, and the close when
-content begins or the round's provider stream ends.
+Reasoning models emit reasoning beside their content, and the protocol carries
+it with **no new frame type** (021 D4, U2): **reasoning streams as ordinary
+`token` frames wrapped in `<think>` … `</think>`.** The client library delivers
+reasoning inline in exactly this convention — the open tag on the first
+reasoning piece of a round, the close before the round's first text piece or at
+the round's end — so the gateway passes the pieces through unchanged, and token
+frames and the persisted row keep the shape they had.
 
 - **No new frame, because the client already renders `token` text.** A
   `reasoning` frame would need its own client path, its own persistence question
@@ -453,9 +531,13 @@ get the persist wrong. The persist itself is **synchronous**, and the source is
 then closed with a **shielded, error-suppressed `aclose()`** — shielded because
 the surrounding task is usually already cancelled and an unshielded close would
 not run; error-suppressed because a failure *while cleaning up after a client
-that has gone* has nobody to report to. That `aclose()` is what unwinds the
-upstream `httpx` request, so a stop does not leave a provider call running for a
-reply nobody will read.
+that has gone* has nobody to report to. **That `aclose()` is the upstream half
+of the stop**: closing the compose source **cancels the task running the
+library's tool loop**, and that cancellation closes the library's in-flight
+provider request. The library swallows no cancellation, so a stop does not leave
+a provider call running for a reply nobody will read. Only this upstream half
+changed with the move to the library; the detection, the persist and everything
+below are as they were.
 
 Why this shape rather than a control route: a stop route needs a name for the
 work being stopped, and the work has no name — the current zone has no id (R11)
@@ -522,7 +604,9 @@ table above: not showing `llm_unreachable` for its own stop.
 **4. Stopping mid-tool-call ends the exchange.** There is no wrap-up pass and no
 final answer, because **the connection the answer would stream over is the one
 that just closed**. The loop does not resume, does not re-enter with a "the tool
-was cancelled" message, and does not produce a closing sentence.
+was cancelled" message, and does not produce a closing sentence. **No tool row is
+written for the cancelled call**: the cancellation propagates through the tool
+wrapper (below) before it records an outcome.
 
 The candidate left behind is whatever prose had already streamed — **which may be
 empty**, if the stop landed during the first tool call before any `token` frame.
@@ -581,36 +665,45 @@ Each control cancels the work its own surface started.
 **Realizes:** ACT-004, FEAT-013, FEAT-014, FEAT-015, FEAT-016
 
 Three tools, and only three (`domain-rules.md` R9): `memo_search`,
-`session_search`, `web_search`. The loop:
+`session_search`, `web_search`.
+
+**The library owns the tool-calling loop; RPHelper owns what happens per tool.**
+The library sends the request, reads the model's calls, invokes the callables it
+was handed, returns their outputs to the model and repeats until the model
+answers. RPHelper hands it one **wrapper** per offered tool, and the wrapper is
+where every RPHelper rule about a tool call lives. The loop:
 
 ```
- assemble context ──► chat_stream ──┬── text delta ──────────────► token frame
-                        ▲           │
-                        │           └── tool call ──► tool_start frame
-                        │                              │
-                        │                     dispatch (scoped read)
-                        │                              │
-                        │                   ┌──────────┴──────────┐
-                        │                success                fail
-                        │                   │                     │
-                        │            tool_result frame      tool_fail frame
-                        │                   │                     │
-                        │            append tool result    append "tool failed"
-                        │            message to the        message to the
-                        │            conversation          conversation
-                        └───────────────────┴─────────────────────┘
-                                   re-enter with the tool output
- ...until the model produces a final answer ──► done frame
+ assemble context ──► gateway.compose ── library tool loop (one task) ─────────┐
+                                           │                                   │
+                          text / <think> piece ──────────────► queue ──► token frame
+                                           │                                   │
+                          model calls a tool ──► RPHelper wrapper              │
+                                                   1. mint call_id             │
+                                                   2. tool_start ──► queue ──► tool_start frame
+                                                   3. dispatch (the tool seam:
+                                                      scoped read, tool row, log)
+                                                   4. tool_result ─► queue ──► tool_result frame
+                                                      or tool_fail ─► queue ──► tool_fail frame
+                                                   5. return the content, or
+                                                      the "tool failed" text
+                                           ◄──────────────┘
+                          the library sends the output back and continues
+ ...until the model produces a final answer ──► the source writes the row ──► done frame
 ```
 
 Rules:
 
-- **A failed tool is a tool *result*, not a stream error.** The loop appends a
-  message telling the model the tool failed, and continues (UC-051, UC-053
-  exception flows; FEAT-010's exception flows). The assistant carries on without
-  it. This is the single most commonly mis-implemented rule in this document, and
-  it is tested by making a tool fail and asserting the exchange still produces
-  an answer.
+- **A failed tool is a tool *result*, not a stream error.** The wrapper returns
+  a message telling the model the tool failed, the library hands that back as the
+  tool's output, and the exchange continues (UC-051, UC-053 exception flows;
+  FEAT-010's exception flows). The assistant carries on without it. This is the
+  single most commonly mis-implemented rule in this document, and it is tested by
+  making a tool fail and asserting the exchange still produces an answer. The
+  rule covers model-side mistakes too — a tool that was not offered, an unknown
+  or empty name, non-object arguments, undeclared argument names — each is a
+  `tool_fail` and the exchange continues. Library 0.2.0 cannot honour those yet;
+  that is a **temporary library limitation, below**, not a change to the rule.
 - **Tool availability is an intersection, not a single switch** (021 D5, U3).
   A tool is offered iff **its resolved switch is on** *and* **an implementation is
   registered under that name** — and `web_search` carries a third condition of its
@@ -657,7 +750,10 @@ Rules:
   `docs/product/` decided: FEAT-010 states "there is no cap on tool iterations,
   the stop is what bounds a runaway loop", and FEAT-014/015/016 each repeat
   "there is no limit on how many times the assistant may call tools before
-  answering". So the loop has no round counter and no `max_iterations`.
+  answering". So RPHelper sets no round cap: the library's loop takes one, and
+  RPHelper passes it as **effectively unbounded**
+  (`DEC-arch-llm-client-library-4`). The stop is still what bounds a runaway
+  loop.
 
   **The rationale survives the abort mechanism intact, and the connection is the
   whole reason no cap is needed.** The objection a cap answered was that an
@@ -676,27 +772,77 @@ Rules:
   destructive. A cap is a loop guard and was never context compaction, which
   remains a separate non-goal (`overview.md`).
 
-### How one round is assembled (021 D11)
+### How one exchange runs (revises 021 D11)
 
-The client yields fragments, not calls, so the loop does the assembling:
+The library assembles each round — joining a call's streamed name and
+arguments, sending the round's calls and outputs back — so RPHelper no longer
+does. What RPHelper owns is the shape of the exchange around it:
 
-- **Tool-call fragments are accumulated by index.** A provider streams a call's
-  name and arguments across several chunks, keyed by position, and the loop joins
-  them; `chat_stream` deliberately does none of this (above), because only the
-  loop knows when a round has ended.
-- **Per round, the assistant message sent back carries its content *without*
-  reasoning, plus the round's calls in index order.** Reasoning is for the
-  roleplayer's screen and the persisted row, not for the next request — sending it
-  back would spend context on the model's own scratch work.
+- **The compose source runs the library's streaming tool loop as one asyncio
+  task.** The library's text callback and the per-tool wrappers both write into
+  **one ordered queue**, and the compose source drains that queue into frames.
+  One queue rather than two channels because the frame order *is* the order
+  things happened in: a `tool_start` must never overtake the text the model
+  streamed before the call.
+- **Each offered tool is handed to the library as a wrapper**, and the wrapper
+  does five things in this order: (1) **mints the call's `call_id`**, because
+  the library never exposes the provider's; (2) emits `tool_start`; (3) runs the
+  existing tool seam's **dispatch**, which keeps the scoped read, the persisted
+  tool row and the logging exactly as they were (`session-stream.md`); (4) emits
+  `tool_result` or `tool_fail`; (5) returns the result content — or the "tool
+  failed" text — to the library as the tool's output. How the wrapper presents
+  itself to the library and why it never raises are
+  `DEC-arch-llm-client-library-6` and `-7`.
+- **The SSE frame protocol, the frame shapes, the persisted tool rows, the one
+  assistant row per exchange and context replay are all unchanged.**
 - **One assistant row per exchange**, holding all streamed token text across every
   round, `<think>` tags included. Not one row per round: the roleplayer settles a
   *candidate*, and a candidate assembled across three tool rounds is still one
-  candidate.
-- **A call with no id from the provider gets the fallback `call_<n>`**, so the
-  `tool` message can be paired with its call. `call_id` remains opaque and
-  unordered (the id rule above).
-- **The provider iterator is always closed with the source**, which is the
-  upstream half of the stop.
+  candidate. The library's own final text is not used for the row
+  (`DEC-arch-llm-client-library-8`).
+- **Context replay of persisted tool pairs works through the library.** The
+  gateway hands it history in which an assistant message carries a tool call and
+  a `tool` message carries its output — the replay shape above — and the library
+  converts that pair into the Responses protocol's call and call-output items.
+- **Reasoning is sent back to the model within one exchange, between tool
+  rounds.** The library carries each round's reasoning to the later rounds of
+  the same call, which is one of the two reasons the Responses protocol was
+  adopted (the gateway section above). This **supersedes** "reasoning is not
+  sent back to the next request". The boundary is the exchange: reasoning is
+  **never persisted as context and never replayed into a later exchange** — the
+  persisted row carries it in `<think>` tags only for the roleplayer's screen,
+  and context assembly strips those tags (the Thinking section above), so replay
+  is unchanged. RPHelper asks for no reasoning options of its own
+  (`DEC-arch-llm-client-library-12`).
+- **Closing the compose source cancels the library task**, which closes the
+  provider request — the upstream half of the stop (the stop section above).
+
+### Temporary library limitation — model-side tool mistakes (0.2.0)
+
+**The rule is unchanged and is the design: a model-side tool mistake is a
+`tool_fail`, and the exchange continues.** That covers a tool that was not
+offered, an unknown or empty tool name, arguments that are not an object, and
+argument names the tool does not declare. **A planner builds to the rule, not to
+the limitation below.**
+
+**What library 0.2.0 does instead, temporarily.** The library rejects those cases
+before any wrapper runs and ends the exchange, so RPHelper cannot yet turn
+them into tool results:
+
+- **Until the library release lands**, these cases surface as a **stream error**
+  (`llm_unreachable`), and the partial text is kept by the harness rule —
+  whatever streamed is persisted whenever no `done` passed through — so nothing
+  the model produced is lost, but the exchange does not continue.
+- **The library is to be updated to return these cases as tool results.** The
+  asks are recorded outside this repository, in
+  `/home/tahorg/projects/llm-client-handover-rphelper-asks.md`, item 1. No
+  release version is fixed yet.
+- **When that release lands**, the gateway relies on it: the cases reach the
+  model as tool results, the wrapper's `tool_fail` path covers them like any
+  other failure, and this limitation entry is closed. No architecture rule
+  changes when it closes, because none changed when it opened.
+
+The mechanism-level record is `DEC-arch-llm-client-library-7`.
 
 ### `web_search` — the provider seam and Google
 
@@ -1089,19 +1235,19 @@ question is now a recorded operational reality:
 
 **Realizes:** FEAT-011, UC-039, UC-040, UC-041
 
-Translation uses the same `LlmClient` and the same resolve→validate→call path as
+Translation uses the same LLM gateway and the same resolve→validate→call path as
 generation, against the session's resolved model, targeting the session's resolved
 **preferred language** (R1's two-level chain).
 
-**The route is not streamed, although it consumes the streaming client.** The two
-facts sit together and are easy to read as a contradiction. A translation is a
-whole-text replacement for a read-only flicker (UC-039), so partial output has no
-use — the flicker either shows the translation or shows the original — and the
-route answers **JSON**. Internally, as built, it **reuses `chat_stream` with no
-tools** and **joins the content deltas**, ignoring reasoning and tool-call deltas
-(023 D2, D8). Reusing the one client rather than adding a non-streaming call is
-what keeps the provider surface at one function; the joining happens in the
-service, so nothing downstream of it knows a stream was involved.
+**The route is not streamed, and neither is the call behind it.** A translation
+is a whole-text replacement for a read-only flicker (UC-039), so partial output
+has no use — the flicker either shows the translation or shows the original — and
+the route answers **JSON**. It calls the gateway's **non-streamed `complete()`**
+with no tools and takes the text it returns. This **supersedes** 023 D2 / D8's
+"reuse the streaming call and join the content deltas": that reuse existed to keep
+the provider surface at one function, and with the library the non-streamed call
+is already there, so there is nothing to keep small. The text may still carry
+`<think>` blocks, which the strip below removes.
 
 The request is **two messages**: one system message instructing a faithful
 translation into the target language and **nothing but the translation** as
@@ -1133,7 +1279,7 @@ something the roleplayer cannot see.
 - On **failure**, `translation_failed` is raised, the flicker falls back to the
   original text with a visible error, and **nothing is cached** (UC-039's exception
   flow). **The mapping is narrow** (023 D5): only a provider failure out of
-  `chat_stream`, **or an empty result after the `<think>` strip**, becomes
+  the gateway's `complete()`, **or an empty result after the `<think>` strip**, becomes
   `translation_failed`. 017's model errors (`no_model_enabled`,
   `model_not_chosen`, `model_not_enabled`) and `secret_ref_missing` **propagate
   under their own codes**, because each of those is a configuration condition the
@@ -1200,3 +1346,47 @@ Two controls because the two cancellations are different mechanisms with
 different guarantees — an `abort()` on a live stream versus a best-effort sample
 before a write — and one control over both would promise the stream's behaviour
 for a request that cannot provide it.
+
+---
+
+## Decision history
+
+All of the 2026-11-08 lines are one architecture revision — every LLM call moves
+to the `llm-client` 0.2.0 library — approved by the user and **not yet
+implemented**; until the plan that builds it lands, the code is the superseded
+side of each line.
+
+- **2026-11-08 — the in-house `httpx` client is superseded by the LLM gateway
+  over `llm-client` 0.2.0.** Was: one OpenAI-compatible `httpx.AsyncClient`
+  (plans 006, 021, 024) with `chat_stream` over chat completions, `embed` and
+  `probe`. Now: one gateway module, the only importer of the library, with
+  `probe` / `embed` / `complete` / `compose`; `httpx` remains for `web_search`
+  only. `DEC-arch-llm-client-library-1`.
+- **2026-11-08 — `llm_servers.kind` is a dispatch key.** Was: one client, `kind`
+  a presentation label and never a dispatch key. Now: `kind` selects the
+  library's Responses client class. `DEC-arch-llm-client-library-1`,
+  `DEC-arch-llm-client-library-9`.
+- **2026-11-08 — the library owns the tool loop (revises "The tool-calling loop"
+  and 021 D11).** Was: RPHelper accumulated tool-call fragments by index and
+  re-entered the provider each round. Now: the library runs the loop as one task;
+  RPHelper's per-tool wrapper mints the call id, emits the tool frames and runs
+  the unchanged seam dispatch. `DEC-arch-llm-client-library-4` .. `-8`.
+- **2026-11-08 — `call_id` is minted by RPHelper.** Was: the provider's own call
+  identifier, with a `call_<n>` fallback when it supplied none. Now: always
+  `call_<n>`, per exchange. `DEC-arch-llm-client-library-5`.
+- **2026-11-08 — reasoning is sent back within one exchange.** Was: "reasoning is
+  not sent back to the next request". Now: the library carries each round's
+  reasoning to later rounds of the same exchange; never persisted as context,
+  never replayed across exchanges. `DEC-arch-llm-client-library-12`.
+- **2026-11-08 — the stop's upstream half.** Was: the source's `aclose()`
+  unwound the `httpx` stream. Now: it cancels the library task, which closes the
+  provider request. `DEC-arch-llm-client-library-8`.
+- **2026-11-08 — translation calls a non-streamed `complete()`.** Was: 023 D2 /
+  D8, reuse `chat_stream` and join the content deltas. Now: the gateway's
+  non-streamed completion. `DEC-arch-llm-client-library-1`.
+- **2026-11-08 — the timeout is total time per request, and the
+  streaming-read-timeout `_TBD:` is closed.** Was: `llm_request_timeout_seconds`
+  applied per `httpx` phase, the read between chunks included, with the
+  per-phase question open (021 D10). Now: the library's total per request — per
+  tool round when streaming — at a raised default.
+  `DEC-arch-llm-client-library-2`.

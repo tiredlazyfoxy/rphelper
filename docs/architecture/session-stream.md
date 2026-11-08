@@ -65,7 +65,8 @@ because a reader counting them will otherwise assume one decision:
   **null on a non-tool row**. **This supersedes plan 021's "tool columns are not
   on the wire"** (021 D7): plan 022 needed them to render a tool block, and the
   derivation lives in `services/messages.py` (022 D3). `tool_payload`, the
-  provider's `call_id` and the raw tool content never leave the backend — the
+  `call_id` (minted by RPHelper per exchange, `llm-and-streaming.md`) and the raw
+  tool content never leave the backend — the
   wire carries a *view* of the payload, not the payload.
 - **The coverage flag**, `search_coverage_incomplete: bool` (plan 024), **false
   for zone rows and plain appends**. It is the degraded-embedding signal ("The
@@ -525,8 +526,10 @@ Four route-level ordering rules:
 Disconnect detection is **one `finally` keyed on "no terminal frame emitted"**,
 covering cancellation, generator close and an `is_disconnected()` poll before
 each write. The persist is synchronous; the source is then closed with a
-shielded, error-suppressed `aclose()`, which unwinds the upstream `httpx`
-request (019 D6).
+shielded, error-suppressed `aclose()` (019 D6). Closing the compose source
+cancels the task running the client library's tool loop, and that cancellation
+closes the library's in-flight `aiohttp` request (`llm-and-streaming.md`'s stop
+section).
 
 ### The stop is a client disconnect and nothing else
 
@@ -597,7 +600,10 @@ derived from the authenticated session.
 A failure — the tool not offered, an unknown name, non-object arguments, or
 `run` raising — produces a `tool_fail` frame carrying `tool_failed` plus the
 fixed model-facing message, and the loop continues (R9: a failed tool does not
-end the discussion). A **cancellation** propagates and writes **no** tool row, so
+end the discussion). That is the rule; client library 0.2.0 cannot yet honour
+it for the first three cases, which until a library release lands end the
+exchange as a stream error instead — a temporary limitation, not the design
+(`llm-and-streaming.md`'s "Temporary library limitation"). A **cancellation** propagates and writes **no** tool row, so
 a stop during `run` ends the exchange — which is what `US-133.AC-1` now states.
 `tool_failed` is a **502** (021 D13) — a dependency's failure, like
 `llm_unreachable` — and in plan 021 it was never an HTTP response, only the

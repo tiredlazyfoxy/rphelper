@@ -315,7 +315,7 @@ surface (`Create`), not FEAT-002's problem.
 |---|---|
 | `id` | PK |
 | `name` | admin-facing label |
-| `kind` | `'llamaswap'` \| `'openai'` |
+| `kind` | `'llamaswap'` \| `'openai'`; **the dispatch key** that selects the LLM gateway's client class (since 2026-11-08, `llm-and-streaming.md`) |
 | `base_url` | OpenAI-compatible endpoint root |
 | `api_key_ref` | **secret pointer**, not a secret — see below |
 | `last_test_at`, `last_test_ok`, `last_test_error` | result of UC-011; registration is unaffected either way |
@@ -330,9 +330,11 @@ export (FEAT-018/UC-061) does not exfiltrate credentials, and a drift report
 **As built by FEAT-004 (plan 006):**
 
 - **`kind` is plain text with no `CHECK`.** The two-member constraint lives at the
-  pydantic boundary. A database `CHECK` would make a third provider a schema
-  change, which contradicts "a label, not a dispatch key"
-  (`llm-and-streaming.md`).
+  pydantic boundary. Plan 006's reason — a database `CHECK` would contradict
+  "a label, not a dispatch key" — is **superseded** (2026-11-08): `kind` is now
+  the dispatch key that selects the LLM gateway's Responses client class
+  (`llm-and-streaming.md`'s "One protocol; `kind` selects the library class").
+  The no-`CHECK` column shape is unchanged.
 - **`last_test_error` stores the typed probe outcome value itself** — never a
   provider message and never prose (`admin-surfaces.md`'s result taxonomy).
 - There is **no `active` column**, and the LLM Servers page carries no active
@@ -743,8 +745,8 @@ this table.
 
 The twelve columns exactly as listed. **`role` and `kind` are plain text with no
 database CHECK** — their value sets are constrained at the pydantic boundary, the
-same choice `llm_servers.kind` makes and for the same reason: a fourth role or a
-fourth kind must not be a schema change. The **one** named CHECK is the state
+same column shape `llm_servers.kind` has: a fourth role or a fourth kind must not
+be a schema change. The **one** named CHECK is the state
 constraint above, `related_to IS NULL OR settled_at IS NULL`. No foreign key
 carries `ON DELETE`. An existing instance picks the table up through **Create**.
 
@@ -754,13 +756,18 @@ plan 021**, which is the writer. As built (021 D7):
 - **One `role='tool'` current-zone row per completed call.**
 - `text` is the tool's **summary**, or the literal `The tool failed.`
 - `tool_payload` is JSON:
-  `{call_id, arguments (the raw string), status: ok|failed, content | code}`.
+  `{call_id, arguments, status: ok|failed, content | code}`. As built by plan 021
+  `call_id` was the provider's own and `arguments` the provider's raw string;
+  **superseded 2026-11-08**: the client library exposes neither, so `call_id` is
+  minted by RPHelper per exchange and `arguments` is a re-serialisation of the
+  parsed arguments (`llm-and-streaming.md`, `DEC-arch-llm-client-library-5`). The
+  payload's keys are unchanged.
 - **A call stopped mid-run writes no row at all** — a cancellation propagates and
   the exchange ends (`US-133.AC-1`).
 - The **wire** carries a *derived view* of the payload, never the payload:
   `tool_name`, `tool_status` and `tool_args` on `MessageResponse`, derived in
-  `services/messages.py` (022 D3). `tool_payload` itself, the provider's
-  `call_id` and the raw tool content stay server-side.
+  `services/messages.py` (022 D3). `tool_payload` itself, the `call_id` and the
+  raw tool content stay server-side.
 
 **A current-zone assistant row may contain `<think>` … `</think>` blocks** —
 persisted reasoning, stored exactly as it streamed (021 D4). They are stripped
@@ -1363,3 +1370,7 @@ rather than of the envelope:
   start date) computed by the client rather than stored. `partner_label` stays
   absent and `session_fts` stays uncreated. A rename moves `updated_at` only.
   Detail in `DEC-arch-session-names-1` and `DEC-arch-session-names-6`.
+- **2026-11-08 — `llm_servers.kind` is the dispatch key** (approved, not yet
+  built). Was: a presentation label, never a dispatch key. Now: it selects the
+  LLM gateway's Responses client class; the column itself is unchanged. Detail in
+  `DEC-arch-llm-client-library-1`.

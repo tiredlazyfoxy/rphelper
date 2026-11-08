@@ -137,17 +137,25 @@ backend/
         my_search.py             # the two LIKE corpora, hydration, run_my_search
                                  #   (plan 029)
       llm/
-        client.py                # one OpenAI-compatible client, httpx.AsyncClient;
-                                 #   chat_stream, embed, the delta values, and the
-                                 #   probe-outcome value set (plans 006, 021, 024)
-        chat.py                  # ChatMessage (four roles), ToolCall,
-                                 #   to_wire_message, the <think> literals and
-                                 #   strip_think (plans 020, 021). Deliberately
+        gateway.py               # THE LLM GATEWAY (revision 2026-11-08, not yet
+                                 #   built): the ONLY module that imports the
+                                 #   llm-client library (`llm`); probe, embed,
+                                 #   complete, compose, and the probe-outcome value
+                                 #   set (llm-and-streaming.md). The httpx
+                                 #   client.py it replaces is removed by the
+                                 #   building plan
+        chat.py                  # STAYS. ChatMessage (four roles), ToolCall, the
+                                 #   <think> literals and strip_think (plans 020,
+                                 #   021). Its to_wire_message emitted the
+                                 #   chat-completions wire form for client.py;
+                                 #   the gateway now hands history to the library,
+                                 #   so that helper's fate is the building plan's.
+                                 #   Deliberately
                                  #   NEUTRAL: the chat-message value type and the
                                  #   role literal live here, not in context.py,
-                                 #   so client.py imports them without importing
-                                 #   the assembler (020 D9)
-        frames.py                # SSE frame types + encoder, the streaming harness
+                                 #   so the gateway imports them without
+                                 #   importing the assembler (020 D9)
+        frames.py                # STAYS. SSE frame types + encoder, the streaming harness
                                  #   (frame_stream, sse_response) and
                                  #   own_connection_persister (plans 019, 021)
       transfer.py                # export only — read-only by design (plan 030)
@@ -407,7 +415,7 @@ The instances, so each is visibly deliberate rather than a leak:
 | `context.py` | read operations from `sessions`, `characters`, `configuration`, `memo_chain` and `messages` | 020 D9 |
 | `compose.py` | `configuration`, `context.py` (the assembler), `messages`, `llm_registry`, `tools`, `llm.*` | 021 D15 |
 | `tools/seam.py` | `sessions`, `messages`, `configuration` types | 021 D15 |
-| `translation.py` | `configuration`, `llm_registry`, `llm.chat`, `llm.client` | 023 |
+| `translation.py` | `configuration`, `llm_registry`, `llm.chat`, `llm.gateway` (was `llm.client` until the 2026-11-08 revision) | 023 |
 | `memos`, `settle`, `messages`, `characters`, `setups` | `embedding.py` / `session_index.py` | 024 D9 |
 | `search/vector.py` | `embedding.py` — the vector arm embeds the query | 025 |
 | `search/memo_search.py` | `memo_chain.py`'s chain clause builder, and the port | 026 D2 |
@@ -957,7 +965,7 @@ class Settings(BaseSettings):
     node_id: int = Field(default=0, validation_alias="RPHELPER_NODE_ID")
     session_cookie_name: str = Field(default="rphelper_session", validation_alias="RPHELPER_SESSION_COOKIE_NAME")
     session_ttl_hours: int = Field(default=720, validation_alias="RPHELPER_SESSION_TTL_HOURS")
-    llm_request_timeout_seconds: float = Field(default=30.0, validation_alias="RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS")  # plan 006
+    llm_request_timeout_seconds: float = Field(default=600.0, validation_alias="RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS")  # plan 006; total per request since 2026-11-08
 
     # logging — sinks and their thresholds (deployment.md owns the posture)
     log_console_level: str  = Field(default="DEBUG",   validation_alias="RPHELPER_LOG_CONSOLE_LEVEL")
@@ -999,6 +1007,15 @@ def get_settings() -> Settings:
   `expires_at` is written, and the expiry is never moved afterwards — no sliding
   expiry, no refresh route ("Session lifetime" above has the reason and the flip
   condition). **`session_cookie_name`** is the only source of the cookie's name.
+- **`llm_request_timeout_seconds` is the single LLM timeout**, and since the
+  2026-11-08 revision it is the client library's **total time per request** —
+  per tool round for a streamed compose — not a per-phase bound. Its default is
+  the library's own, so a long generation is not cut off; the accepted cost is
+  that a probe or embedding against a hanging host waits the whole total
+  (`llm-and-streaming.md`, `DEC-arch-llm-client-library-2`). **The library's two
+  tracing variables are deliberately not `Settings` fields**: the library reads
+  them from the environment itself, RPHelper does not disable them, and they are
+  an operator's privacy-breaking debug switch (`deployment.md`).
 - **The five `log_*` fields** are the only configuration the logging module
   reads. `log_file_path` defaults under `data/` because that is the one writable
   volume in prod; `deployment.md` owns that reasoning and the redaction rule.
@@ -1176,8 +1193,8 @@ The named errors the design requires:
 | `llm_server_not_found` | An admin LLM route addresses a server id that does not exist | nothing | FEAT-004, UC-010..UC-013 |
 | `unknown_table` | A drift-page apply route names a table the registry does not declare | the table name | FEAT-005, UC-015 |
 | `schema_apply_failed` | A `Create` or a `Sync` could not be applied — a driver error, a failed cast, or a `PRAGMA foreign_key_check` violation | the table name and the operation (`create` \| `sync`); **never the driver's message** (below) | FEAT-005, UC-015, US-018.AC-6, US-018.AC-7 |
-| `llm_unreachable` | Provider call fails or times out | provider-side message, no request body | FEAT-010, UC-032 |
-| `tool_failed` | A tool invocation fails — the tool is not offered, the name is unknown, the arguments are not an object, or `run` raises. **Since plan 028 the web-search provider and its adapter raise it directly too**, for every provider failure. **Not surfaced as a stream error** (R9): it becomes a `tool_fail` frame and the loop continues | the tool name — for web search exactly `{"tool": "web_search"}`, and **never chained to the transport exception** (below) | FEAT-014, FEAT-015, FEAT-016, UC-051, UC-053 |
+| `llm_unreachable` | Provider call fails or times out | only RPHelper's own reason values — `{"reason": …}` where one applies (an embedding failure's `auth_failed`, `unreachable` or `no_usable_vector`), otherwise nothing; **never provider text** — no provider message, no response body, no request body (`llm-and-streaming.md`'s errors rule) | FEAT-010, UC-032 |
+| `tool_failed` | A tool invocation fails — the tool is not offered, the name is unknown, the arguments are not an object, or `run` raises. **Since plan 028 the web-search provider and its adapter raise it directly too**, for every provider failure. **Not surfaced as a stream error** (R9): it becomes a `tool_fail` frame and the loop continues. (Client library 0.2.0 cannot yet honour this for the first three cases — a temporary library limitation, not the design: `llm-and-streaming.md`'s "Temporary library limitation") | the tool name — for web search exactly `{"tool": "web_search"}`, and **never chained to the transport exception** (below) | FEAT-014, FEAT-015, FEAT-016, UC-051, UC-053 |
 | `translation_failed` | UC-039's exception flow; nothing is cached | the message id, as a string | FEAT-011 |
 | `zone_empty` | Settle is attempted with nothing in the current zone — **or with a zone holding only `role='tool'` rows** (R11); also the textless retry compose when no non-tool zone row exists | nothing | FEAT-010, UC-083 |
 | `zone_not_empty` | Re-open is attempted while the session's current zone is not empty (R11, US-128) | nothing | FEAT-010, UC-037 |
@@ -1464,10 +1481,12 @@ account ("What `require_user` resolves", above), and answers with
 
 **Realizes:** FEAT-004, UC-011, UC-012, UC-013
 
-There is **one** piece of code that talks to an OpenAI-compatible server to find
-out whether it answers and what it offers — the probe primitive, in
-`services/llm_registry.py`. It resolves the server's `"$ENV_VAR"` pointer, issues
-the request, and returns a typed outcome or raises a typed error
+There is **one** piece of code that asks an OpenAI-compatible server whether it
+answers and what it offers — the probe primitive, in
+`services/llm_registry.py`. It resolves the server's `"$ENV_VAR"` pointer, asks
+the LLM gateway (`llm-and-streaming.md` — since the 2026-11-08 revision the
+gateway, over the `llm-client` library, is the only code that talks to the
+server), and returns a typed outcome or raises a typed error
 (`secret_ref_missing`, `llm_unreachable`).
 
 That one primitive is exposed as **two distinct routes** in `admin_llm.py`:
@@ -1508,10 +1527,13 @@ its ok mapping are in `admin-surfaces.md`.
 
 ### The first async code in the backend, and what it costs
 
-Plan 006 moved **`httpx` from the dev dependency group into the runtime
-dependencies** — the first outbound-HTTP code in `app/` — and the client is
-**`httpx.AsyncClient`**, because FEAT-009/010's streaming goes through the same
-module and a sync client would have to be rewritten.
+**Every LLM call is async, because the client under it is.** Plan 006 introduced
+the first outbound-HTTP code in `app/` as an async `httpx` client, so that
+FEAT-009/010's streaming could go through the same module. **Since the
+2026-11-08 revision that client is superseded by the LLM gateway over the
+`llm-client` library** (`llm-and-streaming.md`), which runs on `aiohttp` and is
+async throughout — so the reasoning, and every consequence below, carries over
+unchanged. `httpx` stays a runtime dependency only for the `web_search` provider.
 
 Consequence: the three registry operations that reach the network are
 `async def`, and so are their three routes, while the SQLAlchemy `Connection`
@@ -1525,13 +1547,16 @@ extended — either by moving the database work off the loop or by adopting an
 async driver.
 
 **The second async consumer goes the other way** (plan 024). The embedding
-writes are **sync services that call `LlmClient.embed` through
+writes are **sync services that call the gateway's `embed` through
 `asyncio.run`** — a sync→async bridge inside a synchronous transaction, rather
 than an async route holding a sync connection. That is legal only because the
 routes those services sit behind are sync `def` and therefore run on threadpool
 threads, **and they must stay so**: making one of them `async def` would run
 `asyncio.run` on a thread that already has a running loop, which raises. There is
-one client and one `embed` call per write operation.
+one `embed` call per write operation. **The bridge is unchanged by the
+2026-11-08 revision, and it is why the gateway builds its library client inside
+the coroutine and closes it there**: each `asyncio.run` is a new event loop, and
+a library HTTP session opened on one loop must not outlive it.
 
 The cost is recorded in `search-and-retrieval.md` and it is real: **the SQLite
 write lock is held across the provider round trip**, so concurrent writers wait.
@@ -1928,3 +1953,13 @@ endorses:
   intent — configuration is never written through the session resource — still
   holds. Every session payload carries `name`. Detail and the rejected dedicated
   sub-route in `DEC-arch-session-names-2`.
+- **2026-11-08 — the `httpx` LLM client is superseded by the LLM gateway over
+  `llm-client` 0.2.0** (approved, not yet built). Was: `services/llm/client.py`,
+  an `httpx.AsyncClient`, the first outbound-HTTP and async code. Now: one gateway
+  module, `services/llm/gateway.py`, the only importer of the library; the async/sync
+  postures and the embed bridge are unchanged; `httpx` stays for `web_search`
+  only. `DEC-arch-llm-client-library-1`.
+- **2026-11-08 — `llm_request_timeout_seconds` is total time per request.** Was:
+  default 30, applied per `httpx` phase including each read. Now: the library's
+  total per request (per tool round when streaming), default raised to the
+  library's. `DEC-arch-llm-client-library-2`.

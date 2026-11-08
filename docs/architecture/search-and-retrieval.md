@@ -664,8 +664,9 @@ a write that changes no indexed text has nothing to index.
 
 **A fan-out sends one embed request carrying all N texts**, not N requests. One
 round trip rather than N is the difference between a persona edit on a long
-history being slow and being unusable, and the client's `embed` already takes a
-list of texts (`LlmClient.embed`).
+history being slow and being unusable, and the LLM gateway's `embed` takes a
+list of texts (`llm-and-streaming.md`; since 2026-11-08 every embed goes through
+the gateway, which replaced the earlier client).
 
 **Flip condition — recorded so this is one decision away, not a redesign.** If
 persona edits become slow enough to be disruptive, the fallback is

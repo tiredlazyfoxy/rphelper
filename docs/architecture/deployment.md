@@ -180,6 +180,12 @@ way to reach the API without passing the directives below.
    resolved at build time — a consequence of the uv packaging decision
    (`overview.md`): the lock is what makes the image and a developer machine run
    the same tree. Forward-looking; no feature has built an image yet.
+   **The backend has a git dependency** — the `llm-client` library, pinned to a
+   tag of its GitHub repository (`llm-and-streaming.md`, 2026-11-08). The lock
+   pins its revision, but `uv sync` still fetches it from the repository, so the
+   stage that installs the backend **needs `git` and network access to
+   github.com**. A build environment without either fails at dependency
+   installation, not at runtime.
 
 Two stages so Node and the frontend's `node_modules` never reach the runtime
 image.
@@ -461,6 +467,17 @@ location /api/ {
 | `proxy_cache off` | an event stream must never be cached |
 | `proxy_read_timeout 300s` | a long generation with several tool rounds can idle between frames for longer than the 60s default |
 
+**`proxy_read_timeout 300s` is shorter than the LLM timeout, and both are kept
+(user decision, 2026-11-08).** Since the move to the `llm-client` library the LLM
+timeout is a total per request — per tool round for a compose — at 600 s
+(`llm-and-streaming.md`'s timeout section). nginx's read timeout is measured
+between frames, so a compose round that sends **no frame for over 300 s** is cut
+by nginx before the library's 600 s fires. The user judges that an extreme case
+and not relevant in practice: the 600 s is a **ceiling, not an expected
+duration**, and a round that streams tokens resets nginx's clock with every
+frame. **Flip condition:** observed cuts of legitimately slow rounds — then the
+two timeouts are revisited together.
+
 ### Gaps in the sibling project that RPHelper closes
 
 Each of the following is a **deliberate deviation** from BookWriter, with its
@@ -588,6 +605,17 @@ requesting an asset bundle that no longer exists after a deploy. `no-cache`
   `RPHELPER_SEARCH_CSE_ID`: that change breaks nothing loudly, it **silently
   unconfigures web search** on every instance that was working, and the symptom
   is a tool quietly no longer being offered.
+- **LLM-library tracing takes two environment variables, `LLM_TRACE` and
+  `LLM_TRACE_FOLDER`, and both must stay unset in any shared deployment**
+  (2026-11-08, user decision). They are read by the `llm-client` library itself,
+  not by `Settings`. When both are set, the library writes **full prompts,
+  histories, tool arguments and tool results** to files in that folder. RPHelper
+  does not disable this: it is an **operator's debug switch, off by default, for
+  debugging on their own instance only**. It is **privacy-breaking by design** —
+  it bypasses the redaction rule below and the privacy audit, and the files it
+  writes hold exactly the roleplayer material that rule forbids in a log
+  (`llm-and-streaming.md`). The prefixless names are the library's, not a second
+  exception to the `RPHELPER_` convention.
 
 ---
 
@@ -869,6 +897,14 @@ path.
 ---
 
 ## Decision history
+
+### 2026-11-08 — LLM calls move to the `llm-client` library
+
+Two deployment consequences, both recorded above: the image build needs `git`
+and network access to github.com for the backend's git dependency, and the
+library's `LLM_TRACE` / `LLM_TRACE_FOLDER` variables are an operator-only,
+privacy-breaking debug switch that must stay unset in a shared deployment.
+`DEC-arch-llm-client-library-1`.
 
 ### 2026-10-07 — dev serves the app at `/`, mirroring prod
 

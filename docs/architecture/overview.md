@@ -437,6 +437,23 @@ while the console still looks right. Two sinks (console `DEBUG`, rotating file
 redaction rule that FEAT-019 imposes at **every** level: full statement, flip
 condition and the forbidden/allowed lists in `deployment.md`.
 
+**`llm-client` 0.2.0 for every LLM call — RPHelper has no HTTP code of its own
+for LLM providers** (architecture revision, 2026-11-08; not yet built). A shared
+in-house library (github.com/Iezious/PythonLLMClient), pinned as a runtime
+dependency to its `v0.2.0` tag and running on `aiohttp`, sits behind **one
+gateway module** that is its only importer. Two reasons: it is **one maintained
+client shared with other projects**, and it **already implements the OpenAI
+Responses protocol**, which RPHelper needs — OpenAI's reasoning models refuse
+function tools on the chat-completions endpoint, and only the Responses protocol
+carries reasoning between tool rounds. Rejected: keeping RPHelper's own `httpx`
+client and adding the protocol to it (a second implementation to maintain), and a
+local path dependency (it breaks the container build and every other machine).
+**`httpx` stays a runtime dependency for the `web_search` provider alone**, which
+is not an LLM call. The gateway's contract, the per-kind client choice and its
+flip condition are in `llm-and-streaming.md`; the pin and rejected alternatives
+are `DEC-arch-llm-client-library-1`. A git dependency also means the image build
+needs `git` and network access to github.com (`deployment.md`).
+
 **`web_search`: Google Custom Search behind a provider seam** (plan 028). The
 deferral this entry used to record is **closed**. A provider protocol in
 `services/web_search/` with **one** implementation — the Google Custom Search
