@@ -16,9 +16,9 @@ Bindings come from `status.md` `## Skeleton` -> **Step 002 — frozen interface*
 - `async translate_message(engine, generator, user_id, message_id, timeout_seconds,
   client_factory, is_disconnected) -> TranslationResult` — **the generator is the second
   positional parameter**, and this file builds its own `SnowflakeGenerator(node_id=0)`.
-- Upstream: `ChatMessage(role, content, ...)`, `ChatDelta(content, reasoning, tool_calls)`,
-  `ChatClientFactory = Callable[[base_url, api_key, timeout], ChatClientLike]`,
-  `LlmUnreachableError` from **`app.errors`**, `assemble_context(connection, user_id,
+- Upstream: `ChatMessage(role, content, ...)`, `ChatClientLike.complete(model, messages) -> str`
+  and `ChatClientFactory = Callable[[kind, base_url, api_key, timeout], ChatClientLike]` (035
+  step 004), `LlmUnreachableError` from **`app.errors`**, `assemble_context(connection, user_id,
   session_id)`.
 
 Seeding follows feature 023's **Test conventions**: a file-local `engine` fixture applies the
@@ -26,18 +26,27 @@ registry with `schema.metadata.create_all`, raw-inserts two users (isolation), a
 session each, the registry rows (`llm_servers` + `models`, per 017's conventions) and USER_A's
 stream (two settled partner rows, a settled turn, a settled decision, a row buried under the
 turn, a zone row) plus one settled partner row of USER_B. Async service code is driven with
-`asyncio.run(...)`, bounded by `asyncio.wait_for`. The provider fake is file-local: it yields
-scripted `ChatDelta`s or raises, records each call's model name, messages and tools and whether
-its iterator was closed, runs a per-test hook on first entry (DoD-13 / 14 / 18) and is built by a
-file-local factory recording its `(base_url, api_key, timeout)`. **No fixture is added to
-`conftest.py`.** Each test name ends `__S023_002_DoD<n>`.
+`asyncio.run(...)`, bounded by `asyncio.wait_for`. The provider fake is file-local (its shape is
+described below), runs a per-test hook on first entry (DoD-13 / 14 / 18) and is built by a
+file-local factory. **No fixture is added to `conftest.py`.** Each test name ends
+`__S023_002_DoD<n>`.
+
+Amended by feature 035 step 004 (`docs/plans/035.llm-client-gateway/004.callers-on-gateway.md`,
+DoD-10..DoD-12, DEC-035-1, DEC-035-6): translation obtains its text from the client's non-streamed
+`complete(model, messages)` instead of joining stream deltas. The provider fake is therefore
+gateway-shaped: `complete` returns the joined text pieces of its script (or raises the scripted
+exception), records each call's model and messages, runs the per-test hook on first entry and
+records `complete-returned` into the shared ordered list; its `compose` must never be called. The
+factory records `(kind, base_url, api_key, timeout)`. The 023 clauses about reasoning deltas and
+closing the stream iterator no longer describe anything (`complete` has neither); their tests now
+assert the 035 equivalent. Tests that also cover a 035 step 004 clause carry `__S035_004_DoD<n>`.
 """
 
 from __future__ import annotations
 
 import ast
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
@@ -64,7 +73,7 @@ from app.services import context as context_module
 from app.services import translation as translation_module
 from app.services.context import assemble_context
 from app.services.llm.chat import ChatMessage
-from app.services.llm.client import ChatDelta
+from app.services.llm.gateway import ComposeText, ComposeTools
 from app.services.translation import (
     FALLBACK_TARGET_LANGUAGE,
     TranslationResult,
@@ -151,8 +160,7 @@ EARLIER_TEXT = "Earlier"
 EDITED_TEXT = "She waits by the pier instead."
 
 #: Events recorded into the one ordered list shared by the fake and the probe (DoD-12).
-DELTA_EVENT = "delta"
-EXHAUSTED_EVENT = "stream-exhausted"
+EXHAUSTED_EVENT = "complete-returned"
 PROBE_EVENT = "probe"
 
 
@@ -490,75 +498,26 @@ def generator() -> SnowflakeGenerator:
 
 # --- the provider fake, its factory and the disconnect probe --------------------------------
 
-#: One scripted stream: deltas in order, optionally ending in an exception to raise.
-Script = Sequence[ChatDelta | BaseException]
+#: One scripted answer: text pieces joined in order, or an exception to raise instead.
+Script = Sequence[str | BaseException]
 
 
 class ChatCall:
-    """What one `chat_stream` call received, and what became of its iterator."""
+    """What one `complete` call received."""
 
-    def __init__(self, model: str, messages: list[ChatMessage], tools: list[Mapping[str, object]]) -> None:
+    def __init__(self, model: str, messages: list[ChatMessage]) -> None:
         self.model = model
         self.messages = messages
-        self.tools = tools
-        self.closed = False
-        self.exhausted = False
-
-
-class FakeStream:
-    """The object `chat_stream` returns: an async iterator with an explicit `aclose`.
-
-    `002.context.md` ("The model call") requires the iterator always to be closed, with
-    `contextlib.aclosing` or an `aclose()` in a `finally`. Recording `aclose` here makes that
-    observable even on the path where the stream raised (DoD-7), where a generator's own
-    `GeneratorExit` would never fire.
-    """
-
-    def __init__(
-        self,
-        call: ChatCall,
-        script: Script,
-        order: list[str],
-        hook: Callable[[], None] | None,
-    ) -> None:
-        self._call = call
-        self._script = list(script)
-        self._order = order
-        self._hook = hook
-        self._inner = self._iterate()
-
-    def __aiter__(self) -> FakeStream:
-        return self
-
-    async def __anext__(self) -> ChatDelta:
-        return await self._inner.__anext__()
-
-    async def aclose(self) -> None:
-        self._call.closed = True
-        await self._inner.aclose()
-
-    async def _iterate(self) -> AsyncIterator[ChatDelta]:
-        try:
-            if self._hook is not None:
-                self._hook()
-            for item in self._script:
-                if isinstance(item, BaseException):
-                    raise item
-                await asyncio.sleep(0)
-                self._order.append(DELTA_EVENT)
-                yield item
-            self._call.exhausted = True
-            self._order.append(EXHAUSTED_EVENT)
-        except GeneratorExit:
-            self._call.closed = True
-            raise
 
 
 class FakeChatClient:
-    """Replays one scripted stream per `chat_stream` call; records every call.
+    """A gateway-shaped chat client (DEC-035-6) whose `complete` answers from a script.
 
-    `hook`, when given, runs on first entry of the **first** stream, before any delta — the seam
-    DoD-13, DoD-14 and DoD-18 use to touch the database while the model call is in flight.
+    `complete` records the call, runs `hook` on the **first** call before answering (the seam
+    DoD-13, DoD-14 and DoD-18 use to touch the database while the model call is in flight), raises
+    the first scripted exception if there is one, and otherwise records `complete-returned` into
+    the shared ordered list and returns the joined text pieces. `compose` is never expected here:
+    a translation is a non-streamed call.
     """
 
     def __init__(
@@ -572,40 +531,49 @@ class FakeChatClient:
         self.hook = hook
         self.order: list[str] = order if order is not None else []
         self.calls: list[ChatCall] = []
-        self.streams: list[FakeStream] = []
+        self.compose_calls = 0
 
-    def chat_stream(
+    async def complete(self, model: str, messages: Sequence[ChatMessage]) -> str:
+        first = not self.calls
+        self.calls.append(ChatCall(model, list(messages)))
+        if first and self.hook is not None:
+            self.hook()
+        await asyncio.sleep(0)
+        pieces: list[str] = []
+        for item in self.script:
+            if isinstance(item, BaseException):
+                raise item
+            pieces.append(item)
+        self.order.append(EXHAUSTED_EVENT)
+        return "".join(pieces)
+
+    async def compose[E](
         self,
         model: str,
         messages: Sequence[ChatMessage],
-        tools: Sequence[Mapping[str, object]],
-    ) -> FakeStream:
-        call = ChatCall(model, list(messages), [dict(tool) for tool in tools])
-        hook = self.hook if not self.calls else None
-        self.calls.append(call)
-        stream = FakeStream(call, self.script, self.order, hook)
-        self.streams.append(stream)
-        return stream
+        tools: ComposeTools[E],
+    ) -> AsyncGenerator[ComposeText | E, None]:
+        self.compose_calls += 1
+        raise AssertionError("a translation never calls `compose`")
+        yield ComposeText("unreachable")  # makes this an async generator, like the protocol's
 
 
 class FakeFactory:
-    """A `ChatClientFactory` returning one fake client and recording its arguments."""
+    """A `ChatClientFactory` returning one fake client and recording its four arguments
+    `(kind, base_url, api_key, timeout_seconds)` (DEC-035-1)."""
 
     def __init__(self, client: FakeChatClient) -> None:
         self.client = client
-        self.calls: list[tuple[str, str | None, float]] = []
+        self.calls: list[tuple[str, str, str | None, float]] = []
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
-        self.calls.append((base_url, api_key, timeout_seconds))
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
+        self.calls.append((kind, base_url, api_key, timeout_seconds))
         return self.client
 
 
-def _content(text: str) -> ChatDelta:
-    return ChatDelta(content=text)
-
-
-def _reasoning(text: str) -> ChatDelta:
-    return ChatDelta(reasoning=text)
+def _content(text: str) -> str:
+    """One scripted text piece of the model's answer."""
+    return text
 
 
 def _probe(order: list[str], *, disconnected: bool = False) -> Callable[[], Awaitable[bool]]:
@@ -619,7 +587,7 @@ def _probe(order: list[str], *, disconnected: bool = False) -> Callable[[], Awai
 
 
 def _two_deltas(order: list[str] | None = None, hook: Callable[[], None] | None = None) -> FakeChatClient:
-    """DoD-1's script: content "При" then "вет"."""
+    """DoD-1's script: the pieces "При" then "вет", so `complete` answers "Привет"."""
     return FakeChatClient([_content(DELTA_ONE), _content(DELTA_TWO)], hook=hook, order=order)
 
 
@@ -741,24 +709,25 @@ def test_the_stored_row_is_readable_only_by_its_owner__S023_002_DoD1(
     assert _cached(engine, USER_A, PARTNER_A2, "Russian") is None
 
 
-def test_the_model_is_called_with_the_captured_name_and_no_tools__S023_002_DoD1(
+def test_a_miss_calls_complete_once_with_the_captured_name_and_never_compose__S023_002_DoD1__S035_004_DoD10(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-1 / D2 — one call, with the session's captured model name and an empty tools list."""
+    """DoD-1 / D2 / 035 DoD-10 — a miss makes one `complete` call with the session's captured
+    model name; the streamed `compose` is never used."""
     client = _two_deltas()
 
     _translate(engine, generator, FakeFactory(client))
 
     assert len(client.calls) == 1
     assert client.calls[0].model == MODEL_NAME
-    assert client.calls[0].tools == []
+    assert client.compose_calls == 0
 
 
-def test_exactly_two_messages_a_system_then_the_row_text__S023_002_DoD1(
+def test_exactly_two_messages_a_system_then_the_row_text__S023_002_DoD1__S035_004_DoD10(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-1 / D8 — exactly two messages: a `system` one naming the target language, then a
-    `user` one whose content is the row's text verbatim."""
+    """DoD-1 / D8 / 035 DoD-10 — `complete` receives exactly two messages: a `system` instruction
+    naming the target language, then a `user` one whose content is the row's text verbatim."""
     client = _two_deltas()
 
     _translate(engine, generator, FakeFactory(client))
@@ -771,16 +740,16 @@ def test_exactly_two_messages_a_system_then_the_row_text__S023_002_DoD1(
     assert messages[1].content == PARTNER_A_TEXT
 
 
-def test_the_factory_receives_the_servers_base_url_and_the_given_timeout__S023_002_DoD1(
+def test_the_factory_receives_the_kind_the_base_url_and_the_given_timeout__S023_002_DoD1__S035_004_DoD10(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-1 — the chat-client factory is called once, with the server's base URL and the
-    timeout the caller passed in."""
+    """DoD-1 / 035 DoD-10 (DEC-035-1) — the chat-client factory is called once, with the server's
+    `kind` first, then its base URL, its (NULL-ref) key and the timeout the caller passed in."""
     factory = FakeFactory(_two_deltas())
 
     _translate(engine, generator, factory, timeout=TIMEOUT)
 
-    assert [(call[0], call[2]) for call in factory.calls] == [(BASE_URL, TIMEOUT)]
+    assert factory.calls == [("llamaswap", BASE_URL, None, TIMEOUT)]
 
 
 # ====================================================================== DoD-2
@@ -945,16 +914,18 @@ def test_an_ineligible_row_is_indistinguishable_from_a_missing_one__S023_002_DoD
 @pytest.mark.parametrize(
     "script",
     [
-        pytest.param([LlmUnreachableError("the server is down")], id="raises-before-any-delta"),
-        pytest.param([_content(DELTA_ONE), LlmUnreachableError("the server is down")], id="raises-mid-stream"),
+        pytest.param([LlmUnreachableError("the server is down")], id="unreachable"),
+        pytest.param(
+            [LlmUnreachableError("the server refused the key", {"reason": "auth_failed"})], id="auth-failed"
+        ),
     ],
 )
-def test_an_unreachable_provider_fails_with_translation_failed__S023_002_DoD7(
+def test_an_unreachable_provider_fails_with_translation_failed__S023_002_DoD7__S035_004_DoD11(
     engine: Engine, generator: SnowflakeGenerator, script: Script
 ) -> None:
-    """DoD-7 / D5 — `LlmUnreachableError` before any delta and after one both become
-    `TranslationFailedError` with code `translation_failed` and the message id in `detail`; no
-    row is written and the fake's iterator was closed."""
+    """DoD-7 / D5 / 035 DoD-11 — `complete` raising `llm_unreachable` (whatever its reason) becomes
+    `TranslationFailedError` with code `translation_failed` and the message id in `detail`;
+    `complete` was called once and nothing is cached."""
     client = FakeChatClient(script)
 
     with pytest.raises(TranslationFailedError) as raised:
@@ -964,14 +935,13 @@ def test_an_unreachable_provider_fails_with_translation_failed__S023_002_DoD7(
     assert dict(raised.value.detail) == {"message_id": str(PARTNER_A)}
     assert _translation_rows(engine) == []
     assert len(client.calls) == 1
-    assert client.calls[0].closed is True
 
 
 # ====================================================================== DoD-8
 # US-048.AC-2 — a failure memoises nothing.
 
 
-def test_a_call_after_a_failure_tries_the_model_again__S023_002_DoD8(
+def test_a_call_after_a_failure_tries_the_model_again__S023_002_DoD8__S035_004_DoD11(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
     """DoD-8 / US-048.AC-2 — after DoD-7's failure a succeeding fake is called and its result is
@@ -995,16 +965,18 @@ def test_a_call_after_a_failure_tries_the_model_again__S023_002_DoD8(
     "script",
     [
         pytest.param([], id="no-content-at-all"),
-        pytest.param([_reasoning("plan"), _reasoning(" more")], id="only-reasoning-deltas"),
+        pytest.param([_content("")], id="an-empty-string"),
         pytest.param([_content("   \n")], id="whitespace-only-content"),
         pytest.param([_content("<think>only reasoning</think>")], id="only-a-think-block"),
+        pytest.param([_content("<think>plan</think>\n\n  ")], id="a-think-block-then-whitespace"),
     ],
 )
-def test_an_empty_result_fails_and_caches_nothing__S023_002_DoD9(
+def test_an_empty_result_fails_and_caches_nothing__S023_002_DoD9__S035_004_DoD11(
     engine: Engine, generator: SnowflakeGenerator, script: Script
 ) -> None:
-    """DoD-9 / D5 / D10 — nothing, only reasoning, whitespace only and a bare `<think>` block
-    each raise `TranslationFailedError` and write no row."""
+    """DoD-9 / D5 / D10 / 035 DoD-11 — `complete` returning nothing, an empty string, whitespace
+    only, a bare `<think>` block, or a `<think>` block followed by whitespace — every result that is
+    empty after the strip — raises `TranslationFailedError` and writes no row."""
     client = FakeChatClient(script)
 
     with pytest.raises(TranslationFailedError) as raised:
@@ -1019,17 +991,18 @@ def test_an_empty_result_fails_and_caches_nothing__S023_002_DoD9(
 # D2 / D10 — reasoning is ignored and a `<think>` block is stripped.
 
 
-def test_reasoning_is_ignored_and_a_think_block_is_stripped__S023_002_DoD10(
+def test_a_think_block_is_stripped_and_the_rest_cached_and_returned__S023_002_DoD10__S035_004_DoD10(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-10 — a reasoning delta "plan", then content "<think>x</think>\\n\\n", then "Hola":
-    "Hola" is returned and stored."""
-    client = FakeChatClient([_reasoning("plan"), _content("<think>x</think>\n\n"), _content("Hola")])
+    """DoD-10 / 035 DoD-10 / UC-039 / US-045 — `complete` answers "<think>x</think>\\n\\nHola":
+    the `<think>` block is stripped, and "Hola" is returned and cached."""
+    client = FakeChatClient([_content("<think>x</think>\n\n"), _content("Hola")])
 
     result = _translate(engine, generator, FakeFactory(client))
 
     assert (result.text, result.cached) == ("Hola", False)
     assert _pairs(engine) == [(PARTNER_A, "Russian", "Hola")]
+    assert _cached(engine, USER_A, PARTNER_A, "Russian") == "Hola"
 
 
 # ====================================================================== DoD-11
@@ -1061,20 +1034,22 @@ def _break_secret_ref_missing(engine: Engine) -> None:
         pytest.param(_break_secret_ref_missing, SecretRefError, id="unset-key-variable"),
     ],
 )
-def test_the_upstream_refusals_propagate_unchanged__S023_002_DoD11(
+def test_the_upstream_refusals_propagate_unchanged__S023_002_DoD11__S035_004_DoD11(
     engine: Engine,
     generator: SnowflakeGenerator,
     break_it: Callable[[Engine], None],
     error: type[Exception],
 ) -> None:
-    """DoD-11 / D5 / R4 — 017's three model refusals and 021's `secret_ref_missing` reach the
-    caller as themselves; the client is never called and no row is written."""
+    """DoD-11 / D5 / R4 / 035 DoD-11 — 017's three model refusals and 021's `secret_ref_missing`
+    reach the caller as themselves (not as `translation_failed`); `complete` is never called and
+    no row is written."""
     break_it(engine)
     client = _two_deltas()
 
-    with pytest.raises(error):
+    with pytest.raises(error) as raised:
         _translate(engine, generator, FakeFactory(client))
 
+    assert not isinstance(raised.value, TranslationFailedError)
     assert client.calls == []
     assert _translation_rows(engine) == []
 
@@ -1091,7 +1066,7 @@ def test_a_disabled_captured_model_names_the_session_level__S023_002_DoD11(
     assert dict(raised.value.detail)["level"] == "session"
 
 
-def test_an_unset_key_variable_refuses_with_secret_ref_missing__S023_002_DoD11(
+def test_an_unset_key_variable_refuses_with_secret_ref_missing__S023_002_DoD11__S035_004_DoD11(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
     """DoD-11 — the server's `api_key_ref` naming an unset variable refuses with that code."""
@@ -1108,11 +1083,11 @@ def test_an_unset_key_variable_refuses_with_secret_ref_missing__S023_002_DoD11(
 # US-133.AC-2 (best-effort half) / D4 — the disconnected-before-write path only.
 
 
-def test_a_disconnect_before_the_write_skips_the_row_but_returns_the_text__S023_002_DoD12(
+def test_a_disconnect_before_the_write_skips_the_row_but_returns_the_text__S023_002_DoD12__S035_004_DoD12(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-12 / D4 — the probe reports a disconnect: the produced text still comes back with
-    cached false, and no row is written."""
+    """DoD-12 / D4 / 035 DoD-12 / US-133.AC-2 — the probe reports a disconnect by the time the
+    result arrives: the produced text still comes back with cached false, and nothing is cached."""
     order: list[str] = []
     client = _two_deltas(order)
 
@@ -1129,11 +1104,11 @@ def test_a_disconnect_before_the_write_skips_the_row_but_returns_the_text__S023_
     assert _translation_rows(engine) == []
 
 
-def test_the_probe_is_awaited_once_after_the_stream_finished__S023_002_DoD12(
+def test_the_probe_is_awaited_once_after_complete_returned__S023_002_DoD12__S035_004_DoD12(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-12 / D4 — the fake and the probe record into one ordered list: the probe is awaited
-    exactly once, and after the fake's iterator finished."""
+    """DoD-12 / D4 / 035 DoD-12 — the fake and the probe record into one ordered list: the probe is
+    awaited exactly once, and after `complete` returned its result."""
     order: list[str] = []
     client = _two_deltas(order)
 
@@ -1144,7 +1119,7 @@ def test_the_probe_is_awaited_once_after_the_stream_finished__S023_002_DoD12(
     assert order.index(PROBE_EVENT) > order.index(EXHAUSTED_EVENT)
 
 
-def test_a_probe_reporting_no_disconnect_lets_the_row_land__S023_002_DoD12(
+def test_a_probe_reporting_no_disconnect_lets_the_row_land__S023_002_DoD12__S035_004_DoD12(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
     """DoD-12 — the same path with a probe reporting no disconnect writes the row (DoD-1)."""
@@ -1269,6 +1244,18 @@ def test_the_translation_service_imports_no_fastapi__S023_002_DoD16() -> None:
         module
         for module in _imported_modules(translation_module)
         if module == "fastapi" or module.startswith("fastapi.")
+    ]
+    assert offenders == []
+
+
+def test_the_translation_service_imports_neither_the_old_client_nor_the_library__S035_004_DoD10() -> None:
+    """035 DoD-10 (the text comes from the client's `complete`, not joined stream deltas;
+    `context.md`: the gateway is the only module that imports the library) — `services/translation.py`
+    imports neither `app.services.llm.client` nor the `llm` package."""
+    offenders = [
+        module
+        for module in _imported_modules(translation_module)
+        if module in ("app.services.llm.client", "llm") or module.startswith("llm.")
     ]
     assert offenders == []
 
@@ -1406,7 +1393,7 @@ def test_no_log_record_carries_the_source_or_translated_text__S023_002_DoD17(
 def test_another_writer_can_commit_during_the_model_call__S023_002_DoD18(
     engine: Engine, generator: SnowflakeGenerator
 ) -> None:
-    """DoD-18 / D8 — inside the fake's `chat_stream`, a write transaction on a separate
+    """DoD-18 / D8 — inside the fake's `complete`, a write transaction on a separate
     connection (an insert into an unrelated table) commits without a "database is locked"
     error, and the translation itself still completes."""
     failures: list[BaseException] = []

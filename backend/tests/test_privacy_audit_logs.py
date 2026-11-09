@@ -89,7 +89,7 @@ from sqlalchemy import Engine
 from app.config import Settings
 from app.errors import LlmUnreachableError
 from app.logging import configure_logging
-from app.services.llm.client import ProbeOutcome, ProbeResult
+from app.services.llm.gateway import ProbeOutcome, ProbeResult
 from app.services.llm_registry import LlmClientFactory
 from tests.privacy_audit_support import (
     ADMIN_SERVERS_PATH,

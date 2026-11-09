@@ -43,7 +43,7 @@ from app.ids import SnowflakeGenerator
 from app.models.ids import SnowflakeIn
 from app.models.translation import TranslationResponse
 from app.routers.bootstrap import get_id_generator
-from app.services.llm.client import LlmClient
+from app.services.llm.gateway import LlmGateway
 from app.services.llm_registry import ChatClientFactory
 from app.services.translation import translate_message
 
@@ -54,12 +54,12 @@ router = APIRouter(
 
 
 def get_translation_chat_client_factory() -> ChatClientFactory:
-    """The translate route's chat-client factory dependency: the real `LlmClient` class (D12).
+    """The translate route's chat-client factory dependency: the `LlmGateway` class (D12, DEC-035-1).
 
     Named distinctly from `app.routers.stream.get_chat_client_factory` on purpose — tests
     override **this** name with `dependency_overrides`, and `routers/stream.py` is untouched.
     """
-    return LlmClient
+    return LlmGateway
 
 
 @router.post("/api/messages/{message_id}/translation", status_code=200)

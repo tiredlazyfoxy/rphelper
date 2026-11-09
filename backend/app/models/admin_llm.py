@@ -26,7 +26,7 @@ pointer = replace.
 means "none". `DesignateEmbeddingModelRequest`: one non-empty `model_name`.
 
 Undeclared request fields are ignored. This module imports neither `fastapi` nor anything
-from `app.routers`; it imports `ProbeOutcome` from the LLM client module as a type only.
+from `app.routers`; it imports `ProbeOutcome` from the LLM gateway module as a type only (DEC-035-13).
 """
 
 from datetime import datetime
@@ -36,7 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.ids import SnowflakeOut
 from app.models.secret_ref import SecretRefIn
-from app.services.llm.client import ProbeOutcome
+from app.services.llm.gateway import ProbeOutcome
 
 #: The two provider kinds (`context.md` D5) — a presentation label, never a dispatch key.
 LlmServerKind = Literal["llamaswap", "openai"]

@@ -11,11 +11,10 @@ helpers keep the services' posture — a Core `Connection` first, plain argument
    falling back to `FALLBACK_TARGET_LANGUAGE` (D3); then the cache. A hit returns
    `cached=True` here, with no model resolution and no call. On a miss, `resolve_model_for_use`
    and `open_chat_client`, whose errors propagate **unchanged** (D5).
-2. **Call** — 021's `chat_stream` with the resolved model's name, exactly two `ChatMessage`s
-   and **no tools** (D2). Content deltas are joined in arrival order; `reasoning` and
-   `tool_calls` are ignored; the iterator is always closed. The joined text goes through 021
+2. **Call** — the chat client's non-streamed `complete` (DEC-035-6) with the resolved model's
+   name, exactly two `ChatMessage`s and **no tools** (D2). The returned text goes through 021
    D4's `strip_think` (D10). Only two outcomes become `TranslationFailedError`: an
-   `LlmUnreachableError` from `chat_stream`, and a result that is empty after stripping (D5).
+   `LlmUnreachableError` from `complete`, and a result that is empty after stripping (D5).
 3. **Write** — the injected disconnect probe is awaited **once**, immediately before the write
    (D4, best-effort by design). Otherwise one short transaction inserts the row, but only while
    the message is still the caller's settled partner row carrying the same text (D9), ignoring
@@ -23,7 +22,8 @@ helpers keep the services' posture — a Core `Connection` first, plain argument
 
 This module imports no `fastapi` — the disconnect probe arrives as an injected async callable
 (`DisconnectProbe`), declared here so the service layer stays HTTP-free. Its `app.services`
-imports are limited to `configuration`, `llm_registry`, `llm.chat` and `llm.client`. It is the
+imports are limited to `configuration`, `llm_registry` (`ChatClientFactory`,
+`open_chat_client`) and `llm.chat` (`ChatMessage`, `strip_think`). It is the
 only module that reads or writes the `translations` table (R8), the one exception being the
 delete inside `services/messages.py`'s edit transaction (D11). Nothing here is ever read by
 context assembly, and no log line carries source text, a translation or a prompt
@@ -31,7 +31,7 @@ context assembly, and no log line carries source text, a translation or a prompt
 """
 
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -46,7 +46,6 @@ from app.errors import LlmUnreachableError, MessageNotFoundError, TranslationFai
 from app.ids import SnowflakeGenerator
 from app.services.configuration import get_session_configuration, resolve_model_for_use
 from app.services.llm.chat import ChatMessage, strip_think
-from app.services.llm.client import ChatDelta
 from app.services.llm_registry import ChatClientFactory, open_chat_client
 
 FALLBACK_TARGET_LANGUAGE: Final = "English"
@@ -152,8 +151,8 @@ async def translate_message(
 
     # Phase 2 — no connection held (D8); no tools (D2).
     try:
-        joined = await _join_content(
-            client.chat_stream(enabled_model.model_name, _translation_messages(target_language, row.text), [])
+        joined = await client.complete(
+            enabled_model.model_name, _translation_messages(target_language, row.text)
         )
     except LlmUnreachableError as error:
         _log_failure(row.id, int((time.monotonic() - started) * 1000))
@@ -214,25 +213,6 @@ def _translation_messages(target_language: str, source_text: str) -> list[ChatMe
         ),
         ChatMessage(role="user", content=source_text),
     ]
-
-
-async def _join_content(deltas: AsyncIterator[ChatDelta]) -> str:
-    """The `content` of every delta concatenated in arrival order; the iterator is always closed.
-
-    `reasoning` and `tool_calls` are ignored (D2). An `LlmUnreachableError` raised by the
-    iterator propagates to the caller, which maps it (D5).
-    """
-    pieces: list[str] = []
-    try:
-        async for delta in deltas:
-            if delta.content is not None:
-                pieces.append(delta.content)
-    finally:
-        # 021 `005`'s closing guarantee: `AsyncIterator` declares no `aclose`, so ask the object.
-        aclose = getattr(deltas, "aclose", None)
-        if aclose is not None:
-            await aclose()
-    return "".join(pieces)
 
 
 def _write_cache(

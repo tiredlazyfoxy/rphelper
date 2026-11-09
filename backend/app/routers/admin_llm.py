@@ -18,9 +18,9 @@ outbound routes (test, available-models, designate) are `async def`, take `Setti
 `get_llm_client_factory`.
 
 **Test seam:** `get_llm_client_factory` is the one place the router obtains the registry's
-`LlmClientFactory`. Its production answer is the class `LlmClient` itself; tests replace it
+`LlmClientFactory`. Its production answer is the class `LlmGateway` itself; tests replace it
 with `app.dependency_overrides[get_llm_client_factory] = lambda: fake_factory`, where
-`fake_factory(base_url, resolved_api_key, timeout_seconds)` returns an `LlmClientLike`. It
+`fake_factory(kind, base_url, resolved_api_key, timeout_seconds)` returns an `LlmClientLike`. It
 **lives in `app.dependencies`** since feature 024 (D9), because four more routers now share
 it; the name below is an import, so it is the same object the other routers depend on and an
 override keyed on either spelling covers both.

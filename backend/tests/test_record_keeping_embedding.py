@@ -794,7 +794,7 @@ def test_a_settled_edit_with_an_unset_credential_saves_flags_and_clears__F005_Do
 class _ExplodingFactory(FakeClientFactory):
     """A client factory whose construction raises `RuntimeError` — a bug, not an outage."""
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeEmbeddingClient:
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeEmbeddingClient:
         self.calls.append((base_url, api_key, timeout_seconds))
         raise RuntimeError("a bug in the embedding code")
 

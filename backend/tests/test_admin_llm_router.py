@@ -14,6 +14,12 @@ database through ``dependency_overrides[get_settings]``; cookies are carried exp
 in ``test_admin_users_router.py``.
 
 Tests are suffixed ``__S006_005_DoD<n>``. DoD-23 .. DoD-26 are ``[manual/live]``.
+
+Feature 035 step 002 (``docs/plans/035.llm-client-gateway/002.embed-and-factory.md``) moved
+the client factory to ``(kind, base_url, api_key, timeout_seconds)`` (DEC-035-1) and the
+probe types to ``app.services.llm.gateway``; ``_FakeFactory.calls`` now records all four
+arguments. Its tests are suffixed ``__S035_002_DoD<n>``. Step 001 moved the request-timeout
+default to 600 s.
 """
 
 import json
@@ -36,7 +42,7 @@ from app.main import create_app
 from app.roles import Role
 from app.routers.admin_llm import get_llm_client_factory
 from app.routers.admin_llm import router as admin_llm_router
-from app.services.llm.client import ProbeOutcome, ProbeResult
+from app.services.llm.gateway import ProbeOutcome, ProbeResult
 from app.services.passwords import hash_password
 
 LIST_PATH = "/api/admin/llm-servers"
@@ -181,7 +187,11 @@ class _FakeClient:
 
 
 class _FakeFactory:
-    """The client factory tests install; records every positional call."""
+    """The client factory tests install; records every positional call.
+
+    Each entry of ``calls`` is ``(kind, base_url, api_key, timeout_seconds)`` — the
+    four-argument factory seam of feature 035 (DEC-035-1).
+    """
 
     def __init__(self) -> None:
         self.probe_result = ProbeResult(
@@ -193,8 +203,8 @@ class _FakeFactory:
         self.probe_calls = 0
         self.embed_calls: list[tuple[str, list[str]]] = []
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> _FakeClient:
-        self.calls.append((base_url, api_key, timeout_seconds))
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> _FakeClient:
+        self.calls.append((kind, base_url, api_key, timeout_seconds))
         return _FakeClient(self)
 
     def answer(self, outcome: ProbeOutcome, names: Sequence[str] = ()) -> None:
@@ -1155,7 +1165,7 @@ def test_test_route_hands_the_resolved_key_to_the_client__S006_005_DoD10(
     fake.answer(ProbeOutcome.REACHABLE, ("model-one",))
     assert _admin(application, db_settings).post(_path(SERVER_A, "/test")).status_code == 200
     assert len(fake.calls) == 1
-    base_url, api_key, _timeout = fake.calls[0]
+    _kind, base_url, api_key, _timeout = fake.calls[0]
     assert base_url == SERVER_A_URL
     assert api_key == RESOLVED_KEY
 
@@ -1543,7 +1553,7 @@ def test_large_path_id_reaches_that_registration_on_the_outbound_routes__S006_00
     assert designated.status_code == 200
     assert designated.json()["id"] == BIG_ID_TEXT
 
-    assert [call[0] for call in fake.calls] == [BIG_URL, BIG_URL, BIG_URL]
+    assert [call[1] for call in fake.calls] == [BIG_URL, BIG_URL, BIG_URL]
 
 
 def test_large_path_id_models_and_delete_touch_only_that_registration__S006_005_DoD21(
@@ -1683,16 +1693,104 @@ def test_settings_reach_the_outbound_routes_from_the_settings_dependency__S006_0
     assert admin.post(_path(SERVER_A, "/embedding-model"), json={"model_name": "embed-a"}).status_code == 200
 
     assert fake.calls == [
-        (SERVER_A_URL, RESOLVED_KEY, 7.25),
-        (SERVER_A_URL, RESOLVED_KEY, 7.25),
-        (SERVER_A_URL, RESOLVED_KEY, 7.25),
+        ("llamaswap", SERVER_A_URL, RESOLVED_KEY, 7.25),
+        ("llamaswap", SERVER_A_URL, RESOLVED_KEY, 7.25),
+        ("llamaswap", SERVER_A_URL, RESOLVED_KEY, 7.25),
     ]
 
 
 def test_default_settings_timeout_reaches_the_client__S006_005_DoD22(
     application: FastAPI, db_settings: Settings, fake: _FakeFactory
 ) -> None:
-    """DoD-22 — with the unmodified settings the client gets the default 30-second timeout."""
+    """DoD-22 — with the unmodified settings the client gets the default timeout (600 s since 035 step 001)."""
     fake.answer(ProbeOutcome.REACHABLE, ("model-one",))
     assert _admin(application, db_settings).post(_path(SERVER_B, "/test")).status_code == 200
-    assert fake.calls == [(SERVER_B_URL, None, 30.0)]
+    assert fake.calls == [("openai", SERVER_B_URL, None, 600.0)]
+
+
+# =========================================================================== 035 step 002
+
+
+def test_test_route_calls_the_factory_with_kind_first__S035_002_DoD6(
+    application: FastAPI, db_settings: Settings, fake: _FakeFactory
+) -> None:
+    """035 DoD-6 — the test route's probe calls the factory ``(kind, base_url, resolved key, timeout)``."""
+    custom = db_settings.model_copy(update={"llm_request_timeout_seconds": 4.5})
+    application.dependency_overrides[get_settings] = lambda: custom
+    fake.answer(ProbeOutcome.REACHABLE, ("model-one",))
+    admin = _admin(application, db_settings)
+
+    assert admin.post(_path(SERVER_A, "/test")).status_code == 200
+    assert admin.post(_path(SERVER_B, "/test")).status_code == 200
+
+    assert fake.calls == [
+        ("llamaswap", SERVER_A_URL, RESOLVED_KEY, 4.5),
+        ("openai", SERVER_B_URL, None, 4.5),
+    ]
+
+
+def test_available_models_calls_the_factory_with_kind_first__S035_002_DoD6(
+    application: FastAPI, db_settings: Settings, fake: _FakeFactory
+) -> None:
+    """035 DoD-6 — available-models probes through the factory with the server's kind first."""
+    fake.answer(ProbeOutcome.REACHABLE, ("model-one",))
+    response = _admin(application, db_settings).get(_path(SERVER_B, "/available-models"))
+    assert response.status_code == 200
+    assert fake.calls == [("openai", SERVER_B_URL, None, 600.0)]
+
+
+@pytest.mark.parametrize("outcome", FAILING_OUTCOMES, ids=[o.value for o in FAILING_OUTCOMES])
+def test_test_route_still_answers_200_and_records_a_failing_outcome__S035_002_DoD6(
+    application: FastAPI, db_settings: Settings, fake: _FakeFactory, outcome: ProbeOutcome
+) -> None:
+    """035 DoD-6 — posture unchanged: a failing outcome is a 200 and is written to ``last_test_*``."""
+    fake.answer(outcome)
+    admin = _admin(application, db_settings)
+    response = admin.post(_path(SERVER_B, "/test"))
+    assert response.status_code == 200
+    assert response.json()["outcome"] == outcome.value
+    assert response.json()["ok"] is False
+    entry = _list(admin)[str(SERVER_B)]
+    assert entry["last_test_ok"] is False
+    assert entry["last_test_error"] == outcome.value
+    assert entry["last_test_at"] is not None
+    assert [call[0] for call in fake.calls] == ["openai"]
+
+
+@pytest.mark.parametrize(
+    "outcome", [ProbeOutcome.UNREACHABLE, ProbeOutcome.AUTH_FAILED], ids=["unreachable", "auth_failed"]
+)
+def test_available_models_still_answers_502_for_a_failed_probe__S035_002_DoD6(
+    application: FastAPI, db_settings: Settings, fake: _FakeFactory, outcome: ProbeOutcome
+) -> None:
+    """035 DoD-6 — posture unchanged: unreachable / auth-failed listing is 502 ``llm_unreachable``."""
+    fake.answer(outcome)
+    response = _admin(application, db_settings).get(_path(SERVER_A, "/available-models"))
+    _assert_envelope(response, 502, LLM_UNREACHABLE)
+    assert [call[0] for call in fake.calls] == ["llamaswap"]
+
+
+def test_designation_calls_the_factory_with_kind_first__S035_002_DoD7(
+    application: FastAPI, db_settings: Settings, fake: _FakeFactory
+) -> None:
+    """035 DoD-7 — designate calls the factory with the server's kind first and stores the measured dimension."""
+    fake.embed_dim = 512
+    admin = _admin(application, db_settings)
+    response = admin.post(_path(SERVER_A, "/embedding-model"), json={"model_name": "embed-a3"})
+    assert response.status_code == 200
+    assert response.json()["embedding_dim"] == 512
+    assert fake.calls == [("llamaswap", SERVER_A_URL, RESOLVED_KEY, 600.0)]
+    assert [model for model, _texts in fake.embed_calls] == ["embed-a3"]
+
+
+def test_missing_variable_raises_before_the_factory_on_every_outbound_route__S035_002_DoD9(
+    application: FastAPI, db_settings: Settings, fake: _FakeFactory
+) -> None:
+    """035 DoD-9 — an absent ``api_key_ref`` variable is 500 ``secret_ref_missing``; the factory is never called."""
+    admin = _admin(application, db_settings)
+    _assert_envelope(admin.post(_path(SERVER_C, "/test")), 500, SECRET_REF_MISSING)
+    _assert_envelope(admin.get(_path(SERVER_C, "/available-models")), 500, SECRET_REF_MISSING)
+    _assert_envelope(
+        admin.post(_path(SERVER_C, "/embedding-model"), json={"model_name": "embed-c"}), 500, SECRET_REF_MISSING
+    )
+    assert fake.calls == []

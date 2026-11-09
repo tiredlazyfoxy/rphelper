@@ -8,7 +8,8 @@ shapes (`{"event": ...}`, ids as decimal strings, `error` = `event`/`code`/`mess
 Bindings come from `status.md` `## Skeleton` (Steps 003–006):
 
 - `get_chat_client_factory`, `get_tool_registry` in `app.routers.stream` — override keys
-- `ChatClientFactory = Callable[[str, str | None, float], ChatClientLike]`; `ChatDelta(content=...)`
+- `ChatClientFactory = Callable[[str, str, str | None, float], ChatClientLike]` (035 step 004);
+  `ComposeText(text)`, `ComposeTools[E](declarations, runner)` (035 step 003)
 - `ChatMessage` (frozen, comparable)
 
 The application is the real factory's (`create_app()`) with `dependency_overrides` for
@@ -21,13 +22,23 @@ HTTP call runs on a worker thread with a bounded wait. `conftest.py` is untouche
 DoD-12: `tests/test_stream_router.py` holds no assertion depending on the compose route's
 absence, so it is not modified; its tests running unchanged is the other half of DoD-12.
 DoD-13 and DoD-14 are `[manual/live]` and carry no test. Names end `__S021_006_DoD<n>`.
+
+Amended by feature 035 step 004 (`docs/plans/035.llm-client-gateway/004.callers-on-gateway.md`,
+DEC-035-1, DEC-035-6): the chat client is the gateway shape — the file-local fake's generic
+`compose(model, messages, tools)` plays one scripted exchange per call (text pieces as
+`ComposeText`, whole tool calls handed to `tools.runner` as the gateway would, exceptions raised
+from the stream) — and the factory takes `(kind, base_url, api_key, timeout_seconds)`. Tests that
+also cover a 035 step 004 clause carry `__S035_004_DoD<n>` as well: DoD-2 (pieces as tokens, the
+row, `done` as a string id), DoD-3 (a tool exchange on the wire), DoD-7 (failure after text),
+DoD-9 (model refusals as `error` frames after `accepted`) and DoD-13 (the production factory is
+`LlmGateway`).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -43,9 +54,10 @@ from app.errors import LlmUnreachableError
 from app.main import create_app
 from app.roles import Role
 from app.routers.stream import get_chat_client_factory, get_tool_registry
-from app.services.llm.chat import ChatMessage
-from app.services.llm.client import ChatDelta
+from app.services.llm.chat import ChatMessage, ToolCall
+from app.services.llm.gateway import ComposeText, ComposeTools, LlmGateway
 from app.services.passwords import hash_password
+from app.services.tools import ToolOutcome, ToolScope
 from app.services.tools.definitions import MEMO_SEARCH, SESSION_SEARCH
 
 TIMESTAMP = "2026-01-01T00:00:00.000000+00:00"
@@ -336,12 +348,13 @@ def engine(db_engine: Engine, monkeypatch: pytest.MonkeyPatch) -> Engine:
 
 # --- the fake chat client and factory ----------------------------------------------------
 
-#: One round: deltas in order, optionally ending in an exception to raise.
-Round = Sequence[ChatDelta | BaseException]
+#: One exchange's script: text pieces (`ComposeText`), whole tool calls (`ToolCall`, handed to the
+#: runner) and exceptions (raised from inside the stream), in order.
+Round = Sequence[ComposeText | ToolCall | BaseException]
 
 
 class ChatCall:
-    """What one `chat_stream` call received."""
+    """What one `compose` call received: the model, the messages and the offered declarations."""
 
     def __init__(self, model: str, messages: list[ChatMessage], tools: list[Mapping[str, object]]) -> None:
         self.model = model
@@ -350,9 +363,12 @@ class ChatCall:
 
 
 class FakeChatClient:
-    """Replays one scripted round per `chat_stream` call; records every call.
+    """A gateway-shaped chat client (DEC-035-6) playing one scripted exchange per `compose` call;
+    records every call.
 
-    `on_enter`, when given, runs the first time a `chat_stream` iterator is entered.
+    A `ToolCall` step is handed to `tools.runner` with a collecting `emit`, exactly as the gateway
+    would; the emitted events are yielded once the runner returns, then the script continues.
+    `on_enter`, when given, runs the first time a `compose` stream is entered.
     """
 
     def __init__(self, rounds: Sequence[Round], on_enter: Callable[[], None] | None = None) -> None:
@@ -361,47 +377,70 @@ class FakeChatClient:
         self.on_enter = on_enter
         self.entered = 0
 
-    def chat_stream(
+    async def complete(self, model: str, messages: Sequence[ChatMessage]) -> str:
+        raise AssertionError("the compose route never calls `complete`")
+
+    async def compose[E](
         self,
         model: str,
         messages: Sequence[ChatMessage],
-        tools: Sequence[Mapping[str, object]],
-    ) -> AsyncIterator[ChatDelta]:
+        tools: ComposeTools[E],
+    ) -> AsyncGenerator[ComposeText | E, None]:
         index = len(self.calls)
-        self.calls.append(ChatCall(model, list(messages), [dict(tool) for tool in tools]))
-        return self._stream(index)
-
-    async def _stream(self, index: int) -> AsyncIterator[ChatDelta]:
+        self.calls.append(ChatCall(model, list(messages), [dict(tool) for tool in tools.declarations]))
         self.entered += 1
         if self.entered == 1 and self.on_enter is not None:
             self.on_enter()
         if index >= len(self.rounds):
-            raise AssertionError(f"chat_stream called {index + 1} times; only {len(self.rounds)} scripted")
+            raise AssertionError(f"compose called {index + 1} times; only {len(self.rounds)} scripted")
         for item in self.rounds[index]:
+            await asyncio.sleep(0)
             if isinstance(item, BaseException):
                 raise item
-            await asyncio.sleep(0)
-            yield item
+            if isinstance(item, ComposeText):
+                yield item
+                continue
+            emitted: list[E] = []
+            await tools.runner(item, emitted.append)
+            for event in emitted:
+                yield event
 
 
 class FakeFactory:
-    """A `ChatClientFactory` returning one fake client and recording its arguments."""
+    """A `ChatClientFactory` returning one fake client and recording its four arguments
+    `(kind, base_url, api_key, timeout_seconds)` (DEC-035-1)."""
 
     def __init__(self, client: FakeChatClient) -> None:
         self.client = client
-        self.calls: list[tuple[str, str | None, float]] = []
+        self.calls: list[tuple[str, str, str | None, float]] = []
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
-        self.calls.append((base_url, api_key, timeout_seconds))
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
+        self.calls.append((kind, base_url, api_key, timeout_seconds))
         return self.client
 
 
-def _content(text: str) -> ChatDelta:
-    return ChatDelta(content=text)
+def _content(text: str) -> ComposeText:
+    return ComposeText(text)
+
+
+def _tool_call(call_id: str, name: str, arguments: str) -> ToolCall:
+    """A whole tool call as the gateway presents it to the runner (DEC-035-6)."""
+    return ToolCall(call_id=call_id, name=name, arguments=arguments)
 
 
 def _unreachable() -> LlmUnreachableError:
     return LlmUnreachableError("The provider is unreachable.")
+
+
+class RecordingTool:
+    """A fake `Tool` returning a fixed outcome (DoD-3's wire exchange)."""
+
+    def __init__(self, name: str, outcome: ToolOutcome) -> None:
+        self.name = name
+        self.outcome = outcome
+
+    async def run(self, scope: ToolScope, connection: Any, arguments: Mapping[str, object]) -> ToolOutcome:
+        return self.outcome
 
 
 # --- the application ---------------------------------------------------------------------
@@ -578,7 +617,7 @@ def test_after_compose_the_zone_lists_the_user_row_then_the_assistant_row__S021_
 def test_the_user_row_is_committed_before_the_model_is_called__S021_006_DoD2(
     application: FastAPI, db_settings: Settings, engine: Engine
 ) -> None:
-    """DoD-2 / R10 / D1 — when `chat_stream` is first entered, a fresh connection already sees
+    """DoD-2 / R10 / D1 — when `compose` is first entered, a fresh connection already sees
     the user row (with the composed text) in the session's zone."""
     seen: list[list[str]] = []
 
@@ -629,11 +668,12 @@ def test_a_failure_before_any_token_gives_accepted_then_error__S021_006_DoD3(
 # =========================================================================================
 
 
-def test_a_failure_after_a_token_keeps_the_partial_as_an_assistant_row__S021_006_DoD4(
+def test_a_failure_after_a_token_keeps_the_partial_as_an_assistant_row__S021_006_DoD4__S035_004_DoD7(
     application: FastAPI, db_settings: Settings
 ) -> None:
-    """DoD-4 / US-044.AC-1 / US-132.AC-1 / 019 D4 — frames `accepted`, token `Par`, `error`;
-    the zone holds the user row then an assistant row `Par`."""
+    """DoD-4 / 035 DoD-7 / US-044.AC-1 / US-132.AC-1 / 019 D4 — the client's stream raises
+    `llm_unreachable` after text: frames `accepted`, token `Par`, `error` (`llm_unreachable`) and
+    no `done`; the zone holds the user row then an assistant row `Par`."""
     factory = FakeFactory(FakeChatClient([[_content("Par"), _unreachable()]]))
     _use_factory(application, factory)
     client = _player_a(application, db_settings)
@@ -673,11 +713,11 @@ def _no_captured_model(engine: Engine) -> None:
         pytest.param(_no_captured_model, MODEL_NOT_CHOSEN, id="none-captured"),
     ],
 )
-def test_a_failed_model_check_is_an_error_frame_after_accepted__S021_006_DoD5(
+def test_a_failed_model_check_is_an_error_frame_after_accepted__S021_006_DoD5__S035_004_DoD9(
     application: FastAPI, db_settings: Settings, engine: Engine, arrange: Any, code: str
 ) -> None:
-    """DoD-5 / US-044.AC-2 / US-107 / R4 / D3 — `accepted` then `error` with the code; the user
-    row is in the zone; the factory was never called."""
+    """DoD-5 / 035 DoD-9 / US-044.AC-2 / US-107 / US-144 / R4 / D3 — `accepted` then `error` with
+    the code; the user row is in the zone; the factory was never called."""
     arrange(engine)
     client_fake = FakeChatClient([[_content("never")]])
     factory = FakeFactory(client_fake)
@@ -758,13 +798,13 @@ def test_a_retry_uses_the_model_set_after_the_failure__S021_006_DoD7(
 ) -> None:
     """DoD-7 / R4 / D2 — the session's model is raw-updated to the second server's model
     between the failure and the retry; the retry's factory call gets the second base URL and
-    its client call the new model name."""
+    its client call the new model name. (035: the base URL is the factory's second argument.)"""
     client_fake = FakeChatClient([[_unreachable()], [_content("Hi")]])
     factory = FakeFactory(client_fake)
     _use_factory(application, factory)
     client = _player_a(application, db_settings)
     _fail_once(client)
-    assert factory.calls[0][0] == BASE_ONE
+    assert factory.calls[0][1] == BASE_ONE
     assert client_fake.calls[0].model == MODEL_ONE
 
     _set_session_model(engine, SERVER_TWO, MODEL_TWO)
@@ -772,7 +812,7 @@ def test_a_retry_uses_the_model_set_after_the_failure__S021_006_DoD7(
 
     assert _events(frames)[-1] == "done"
     assert len(factory.calls) == 2
-    assert factory.calls[1][0] == BASE_TWO
+    assert factory.calls[1][1] == BASE_TWO
     assert len(client_fake.calls) == 2
     assert client_fake.calls[1].model == MODEL_TWO
 
@@ -892,7 +932,7 @@ def test_compose_without_a_cookie_answers_401__S021_006_DoD9(
 
 # Amended by 026 step 002, then by 027 step 003 (S027_003_DoD15): the production registry now
 # holds both `memo_search` and `session_search`.
-def test_the_production_registry_dependency_sends_both_registered_tools__S021_006_DoD10(
+def test_the_production_registry_dependency_sends_both_registered_tools__S021_006_DoD10__S035_004_DoD6(
     application: FastAPI, db_settings: Settings
 ) -> None:
     """DoD-10 / D5 / U3 — the registry dependency is NOT overridden; all switches on; the fake
@@ -912,7 +952,7 @@ def test_the_production_registry_dependency_sends_both_registered_tools__S021_00
 # Added by 026 step 002, then amended by 027 step 003 (S027_003_DoD15): the seeded session has
 # all three switches on, so switching only `tool_memo_search` off would now still offer
 # `session_search`. Both registered switches go off to keep the clause's point.
-def test_the_production_registry_with_both_switches_off_sends_no_tools__S021_006_DoD10(
+def test_the_production_registry_with_both_switches_off_sends_no_tools__S021_006_DoD10__S035_004_DoD6(
     application: FastAPI, db_settings: Settings, engine: Engine
 ) -> None:
     """DoD-10 / D5 / U3 — the registry dependency is NOT overridden, but the session's
@@ -938,7 +978,7 @@ def test_the_production_registry_with_both_switches_off_sends_no_tools__S021_006
 
 # Added by 027 step 003 (S027_003_DoD15): the third case of the matrix — only the session-search
 # switch off, so the memo-search declaration alone is offered.
-def test_the_production_registry_with_the_session_switch_off_sends_memo_search__S021_006_DoD10(
+def test_the_production_registry_with_the_session_switch_off_sends_memo_search__S021_006_DoD10__S035_004_DoD6(
     application: FastAPI, db_settings: Settings, engine: Engine
 ) -> None:
     """DoD-10 / D5 / U3 — the registry dependency is NOT overridden and only the session's
@@ -997,3 +1037,72 @@ def test_the_compose_route_is_registered_as_post__S021_006_DoD12(application: Fa
 
     assert COMPOSE_TEMPLATE in paths
     assert "post" in paths[COMPOSE_TEMPLATE]
+
+
+# =========================================================================================
+# 035 step 004: the compose route on the gateway
+# =========================================================================================
+
+
+def test_text_pieces_stream_verbatim_and_done_names_the_row_as_a_string__S035_004_DoD2(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """035 DoD-2 / UC-034 / US-114 / US-146 — four pieces (two of them `<think>` markup): one token
+    frame per piece, verbatim and in order, then `done`; the zone's assistant row holds exactly the
+    joined text, and `done.message_id` is that row's id as a decimal string. The factory was
+    called with the captured model's server `kind` first (035 DoD-1)."""
+    pieces = ["<think>plan", "</think>", "Hel", "lo"]
+    factory = FakeFactory(FakeChatClient([[_content(piece) for piece in pieces]]))
+    _use_factory(application, factory)
+    client = _player_a(application, db_settings)
+
+    frames = _frames(_compose(client, SESSION_A, {"text": COMPOSE_TEXT}))
+
+    assert _events(frames) == ["accepted", "token", "token", "token", "token", "done"]
+    assert [frame["text"] for frame in frames[1:5]] == pieces
+    done_id = frames[-1]["message_id"]
+    assert _is_decimal_string(done_id)
+    zone = _zone(client, SESSION_A)
+    assert [(row["role"], row["text"]) for row in zone] == [
+        ("user", COMPOSE_TEXT),
+        ("assistant", "<think>plan</think>Hello"),
+    ]
+    assert zone[1]["id"] == done_id
+    assert [call[0] for call in factory.calls] == ["llamaswap"]
+
+
+def test_a_tool_exchange_streams_start_result_text_and_done_on_the_wire__S035_004_DoD3(
+    application: FastAPI, db_settings: Settings
+) -> None:
+    """035 DoD-3 / UC-051 / UC-053 — the client invokes the offered `memo_search` (`call_1`): the
+    wire shows `accepted`, `tool_start` and `tool_result` both carrying `call_1`, the final text's
+    token and `done`; the zone opens with the user row and ends with the assistant row named by
+    `done` (the tool row's persistence is asserted at the source level, `test_compose_source.py`)."""
+    outcome = ToolOutcome(content="Memo: the Gilded Goose.", summary="1 memo found")
+    registry = {"memo_search": RecordingTool("memo_search", outcome)}
+    application.dependency_overrides[get_tool_registry] = lambda: registry
+    client_fake = FakeChatClient(
+        [[_tool_call("call_1", "memo_search", '{"query":"inn"}'), _content("At the Goose.")]]
+    )
+    _use_factory(application, FakeFactory(client_fake))
+    client = _player_a(application, db_settings)
+
+    frames = _frames(_compose(client, SESSION_A, {"text": COMPOSE_TEXT}))
+
+    assert _events(frames) == ["accepted", "tool_start", "tool_result", "token", "done"]
+    assert frames[1]["call_id"] == "call_1"
+    assert frames[1]["tool"] == "memo_search"
+    assert frames[2]["call_id"] == "call_1"
+    assert frames[2]["tool"] == "memo_search"
+    assert frames[3]["text"] == "At the Goose."
+    zone = _zone(client, SESSION_A)
+    assert zone[0]["role"] == "user"
+    assert (zone[-1]["role"], zone[-1]["text"]) == ("assistant", "At the Goose.")
+    assert zone[-1]["id"] == frames[-1]["message_id"]
+    assert client_fake.calls[0].tools == [dict(MEMO_SEARCH)]
+
+
+def test_the_chat_client_factory_dependency_is_the_gateway_class__S035_004_DoD13() -> None:
+    """035 DoD-13 / DEC-035-1 — the compose route's un-overridden factory dependency returns the
+    gateway class `LlmGateway` itself."""
+    assert get_chat_client_factory() is LlmGateway

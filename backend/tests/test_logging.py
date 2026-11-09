@@ -15,6 +15,10 @@ Two facts about this subject shape the file:
 Sink counting reads ``logger._core.handlers``: loguru exposes no public handler
 inventory, so the private core is the only way to answer "how many sinks are active".
 This is a recorded, deliberate choice.
+
+Feature 035 step 001 (``docs/plans/035.llm-client-gateway/001.library-and-probe.md``)
+adds DoD-2 at the end of this module: records on the ``aiohttp`` logger tree reach
+neither sink, the same treatment ``httpx`` records get (``DEC-arch-llm-client-library-10``).
 """
 
 import io
@@ -32,6 +36,18 @@ from app.logging import InterceptHandler, configure_logging
 
 # The four framework loggers DoD-6 names, and whose handlers configure_logging clears.
 MANAGED_LOGGERS: tuple[str, ...] = ("uvicorn", "uvicorn.access", "uvicorn.error", "sqlalchemy")
+
+# 035/001 DoD-2: the third-party logger trees whose records must reach no sink — ``aiohttp``
+# (new) and ``httpx`` (unchanged) — each with child loggers, since the requirement covers
+# the whole tree. ``configure_logging`` may mutate any of them, so the restore fixture
+# snapshots them too; they are kept apart from MANAGED_LOGGERS, which drives DoD-6.
+SILENCED_TREE_LOGGERS: tuple[str, ...] = (
+    "aiohttp",
+    "aiohttp.client",
+    "aiohttp.internal",
+    "httpx",
+    "httpx._client",
+)
 
 # A stdlib level with no name of its own, and therefore no loguru level name either.
 CUSTOM_LEVEL = 35
@@ -52,7 +68,7 @@ def restore_logging_state() -> Iterator[None]:
     saved_root_handlers = list(root.handlers)
     saved_root_level = root.level
     saved_named: dict[str, tuple[list[logging.Handler], int, bool]] = {}
-    for name in MANAGED_LOGGERS:
+    for name in (*MANAGED_LOGGERS, *SILENCED_TREE_LOGGERS):
         managed = logging.getLogger(name)
         saved_named[name] = (list(managed.handlers), managed.level, managed.propagate)
 
@@ -308,3 +324,42 @@ def test_intercept_handler_passes_through_an_unnamed_numeric_level__DoD8(
     matched = [message.record for message in seen if "numeric-level-marker" in message.record["message"]]
     assert len(matched) == 1
     assert matched[0]["level"].no == CUSTOM_LEVEL
+
+
+# --------------------------------------------------------------------------- 035/001 DoD-2
+
+# A logger that belongs to no library: its record proves the bridge and both sinks are live,
+# so an absent library record means suppression rather than a dead sink.
+SILENCING_CONTROL_LOGGER = "rphelper.tests.silencing"
+SILENCING_CONTROL_MARKER = "silencing-control-marker"
+
+RECORD_LEVELS: tuple[int, ...] = (logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL)
+
+
+@pytest.mark.parametrize("level", RECORD_LEVELS)
+@pytest.mark.parametrize("logger_name", SILENCED_TREE_LOGGERS)
+def test_library_logger_tree_record_reaches_neither_sink__S035_001_DoD2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, logger_name: str, level: int
+) -> None:
+    """035/001 DoD-2: a record on ``aiohttp`` / a child of it (and, unchanged, ``httpx``) reaches no sink.
+
+    Both sinks are lowered to DEBUG so that no absence can be explained by a sink's level.
+    The assertion is on the observable property only — the record is absent from the
+    console and the file — not on how it was suppressed.
+    """
+    console = _capture_stderr(monkeypatch)
+    log_file = tmp_path / "logs" / "rphelper.log"
+    configure_logging(_settings(monkeypatch, log_file, console_level="DEBUG", file_level="DEBUG"))
+
+    library_marker = f"library-record-marker-{logger_name}-{level}"
+    logging.getLogger(logger_name).log(level, library_marker)
+    logging.getLogger(SILENCING_CONTROL_LOGGER).warning(SILENCING_CONTROL_MARKER)
+    logger.remove()  # close the file sink so its buffer is on disk
+
+    console_text = console.getvalue()
+    file_text = log_file.read_text(encoding="utf-8")
+    assert SILENCING_CONTROL_MARKER in console_text, "precondition: the console sink receives stdlib records"
+    assert SILENCING_CONTROL_MARKER in file_text, "precondition: the file sink receives stdlib records"
+
+    assert library_marker not in console_text
+    assert library_marker not in file_text

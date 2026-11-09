@@ -1067,6 +1067,11 @@ _PERMITTED_DELETE_TABLE = "translations"
 #: `parens` halves of the guard are untouched.
 _PERMITTED_SERVICE_IMPORT = "app.services.session_index"
 
+#: Feature 035 step 002 — **approved deviation** DEC-035-14 (user, 2026-11-09): `messages.py`
+#: imports the production factory `LlmGateway` directly from the gateway module (DEC-035-1,
+#: `002.context.md`), so that one module is permitted too (exact match); everything else still offends.
+_PERMITTED_GATEWAY_IMPORT = "app.services.llm.gateway"
+
 
 def _module_tree() -> ast.Module:
     return ast.parse(inspect.getsource(messages_module))
@@ -1209,8 +1214,9 @@ def test_the_module_deletes_only_messages_and_translations__S012_002_DoD13__F014
 
 def _is_forbidden_service_import(module: str) -> bool:
     """A service import this module may not make: anything under `app.services` except the one
-    module 024 step 005 permits (an exact match, so no submodule of it slips through either)."""
-    if module == _PERMITTED_SERVICE_IMPORT:
+    module 024 step 005 permits and the gateway module DEC-035-14 permits (exact matches, so no
+    submodule of either slips through)."""
+    if module in (_PERMITTED_SERVICE_IMPORT, _PERMITTED_GATEWAY_IMPORT):
         return False
     return module == _FORBIDDEN_IMPORT_ROOT or module.startswith(_FORBIDDEN_IMPORT_ROOT + ".")
 

@@ -906,10 +906,15 @@ _FORBIDDEN_IMPORT_ROOT = "app.services"
 #: invariant still bites: adding `app.services.characters` to `memos.py` still fails these tests.
 _PERMITTED_SERVICE_IMPORT = "app.services.embedding"
 
+#: Feature 035 step 002 — **approved deviation** DEC-035-14 (user, 2026-11-09): `memos.py` imports
+#: the production factory `LlmGateway` directly from the gateway module (DEC-035-1,
+#: `002.context.md`), so that one module is permitted too; everything else still offends.
+_PERMITTED_GATEWAY_IMPORT = "app.services.llm.gateway"
+
 
 def _is_forbidden_service_import(module: str) -> bool:
-    """Is `module` an `app.services` import other than the single permitted one?"""
-    if module == _PERMITTED_SERVICE_IMPORT:
+    """Is `module` an `app.services` import other than the permitted ones?"""
+    if module in (_PERMITTED_SERVICE_IMPORT, _PERMITTED_GATEWAY_IMPORT):
         return False
     return module == _FORBIDDEN_IMPORT_ROOT or module.startswith(_FORBIDDEN_IMPORT_ROOT + ".")
 

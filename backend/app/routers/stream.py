@@ -56,8 +56,8 @@ from app.models.stream import (
 )
 from app.routers.bootstrap import get_id_generator
 from app.services.compose import begin_compose, compose_stream
-from app.services.llm.client import LlmClient
 from app.services.llm.frames import own_connection_persister, sse_response
+from app.services.llm.gateway import LlmGateway
 from app.services.llm_registry import ChatClientFactory, LlmClientFactory
 from app.services.messages import (
     StreamMessage,
@@ -166,8 +166,8 @@ def append_zone_message(
 
 
 def get_chat_client_factory() -> ChatClientFactory:
-    """The chat-client factory dependency: the real `LlmClient` class (D14). Tests override it."""
-    return LlmClient
+    """The chat-client factory dependency: the `LlmGateway` class (D14, DEC-035-1). Tests override it."""
+    return LlmGateway
 
 
 def get_tool_registry(settings: Annotated[Settings, Depends(get_settings)]) -> ToolRegistry:

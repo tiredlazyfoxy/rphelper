@@ -9,13 +9,21 @@ Retargeted by fast/013.build-and-deploy-scripts (its DoD-22..25, tagged ``f013``
 compose now lives in ``docker-compose.prod.yml`` (image-based), the dev compose took the
 standard ``docker-compose.yml`` name, and ``build.sh`` / ``deploy.sh`` joined the deployment
 files. The fast/001 compose checks (DoD-10) now run against ``docker-compose.prod.yml``.
+
+Extended by feature 035 step 001 (``docs/plans/035.llm-client-gateway/001.library-and-probe.md``,
+DoD-3, tagged ``S035_001``): ``backend/pyproject.toml`` declares the ``llm-client`` 0.2.0 git
+dependency and still declares ``httpx``, and the Dockerfile stage that runs ``uv sync``
+installs ``git`` (``DEC-arch-llm-client-library-1``).
 """
 
 import configparser
 import re
+import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
+from packaging.requirements import Requirement
 from pydantic import AliasChoices, AliasPath
 
 from app.config import Settings
@@ -649,3 +657,53 @@ def test_f013_dod25_script_has_bash_shebang(relative: str) -> None:
 def test_f013_dod25_script_enables_strict_mode(relative: str) -> None:
     # fast/013 DoD-25: both scripts enable `set -euo pipefail`.
     assert re.search(r"(?m)^\s*set\s+-euo\s+pipefail\s*$", read_text(relative))
+
+
+# --- 035/001 DoD-3 -------------------------------------------------------------------
+
+BACKEND_PYPROJECT = "backend/pyproject.toml"
+
+#: The exact runtime dependency DoD-3 names (DEC-arch-llm-client-library-1).
+LLM_CLIENT_NAME = "llm-client"
+LLM_CLIENT_URL = "git+https://github.com/Iezious/PythonLLMClient.git@v0.2.0"
+
+
+def pyproject() -> dict[str, Any]:
+    """``backend/pyproject.toml`` parsed as TOML (read as data, nothing executed)."""
+    return tomllib.loads(read_text(BACKEND_PYPROJECT))
+
+
+def runtime_requirements_named(name: str) -> list[Requirement]:
+    """Every ``[project] dependencies`` entry whose distribution name is ``name`` (normalised)."""
+    entries = pyproject()["project"]["dependencies"]
+    parsed = [Requirement(entry) for entry in entries if isinstance(entry, str)]
+    wanted = name.lower().replace("_", "-")
+    return [requirement for requirement in parsed if requirement.name.lower().replace("_", "-") == wanted]
+
+
+def test_s035_001_dod3_pyproject_declares_llm_client_git_dependency() -> None:
+    # 035/001 DoD-3: exactly one runtime dependency `llm-client @ git+https://...PythonLLMClient.git@v0.2.0`.
+    found = runtime_requirements_named(LLM_CLIENT_NAME)
+    assert len(found) == 1, f"expected one `{LLM_CLIENT_NAME}` runtime dependency, found {len(found)}"
+    assert found[0].url == LLM_CLIENT_URL
+
+
+def test_s035_001_dod3_pyproject_dependency_string_is_verbatim() -> None:
+    # 035/001 DoD-3: the declared entry reads `llm-client @ <url>` (whitespace around `@` aside).
+    entries = [squash(entry) for entry in pyproject()["project"]["dependencies"] if isinstance(entry, str)]
+    expected = f"{LLM_CLIENT_NAME} @ {LLM_CLIENT_URL}"
+    assert any(re.sub(r"\s*@\s*", " @ ", entry, count=1) == expected for entry in entries), entries
+
+
+def test_s035_001_dod3_pyproject_still_declares_httpx() -> None:
+    # 035/001 DoD-3: `httpx` stays a runtime dependency (the web_search provider still uses it).
+    assert len(runtime_requirements_named("httpx")) == 1
+
+
+def test_s035_001_dod3_uv_sync_stage_installs_git() -> None:
+    # 035/001 DoD-3: the Dockerfile stage that runs `uv sync` installs `git` through its apt line.
+    sync_stages = [stage for stage in dockerfile_stages() if re.search(r"\buv sync\b", stage)]
+    assert len(sync_stages) == 1, f"expected exactly one stage running `uv sync`, found {len(sync_stages)}"
+    installs = re.findall(r"\bapt(?:-get)? install\b[^\n]*", sync_stages[0])
+    assert installs, "the `uv sync` stage has no apt install line"
+    assert any(re.search(r"(?<![\w.-])git(?![\w-])", line) for line in installs), installs

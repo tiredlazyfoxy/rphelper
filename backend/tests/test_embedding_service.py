@@ -13,6 +13,12 @@ Each test name ends `__S024_002_DoD<n>`. DoD-9 lives in `test_dependencies.py`; 
 regression fallout carried by the existing `test_admin_llm_router.py` / `test_dependencies.py`
 suites.
 
+Feature 035 step 002 (`docs/plans/035.llm-client-gateway/002.embed-and-factory.md`) adds the
+tests suffixed `__S035_002_DoD<n>` at the end: `open_embedding_model` hands the designated
+server's `kind` to the four-argument factory first (DoD-8), and an absent key variable still
+raises before the factory (DoD-9). The shared fake keeps `calls` three-wide; `kinds` and
+`full_calls` carry the `kind`.
+
 Mechanics (`context.md` "Test conventions", `002.context.md` "Test shape"):
 - a real SQLite file per test (`db_engine`) with `schema.metadata.create_all`;
 - the `llm_servers` / `models` registry rows are **raw inserts**, so the designation is set up
@@ -32,6 +38,7 @@ from typing import Any
 
 import pytest
 import sqlite_vec
+from llm import LLMError
 from sqlalchemy import Connection, Engine, Table, text
 
 import app.services.embedding as embedding_module
@@ -47,10 +54,13 @@ from app.services.embedding import (
     open_embedding_model,
     write_vector,
 )
+from app.services.llm.gateway import EMBED_NO_VECTOR_REASON
 from tests.llm_fakes import (
     FakeClientFactory,
+    LibraryEmbedRecorder,
     embedding_vector,
     fake_factory,
+    gateway_factory,
     unreachable_factory,
     vectors_for,
     wrong_length_factory,
@@ -124,14 +134,19 @@ def _seed_designation(
     is_enabled: bool = True,
     is_designated: bool = True,
     api_key_ref: str | None = POINTER,
+    kind: str = "llamaswap",
 ) -> None:
-    """Raw-insert one server and one model row — the designation, built without any service."""
+    """Raw-insert one server and one model row — the designation, built without any service.
+
+    ``kind`` is the server's dispatch key, which ``open_embedding_model`` hands the factory
+    first since feature 035 (DEC-035-1).
+    """
     with engine.begin() as connection:
         connection.execute(
             _servers().insert().values(
                 id=SERVER_ID,
                 name="the embedding server",
-                kind="llamaswap",
+                kind=kind,
                 base_url=BASE_URL,
                 api_key_ref=api_key_ref,
                 last_test_at=None,
@@ -155,7 +170,7 @@ def _seed_designation(
         )
 
 
-def _open(engine: Engine, factory: FakeClientFactory, timeout: float = PASSED_TIMEOUT) -> EmbeddingModelHandle:
+def _open(engine: Engine, factory: Any, timeout: float = PASSED_TIMEOUT) -> EmbeddingModelHandle:
     with engine.connect() as connection:
         return open_embedding_model(connection, client_factory=factory, timeout_seconds=timeout)
 
@@ -643,3 +658,117 @@ def test_the_module_binds_no_fastapi_symbol__S024_002_DoD10() -> None:
         if isinstance(origin, str) and origin.split(".")[0] in {"fastapi", "starlette"}:
             offenders.append(name)
     assert offenders == []
+
+
+# =========================================================================== 035 step 002
+
+
+@pytest.mark.parametrize("kind", ["llamaswap", "openai"])
+def test_open_calls_the_factory_with_the_designated_servers_kind_first__S035_002_DoD8(
+    engine: Engine, key_present: None, kind: str
+) -> None:
+    """035 DoD-8 — ``open_embedding_model`` calls the factory
+    ``(kind, base_url, resolved key, timeout)`` with the designated server's ``kind`` first."""
+    _seed_designation(engine, kind=kind)
+    factory = fake_factory(dim=DIMENSION)
+
+    handle = _open(engine, factory, timeout=PASSED_TIMEOUT)
+
+    assert factory.full_calls == [(kind, BASE_URL, RESOLVED_KEY, PASSED_TIMEOUT)]
+    assert factory.kinds == [kind]
+    assert handle.client is factory.clients[0]
+
+
+def test_embedding_through_the_shared_fake_behaves_as_before__S035_002_DoD8(
+    engine: Engine, key_present: None
+) -> None:
+    """035 DoD-8 — through the four-argument shared fake, one batch call answers one vector per
+    text in order, as before."""
+    _seed_designation(engine, kind="openai")
+    handle = _open(engine, factory := fake_factory(dim=DIMENSION))
+
+    assert embed_texts(handle, TEXTS) == vectors_for(TEXTS, DIMENSION)
+    assert factory.embed_calls == [(MODEL_NAME, tuple(TEXTS))]
+
+
+def test_a_wrong_length_vector_through_the_shared_fake_is_still_a_dimension_mismatch__S035_002_DoD8(
+    engine: Engine, key_present: None
+) -> None:
+    """035 DoD-8 — the wrong-length case is unchanged: ``no_embedding_model`` / ``dimension_mismatch``."""
+    handle = _opened(engine, wrong_length_factory(dim=DIMENSION, returned_length=DIMENSION - 1))
+
+    with pytest.raises(NoEmbeddingModelError) as excinfo:
+        embed_texts(handle, TEXTS)
+
+    assert excinfo.value.detail == {"reason": "dimension_mismatch"}
+
+
+def test_a_no_vector_failure_through_the_shared_fake_still_propagates__S035_002_DoD8(
+    engine: Engine, key_present: None
+) -> None:
+    """035 DoD-8 — the no-vector case is unchanged: ``llm_unreachable`` with ``no_usable_vector``."""
+    handle = _opened(engine, unreachable_factory(dim=DIMENSION, reason=EMBED_NO_VECTOR_REASON))
+
+    with pytest.raises(LlmUnreachableError) as excinfo:
+        embed_texts(handle, TEXTS)
+
+    assert excinfo.value.detail == {"reason": "no_usable_vector"}
+
+
+def test_embedding_through_the_gateway_answers_the_library_vectors__S035_002_DoD8(
+    engine: Engine, key_present: None
+) -> None:
+    """035 DoD-8 — with the real gateway as the factory (fake library clients), the sync bridge
+    answers the library's vectors in order, built for the designated model and kind."""
+    _seed_designation(engine, kind="openai")
+    recorder = LibraryEmbedRecorder(vectors=[VECTOR_ONE, VECTOR_TWO])
+    handle = _open(engine, gateway_factory(recorder))
+
+    assert embed_texts(handle, TEXTS[:2]) == [VECTOR_ONE, VECTOR_TWO]
+    assert recorder.embed_batch_calls == [TEXTS[:2]]
+    assert [(c["kind"], c["model"]) for c in recorder.constructions] == [("openai", MODEL_NAME)]
+
+
+def test_a_wrong_length_vector_through_the_gateway_is_a_dimension_mismatch__S035_002_DoD8(
+    engine: Engine, key_present: None
+) -> None:
+    """035 DoD-8 — a library vector of the wrong length still gives ``dimension_mismatch``."""
+    _seed_designation(engine)
+    recorder = LibraryEmbedRecorder(vectors=[[0.5] * (DIMENSION - 1)] * len(TEXTS))
+    handle = _open(engine, gateway_factory(recorder))
+
+    with pytest.raises(NoEmbeddingModelError) as excinfo:
+        embed_texts(handle, TEXTS)
+
+    assert excinfo.value.detail == {"reason": "dimension_mismatch"}
+
+
+def test_a_no_vector_reply_through_the_gateway_is_llm_unreachable__S035_002_DoD8(
+    engine: Engine, key_present: None
+) -> None:
+    """035 DoD-8 / DoD-2 — a library ``Invalid response`` reply surfaces as ``llm_unreachable``
+    with ``no_usable_vector``."""
+    _seed_designation(engine)
+    recorder = LibraryEmbedRecorder(error=LLMError("Invalid response from llama-swap API when embedding: no data"))
+    handle = _open(engine, gateway_factory(recorder))
+
+    with pytest.raises(LlmUnreachableError) as excinfo:
+        embed_texts(handle, TEXTS)
+
+    assert excinfo.value.detail == {"reason": EMBED_NO_VECTOR_REASON}
+
+
+def test_an_unset_key_variable_still_raises_before_the_factory__S035_002_DoD9(
+    engine: Engine, key_present: None
+) -> None:
+    """035 DoD-9 — an ``api_key_ref`` naming an absent variable raises ``secret_ref_missing``
+    before the four-argument factory is called."""
+    _seed_designation(engine, api_key_ref=MISSING_POINTER, kind="openai")
+    factory = fake_factory(dim=DIMENSION)
+
+    with engine.connect() as connection:
+        with pytest.raises(SecretRefError) as excinfo:
+            open_embedding_model(connection, client_factory=factory, timeout_seconds=PASSED_TIMEOUT)
+
+    assert excinfo.value.code == "secret_ref_missing"
+    assert factory.full_calls == []

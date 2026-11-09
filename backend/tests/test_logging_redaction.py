@@ -50,6 +50,8 @@ ACCESS_LOGGER_NAME = "uvicorn.access"
 SQL_LOGGER_NAME = "sqlalchemy.engine"
 
 # Every logger whose state these tests mutate, directly or through configure_logging.
+# Feature 035 step 001 DoD-2 (DEC-arch-llm-client-library-10): configure_logging now
+# silences the ``aiohttp`` logger tree beside ``httpx``, so its state is restored as well.
 TOUCHED_LOGGERS: tuple[str, ...] = (
     "",
     "uvicorn",
@@ -58,6 +60,7 @@ TOUCHED_LOGGERS: tuple[str, ...] = (
     "sqlalchemy",
     "sqlalchemy.engine",
     "httpx",
+    "aiohttp",
 )
 
 # The non-target parts of an access record, which the redaction must leave untouched.

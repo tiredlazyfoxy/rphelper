@@ -16,7 +16,7 @@ Safety contract — read before touching the seam
 
 ``install_fake_model_seam`` replaces **all four** dependency seams of
 ``FAKE_SEAM_OVERRIDE_KEYS`` or none. A half-installed seam lets the real
-``app.services.llm.client.LlmClient`` run, which in a privacy audit means a real network
+``app.services.llm.gateway.LlmGateway`` run, which in a privacy audit means a real network
 request to the operator's configured server. ``audit_world`` calls it **exactly once**;
 **no later step may set any of those four keys itself** — re-script through
 ``world.fakes.chat_factory.script_*``, ``world.fakes.translation_factory.script_*``,
@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -54,8 +54,8 @@ from app.dependencies import get_llm_client_factory
 from app.models.memos import MemoScope
 from app.routers.stream import get_chat_client_factory, get_tool_registry
 from app.routers.translation import get_translation_chat_client_factory
-from app.services.llm.chat import ChatMessage
-from app.services.llm.client import ChatDelta, ProbeOutcome, ProbeResult, ToolCallDelta
+from app.services.llm.chat import ChatMessage, ToolCall
+from app.services.llm.gateway import ComposeText, ComposeTools, ProbeOutcome, ProbeResult
 from app.services.llm_registry import LlmClientFactory
 from app.services.memo_chain import MemoReach
 from app.services.tools.memo_search import MemoSearchTool
@@ -419,12 +419,39 @@ class SentinelRegistry:
 # 5. The fake model seam — one atomic installation (decision 7)
 # --------------------------------------------------------------------------------------
 
-ChatRound = Sequence[ChatDelta | BaseException]
+#: Chat fakes, moved to the gateway shape by feature 035 step 004 (DEC-035-6, DEC-035-1,
+#: ``DEC-arch-llm-client-library-11``). The public names are unchanged; only the call shape and
+#: the scripted behaviour moved. A *round* is now a sequence of **steps** — a text piece, a whole
+#: tool call, or an exception to raise — and one ``compose`` call plays every scripted round in
+#: order, as one exchange: the gateway, not the caller, runs the tool loop now.
+
+
+@dataclass(frozen=True)
+class TextStep:
+    """One text piece the fake model streams verbatim (a ``ComposeText``)."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class ToolCallStep:
+    """One whole tool call the fake model makes; ``call_id`` ``None`` means "mint ``call_<n>``"."""
+
+    name: str
+    arguments: str
+    call_id: str | None = None
+
+
+ChatStep = TextStep | ToolCallStep | BaseException
+ChatRound = Sequence[ChatStep]
 
 
 @dataclass(frozen=True)
 class ChatCall:
-    """What one ``chat_stream`` call was asked, recorded at call time."""
+    """What one ``compose`` or ``complete`` call was asked, recorded at call time.
+
+    ``tools`` is the offered declarations of a ``compose`` call, and always empty for ``complete``.
+    """
 
     model: str
     messages: tuple[ChatMessage, ...]
@@ -432,13 +459,17 @@ class ChatCall:
 
 
 def text_round(text: str) -> ChatRound:
-    """One completion round carrying ``text`` as a single content delta."""
-    return (ChatDelta(content=text),)
+    """One round carrying ``text`` as a single text piece."""
+    return (TextStep(text),)
 
 
 def tool_call_round(*, name: str, arguments: str, call_id: str | None = None, index: int = 0) -> ChatRound:
-    """One round carrying a single whole tool call with caller-chosen ``arguments``."""
-    return (ChatDelta(tool_calls=(ToolCallDelta(index=index, call_id=call_id, name=name, arguments=arguments),)),)
+    """One round carrying a single whole tool call with caller-chosen ``arguments``.
+
+    ``index`` is kept for signature compatibility; a whole call has no fragments to order.
+    """
+    del index
+    return (ToolCallStep(name=name, arguments=arguments, call_id=call_id),)
 
 
 def failure_round(error: BaseException) -> ChatRound:
@@ -447,52 +478,74 @@ def failure_round(error: BaseException) -> ChatRound:
 
 
 class FakeChatClient:
-    """A scripted ``ChatClientLike``: replays rounds and records what it was asked."""
+    """A scripted gateway-shaped ``ChatClientLike`` (DEC-035-6): ``complete`` and ``compose``.
+
+    ``compose`` plays the scripted rounds' steps in order: a ``TextStep`` is yielded as a
+    ``ComposeText``; a ``ToolCallStep`` is handed to ``tools.runner`` exactly as the gateway
+    would — the runner's emitted events are collected and yielded once it returns, then the
+    script continues — and an exception step is raised from inside the stream. ``complete``
+    returns the joined text pieces of the script (tool calls are ignored; an exception step is
+    raised). ``on_enter`` runs once at the start of every call.
+    """
 
     def __init__(self, rounds: Sequence[ChatRound] = (), *, on_enter: Callable[[], None] | None = None) -> None:
-        self._rounds: list[tuple[ChatDelta | BaseException, ...]] = [tuple(one) for one in rounds]
+        self._steps: tuple[ChatStep, ...] = tuple(step for one in rounds for step in one)
         self._on_enter = on_enter
-        self._index = 0
         self.calls: list[ChatCall] = []
+        #: The text every runner invocation returned, in order (the model-facing tool output).
+        self.tool_outputs: list[str] = []
 
-    def chat_stream(
+    async def complete(self, model: str, messages: Sequence[ChatMessage]) -> str:
+        self.calls.append(ChatCall(model=model, messages=tuple(messages), tools=()))
+        if self._on_enter is not None:
+            self._on_enter()
+        pieces: list[str] = []
+        for step in self._steps:
+            if isinstance(step, BaseException):
+                raise step
+            if isinstance(step, TextStep):
+                pieces.append(step.text)
+        return "".join(pieces)
+
+    async def compose[E](
         self,
         model: str,
         messages: Sequence[ChatMessage],
-        tools: Sequence[Mapping[str, object]],
-    ) -> AsyncIterator[ChatDelta]:
-        self.calls.append(ChatCall(model=model, messages=tuple(messages), tools=tuple(dict(one) for one in tools)))
-        index = self._index
-        self._index += 1
-        if index >= len(self._rounds):
-            raise AssertionError(
-                f"the fake chat client was called {index + 1} times but only "
-                f"{len(self._rounds)} rounds were scripted"
-            )
-        items = self._rounds[index]
-        on_enter = self._on_enter
-
-        async def stream() -> AsyncIterator[ChatDelta]:
-            if on_enter is not None:
-                on_enter()
-            for item in items:
-                if isinstance(item, BaseException):
-                    raise item
-                yield item
-
-        return stream()
+        tools: ComposeTools[E],
+    ) -> AsyncGenerator[ComposeText | E, None]:
+        self.calls.append(
+            ChatCall(model=model, messages=tuple(messages), tools=tuple(dict(one) for one in tools.declarations))
+        )
+        if self._on_enter is not None:
+            self._on_enter()
+        minted = 0
+        for step in self._steps:
+            if isinstance(step, BaseException):
+                raise step
+            if isinstance(step, TextStep):
+                yield ComposeText(step.text)
+                continue
+            minted += 1
+            call_id = step.call_id if step.call_id is not None else f"call_{minted}"
+            emitted: list[E] = []
+            call = ToolCall(call_id=call_id, name=step.name, arguments=step.arguments)
+            output = await tools.runner(call, emitted.append)
+            self.tool_outputs.append(output)
+            for event in emitted:
+                yield event
 
 
 class FakeChatClientFactory:
-    """A ``ChatClientFactory`` recording every construction and every call."""
+    """A ``ChatClientFactory`` recording every construction ``(kind, base_url, api_key, timeout)``
+    (DEC-035-1) and, through the clients it built, every call."""
 
     def __init__(self, *, rounds: Sequence[ChatRound] = ()) -> None:
         self._rounds: tuple[ChatRound, ...] = tuple(rounds)
-        self.calls: list[tuple[str, str | None, float]] = []
+        self.calls: list[tuple[str, str, str | None, float]] = []
         self.clients: list[FakeChatClient] = []
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeChatClient:
-        self.calls.append((base_url, api_key, timeout_seconds))
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeChatClient:
+        self.calls.append((kind, base_url, api_key, timeout_seconds))
         client = FakeChatClient(self._rounds)
         self.clients.append(client)
         return client
@@ -536,7 +589,9 @@ class ScriptedProbeClient:
     """An ``LlmClientLike`` whose probe and embed can both be scripted to fail.
 
     ``llm_fakes.FakeEmbeddingClient`` always probes REACHABLE; step 007 needs a probe that
-    fails, so the failable variant lives here.
+    fails, so the failable variant lives here. ``kind`` is the server kind the factory was
+    called with (feature 035, DEC-035-1); it is kept on the client so that clearing
+    ``clients`` also clears the recorded kinds.
     """
 
     def __init__(
@@ -546,7 +601,9 @@ class ScriptedProbeClient:
         probe_result: ProbeResult | None = None,
         probe_error: BaseException | None = None,
         embed_error: BaseException | None = None,
+        kind: str = "",
     ) -> None:
+        self.kind = kind
         self.dim = dim
         self.probe_result = probe_result
         self.probe_error = probe_error
@@ -573,7 +630,12 @@ class ScriptedProbeClient:
 
 
 class ScriptedProbeFactory:
-    """An ``LlmClientFactory`` over ``ScriptedProbeClient``, recording every construction."""
+    """An ``LlmClientFactory`` over ``ScriptedProbeClient``, recording every construction.
+
+    Called with the four-argument seam ``(kind, base_url, api_key, timeout_seconds)``
+    (feature 035, DEC-035-1). ``calls`` stays ``(base_url, api_key, timeout_seconds)`` so
+    existing readers are untouched; ``kinds`` gives the ``kind`` of each construction.
+    """
 
     def __init__(
         self,
@@ -590,13 +652,16 @@ class ScriptedProbeFactory:
         self.calls: list[tuple[str, str | None, float]] = []
         self.clients: list[ScriptedProbeClient] = []
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> ScriptedProbeClient:
+    def __call__(
+        self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float
+    ) -> ScriptedProbeClient:
         self.calls.append((base_url, api_key, timeout_seconds))
         client = ScriptedProbeClient(
             dim=self.dim,
             probe_result=self.probe_result,
             probe_error=self.probe_error,
             embed_error=self.embed_error,
+            kind=kind,
         )
         self.clients.append(client)
         return client
@@ -604,6 +669,11 @@ class ScriptedProbeFactory:
     @property
     def call_count(self) -> int:
         return len(self.calls)
+
+    @property
+    def kinds(self) -> list[str]:
+        """The ``kind`` each recorded construction was called with, in order."""
+        return [client.kind for client in self.clients]
 
     @property
     def embed_calls(self) -> list[tuple[str, tuple[str, ...]]]:
@@ -719,10 +789,10 @@ def install_fake_model_seam(
         web_recorder=WebSearchRecorder(),
     )
 
-    def delegating_embedding_factory(base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
+    def delegating_embedding_factory(kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
         # Reads ``seam.embedding_factory`` at call time, so ``use_embedding_factory``
-        # re-points the tool adapters too.
-        return seam.embedding_factory(base_url, api_key, timeout_seconds)
+        # re-points the tool adapters too. Four-argument seam (feature 035, DEC-035-1).
+        return seam.embedding_factory(kind, base_url, api_key, timeout_seconds)
 
     timeout_seconds = settings.llm_request_timeout_seconds
     built: dict[str, Any] = {

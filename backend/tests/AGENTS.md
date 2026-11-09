@@ -9,7 +9,7 @@ The backend pytest suite (parallel, no network; `-m live` opts into a real llama
 **Files:**
 - `__init__.py` — package marker.
 - `conftest.py` — shared pytest fixtures for the whole suite.
-- `llm_fakes.py` — shared LLM provider fake: fake client, fake factory and a deterministic vector function.
+- `llm_fakes.py` — shared LLM provider fakes: fake client, fake (kind-first) factory, a deterministic vector function, and fake library classes behind a real gateway (`gateway_factory`).
 - `privacy_audit_support.py` — the shared two-user "audit world" the privacy-audit modules sweep over.
 - `test_admin_db_export.py` — whole-database export route.
 - `test_admin_db_import.py` — whole-database import route.
@@ -49,10 +49,13 @@ The backend pytest suite (parallel, no network; `-m live` opts into a real llama
 - `test_errors.py` — the domain error base, its wire body and handler.
 - `test_health.py` — `GET /api/health` and the health probe.
 - `test_ids.py` — the snowflake id generator.
-- `test_live_llm.py` — opt-in (`-m live`) checks against a real OpenAI-compatible server.
-- `test_llm_chat_stream.py` — `LlmClient.chat_stream` and its delta values.
-- `test_llm_client.py` — the OpenAI-compatible client.
+- `test_live_llm.py` — opt-in (`-m live`) checks of `LlmGateway` against a real llama-swap server.
 - `test_llm_frames.py` — SSE frame values and encoder.
+- `test_llm_gateway_boundary.py` — import boundaries over `app/`: only `llm/gateway.py` imports the `llm` library, the old httpx client stays removed, and `httpx` is imported only by `web_search/`.
+- `test_llm_gateway_complete.py` — `LlmGateway.complete` and its failure mapping.
+- `test_llm_gateway_compose.py` — `LlmGateway.compose`: the tool loop, streamed text, tool runs and cancel-on-close.
+- `test_llm_gateway_embed.py` — `LlmGateway.embed` and its failure mapping.
+- `test_llm_gateway_probe.py` — `LlmGateway.probe`, base-URL normalisation and the probe outcomes.
 - `test_llm_registry_enabled.py` — enabled-model reads in the LLM registry.
 - `test_llm_registry_models.py` — model enablement, the embedding designation and use-time validators.
 - `test_llm_registry_servers.py` — server registrations and the probe.

@@ -9,7 +9,7 @@ Feature 024, step `002`. Four things live here and nothing else:
   deliberately not a field on `LlmServer`), resolves it through `app.secrets.resolve_secret`
   and builds the client **once**. It makes no network call, so a write that turns out to
   need no embedding pays nothing.
-- **`embed_texts`** is the sync bridge (D1). `LlmClient.embed` is a coroutine; every 024
+- **`embed_texts`** is the sync bridge (D1). `LlmGateway.embed` is a coroutine; every 024
   caller is a sync `def` service running inside `with connection.begin():` on a threadpool
   thread with no running loop, so one `asyncio.run` per call is both legal and sufficient.
   **One client and one `embed` call per write operation**: `asyncio.run` closes the loop it
@@ -48,7 +48,7 @@ from app.config import Settings
 from app.db.schema import llm_servers
 from app.errors import NoEmbeddingModelError
 from app.secrets import resolve_secret
-from app.services.llm.client import LlmClient
+from app.services.llm.gateway import LlmGateway
 from app.services.llm_registry import LlmClientFactory, LlmClientLike, validate_embedding_model
 
 DEFAULT_EMBED_TIMEOUT_SECONDS: Final[float] = Settings.model_fields[
@@ -81,7 +81,7 @@ class EmbeddingModelHandle:
 def open_embedding_model(
     connection: Connection,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> EmbeddingModelHandle:
     """Resolve the designated embedding model into a ready `EmbeddingModelHandle`.
@@ -90,8 +90,8 @@ def open_embedding_model(
     unchanged (no designation, no `embedding_dim`, or its server gone). Then
     re-selects that server's `api_key_ref` from `llm_servers` by `server.id` — `LlmServer`
     does not carry the pointer — resolves it through `resolve_secret`, whose
-    `SecretRefError` propagates, and calls `client_factory(base_url, api_key,
-    timeout_seconds)` **exactly once**.
+    `SecretRefError` propagates, and calls `client_factory(kind, base_url, api_key,
+    timeout_seconds)` **exactly once**, with the designated server's `kind` first (DEC-035-1).
 
     **No network call happens here**, and no vector table is created or read. `connection`
     may already be inside the caller's transaction; this opens none of its own.
@@ -112,7 +112,10 @@ def open_embedding_model(
     # Resolved before any client exists, so an unset variable raises `SecretRefError`
     # instead of yielding a client that would only fail on the wire.
     api_key = resolve_secret(row.api_key_ref if row is not None else None)
-    client = client_factory(designation.server.base_url, api_key, timeout_seconds)
+    # `kind` first (DEC-035-1): it selects the library client class inside the gateway.
+    client = client_factory(
+        designation.server.kind, designation.server.base_url, api_key, timeout_seconds
+    )
     return EmbeddingModelHandle(client, designation.model_name, designation.embedding_dim)
 
 

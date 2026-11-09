@@ -12,7 +12,7 @@ designation and the use-time validators to this same module, sharing the client-
 seam declared below.
 """
 
-from collections.abc import AsyncIterator, Callable, Collection, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Collection, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -27,7 +27,14 @@ from app.errors import LlmServerNotFoundError, LlmUnreachableError, ModelNotEnab
 from app.ids import SnowflakeGenerator
 from app.secrets import resolve_secret
 from app.services.llm.chat import ChatMessage
-from app.services.llm.client import EMBED_NO_VECTOR_REASON, ChatDelta, LlmClient, ProbeOutcome, ProbeResult
+from app.services.llm.gateway import (
+    EMBED_NO_VECTOR_REASON,
+    ComposeText,
+    ComposeTools,
+    LlmGateway,
+    ProbeOutcome,
+    ProbeResult,
+)
 
 
 class Unset(Enum):
@@ -45,32 +52,83 @@ UNSET: Final = Unset.UNSET
 
 
 class LlmClientLike(Protocol):
-    """What the registry needs from a client — step `002`'s probe and embed operations."""
+    """What the registry needs from a probe/embed client — the probe and embed operations.
+
+    `LlmGateway` satisfies it; tests inject fakes. The probe types it names come from
+    `app.services.llm.gateway` (DEC-035-2).
+    """
 
     async def probe(self) -> ProbeResult: ...
 
     async def embed(self, model: str, texts: Sequence[str]) -> list[list[float]]: ...
 
 
-LlmClientFactory = Callable[[str, str | None, float], LlmClientLike]
-"""`(base_url, resolved_api_key, timeout_seconds) -> client`. The default is `LlmClient`
-itself; tests inject a fake so no network is involved."""
+LlmClientFactory = Callable[[str, str, str | None, float], LlmClientLike]
+"""`(kind, base_url, resolved_api_key, timeout_seconds) -> client` (DEC-035-1).
+
+`kind` is the server's stored `kind` value, passed through untouched, and comes first. The
+production factory is the `LlmGateway` class itself; tests inject a fake so no network is
+involved."""
 
 
 class ChatClientLike(Protocol):
-    """What the compose loop needs from a client — `chat_stream` only (feature `021`, D14)."""
+    """What compose and translation need from a chat client — `complete` and `compose` (DEC-035-6).
 
-    def chat_stream(
+    `LlmGateway` satisfies it structurally; tests inject fakes. There is no `chat_stream`:
+    rounds, tool-call fragments and `<think>` markers are the library's business
+    (DEC-035-7), so callers see whole text (`complete`) or text pieces plus the runner's
+    events (`compose`).
+    """
+
+    async def complete(self, model: str, messages: Sequence[ChatMessage]) -> str:
+        """One non-streamed chat call with no tools; returns the model's text verbatim.
+
+        Args:
+            model: The chat model name.
+            messages: The conversation, oldest first.
+
+        Returns:
+            The returned text, `<think>` markers included (callers strip).
+
+        Raises:
+            LlmUnreachableError: the server could not be reached or refused the call.
+        """
+        ...
+
+    def compose[E](
         self,
         model: str,
         messages: Sequence[ChatMessage],
-        tools: Sequence[Mapping[str, object]],
-    ) -> AsyncIterator[ChatDelta]: ...
+        tools: ComposeTools[E],
+    ) -> AsyncGenerator[ComposeText | E, None]:
+        """Stream one compose exchange: `ComposeText` pieces and the runner's `E` events, in order.
+
+        Declared as a plain `def` returning an `AsyncGenerator`, so an `async def` generator
+        method (the gateway's, or a fake's) satisfies it and the caller can close the stream
+        with `contextlib.aclosing`. Generic in the runner's event type `E`; an implementation
+        must be generic too (`def compose[E]` / `async def compose[E]`).
+
+        Args:
+            model: The chat model name.
+            messages: The conversation, oldest first.
+            tools: The offered declarations (possibly empty) and the runner, awaited once per
+                tool call with a `ToolCall` and an `emit` callback.
+
+        Yields:
+            Text pieces and every value the runner emits, in occurrence order.
+
+        Raises:
+            LlmUnreachableError: from the stream, after the events queued before the failure.
+        """
+        ...
 
 
-ChatClientFactory = Callable[[str, str | None, float], ChatClientLike]
-"""`(base_url, resolved_api_key, timeout_seconds) -> chat client`. `LlmClient` satisfies it;
-tests inject a fake. Separate from `LlmClientFactory` so existing probe/embed fakes stay valid."""
+ChatClientFactory = Callable[[str, str, str | None, float], ChatClientLike]
+"""`(kind, base_url, resolved_api_key, timeout_seconds) -> chat client` (DEC-035-1).
+
+`kind` is the server's stored kind and comes first. The production factory is the
+`LlmGateway` class itself; tests inject a fake. Kept separate from `LlmClientFactory` so
+probe/embed fakes need not implement chat."""
 
 
 @dataclass(frozen=True)
@@ -222,22 +280,26 @@ async def probe_server(
     server_id: int,
     settings: Settings,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
 ) -> ProbeResult:
     """The one probe primitive: read the row, `resolve_secret` its pointer, build a client, probe.
 
-    Writes nothing. Raises only `LlmServerNotFoundError` and `SecretRefError` (the latter
-    before `client_factory` is called). Passes `settings.llm_request_timeout_seconds`.
+    Reads the server's `kind`, `base_url` and `api_key_ref`, then calls
+    `client_factory(kind, base_url, api_key, settings.llm_request_timeout_seconds)` — `kind`
+    first (DEC-035-1). Writes nothing. Raises only `LlmServerNotFoundError` and
+    `SecretRefError` (the latter before `client_factory` is called).
     """
     with _reading(connection):
         row = connection.execute(
-            select(llm_servers.c.base_url, llm_servers.c.api_key_ref).where(llm_servers.c.id == server_id)
+            select(llm_servers.c.kind, llm_servers.c.base_url, llm_servers.c.api_key_ref).where(
+                llm_servers.c.id == server_id
+            )
         ).first()
     if row is None:
         raise _not_found()
     # Resolved at call time; a missing variable raises before any client exists.
     api_key = resolve_secret(row.api_key_ref)
-    client = client_factory(row.base_url, api_key, settings.llm_request_timeout_seconds)
+    client = client_factory(row.kind, row.base_url, api_key, settings.llm_request_timeout_seconds)
     return await client.probe()
 
 
@@ -246,7 +308,7 @@ async def check_server_connection(
     server_id: int,
     settings: Settings,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
 ) -> ConnectionTestResult:
     """Probe, then record `last_test_at` / `last_test_ok` / `last_test_error` in its own transaction.
 
@@ -275,7 +337,7 @@ async def list_available_models(
     server_id: int,
     settings: Settings,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
 ) -> list[str]:
     """Probe and return the model names; records nothing on the row.
 
@@ -478,25 +540,29 @@ async def designate_embedding_model(
     model_name: str,
     settings: Settings,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
 ) -> LlmServer:
     """Measure the model's dimension with one embeddings call, then designate it.
 
-    Order: read the server (`LlmServerNotFoundError`), `resolve_secret` (`SecretRefError`
-    before the factory is called), embed `[EMBEDDING_PROBE_TEXT]` outside any transaction
+    Order: read the server's `kind`, `base_url` and `api_key_ref` (`LlmServerNotFoundError`),
+    `resolve_secret` (`SecretRefError` before the factory is called), build the client with
+    `client_factory(kind, base_url, api_key, settings.llm_request_timeout_seconds)` — `kind`
+    first (DEC-035-1) — embed `[EMBEDDING_PROBE_TEXT]` outside any transaction
     (`LlmUnreachableError` propagates, nothing written), then one transaction clears the
     flag on every row of the table and upserts this (server, model) row with the flag true
     and the measured `embedding_dim`. Never touches `is_enabled`. Returns the server row.
     """
     with _reading(connection):
         row = connection.execute(
-            select(llm_servers.c.base_url, llm_servers.c.api_key_ref).where(llm_servers.c.id == server_id)
+            select(llm_servers.c.kind, llm_servers.c.base_url, llm_servers.c.api_key_ref).where(
+                llm_servers.c.id == server_id
+            )
         ).first()
     if row is None:
         raise _not_found()
     # Resolved at call time; a missing variable raises before any client exists.
     api_key = resolve_secret(row.api_key_ref)
-    client = client_factory(row.base_url, api_key, settings.llm_request_timeout_seconds)
+    client = client_factory(row.kind, row.base_url, api_key, settings.llm_request_timeout_seconds)
     # The network call stays outside any transaction; a failure propagates with nothing written.
     vectors = await client.embed(model_name, [EMBEDDING_PROBE_TEXT])
     if not vectors or not vectors[0]:
@@ -627,8 +693,12 @@ def open_chat_client(
 
     Re-reads the server's `api_key_ref`, `resolve_secret`s it (`SecretRefError` /
     `secret_ref_missing` before the factory is called), then returns
-    `client_factory(server.base_url, api_key, timeout_seconds)`. Writes nothing and leaves no
-    transaction open.
+    `client_factory(enabled_model.server.kind, server.base_url, api_key, timeout_seconds)`
+    (DEC-035-1). Writes nothing and leaves no transaction open.
+
+    Raises:
+        LlmServerNotFoundError: the server row is gone.
+        SecretRefError: the pointer names a missing variable, before any client exists.
     """
     server_id = enabled_model.server.id
     with _reading(connection):
@@ -639,7 +709,7 @@ def open_chat_client(
         raise _not_found()
     # Resolved at call time; a missing variable raises before any client exists.
     api_key = resolve_secret(row.api_key_ref)
-    return client_factory(row.base_url, api_key, timeout_seconds)
+    return client_factory(enabled_model.server.kind, row.base_url, api_key, timeout_seconds)
 
 
 def validate_embedding_model(connection: Connection) -> DesignatedEmbeddingModel:

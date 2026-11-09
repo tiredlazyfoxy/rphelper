@@ -52,7 +52,7 @@ from app.db.engine import CASEFOLD_FUNCTION_NAME
 from app.db.schema import characters, memos, sessions, settled_entries, setups
 from app.models.memos import MemoScope
 from app.services.embedding import DEFAULT_EMBED_TIMEOUT_SECONDS
-from app.services.llm.client import LlmClient
+from app.services.llm.gateway import LlmGateway
 from app.services.llm_registry import LlmClientFactory
 from app.services.search.hybrid import search
 from app.services.search.ports import EntrySearchScope, MemoSearchScope, SearchHit, SessionSearchScope
@@ -620,7 +620,7 @@ def run_my_search(
     user_id: int,
     query_text: str,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> MySearchResults:
     """One whole my-search: five groups for `query_text`, or the failure that stopped it (D1, D5, U1).

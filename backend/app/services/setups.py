@@ -41,9 +41,9 @@ from sqlalchemy import Connection, Row, Select, Update, select
 from app.db.schema import characters, setups
 from app.errors import CharacterNotFoundError, SetupNotFoundError
 from app.ids import SnowflakeGenerator
+from app.services.llm.gateway import LlmGateway
 from app.services.session_index import (
     DEFAULT_EMBED_TIMEOUT_SECONDS,
-    LlmClient,
     LlmClientFactory,
     refresh_session_vectors,
     session_ids_for_setup,
@@ -152,7 +152,7 @@ def update_setup(
     name: str | None = None,
     description: str | None = None,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> Setup:
     """Write the supplied fields of the owner's setup and bump `updated_at`.

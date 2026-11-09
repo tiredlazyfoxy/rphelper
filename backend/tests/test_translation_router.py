@@ -31,11 +31,18 @@ DoD-1's cache write happens. The disconnected path is covered at the **service**
 (step 002 DoD-12), not here.
 
 Covers step 003 DoD-1 .. DoD-6. DoD-7 is `[manual/live]` and carries no test.
+
+Amended by feature 035 step 004 (`docs/plans/035.llm-client-gateway/004.callers-on-gateway.md`,
+DEC-035-1, DEC-035-6): the provider fake is gateway-shaped — translation calls its non-streamed
+`complete(model, messages)`, and the factory takes `(kind, base_url, api_key, timeout_seconds)`.
+The un-overridden factory dependency now returns `LlmGateway` (035 DoD-13); DoD-5's real-factory
+test therefore drives the real gateway — dispatched on the server row's `kind` — against an
+address nothing listens on, and still expects 502 `translation_failed` (035 DoD-11).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Iterator, Sequence
 from typing import Any
 
 import httpx
@@ -52,7 +59,7 @@ from app.main import create_app
 from app.roles import Role
 from app.routers.translation import get_translation_chat_client_factory
 from app.services.llm.chat import ChatMessage
-from app.services.llm.client import ChatDelta
+from app.services.llm.gateway import ComposeText, ComposeTools, LlmGateway
 from app.services.passwords import hash_password
 
 # --- the wire surface (feature context.md, Wire contract; step file DoD-6) ------------------
@@ -401,73 +408,60 @@ def _owner(application: FastAPI, settings: Settings) -> TestClient:
 
 # --- the provider fake, its factory, and request helpers ------------------------------------
 
-#: One scripted stream: deltas in order, optionally ending in an exception to raise.
-Script = Sequence[ChatDelta | BaseException]
+#: One scripted answer: the text `complete` returns, or an exception it raises instead.
+Script = Sequence[str | BaseException]
 
 
 class ChatCall:
-    """What one `chat_stream` call received."""
+    """What one `complete` call received."""
 
-    def __init__(self, model: str, messages: list[ChatMessage], tools: list[Mapping[str, object]]) -> None:
+    def __init__(self, model: str, messages: list[ChatMessage]) -> None:
         self.model = model
         self.messages = messages
-        self.tools = tools
-
-
-class FakeStream:
-    """The object `chat_stream` returns: an async iterator with an explicit `aclose`."""
-
-    def __init__(self, script: Script) -> None:
-        self._script = list(script)
-        self._inner = self._iterate()
-
-    def __aiter__(self) -> FakeStream:
-        return self
-
-    async def __anext__(self) -> ChatDelta:
-        return await self._inner.__anext__()
-
-    async def aclose(self) -> None:
-        await self._inner.aclose()
-
-    async def _iterate(self) -> Any:
-        for item in self._script:
-            if isinstance(item, BaseException):
-                raise item
-            yield item
 
 
 class FakeChatClient:
-    """Replays one scripted stream per `chat_stream` call, recording every call."""
+    """A gateway-shaped chat client (DEC-035-6): `complete` answers from the script and records
+    every call; `compose` is never expected on the translate route."""
 
     def __init__(self, script: Script) -> None:
         self.script = list(script)
         self.calls: list[ChatCall] = []
 
-    def chat_stream(
+    async def complete(self, model: str, messages: Sequence[ChatMessage]) -> str:
+        self.calls.append(ChatCall(model, list(messages)))
+        pieces: list[str] = []
+        for item in self.script:
+            if isinstance(item, BaseException):
+                raise item
+            pieces.append(item)
+        return "".join(pieces)
+
+    async def compose[E](
         self,
         model: str,
         messages: Sequence[ChatMessage],
-        tools: Sequence[Mapping[str, object]],
-    ) -> FakeStream:
-        self.calls.append(ChatCall(model, list(messages), [dict(tool) for tool in tools]))
-        return FakeStream(self.script)
+        tools: ComposeTools[E],
+    ) -> AsyncGenerator[ComposeText | E, None]:
+        raise AssertionError("the translate route never calls `compose`")
+        yield ComposeText("unreachable")  # makes this an async generator, like the protocol's
 
 
 class FakeFactory:
     """A `ChatClientFactory` standing in for the route's own dependency.
 
     `yields(...)` / `raises(...)` script the next client. Every client it ever handed out is kept,
-    so "the model was called once in total" (DoD-1) is observable across two requests.
+    so "the model was called once in total" (DoD-1) is observable across two requests. Each
+    construction's `(kind, base_url, api_key, timeout_seconds)` is recorded (DEC-035-1).
     """
 
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str | None, float]] = []
+        self.calls: list[tuple[str, str, str | None, float]] = []
         self.clients: list[FakeChatClient] = []
         self._client = FakeChatClient([])
 
     def yields(self, text: str) -> None:
-        self._client = FakeChatClient([ChatDelta(content=text)])
+        self._client = FakeChatClient([text])
 
     def raises(self, error: BaseException) -> None:
         self._client = FakeChatClient([error])
@@ -476,8 +470,8 @@ class FakeFactory:
     def chat_calls(self) -> list[ChatCall]:
         return [call for client in self.clients for call in client.calls]
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
-        self.calls.append((base_url, api_key, timeout_seconds))
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
+        self.calls.append((kind, base_url, api_key, timeout_seconds))
         self.clients.append(self._client)
         return self._client
 
@@ -559,11 +553,12 @@ def test_a_second_flick_answers_cached_without_a_second_model_call__S023_003_DoD
 # --- DoD-2: the 502 envelope, and that a failure memoised nothing ---------------------------
 
 
-def test_an_unreachable_provider_answers_502_translation_failed__S023_003_DoD2(
+def test_an_unreachable_provider_answers_502_translation_failed__S023_003_DoD2__S035_004_DoD11(
     application: FastAPI, db_settings: Settings, factory: FakeFactory, engine: Engine
 ) -> None:
-    """DoD-2 — US-048.AC-1, D5: 502 `translation_failed`, a non-empty message (the prose is not
-    pinned here) and `detail` naming the message id as a decimal string. Nothing is cached."""
+    """DoD-2 / 035 DoD-11 — US-048.AC-1, D5: `complete` raising `llm_unreachable` answers 502
+    `translation_failed`, a non-empty message (the prose is not pinned here) and `detail` naming
+    the message id as a decimal string. Nothing is cached."""
     factory.raises(LlmUnreachableError("the server is down"))
     client = _owner(application, db_settings)
 
@@ -680,12 +675,13 @@ def test_a_disabled_captured_model_answers_409_model_not_enabled__S023_003_DoD4(
 # --- DoD-5: the un-overridden factory dependency is the production one ----------------------
 
 
-def test_the_unoverridden_factory_reaches_the_real_client__S023_003_DoD5(
+def test_the_unoverridden_factory_reaches_the_real_client__S023_003_DoD5__S035_004_DoD11(
     application: FastAPI, db_settings: Settings, engine: Engine
 ) -> None:
-    """DoD-5 — D12: with **only** `get_settings` overridden, the route resolves its own factory,
-    which returns the real client. Pointed at an address nothing listens on, with a tiny timeout,
-    the call fails and the wire shows 502 `translation_failed` (D5)."""
+    """DoD-5 / 035 DoD-11, DoD-13 — D12: with **only** `get_settings` overridden, the route resolves
+    its own factory, which is the real gateway, built for the server row's `kind` (`llamaswap`).
+    Pointed at an address nothing listens on, with a tiny timeout, `complete` fails with
+    `llm_unreachable` and the wire shows 502 `translation_failed` (D5); nothing is cached."""
     custom = db_settings.model_copy(update={"llm_request_timeout_seconds": TINY_TIMEOUT_SECONDS})
     application.dependency_overrides[get_settings] = lambda: custom
     _set_base_url(engine, SERVER_A, UNROUTABLE_BASE_URL)
@@ -696,6 +692,32 @@ def test_the_unoverridden_factory_reaches_the_real_client__S023_003_DoD5(
     error = _assert_envelope(response, 502, TRANSLATION_FAILED)
     assert error["detail"] == {"message_id": str(PARTNER_A)}
     assert _translation_rows(engine) == []
+
+
+def test_the_translation_factory_dependency_is_the_gateway_class__S035_004_DoD13() -> None:
+    """035 DoD-13 / DEC-035-1 — the translate route's un-overridden factory dependency returns the
+    gateway class `LlmGateway` itself."""
+    assert get_translation_chat_client_factory() is LlmGateway
+
+
+def test_a_flick_calls_complete_with_the_server_kind_first__S035_004_DoD10(
+    application: FastAPI, db_settings: Settings, factory: FakeFactory
+) -> None:
+    """035 DoD-10 / DEC-035-1 — a miss builds the client with the server's `kind` first, then its
+    base URL, and calls `complete` once with the captured model, the system instruction and the
+    stored text verbatim."""
+    factory.yields(TRANSLATED_TEXT)
+    client = _owner(application, db_settings)
+
+    response = _post(client, PARTNER_A)
+
+    assert response.status_code == 200, response.text
+    assert [(call[0], call[1]) for call in factory.calls] == [("llamaswap", BASE_URL)]
+    assert len(factory.chat_calls) == 1
+    call = factory.chat_calls[0]
+    assert call.model == MODEL_NAME
+    assert [message.role for message in call.messages] == ["system", "user"]
+    assert call.messages[1].content == PARTNER_A_TEXT
 
 
 # --- DoD-6: the route surface ---------------------------------------------------------------

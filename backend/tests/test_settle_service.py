@@ -944,6 +944,11 @@ _ALLOWED_CHAT_NAMES = {"strip_think"}
 #: `app.services` module — and every relative import — stays an offender.
 _ALLOWED_INDEX_MODULE = f"{_APP_SERVICES}.session_index"
 
+#: Feature 035 step 002 — **approved deviation** DEC-035-14 (user, 2026-11-09): settle imports the
+#: production factory `LlmGateway` directly from the gateway module (DEC-035-1, `002.context.md`),
+#: so that one module is permitted too; every other `app.services` module still offends.
+_ALLOWED_GATEWAY_MODULE = f"{_APP_SERVICES}.llm.gateway"
+
 
 def test_settle_imports_parens_and_no_other_service__S012_003_DoD23__S021_001_DoD10() -> None:
     """DoD-23 — D11: `parens` is imported; nothing else from `app.services.`, except (021
@@ -961,6 +966,8 @@ def test_settle_imports_parens_and_no_other_service__S012_003_DoD23__S021_001_Do
                 )
             elif node.level == 0 and module == _ALLOWED_INDEX_MODULE:
                 pass  # 024 005: permitted outright — the degraded refresh and the D9 defaults.
+            elif node.level == 0 and module == _ALLOWED_GATEWAY_MODULE:
+                pass  # 035 002, DEC-035-14: the production factory `LlmGateway`.
             elif node.level > 0:
                 if module == "" and names == ["parens"]:
                     imports_parens = True

@@ -26,9 +26,11 @@ _PROPAGATING_LOGGERS = ("uvicorn", "uvicorn.access", "uvicorn.error", "sqlalchem
 #: Stdlib loggers whose records must never reach a sink. `httpx` logs every completed request
 #: as its full URL, and **a URL can carry message text** — a search provider puts the
 #: roleplayer's query in `q=` — so the HTTP client's own request log is part of the redaction
-#: rule's surface (`docs/architecture/deployment.md` § "The redaction rule"). Only this logger
-#: tree is silenced; every other library keeps logging exactly as before.
-_SILENCED_LOGGERS = ("httpx",)
+#: rule's surface (`docs/architecture/deployment.md` § "The redaction rule"). `aiohttp` is the
+#: transport under the `llm-client` library and is silenced for the same reason
+#: (DEC-arch-llm-client-library-10). Only these logger trees are silenced; every other library
+#: keeps logging exactly as before.
+_SILENCED_LOGGERS = ("httpx", "aiohttp")
 
 #: Above every stdlib level, because the redaction rule has no level exception: a threshold set
 #: anywhere inside the scale would re-open the leak the moment a URL is logged at that level.
@@ -170,6 +172,6 @@ def configure_logging(settings: Settings) -> None:
 
     for name in _SILENCED_LOGGERS:
         # A level on the parent is what the child inherits, so this silences the request log
-        # wherever httpx emits it from (`httpx._client` today). Propagation and the root bridge
+        # wherever the library emits it from (`httpx._client`, `aiohttp.client`, ...). Propagation and the root bridge
         # are left alone: the record is never created, rather than created and then dropped.
         logging.getLogger(name).setLevel(_SILENCED_LEVEL)

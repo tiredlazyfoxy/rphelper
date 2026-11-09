@@ -47,9 +47,9 @@ from app.db.schema import (
 from app.db.search_tables import ensure_fts_tables
 from app.errors import MessageNotEditableError, MessageNotFoundError, SessionNotFoundError
 from app.ids import SnowflakeGenerator
+from app.services.llm.gateway import LlmGateway
 from app.services.session_index import (
     DEFAULT_EMBED_TIMEOUT_SECONDS,
-    LlmClient,
     LlmClientFactory,
     refresh_session_vector_degraded,
 )
@@ -307,7 +307,7 @@ def file_partner_entry(
     session_id: int,
     text: str,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> StreamMessage:
     """Insert one born-settled partner block (`kind` 'partner') and bump the session.
@@ -368,7 +368,7 @@ def edit_message_text(
     message_id: int,
     text: str,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> StreamMessage:
     """Replace a zone or settled message's text verbatim, bump its session, return the stored row.
@@ -463,7 +463,7 @@ def delete_message(
     user_id: int,
     message_id: int,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> DeleteMessageResult:
     """Permanently delete one owned zone message or settled entry (with its buried group).

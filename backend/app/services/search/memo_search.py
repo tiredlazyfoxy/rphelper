@@ -23,7 +23,7 @@ from typing import Final
 from sqlalchemy import ColumnElement, Connection, FromClause, and_, not_
 
 from app.services.embedding import DEFAULT_EMBED_TIMEOUT_SECONDS
-from app.services.llm.client import LlmClient
+from app.services.llm.gateway import LlmGateway
 from app.services.llm_registry import LlmClientFactory
 from app.services.memo_chain import chain_clause
 from app.services.search.hybrid import search
@@ -71,7 +71,7 @@ def search_memos(
     session_id: int,
     query_text: str,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> list[SearchHit]:
     """The searchable notes of one session's whole chain that match `query_text`, best first (D1, D3).

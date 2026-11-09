@@ -60,13 +60,13 @@ from app.db.search_tables import SESSION_VEC_TABLE, ensure_fts_tables, ensure_ve
 from app.errors import LlmUnreachableError, NoEmbeddingModelError, SecretRefError
 from app.services.embedding import (
     DEFAULT_EMBED_TIMEOUT_SECONDS,
-    LlmClient,
     LlmClientFactory,
     delete_vector,
     embed_texts,
     open_embedding_model,
     write_vector,
 )
+from app.services.llm.gateway import LlmGateway
 
 DEGRADED_EMBEDDING_ERRORS: tuple[type[Exception], ...] = (
     NoEmbeddingModelError,
@@ -146,7 +146,7 @@ def refresh_session_vectors(
     user_id: int,
     session_ids: Collection[int],
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> None:
     """Bring every named session's `session_vec` row up to date — the strict posture (D8).
@@ -227,7 +227,7 @@ def refresh_session_vector_degraded(
     user_id: int,
     session_id: int,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> bool:
     """Refresh one session's vector, reporting instead of raising — **`True` = incomplete**.

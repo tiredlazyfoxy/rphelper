@@ -7,7 +7,7 @@ The domain layer: every business rule, ownership check and transaction lives her
 ## Glossary
 
 **Subfolders:**
-- `llm/` — the one OpenAI-compatible client (`client.py`), the neutral chat-message value type (`chat.py`) and SSE frame emission (`frames.py`) used by compose and translation.
+- `llm/` — the LLM gateway over the `llm-client` library (`gateway.py`: `LlmGateway` with probe / embed / complete / compose), the neutral chat-message value type (`chat.py`) and SSE frame emission (`frames.py`) used by compose and translation.
 - `search/` — hybrid search: the narrow port (`ports.py`), candidate filtering, the lexical (FTS5) and vector arms, fusion (`hybrid.py`), and the memo / session / my-search corpora built on it.
 - `tools/` — the assistant's tools: the three declarations, the dispatch seam (`seam.py`) and the `memo_search`, `session_search` and `web_search` adapters.
 - `web_search/` — the web search provider port (`provider.py`) and its one Google Custom Search provider.
