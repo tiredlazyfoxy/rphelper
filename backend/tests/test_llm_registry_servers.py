@@ -21,7 +21,7 @@ Mechanics:
 
 Tests are suffixed ``__S006_003_DoD<n>``. DoD-22 is ``[manual/live]``.
 
-Feature 035 step 002 (``docs/plans/035.llm-client-gateway/002.embed-and-factory.md``): the
+Feature 035 step 002: the
 factory now receives the server's ``kind`` first, so ``FakeFactory.calls`` entries are
 ``(kind, base_url, api_key, timeout_seconds)``; the probe types come from
 ``app.services.llm.gateway``; the timeout default is 600 s (step 001). Its tests are suffixed

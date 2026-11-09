@@ -32,8 +32,8 @@ DoD-1's cache write happens. The disconnected path is covered at the **service**
 
 Covers step 003 DoD-1 .. DoD-6. DoD-7 is `[manual/live]` and carries no test.
 
-Amended by feature 035 step 004 (`docs/plans/035.llm-client-gateway/004.callers-on-gateway.md`,
-DEC-035-1, DEC-035-6): the provider fake is gateway-shaped — translation calls its non-streamed
+Amended by feature 035 step 004 (DEC-035-1, DEC-035-6): the provider fake is gateway-shaped —
+translation calls its non-streamed
 `complete(model, messages)`, and the factory takes `(kind, base_url, api_key, timeout_seconds)`.
 The un-overridden factory dependency now returns `LlmGateway` (035 DoD-13); DoD-5's real-factory
 test therefore drives the real gateway — dispatched on the server row's `kind` — against an

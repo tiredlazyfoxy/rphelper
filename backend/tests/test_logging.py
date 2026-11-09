@@ -16,7 +16,7 @@ Sink counting reads ``logger._core.handlers``: loguru exposes no public handler
 inventory, so the private core is the only way to answer "how many sinks are active".
 This is a recorded, deliberate choice.
 
-Feature 035 step 001 (``docs/plans/035.llm-client-gateway/001.library-and-probe.md``)
+Feature 035 step 001
 adds DoD-2 at the end of this module: records on the ``aiohttp`` logger tree reach
 neither sink, the same treatment ``httpx`` records get (``DEC-arch-llm-client-library-10``).
 """

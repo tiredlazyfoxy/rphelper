@@ -8,6 +8,7 @@
 - `docs/architecture/llm-and-streaming.md` § The LLM gateway over `llm-client` and § Decision history — record the gateway as built: all four operations, client selection by connection kind, and all model traffic going through the external library. Reason: same as above.
 - `docs/architecture/llm-and-streaming.md` § How one exchange runs — record that the existing chat-message-to-wire mapping is kept as the one source of the library's message history, including replayed tool pairs. Reason: the revision left open whether that mapping would survive the move, and this plan keeps it.
 - `docs/architecture/session-stream.md` § The compose source — record that the compose source no longer assembles rounds, tool-call fragments or thinking markers. It drains the gateway's ordered stream and owns the per-call tool rules (start, dispatch, result or failure). Reason: the plan realizes the split between the gateway and the compose source that the revision describes.
+- `docs/architecture/llm-and-streaming.md` § The LLM gateway over `llm-client`, § Model-side tool mistakes — the observer and § The timeout; `docs/architecture/session-stream.md` § The tool seam and dispatch and § Decision history; `docs/architecture/data-model.md` `messages` (tool columns) — drop the "approved, not yet built" wording of the 2026-11-09 revision. Record as built: the newer library release, model-side tool mistakes reaching the roleplayer as a failed tool (with its frames and its failed tool row) while the exchange continues, and failures classified from the library error's structured status. Reason: step 006 realizes that revision. The decision record's own "not yet built" header (`arch-llm-client-library`) needs the same update.
 
 ## Decisions
 
@@ -53,6 +54,11 @@
 - **Reason:** The identity guaranteed a safe hand-off while both modules existed; it has no meaning once one is gone. Retiring it restores DoD-4..13's coverage without touching production code.
 - **Rejected:** Re-planning steps 001 and 005 with /planner — a full cycle for one transitional assertion. Keeping a `client.py` shim — contradicts step 005 DoD-1 and `DEC-arch-llm-client-library-1`.
 - **Lands in:** `backend/tests/test_llm_gateway_probe.py`
+
+- DEC-035-17 — A model-side rejection reaches the compose source as its own stream value, `ComposeRejected`
+- DEC-035-18 — A model-side rejection is logged with the tool name and the kind only
+- DEC-035-19 — Explicit tool signatures stay under 0.2.1
+- DEC-035-20 — The status-based auth split covers all four operations
 
 ## Observations
 

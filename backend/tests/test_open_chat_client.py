@@ -7,13 +7,13 @@ re-reads the server's ``api_key_ref``, resolves it with ``resolve_secret`` (a mi
 ``secret_ref_missing`` before any client is built) and returns the factory's client for the
 server's ``base_url``, the key and the timeout; it writes nothing and leaves no transaction open.
 
-Feature 035 step 004 (``docs/plans/035.llm-client-gateway/004.callers-on-gateway.md``, DoD-1, and
+Feature 035 step 004 (DoD-1, and
 DEC-035-1): the factory is now called with four positional arguments — the enabled model's server
 ``kind`` first, then ``base_url``, the resolved key and the timeout — and ``secret_ref_missing`` is
 still raised before the factory is called. The seeded servers therefore carry **different** kinds
 (``openai`` and ``llamaswap``), so a kind taken from the wrong row, or a constant, is visible.
 
-Bindings come from ``status.md`` ``## Skeleton`` -> 035 Step 004:
+Bindings come from feature 035's status record, ``## Skeleton`` -> Step 004:
 ``open_chat_client(connection, enabled_model, timeout_seconds, client_factory) -> ChatClientLike``
 and ``ChatClientFactory = Callable[[str, str, str | None, float], ChatClientLike]``. The
 ``EnabledChatModel`` is obtained through the built ``validate_chat_model``.

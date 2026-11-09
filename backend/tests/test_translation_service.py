@@ -31,8 +31,8 @@ described below), runs a per-test hook on first entry (DoD-13 / 14 / 18) and is 
 file-local factory. **No fixture is added to `conftest.py`.** Each test name ends
 `__S023_002_DoD<n>`.
 
-Amended by feature 035 step 004 (`docs/plans/035.llm-client-gateway/004.callers-on-gateway.md`,
-DoD-10..DoD-12, DEC-035-1, DEC-035-6): translation obtains its text from the client's non-streamed
+Amended by feature 035 step 004 (DoD-10..DoD-12, DEC-035-1, DEC-035-6): translation obtains its text
+from the client's non-streamed
 `complete(model, messages)` instead of joining stream deltas. The provider fake is therefore
 gateway-shaped: `complete` returns the joined text pieces of its script (or raises the scripted
 exception), records each call's model and messages, runs the per-test hook on first entry and
@@ -1250,7 +1250,7 @@ def test_the_translation_service_imports_no_fastapi__S023_002_DoD16() -> None:
 
 def test_the_translation_service_imports_neither_the_old_client_nor_the_library__S035_004_DoD10() -> None:
     """035 DoD-10 (the text comes from the client's `complete`, not joined stream deltas;
-    `context.md`: the gateway is the only module that imports the library) — `services/translation.py`
+    feature 035's context: the gateway is the only module that imports the library) — `services/translation.py`
     imports neither `app.services.llm.client` nor the `llm` package."""
     offenders = [
         module

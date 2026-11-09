@@ -1,15 +1,20 @@
 """Tests for the LLM gateway's embed — feature 035 step 002.
 
 Every expected value in this module comes from
-``docs/plans/035.llm-client-gateway/002.embed-and-factory.md`` (DoD-1 .. DoD-5) and the
+feature 035 step 002 (DoD-1 .. DoD-5) and the
 decisions it cites: DEC-035-3 (the ``library_clients`` seam), DEC-035-8 (embed failure
 mapping, unrecognised ``kind``, no chained cause, nothing logged from the library error),
 ``DEC-arch-llm-client-library-3`` (``auth_failed`` read from the error *message*), ``-9``
 (OpenAI with no credential) and ``-10`` (the provider's message and ``description`` never
-leave a failure), plus the feature ``context.md`` rule "one library client per operation".
+leave a failure), plus feature 035's context rule "one library client per operation".
 Covers UC-013 for the embed path.
 
-Bound through the frozen interface only (``status.md`` ``## Skeleton`` steps 001 and 002):
+Extended by feature 035 step 006 (DoD-2, DoD-3, tagged ``S035_006``):
+on 0.2.1 ``auth_failed`` is read from ``LLMError.status`` (401/403), never from the message
+(DEC-035-20, ``DEC-arch-llm-client-library-16``, which refines ``-3``), so every status case is
+built status-bearing; ``no_usable_vector`` keeps its ``Invalid response`` message-prefix test.
+
+Bound through the frozen interface only (feature 035's status record, ``## Skeleton`` steps 001 and 002):
 ``LlmGateway(kind, base_url, api_key, timeout_seconds, *, library_clients=...)`` and
 ``await gateway.embed(model, texts) -> list[list[float]]``. No HTTP is involved
 (``DEC-arch-llm-client-library-11``): fake library client classes come from
@@ -30,7 +35,7 @@ from loguru import logger
 
 from app.errors import LlmUnreachableError
 from app.services.llm.gateway import EMBED_NO_VECTOR_REASON, LlmGateway
-from tests.llm_fakes import LibraryEmbedRecorder
+from tests.llm_fakes import LibraryEmbedRecorder, library_status_error
 
 BASE_URL = "http://embed.test:8080"
 API_KEY = "sk-embed-test-key"
@@ -106,11 +111,20 @@ def _status_message(status: int) -> str:
     return f"{REQUEST_FAILED} with status {status}"
 
 
+def _status_error(status: int, description: str | None = None) -> LLMError:
+    """A non-2xx library error as 0.2.1 raises it: the message form plus ``status`` and ``kind``.
+
+    035 step 006 (DEC-035-20) reads ``auth_failed`` from ``status`` only, so every status case
+    carries it.
+    """
+    return library_status_error(status, message=_status_message(status), description=description)
+
+
 #: (case id, library error, expected ``detail.reason``) — the DoD-2 mapping table.
 FAILURE_MAPPING: list[tuple[str, LLMError, str]] = [
-    ("status-401", LLMError(_status_message(401), "invalid api key"), "auth_failed"),
-    ("status-403", LLMError(_status_message(403), "forbidden"), "auth_failed"),
-    ("status-401-no-description", LLMError(_status_message(401)), "auth_failed"),
+    ("status-401", _status_error(401, "invalid api key"), "auth_failed"),
+    ("status-403", _status_error(403, "forbidden"), "auth_failed"),
+    ("status-401-no-description", _status_error(401), "auth_failed"),
     (
         "invalid-response",
         LLMError("Invalid response from llama-swap API when embedding: missing data"),
@@ -121,19 +135,19 @@ FAILURE_MAPPING: list[tuple[str, LLMError, str]] = [
         LLMError("Invalid response from OpenAI API when embedding: expected 3 vectors, got 2"),
         EMBED_NO_VECTOR_REASON,
     ),
-    ("status-400", LLMError(_status_message(400), "bad request"), "unreachable"),
-    ("status-404", LLMError(_status_message(404), "no such model"), "unreachable"),
-    ("status-429", LLMError(_status_message(429), "slow down"), "unreachable"),
-    ("status-500", LLMError(_status_message(500), "internal error"), "unreachable"),
-    ("status-502", LLMError(_status_message(502)), "unreachable"),
+    ("status-400", _status_error(400, "bad request"), "unreachable"),
+    ("status-404", _status_error(404, "no such model"), "unreachable"),
+    ("status-429", _status_error(429, "slow down"), "unreachable"),
+    ("status-500", _status_error(500, "internal error"), "unreachable"),
+    ("status-502", _status_error(502), "unreachable"),
     ("transport-timeout", LLMError(f"{REQUEST_FAILED}: timeout"), "unreachable"),
     ("transport-interrupted", LLMError(f"{REQUEST_FAILED}: interrupted transfer"), "unreachable"),
     ("transport-connection", LLMError(f"{REQUEST_FAILED}: connection failure"), "unreachable"),
     ("unreadable-reply", LLMError("Unreadable reply from llama-swap API when embedding"), "unreachable"),
-    # The rule reads the *message*: a 500 whose body (``description``) mentions 401 is not auth.
+    # A 500 whose body (``description``) mentions 401 is not auth: only the status decides.
     (
         "status-500-description-mentions-401",
-        LLMError(_status_message(500), "upstream said status 401"),
+        _status_error(500, "upstream said status 401"),
         "unreachable",
     ),
 ]
@@ -296,7 +310,7 @@ def test_the_raised_error_has_no_cause_and_suppresses_its_context__DoD4(prefix: 
 
 
 def test_constructing_the_gateway_builds_no_library_client__DoD5() -> None:
-    """DoD-5 / context.md — the gateway object itself holds no library client."""
+    """DoD-5 / feature 035's context — the gateway object itself holds no library client."""
     recorder = LibraryEmbedRecorder(vectors=LIBRARY_VECTORS)
     _gateway(recorder)
     assert recorder.constructions == []
@@ -333,3 +347,117 @@ def test_each_embed_call_uses_its_own_client__DoD5() -> None:
     _embed(gateway)
     assert len(recorder.constructions) == 2
     assert (recorder.entered, recorder.exited) == (2, 2)
+
+
+# =========================================================================== 035 step 006 DoD-2
+# DEC-035-20 / DEC-arch-llm-client-library-16: ``auth_failed`` comes from ``LLMError.status``
+# being 401 or 403, whatever the message says.
+
+#: (case id, library error, expected ``detail.reason``) for the status-based auth split.
+STATUS_SPLIT: list[tuple[str, LLMError, str]] = [
+    ("status-401-opaque-message", LLMError("request refused", status=401), "auth_failed"),
+    ("status-403-opaque-message", LLMError("request refused", "forbidden", status=403), "auth_failed"),
+    (
+        "status-403-message-says-500",
+        library_status_error(403, message=_status_message(500), description="body"),
+        "auth_failed",
+    ),
+    ("message-401-no-status", LLMError(_status_message(401), "invalid api key"), "unreachable"),
+    ("message-403-no-status", LLMError(_status_message(403)), "unreachable"),
+    ("status-500-message-says-401", library_status_error(500, message=_status_message(401)), "unreachable"),
+    ("status-402", _status_error(402), "unreachable"),
+    ("status-407", _status_error(407), "unreachable"),
+    ("status-503", _status_error(503), "unreachable"),
+]
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [(error, reason) for _id, error, reason in STATUS_SPLIT],
+    ids=[case_id for case_id, _error, _reason in STATUS_SPLIT],
+)
+@pytest.mark.parametrize("kind", KINDS)
+def test_embed_auth_failed_is_read_from_the_error_status__S035_006_DoD2(
+    kind: str, error: LLMError, reason: str
+) -> None:
+    """S035 006 DoD-2 — status 401/403 → ``llm_unreachable`` / ``auth_failed`` whatever the message;
+    a message naming 401/403 with no status, or another status, → ``unreachable``."""
+    recorder = LibraryEmbedRecorder(error=error)
+    raised = _embed_failure(_gateway(recorder, kind=kind))
+    assert type(raised) is LlmUnreachableError
+    assert raised.code == "llm_unreachable"
+    assert raised.detail == {"reason": reason}
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_embed_auth_failure_leaks_no_provider_text_and_has_no_cause__S035_006_DoD2(
+    caplog: pytest.LogCaptureFixture, status: int
+) -> None:
+    """S035 006 DoD-2 — a 401/403's message and ``description`` reach no message, ``detail`` or log,
+    and the raised error has no chained cause."""
+    error = library_status_error(
+        status, message=f"{_status_message(status)} {_MESSAGE_SENTINEL}", description=_DESCRIPTION_SENTINEL
+    )
+    recorder = LibraryEmbedRecorder(error=error)
+    with captured_log_text(caplog) as lines:
+        raised = _embed_failure(_gateway(recorder))
+
+    assert raised.detail == {"reason": "auth_failed"}
+    _assert_no_sentinel(str(raised))
+    _assert_no_sentinel(repr(raised.args))
+    _assert_no_sentinel(repr(raised.detail))
+    _assert_no_sentinel("\n".join(lines))
+    assert raised.__cause__ is None
+    assert raised.__suppress_context__ is True
+    _assert_no_sentinel("".join(traceback.format_exception(raised)))
+
+
+# =========================================================================== 035 step 006 DoD-3
+# DEC-arch-llm-client-library-16: ``no_usable_vector`` keeps its message-prefix test; the
+# library's ``invalid_reply`` kind alone does not make it.
+
+#: (case id, library error, expected ``detail.reason``).
+INVALID_REPLY_SPLIT: list[tuple[str, LLMError, str]] = [
+    (
+        "invalid-response-prefix-with-kind",
+        LLMError("Invalid response from llama-swap API when embedding: missing data", kind="invalid_reply"),
+        EMBED_NO_VECTOR_REASON,
+    ),
+    (
+        "invalid-response-prefix-without-kind",
+        LLMError("Invalid response from OpenAI API when embedding: expected 3 vectors, got 2"),
+        EMBED_NO_VECTOR_REASON,
+    ),
+    (
+        "invalid-reply-kind-unreadable",
+        LLMError("Unreadable reply from llama-swap API when embedding", kind="invalid_reply"),
+        "unreachable",
+    ),
+    (
+        "invalid-reply-kind-empty-result",
+        LLMError("Empty embedding result from llama-swap API", kind="invalid_reply"),
+        "unreachable",
+    ),
+    (
+        "invalid-reply-kind-prefix-not-at-start",
+        LLMError("Embedding failed: Invalid response from llama-swap API", kind="invalid_reply"),
+        "unreachable",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [(error, reason) for _id, error, reason in INVALID_REPLY_SPLIT],
+    ids=[case_id for case_id, _error, _reason in INVALID_REPLY_SPLIT],
+)
+@pytest.mark.parametrize("kind", KINDS)
+def test_embed_no_usable_vector_keeps_the_message_prefix_test__S035_006_DoD3(
+    kind: str, error: LLMError, reason: str
+) -> None:
+    """S035 006 DoD-3 — a message starting ``Invalid response`` is ``no_usable_vector``; an
+    ``invalid_reply`` error whose message does not start that way is ``unreachable``."""
+    recorder = LibraryEmbedRecorder(error=error)
+    raised = _embed_failure(_gateway(recorder, kind=kind))
+    assert raised.code == "llm_unreachable"
+    assert raised.detail == {"reason": reason}

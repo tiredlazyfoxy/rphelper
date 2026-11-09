@@ -33,7 +33,7 @@ are obvious fakes. **No test here makes a network request**: the fake chat clien
 text and never calls a tool, so no provider ever runs. Each test name ends
 `__S028_002_DoD<n>`.
 
-Amended by feature 035 step 004 (`docs/plans/035.llm-client-gateway/004.callers-on-gateway.md`):
+Amended by feature 035 step 004:
 the chat client is now the gateway shape (DEC-035-6) — the fake's `compose(model, messages,
 tools)` records `tools.declarations` and yields one `ComposeText`; its factory takes
 `(kind, base_url, api_key, timeout_seconds)` (DEC-035-1). The all-three-offered route test also

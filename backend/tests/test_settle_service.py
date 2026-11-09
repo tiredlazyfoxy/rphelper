@@ -945,7 +945,7 @@ _ALLOWED_CHAT_NAMES = {"strip_think"}
 _ALLOWED_INDEX_MODULE = f"{_APP_SERVICES}.session_index"
 
 #: Feature 035 step 002 — **approved deviation** DEC-035-14 (user, 2026-11-09): settle imports the
-#: production factory `LlmGateway` directly from the gateway module (DEC-035-1, `002.context.md`),
+#: production factory `LlmGateway` directly from the gateway module (DEC-035-1, feature 035 step 002's context),
 #: so that one module is permitted too; every other `app.services` module still offends.
 _ALLOWED_GATEWAY_MODULE = f"{_APP_SERVICES}.llm.gateway"
 

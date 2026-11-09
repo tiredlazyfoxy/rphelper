@@ -23,8 +23,8 @@ DoD-12: `tests/test_stream_router.py` holds no assertion depending on the compos
 absence, so it is not modified; its tests running unchanged is the other half of DoD-12.
 DoD-13 and DoD-14 are `[manual/live]` and carry no test. Names end `__S021_006_DoD<n>`.
 
-Amended by feature 035 step 004 (`docs/plans/035.llm-client-gateway/004.callers-on-gateway.md`,
-DEC-035-1, DEC-035-6): the chat client is the gateway shape — the file-local fake's generic
+Amended by feature 035 step 004 (DEC-035-1, DEC-035-6): the chat client is the gateway shape —
+the file-local fake's generic
 `compose(model, messages, tools)` plays one scripted exchange per call (text pieces as
 `ComposeText`, whole tool calls handed to `tools.runner` as the gateway would, exceptions raised
 from the stream) — and the factory takes `(kind, base_url, api_key, timeout_seconds)`. Tests that

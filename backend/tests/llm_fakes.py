@@ -81,9 +81,15 @@ Library-level fakes (feature 035 step 002)
     library constructor keywords (`model`, `base_url`, `timeout`, `bearer_token`), is an async
     context manager, and offers an async `embed_batch(texts)`. The `"openai"` class refuses
     an empty bearer token with `ValueError` at construction, as the real `OpenAIAPIClient`
-    does (feature 035 `context.md`, "Library facts"). It records constructions, enters,
+    does (feature 035's context, "Library facts"). It records constructions, enters,
     exits and `embed_batch` calls, and answers `vectors` or raises `error` (a real
     `llm.LLMError` in tests).
+
+`library_status_error(status, *, message=..., description=None)`
+    A real `llm.LLMError` for a non-2xx reply, shaped like `llm-client` 0.2.1 raises it: the
+    HTTP status on the keyword-only `status` attribute and `kind="status"`. Since feature 035
+    step 006 the gateway reads `auth_failed` from that `status` only (DEC-035-20), so every
+    401/403 handed to `LibraryEmbedRecorder(error=...)` must be built this way.
 
 `gateway_factory(recorder)`
     A four-argument factory `(kind, base_url, api_key, timeout_seconds)` that builds a real
@@ -94,6 +100,8 @@ Library-level fakes (feature 035 step 002)
 import hashlib
 from collections.abc import Callable, Sequence
 from typing import Any
+
+from llm import LLMError
 
 from app.errors import LlmUnreachableError
 from app.services.llm.gateway import LlmGateway, ProbeOutcome, ProbeResult
@@ -306,6 +314,26 @@ class LibraryEmbedRecorder:
                 raise AssertionError("embed must not chat")
 
         return _FakeLibraryClient
+
+
+#: The library's request-failure message prefix for an embeddings call (message text only; the
+#: gateway never classifies by it since 035 step 006).
+LIBRARY_REQUEST_FAILED = "Request to http://llm.test:8080/v1/embeddings failed"
+
+
+def library_status_error(
+    status: int,
+    *,
+    message: str | None = None,
+    description: str | None = None,
+) -> LLMError:
+    """A real ``llm.LLMError`` for a non-2xx reply, carrying ``status`` and ``kind="status"``.
+
+    0.2.1 sets ``status`` on every non-2xx error (feature 035 step 006's context, "Library 0.2.1"); the
+    message defaults to the library's ``"... failed with status <n>"`` text form.
+    """
+    text = f"{LIBRARY_REQUEST_FAILED} with status {status}" if message is None else message
+    return LLMError(text, description, status=status, kind="status")
 
 
 def gateway_factory(recorder: LibraryEmbedRecorder) -> Callable[[str, str, str | None, float], LlmGateway]:

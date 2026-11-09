@@ -1,8 +1,8 @@
 """The compose source (`app/services/compose.py`) — feature 021 step 005, moved onto the gateway by
 feature 035 step 004.
 
-Feature 035 step 004 (`docs/plans/035.llm-client-gateway/004.callers-on-gateway.md`, DoD-1..DoD-9
-and DoD-14, its `004.context.md`, DEC-035-1/-6/-7 and `DEC-arch-llm-client-library-7`/-8): the
+Feature 035 step 004 (DoD-1..DoD-9
+and DoD-14, its context, DEC-035-1/-6/-7 and `DEC-arch-llm-client-library-7`/-8): the
 source drains the client's `compose(model, messages, tools)` inside `aclosing`; each text piece
 becomes one token frame, verbatim and in order (`<think>` tags included); each frame the runner
 emits passes through; on success the joined token text is written as the assistant row and `done`
@@ -15,7 +15,7 @@ covered by its own tests; the clauses that still hold here (accepted, the prompt
 model-check refusals, the provider failure, the close, the offered declarations, the import rule)
 keep their `__S021_005_DoD<n>` tags and gain the 035 id they also cover.
 
-Bindings come from `status.md` `## Skeleton`:
+Bindings come from feature 035's status record, `## Skeleton`:
 
 - `compose_stream(engine, generator, user_id, session_id, accepted_id, timeout_seconds,
   client_factory, registry) -> AsyncGenerator[Frame, None]` (035 step 004, unchanged)
@@ -32,18 +32,27 @@ plays a script of text pieces, whole tool calls and exceptions; for a tool call 
 `tools.runner(ToolCall("call_<n>", ...), emitted.append)` exactly as the gateway would, then yields
 each emitted event and continues. Tools are file-local fakes. Rows are raw-inserted (`conftest.py`
 untouched). Async code is driven with `asyncio.run`, every run bounded by `asyncio.wait_for`.
+
+Feature 035 step 006 (DoD-9..DoD-13, tagged `__S035_006_DoD<n>`;
+DEC-035-17, DEC-035-18, `DEC-arch-llm-client-library-15`): the fake also plays `Reject` steps,
+yielding `ComposeRejected(call=ToolCall("call_<n>", name, arguments), kind=...)` from the same
+counter (frozen skeleton binding). The source turns each into `tool_start` then `tool_fail`
+(`tool_failed`) without dispatching, writes one failed tool row, and logs the tool name and kind.
 """
 
 from __future__ import annotations
 
 import ast
 import asyncio
-from collections.abc import AsyncGenerator, Mapping, Sequence
+import json
+from collections.abc import AsyncGenerator, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
+from loguru import logger
 from sqlalchemy import Connection, Engine, Table, select, update
 
 from app.db import schema
@@ -68,7 +77,8 @@ from app.services.llm.frames import (
     frame_stream,
     own_connection_persister,
 )
-from app.services.llm.gateway import ComposeText, ComposeTools
+from app.services.llm.gateway import ComposeRejected, ComposeRejectionKind, ComposeText, ComposeTools
+from app.services.messages import list_zone
 from app.services.tools import PRODUCTION_TOOL_REGISTRY, Tool, ToolOutcome, ToolScope
 from app.services.tools.definitions import MEMO_SEARCH, SESSION_SEARCH, WEB_SEARCH
 from tests.privacy_audit_support import (
@@ -355,8 +365,20 @@ class Call:
     arguments: str
 
 
-#: One exchange's script: text pieces, tool calls and exceptions (raised from inside the stream).
-Step = Text | Call | BaseException
+@dataclass(frozen=True)
+class Reject:
+    """A scripted model-side rejection (035 step 006, DEC-035-17): the fake yields one
+    `ComposeRejected` whose call is `ToolCall("call_<n>", name, arguments)` — `<n>` taken from the
+    same counter `Call` uses, as the gateway mints it — with the rejection `kind`."""
+
+    name: str
+    arguments: str
+    kind: str
+
+
+#: One exchange's script: text pieces, tool calls, rejections and exceptions (raised from inside
+#: the stream).
+Step = Text | Call | Reject | BaseException
 
 
 class ComposeCall:
@@ -392,7 +414,7 @@ class FakeChatClient:
         model: str,
         messages: Sequence[ChatMessage],
         tools: ComposeTools[E],
-    ) -> AsyncGenerator[ComposeText | E, None]:
+    ) -> AsyncGenerator[ComposeText | ComposeRejected | E, None]:
         call = ComposeCall(model, list(messages), [dict(one) for one in tools.declarations])
         self.calls.append(call)
         minted = 0
@@ -403,6 +425,13 @@ class FakeChatClient:
                     raise step
                 if isinstance(step, Text):
                     yield ComposeText(step.text)
+                    continue
+                if isinstance(step, Reject):
+                    # 035 step 006: a model-side rejection is its own stream value; the runner is
+                    # never involved, but the id comes from the same per-compose counter.
+                    minted += 1
+                    rejected = ToolCall(call_id=f"call_{minted}", name=step.name, arguments=step.arguments)
+                    yield ComposeRejected(call=rejected, kind=ComposeRejectionKind(step.kind))
                     continue
                 # The gateway's half of the wrapper (DEC-035-6): mint `call_<n>`, await the runner,
                 # then hand on what it emitted, in order.
@@ -1144,6 +1173,439 @@ def test_the_shared_chat_fake_failure_script_raises_from_the_stream__S035_004_Do
 
 
 # =========================================================================================
+# 035 step 006: model-side rejections (DoD-9..DoD-13)
+# =========================================================================================
+
+#: The seam's persisted failed-row text (021 literals table; data-model.md `messages`).
+FAILED_ROW_TEXT = "The tool failed."
+
+#: One rejection per gateway-owned kind (DEC-035-17): (kind, the model's name, its argument text).
+#: Names and argument texts are what a model would send for that mistake; the source must carry
+#: them verbatim, so the not-offered text has irregular spacing a re-serialisation would lose.
+REJECTIONS = [
+    pytest.param("not_offered", "ghost_tool", '{ "query" :  "inn" }', id="not-offered"),
+    pytest.param("bad_arguments", "memo_search", '{"query": "inn"', id="bad-arguments"),
+    pytest.param("unknown_argument", "memo_search", '{"query":"inn","undeclared":1}', id="unknown-argument"),
+]
+
+
+@pytest.fixture
+def dispatch_calls(monkeypatch: pytest.MonkeyPatch) -> list[ToolCall]:
+    """Every `ToolCall` handed to the seam's `dispatch`, which still runs as normal.
+
+    It is wrapped at every name it is reachable by (as in the 035 step 004 DoD-5 test), so a
+    rejection that reached `dispatch` by any spelling is seen (DoD-9 says it never does).
+    """
+    from app.services.tools import seam
+
+    original = seam.dispatch
+    seen: list[ToolCall] = []
+
+    async def recording_dispatch(call: ToolCall, *args: Any, **kwargs: Any) -> Any:
+        seen.append(call)
+        return await original(call, *args, **kwargs)
+
+    monkeypatch.setattr("app.services.compose.dispatch", recording_dispatch, raising=False)
+    monkeypatch.setattr("app.services.tools.dispatch", recording_dispatch)
+    monkeypatch.setattr("app.services.tools.seam.dispatch", recording_dispatch)
+    return seen
+
+
+@contextmanager
+def captured_log_records() -> Iterator[list[str]]:
+    """Every loguru record (all levels) logged while the block runs, one string per record:
+    the message followed by any bound `extra` fields."""
+    records: list[str] = []
+    sink_id = logger.add(lambda message: records.append(str(message)), level=0, format="{message} {extra}")
+    try:
+        yield records
+    finally:
+        logger.remove(sink_id)
+
+
+def _tool_payload(row: Mapping[str, Any]) -> dict[str, Any]:
+    payload = json.loads(row["tool_payload"])
+    assert isinstance(payload, dict)
+    return payload
+
+
+# --- DoD-9: tool_start then tool_fail, in stream order, no dispatch, then done --------------
+
+
+@pytest.mark.parametrize(("kind", "name", "arguments"), REJECTIONS)
+def test_a_rejection_streams_tool_start_then_tool_fail_in_place_and_reaches_done__S035_006_DoD9(
+    engine: Engine, generator: SnowflakeGenerator, dispatch_calls: list[ToolCall], kind: str, name: str, arguments: str
+) -> None:
+    """S035 006 DoD-9 / US-066.AC-1 / UC-051 / UC-053 — text, a rejection, text: token, `tool_start`
+    and `tool_fail` (`tool_failed`) both for `call_1` with the model's name, token, `done`; the
+    assistant row is the joined text; `dispatch` is never called and the tool never runs."""
+    tool = RecordingTool("memo_search", MEMO_OUTCOME)
+    client = FakeChatClient([Text("Before "), Reject(name, arguments, kind), Text("after.")])
+
+    frames = _run(engine, generator, FakeFactory(client), _registry(tool))
+
+    assert len(frames) == 5
+    assert frames[0] == TokenFrame(text="Before ")
+    start = frames[1]
+    assert isinstance(start, ToolStartFrame)
+    assert (start.tool, start.call_id) == (name, "call_1")
+    assert frames[2] == ToolFailFrame(tool=name, call_id="call_1", code=FAILED_CODE)
+    assert frames[3] == TokenFrame(text="after.")
+    row = _assert_done_matches_the_one_assistant_row(engine, frames)
+    assert row["text"] == "Before after."
+    assert dispatch_calls == []
+    assert tool.arguments == []
+    assert client.tool_outputs == []
+
+
+def test_a_rejection_with_object_arguments_starts_with_those_arguments__S035_006_DoD9(
+    engine: Engine, generator: SnowflakeGenerator, dispatch_calls: list[ToolCall]
+) -> None:
+    """S035 006 DoD-9 — an unoffered call whose argument text is a JSON object: its `tool_start`
+    shows that object, as any `tool_start` for the same argument text does (035 step 004 DoD-3)."""
+    client = FakeChatClient([Reject("ghost_tool", '{"query":"inn"}', "not_offered"), Text("On.")])
+
+    frames = _run(engine, generator, FakeFactory(client), _registry(RecordingTool("memo_search")))
+
+    start = frames[0]
+    assert isinstance(start, ToolStartFrame)
+    assert dict(start.args) == {"query": "inn"}
+    assert frames[1] == ToolFailFrame(tool="ghost_tool", call_id="call_1", code=FAILED_CODE)
+
+
+def test_a_rejection_with_an_empty_name_keeps_the_name_empty__S035_006_DoD9(
+    engine: Engine, generator: SnowflakeGenerator, dispatch_calls: list[ToolCall]
+) -> None:
+    """S035 006 DoD-9 — a call with an empty tool name: `tool_start` and `tool_fail` carry `""`."""
+    client = FakeChatClient([Reject("", '{"query":"inn"}', "not_offered"), Text("On.")])
+
+    frames = _run(engine, generator, FakeFactory(client), _registry(RecordingTool("memo_search")))
+
+    start = frames[0]
+    assert isinstance(start, ToolStartFrame)
+    assert (start.tool, start.call_id) == ("", "call_1")
+    assert frames[1] == ToolFailFrame(tool="", call_id="call_1", code=FAILED_CODE)
+    assert frames[2] == TokenFrame(text="On.")
+    assert isinstance(frames[3], DoneFrame)
+    assert dispatch_calls == []
+
+
+def test_rejections_and_wrapper_calls_keep_their_ids_and_order__S035_006_DoD9(
+    engine: Engine, generator: SnowflakeGenerator, dispatch_calls: list[ToolCall]
+) -> None:
+    """S035 006 DoD-9 — a wrapper call, a rejection, a wrapper call: `call_1` start/result,
+    `call_2` start/fail, `call_3` start/result, the text, `done`; only `call_1` and `call_3` were
+    dispatched."""
+    tool = RecordingTool("memo_search", MEMO_OUTCOME)
+    client = FakeChatClient(
+        [
+            Call("memo_search", '{"query":"a"}'),
+            Reject("ghost_tool", '{"query":"b"}', "not_offered"),
+            Call("memo_search", '{"query":"c"}'),
+            Text("Done looking."),
+        ]
+    )
+
+    frames = _run(engine, generator, FakeFactory(client), _registry(tool))
+
+    assert [type(frame) for frame in frames] == [
+        ToolStartFrame,
+        ToolResultFrame,
+        ToolStartFrame,
+        ToolFailFrame,
+        ToolStartFrame,
+        ToolResultFrame,
+        TokenFrame,
+        DoneFrame,
+    ]
+    assert [(frames[i].tool, frames[i].call_id) for i in (0, 1, 2, 3, 4, 5)] == [
+        ("memo_search", "call_1"),
+        ("memo_search", "call_1"),
+        ("ghost_tool", "call_2"),
+        ("ghost_tool", "call_2"),
+        ("memo_search", "call_3"),
+        ("memo_search", "call_3"),
+    ]
+    assert frames[3] == ToolFailFrame(tool="ghost_tool", call_id="call_2", code=FAILED_CODE)
+    assert [call.call_id for call in dispatch_calls] == ["call_1", "call_3"]
+    assert tool.arguments == [{"query": "a"}, {"query": "c"}]
+    row = _assert_done_matches_the_one_assistant_row(engine, frames)
+    assert row["text"] == "Done looking."
+
+
+# --- DoD-10: one failed tool row per rejection, before the assistant row --------------------
+
+
+@pytest.mark.parametrize(("kind", "name", "arguments"), REJECTIONS)
+def test_a_rejection_writes_one_failed_tool_row_before_the_assistant_row__S035_006_DoD10(
+    engine: Engine, generator: SnowflakeGenerator, kind: str, name: str, arguments: str
+) -> None:
+    """S035 006 DoD-10 / data-model.md `messages` tool columns — one `role='tool'` current-zone row:
+    text `The tool failed.`, the model's name, payload `call_id` `call_1`, `arguments` the model's
+    text verbatim, status `failed`, code `tool_failed`; it precedes the assistant row, and the zone
+    read shows it `failed`."""
+    client = FakeChatClient([Text("Before "), Reject(name, arguments, kind), Text("after.")])
+
+    _run(engine, generator, FakeFactory(client), _registry(RecordingTool("memo_search")))
+
+    tool_rows = _rows(engine, "tool")
+    assistant_rows = _rows(engine, "assistant")
+    assert len(tool_rows) == 1
+    assert len(assistant_rows) == 1
+    row = tool_rows[0]
+    assert row["text"] == FAILED_ROW_TEXT
+    assert row["tool_name"] == name
+    assert row["session_id"] == SESSION_A
+    assert row["user_id"] == USER_A
+    assert row["settled_at"] is None
+    assert row["related_to"] is None
+    assert row["id"] < assistant_rows[0]["id"]
+    payload = _tool_payload(row)
+    assert payload["call_id"] == "call_1"
+    assert payload["arguments"] == arguments
+    assert payload["status"] == "failed"
+    assert payload["code"] == FAILED_CODE
+    with engine.connect() as connection:
+        zone = list_zone(connection, USER_A, SESSION_A)
+    zone_tool_rows = [message for message in zone if message.role == "tool"]
+    assert [message.id for message in zone_tool_rows] == [row["id"]]
+    assert zone_tool_rows[0].tool_status == "failed"
+    assert zone_tool_rows[0].tool_name == name
+
+
+def test_a_rejection_with_an_empty_name_writes_an_empty_tool_name__S035_006_DoD10(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """S035 006 DoD-10 — the row's `tool_name` is the model's name verbatim, `""` kept."""
+    client = FakeChatClient([Reject("", "", "not_offered"), Text("On.")])
+
+    _run(engine, generator, FakeFactory(client), _registry(RecordingTool("memo_search")))
+
+    (row,) = _rows(engine, "tool")
+    assert row["tool_name"] == ""
+    assert row["text"] == FAILED_ROW_TEXT
+    payload = _tool_payload(row)
+    assert payload["call_id"] == "call_1"
+    assert payload["arguments"] == ""
+    assert payload["status"] == "failed"
+    assert payload["code"] == FAILED_CODE
+
+
+def test_each_rejection_writes_its_own_row_with_its_own_id__S035_006_DoD10(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """S035 006 DoD-10 — two rejections write two failed rows, `call_1` then `call_2`, both before
+    the assistant row."""
+    client = FakeChatClient(
+        [
+            Reject("ghost_tool", '{"query":"a"}', "not_offered"),
+            Reject("memo_search", "[1, 2]", "bad_arguments"),
+            Text("On."),
+        ]
+    )
+
+    _run(engine, generator, FakeFactory(client), _registry(RecordingTool("memo_search")))
+
+    tool_rows = _rows(engine, "tool")
+    (assistant_row,) = _rows(engine, "assistant")
+    assert [_tool_payload(row)["call_id"] for row in tool_rows] == ["call_1", "call_2"]
+    assert [row["tool_name"] for row in tool_rows] == ["ghost_tool", "memo_search"]
+    assert [_tool_payload(row)["arguments"] for row in tool_rows] == ['{"query":"a"}', "[1, 2]"]
+    assert all(row["id"] < assistant_row["id"] for row in tool_rows)
+
+
+# --- DoD-11: a stop between tool_start and tool_fail writes no row --------------------------
+
+
+def test_closing_the_source_at_a_rejections_tool_start_writes_no_tool_row__S035_006_DoD11(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """S035 006 DoD-11 / US-133.AC-1 — `aclose()` while the source is suspended at a rejection's
+    `tool_start`: no `tool_fail` was produced and no tool row exists."""
+    client = FakeChatClient([Text("Par"), Reject("ghost_tool", '{"query":"inn"}', "not_offered"), Text("never")])
+    factory = FakeFactory(client)
+
+    async def scenario() -> list[Any]:
+        source = _source(engine, generator, factory, _registry(RecordingTool("memo_search")), None)
+        seen = [await source.__anext__(), await source.__anext__()]
+        await source.aclose()
+        return seen
+
+    seen = asyncio.run(asyncio.wait_for(scenario(), timeout=RUN_TIMEOUT_SECONDS))
+
+    assert seen[0] == TokenFrame(text="Par")
+    assert isinstance(seen[1], ToolStartFrame)
+    assert seen[1].call_id == "call_1"
+    assert _rows(engine, "tool") == []
+
+
+def test_a_stop_at_a_rejections_tool_start_keeps_the_text_and_writes_no_tool_row__S035_006_DoD11(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """S035 006 DoD-11 / US-133.AC-1 / US-132.AC-1 — under the SSE harness with the own-connection
+    persister, the stream is closed (the stop, as a server closes it on disconnect) once the
+    rejection's `tool_start` chunk arrived and before its `tool_fail`: no tool row exists, and the
+    text streamed before the stop is an ordinary unsettled zone assistant row."""
+    client = FakeChatClient(
+        [Text("Par"), Text("tial"), Reject("ghost_tool", '{"query":"inn"}', "not_offered"), Text("never")]
+    )
+    factory = FakeFactory(client)
+
+    async def scenario() -> list[str]:
+        chunks: list[str] = []
+        source = _source(engine, generator, factory, _registry(RecordingTool("memo_search")), None)
+        persist = own_connection_persister(engine, generator, USER_A, SESSION_A)
+        stream = frame_stream(NeverDisconnected(), source, persist)
+        # Pull chunk by chunk; nothing is pulled after tool_start, so the source stays suspended
+        # at that frame until the stream is closed.
+        while not chunks or '"event":"tool_start"' not in chunks[-1]:
+            chunks.append(await stream.__anext__())
+        await stream.aclose()
+        return chunks
+
+    chunks = asyncio.run(asyncio.wait_for(scenario(), timeout=RUN_TIMEOUT_SECONDS))
+
+    assert len(chunks) == 3
+    assert '"event":"tool_start"' in chunks[2]
+    assert not any('"event":"tool_fail"' in chunk for chunk in chunks)
+    assert _rows(engine, "tool") == []
+    assistant_rows = _rows(engine, "assistant")
+    assert len(assistant_rows) == 1
+    assert assistant_rows[0]["text"] == "Partial"
+    assert assistant_rows[0]["settled_at"] is None
+    assert assistant_rows[0]["related_to"] is None
+
+
+# --- DoD-12: one log record per rejection, name and kind only ------------------------------
+
+
+#: Argument text whose distinctive value must never reach a log (DEC-035-18: roleplay text).
+ARGUMENT_SENTINEL = "".join(("sntl", "rejectargs", "4b8e"))
+
+
+@pytest.mark.parametrize("kind", ["not_offered", "bad_arguments", "unknown_argument"])
+def test_a_rejection_is_logged_once_with_its_name_and_kind_and_no_arguments__S035_006_DoD12(
+    engine: Engine, generator: SnowflakeGenerator, kind: str
+) -> None:
+    """S035 006 DoD-12 / DEC-035-18 — exactly one log record carries both the model's tool name and
+    the rejection kind; no record carries the argument text."""
+    name = "".join(("ghost", "_tool", "_q7"))
+    arguments = f'{{"query":"{ARGUMENT_SENTINEL}"}}'
+    client = FakeChatClient([Text("Before "), Reject(name, arguments, kind), Text("after.")])
+
+    with captured_log_records() as records:
+        _run(engine, generator, FakeFactory(client), _registry(RecordingTool("memo_search")))
+
+    carrying = [record for record in records if name in record and kind in record]
+    assert len(carrying) == 1, records
+    assert not any(ARGUMENT_SENTINEL in record for record in records), records
+
+
+def test_two_rejections_give_two_log_records__S035_006_DoD12(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """S035 006 DoD-12 — each drained rejection produces its own record (name + kind)."""
+    first, second = "".join(("ghost", "_one")), "".join(("ghost", "_two"))
+    client = FakeChatClient(
+        [Reject(first, "{}", "not_offered"), Reject(second, "{oops", "bad_arguments"), Text("On.")]
+    )
+
+    with captured_log_records() as records:
+        _run(engine, generator, FakeFactory(client), _registry(RecordingTool("memo_search")))
+
+    assert len([r for r in records if first in r and "not_offered" in r]) == 1, records
+    assert len([r for r in records if second in r and "bad_arguments" in r]) == 1, records
+
+
+# --- DoD-13: the next exchange replays the rejected row under the existing rule -------------
+
+
+def _next_exchange_messages(
+    engine: Engine, generator: SnowflakeGenerator, first_script: Sequence[Step]
+) -> list[ChatMessage]:
+    """Run one exchange with `first_script`, then a plain next exchange over the same zone;
+    return the conversation the next exchange's `compose` received (the assembled context)."""
+    registry = _registry(RecordingTool("memo_search"))
+    _run(engine, generator, FakeFactory(FakeChatClient(first_script)), registry)
+    follow_up = FakeChatClient([Text("Next.")])
+    _run(engine, generator, FakeFactory(follow_up), registry)
+    assert len(follow_up.calls) == 1
+    return follow_up.calls[0].messages
+
+
+def _assert_no_orphan_tool_message(messages: Sequence[ChatMessage]) -> None:
+    """Every `tool` message directly follows an assistant message holding the call it answers."""
+    for index, message in enumerate(messages):
+        if message.role != "tool":
+            continue
+        assert index > 0
+        previous = messages[index - 1]
+        assert previous.role == "assistant"
+        assert message.tool_call_id in [call.call_id for call in previous.tool_calls]
+
+
+def test_a_not_offered_rejection_with_object_arguments_replays_as_the_pair__S035_006_DoD13(
+    engine: Engine, generator: SnowflakeGenerator
+) -> None:
+    """S035 006 DoD-13 / llm-and-streaming.md § Tool rows are replayed — the next exchange gets,
+    between the zone's user message and the first assistant answer, the recorded call (`call_1`,
+    the model's name and argument text) and then a `tool` message carrying the failed literal."""
+    arguments = '{"query":"inn"}'
+    messages = _next_exchange_messages(
+        engine, generator, [Reject("ghost_tool", arguments, "not_offered"), Text("First answer.")]
+    )
+
+    roles = [message.role for message in messages]
+    assert roles[0] == "system"
+    user_index = next(i for i, m in enumerate(messages) if m.role == "user" and m.content == ZONE_USER_TEXT)
+    call_message, tool_message, answer = messages[user_index + 1 : user_index + 4]
+    assert call_message.role == "assistant"
+    assert list(call_message.tool_calls) == [ToolCall(call_id="call_1", name="ghost_tool", arguments=arguments)]
+    assert tool_message.role == "tool"
+    assert tool_message.tool_call_id == "call_1"
+    assert tool_message.content == FAILED_CONTENT
+    assert answer.role == "assistant"
+    assert answer.content == "First answer."
+    _assert_no_orphan_tool_message(messages)
+
+
+@pytest.mark.parametrize(
+    ("kind", "name", "arguments"),
+    [
+        pytest.param("bad_arguments", "memo_search", "{not json", id="unreadable-arguments"),
+        pytest.param("bad_arguments", "memo_search", "[1, 2]", id="non-object-arguments"),
+        pytest.param("bad_arguments", "memo_search", "", id="missing-arguments"),
+        pytest.param("not_offered", "", '{"query":"inn"}', id="empty-name"),
+        pytest.param("unknown_argument", "memo_search", '{"query":"inn","undeclared":1}', id="unknown-argument"),
+    ],
+)
+def test_any_rejected_row_replays_as_the_pair_or_is_skipped_never_an_orphan__S035_006_DoD13(
+    engine: Engine, generator: SnowflakeGenerator, kind: str, name: str, arguments: str
+) -> None:
+    """S035 006 DoD-13 — under the existing replay rule a rejected row is either the recorded call
+    followed by a `tool` message with the failed literal, or skipped entirely; there is never a
+    `tool` message without its matching call."""
+    messages = _next_exchange_messages(engine, generator, [Reject(name, arguments, kind), Text("First answer.")])
+
+    _assert_no_orphan_tool_message(messages)
+    calls = [
+        (index, call)
+        for index, message in enumerate(messages)
+        for call in message.tool_calls
+        if call.call_id == "call_1"
+    ]
+    answers = [message for message in messages if message.role == "tool" and message.tool_call_id == "call_1"]
+    if calls:
+        ((index, call),) = calls
+        assert call == ToolCall(call_id="call_1", name=name, arguments=arguments)
+        assert answers == [messages[index + 1]]
+        assert answers[0].content == FAILED_CONTENT
+    else:
+        assert answers == []
+    assert [m.content for m in messages if m.role == "assistant" and not m.tool_calls] == ["First answer."]
+
+
+# =========================================================================================
 # 021 DoD-14 / 035: the compose module's imports
 # =========================================================================================
 
@@ -1173,7 +1635,7 @@ def test_compose_imports_no_fastapi__S021_005_DoD14() -> None:
 
 
 def test_compose_imports_neither_the_old_client_nor_the_library__S035_004_DoD2() -> None:
-    """035 DoD-2 (the source drains the gateway's `compose`; `context.md`: the gateway is the only
+    """035 DoD-2 (the source drains the gateway's `compose`; feature 035's context: the gateway is the only
     module that imports the library) — `compose.py` imports neither `app.services.llm.client` nor
     the `llm` package."""
     offenders = [

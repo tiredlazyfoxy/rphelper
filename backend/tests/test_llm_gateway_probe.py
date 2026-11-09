@@ -1,7 +1,7 @@
 """Tests for the LLM gateway's probe — feature 035 step 001.
 
 Every expected value in this module comes from
-``docs/plans/035.llm-client-gateway/001.library-and-probe.md`` (DoD-4 .. DoD-14) and the
+feature 035 step 001 (DoD-4 .. DoD-14) and the
 decisions it cites: DEC-035-2 (probe value types re-homed), DEC-035-3 (the
 ``library_clients`` seam), DEC-035-8 (probe failure mapping, ``note`` never set),
 DEC-035-11 (base-URL rule), ``DEC-arch-llm-client-library-3`` (``auth_failed`` read from
@@ -13,6 +13,12 @@ The gateway is bound through the frozen interface only:
 ``await gateway.probe() -> ProbeResult``. No HTTP is involved
 (``DEC-arch-llm-client-library-11``): fake library client classes are injected through
 ``library_clients``, and library failures are raised as the real ``llm.LLMError``.
+
+Extended by feature 035 step 006 (DoD-2, tagged ``S035_006``): the
+library is 0.2.1, whose ``LLMError`` carries a keyword-only ``status``. ``auth_failed`` is read
+from that status (401 or 403) and never from the message (DEC-035-20,
+``DEC-arch-llm-client-library-16``, which refines ``-3``), so every auth case here builds a
+status-bearing error.
 
 The suite has no pytest-asyncio, so each coroutine is driven with ``asyncio.run``.
 """
@@ -60,7 +66,7 @@ class LibraryScript:
     ``listing`` is what ``list_models`` returns; ``list_error`` / ``enter_error`` /
     ``construct_error`` make the matching step raise instead. ``requires_token`` mimics
     the real ``OpenAIAPIClient``, which refuses a falsy ``bearer_token`` with ``ValueError``
-    at construction (``001.context.md`` "What the probe reads from the library").
+    at construction (feature 035 step 001's context, "What the probe reads from the library").
     """
 
     listing: Sequence[str] = ()
@@ -163,8 +169,12 @@ REQUEST_FAILED = f"Request to {NORMALISED_BASE_URL}/models failed"
 
 
 def status_error(status: int) -> LLMError:
-    """The library's non-2xx error, in the message form ``DEC-arch-llm-client-library-3`` names."""
-    return LLMError(f"{REQUEST_FAILED} with status {status}", description="body")
+    """The library's non-2xx error as 0.2.1 raises it: the message form plus ``status`` and ``kind``.
+
+    Since 035 step 006 ``auth_failed`` is read from ``status`` alone (DEC-035-20,
+    ``DEC-arch-llm-client-library-16``), so the status-bearing form is the realistic one.
+    """
+    return LLMError(f"{REQUEST_FAILED} with status {status}", description="body", status=status, kind="status")
 
 
 # --------------------------------------------------------------------------- DoD-4
@@ -266,7 +276,7 @@ def test_an_empty_listing_gives_model_list_empty__S035_001_DoD7(kind: str) -> No
 def test_library_error_maps_to_its_probe_outcome__S035_001_DoD8(
     kind: str, error: LLMError, expected: ProbeOutcome
 ) -> None:
-    """DoD-8 (UC-011, US-013): ``status 401``/``403`` give ``auth_failed``; other library errors ``unreachable``."""
+    """DoD-8 (UC-011, US-013): status 401/403 give ``auth_failed``; other library errors ``unreachable``."""
     library = Library()
     library.script(kind).list_error = error
 
@@ -455,16 +465,19 @@ def captured_log_text(caplog: pytest.LogCaptureFixture) -> Iterator[list[str]]:
             lines.append(repr(record.args))
 
 
-def _sentinel_error(prefix: str) -> LLMError:
-    """A library error carrying one sentinel in its message and another in its ``description``."""
-    return LLMError(f"{prefix} {_MESSAGE_SENTINEL}", description=_DESCRIPTION_SENTINEL)
+def _sentinel_error(prefix: str, status: int | None = None) -> LLMError:
+    """A library error carrying one sentinel in its message and another in its ``description``.
+
+    ``status`` is the 0.2.1 HTTP status attribute (035 step 006, DEC-035-20).
+    """
+    return LLMError(f"{prefix} {_MESSAGE_SENTINEL}", description=_DESCRIPTION_SENTINEL, status=status)
 
 
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
-        (_sentinel_error(f"{REQUEST_FAILED} with status 401"), ProbeOutcome.AUTH_FAILED),
-        (_sentinel_error(f"{REQUEST_FAILED} with status 500"), ProbeOutcome.UNREACHABLE),
+        (_sentinel_error(f"{REQUEST_FAILED} with status 401", 401), ProbeOutcome.AUTH_FAILED),
+        (_sentinel_error(f"{REQUEST_FAILED} with status 500", 500), ProbeOutcome.UNREACHABLE),
         (_sentinel_error(f"{REQUEST_FAILED}: timeout"), ProbeOutcome.UNREACHABLE),
         (_sentinel_error("Invalid response from llama-swap when listing models"), ProbeOutcome.UNREACHABLE),
     ],
@@ -584,4 +597,81 @@ def test_probe_result_and_no_vector_reason_are_re_homed_unchanged__S035_001_DoD1
     defaults = ProbeResult(outcome=ProbeOutcome.UNREACHABLE)
     assert defaults.model_names == ()
     assert defaults.note is None
+
+
+# --------------------------------------------------------------------------- 035 step 006 DoD-2
+# DEC-035-20 / DEC-arch-llm-client-library-16: ``auth_failed`` comes from ``LLMError.status``
+# being 401 or 403, whatever the message says; a message naming 401/403 without a status, and
+# any other status, are ``unreachable``.
+
+#: (case id, library error, expected outcome) for the status-based auth split.
+STATUS_SPLIT: list[tuple[str, LLMError, ProbeOutcome]] = [
+    ("status-401-opaque-message", LLMError("request refused", status=401), ProbeOutcome.AUTH_FAILED),
+    ("status-403-opaque-message", LLMError("request refused", status=403), ProbeOutcome.AUTH_FAILED),
+    (
+        "status-401-message-says-500",
+        LLMError(f"{REQUEST_FAILED} with status 500", description="body", status=401, kind="status"),
+        ProbeOutcome.AUTH_FAILED,
+    ),
+    ("status-403-with-kind", status_error(403), ProbeOutcome.AUTH_FAILED),
+    (
+        "message-401-no-status",
+        LLMError(f"{REQUEST_FAILED} with status 401", description="body"),
+        ProbeOutcome.UNREACHABLE,
+    ),
+    ("message-403-no-status", LLMError(f"{REQUEST_FAILED} with status 403"), ProbeOutcome.UNREACHABLE),
+    (
+        "status-500-message-says-401",
+        LLMError(f"{REQUEST_FAILED} with status 401", status=500, kind="status"),
+        ProbeOutcome.UNREACHABLE,
+    ),
+    ("status-400", status_error(400), ProbeOutcome.UNREACHABLE),
+    ("status-402", status_error(402), ProbeOutcome.UNREACHABLE),
+    ("status-404", status_error(404), ProbeOutcome.UNREACHABLE),
+    ("status-407", status_error(407), ProbeOutcome.UNREACHABLE),
+    ("status-429", status_error(429), ProbeOutcome.UNREACHABLE),
+    ("status-502", status_error(502), ProbeOutcome.UNREACHABLE),
+]
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [(error, expected) for _id, error, expected in STATUS_SPLIT],
+    ids=[case_id for case_id, _error, _expected in STATUS_SPLIT],
+)
+@pytest.mark.parametrize("kind", ["llamaswap", "openai"])
+def test_probe_auth_failed_is_read_from_the_error_status__S035_006_DoD2(
+    kind: str, error: LLMError, expected: ProbeOutcome
+) -> None:
+    """S035 006 DoD-2: status 401/403 → ``auth_failed`` whatever the message says.
+
+    A message naming 401/403 with no status, and any other status, give ``unreachable``.
+    """
+    library = Library()
+    library.script(kind).list_error = error
+
+    result = probe(make_gateway(library, kind=kind))
+
+    assert result.outcome is expected
+    assert result.model_names == ()
+    assert result.note is None
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_probe_auth_failure_leaks_no_provider_text__S035_006_DoD2(
+    status: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    """S035 006 DoD-2: a 401/403 error's message and ``description`` reach neither the result nor a log."""
+    library = Library()
+    library.llamaswap.list_error = _sentinel_error(f"{REQUEST_FAILED} with status {status}", status)
+
+    with captured_log_text(caplog) as lines:
+        result = probe(make_gateway(library))
+
+    assert result.outcome is ProbeOutcome.AUTH_FAILED
+    rendered = repr(result) + str(result)
+    captured = "\n".join(lines)
+    for sentinel in (_MESSAGE_SENTINEL, _DESCRIPTION_SENTINEL):
+        assert sentinel not in rendered
+        assert sentinel not in captured
 

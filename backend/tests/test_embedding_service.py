@@ -13,7 +13,7 @@ Each test name ends `__S024_002_DoD<n>`. DoD-9 lives in `test_dependencies.py`; 
 regression fallout carried by the existing `test_admin_llm_router.py` / `test_dependencies.py`
 suites.
 
-Feature 035 step 002 (`docs/plans/035.llm-client-gateway/002.embed-and-factory.md`) adds the
+Feature 035 step 002 adds the
 tests suffixed `__S035_002_DoD<n>` at the end: `open_embedding_model` hands the designated
 server's `kind` to the four-argument factory first (DoD-8), and an absent key variable still
 raises before the factory (DoD-9). The shared fake keeps `calls` three-wide; `kinds` and

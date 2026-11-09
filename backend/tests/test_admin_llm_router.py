@@ -15,7 +15,7 @@ in ``test_admin_users_router.py``.
 
 Tests are suffixed ``__S006_005_DoD<n>``. DoD-23 .. DoD-26 are ``[manual/live]``.
 
-Feature 035 step 002 (``docs/plans/035.llm-client-gateway/002.embed-and-factory.md``) moved
+Feature 035 step 002 moved
 the client factory to ``(kind, base_url, api_key, timeout_seconds)`` (DEC-035-1) and the
 probe types to ``app.services.llm.gateway``; ``_FakeFactory.calls`` now records all four
 arguments. Its tests are suffixed ``__S035_002_DoD<n>``. Step 001 moved the request-timeout

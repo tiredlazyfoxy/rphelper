@@ -29,6 +29,7 @@ from app.secrets import resolve_secret
 from app.services.llm.chat import ChatMessage
 from app.services.llm.gateway import (
     EMBED_NO_VECTOR_REASON,
+    ComposeRejected,
     ComposeText,
     ComposeTools,
     LlmGateway,
@@ -100,8 +101,8 @@ class ChatClientLike(Protocol):
         model: str,
         messages: Sequence[ChatMessage],
         tools: ComposeTools[E],
-    ) -> AsyncGenerator[ComposeText | E, None]:
-        """Stream one compose exchange: `ComposeText` pieces and the runner's `E` events, in order.
+    ) -> AsyncGenerator[ComposeText | ComposeRejected | E, None]:
+        """Stream one compose exchange: text pieces, rejections and the runner's events, in order.
 
         Declared as a plain `def` returning an `AsyncGenerator`, so an `async def` generator
         method (the gateway's, or a fake's) satisfies it and the caller can close the stream
@@ -115,7 +116,9 @@ class ChatClientLike(Protocol):
                 tool call with a `ToolCall` and an `emit` callback.
 
         Yields:
-            Text pieces and every value the runner emits, in occurrence order.
+            `ComposeText` pieces, one `ComposeRejected` per model-side tool rejection (the
+            runner is not called for it; DEC-035-17) and every value the runner emits, in
+            occurrence order.
 
         Raises:
             LlmUnreachableError: from the stream, after the events queued before the failure.

@@ -5,7 +5,9 @@ Plan 035 (llm-client-gateway), step 005: the live tests are the only place the r
 ``LlmGateway("llamaswap", $LLAMA_SWITCH_URL, None, timeout)``. Covers the step's
 ``[manual/live]`` DoD-4 (probe, embed, closed port) and DoD-5 (``complete`` and a
 no-tool ``compose``, which confirms the server accepts an empty ``tools`` list —
-DEC-035-10's flip check).
+DEC-035-10's flip check). Step 006 keeps those checks for 0.2.1 and adds an optional
+``[manual/live]`` DoD-15 check: a model-side tool mistake is yielded as ``ComposeRejected``
+and the exchange continues; it skips when the model makes no mistake.
 
 Marked ``live`` and deselected by default (``addopts`` carries ``-m 'not live'``), so the
 normal and verifier runs never depend on a network service. Run with::
@@ -26,7 +28,14 @@ import pytest
 
 from app.errors import LlmUnreachableError
 from app.services.llm.chat import ChatMessage, ToolCall
-from app.services.llm.gateway import ComposeText, ComposeTools, LlmGateway, ProbeOutcome
+from app.services.llm.gateway import (
+    ComposeRejected,
+    ComposeRejectionKind,
+    ComposeText,
+    ComposeTools,
+    LlmGateway,
+    ProbeOutcome,
+)
 
 LIVE_URL = os.environ.get("LLAMA_SWITCH_URL", "")
 LIVE_EMBED_MODEL = "bge-large-en-v1.5.i1-Q6_K"
@@ -112,3 +121,66 @@ def test_live_compose_without_tools_streams_text__S035_005_DoD5() -> None:
     events = asyncio.run(_drain_compose(_live_gateway()))
     texts = [event for event in events if isinstance(event, ComposeText)]
     assert len(texts) >= 1
+
+
+# --- 035 step 006 DoD-15 [manual/live]: a model-side rejection on 0.2.1 -------------------------
+
+#: The one tool offered; the prompt asks for a different one, inviting a `not_offered` mistake.
+OFFERED_DECLARATION = {
+    "type": "function",
+    "function": {
+        "name": "search_memos",
+        "description": "Search the roleplayer's memos.",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "What to find."}},
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+}
+REJECTION_PROMPT = [
+    ChatMessage(
+        role="user",
+        content=(
+            "Call the tool named fetch_weather with the argument city set to Paris, exactly once. "
+            "Whatever it answers, then reply with one short sentence."
+        ),
+    )
+]
+#: A model that keeps repeating its mistake loops until stopped (DEC-arch-llm-client-library-15's
+#: accepted exposure), so the check is bounded and skips rather than hangs.
+REJECTION_BUDGET_SECONDS = 180.0
+
+
+async def _memo_runner(call: ToolCall, emit: Callable[[object], None]) -> str:
+    """The offered tool's runner: emits nothing and answers a fixed text."""
+    return "No memos found."
+
+
+async def _drain_rejection_prompt(gateway: LlmGateway) -> list[object]:
+    """Every event of one `compose` offering only `search_memos` while asking for another tool."""
+    tools: ComposeTools[object] = ComposeTools(declarations=(OFFERED_DECLARATION,), runner=_memo_runner)
+    return [event async for event in gateway.compose(LIVE_CHAT_MODEL, REJECTION_PROMPT, tools)]
+
+
+@needs_chat_model
+def test_live_rejection_is_yielded_and_the_exchange_continues__S035_006_DoD15() -> None:
+    """[manual/live] S035 006 DoD-15: when the real model calls a tool that was not offered, the
+    gateway yields a `ComposeRejected` (the compose source's `tool_start` + `tool_fail`) and the
+    exchange ends normally. Skips when the model makes no mistake, which cannot be forced."""
+
+    async def bounded() -> list[object]:
+        return await asyncio.wait_for(_drain_rejection_prompt(_live_gateway()), REJECTION_BUDGET_SECONDS)
+
+    try:
+        events = asyncio.run(bounded())
+    except TimeoutError:
+        pytest.skip("the model kept repeating its tool mistake past the budget")
+    rejections = [event for event in events if isinstance(event, ComposeRejected)]
+    if not rejections:
+        pytest.skip("the model made no model-side tool mistake this run")
+    for rejection in rejections:
+        assert rejection.call.call_id.startswith("call_")
+        assert rejection.kind in set(ComposeRejectionKind)
+    # Reaching this line means the stream ended normally after the rejection (DoD-15, DoD-8).

@@ -4,8 +4,7 @@ Every expected value in this module comes from the field table in
 ``docs/plans/001.backend-foundation/001.context.md``. Covers DoD-1 .. DoD-7 of
 ``001.scaffold-and-config.md``.
 
-Feature 035 step 001 (``docs/plans/035.llm-client-gateway/001.library-and-probe.md``,
-DoD-1, ``DEC-arch-llm-client-library-2``) raises the outbound-call timeout default from
+Feature 035 step 001 (DoD-1, ``DEC-arch-llm-client-library-2``) raises the outbound-call timeout default from
 30.0 to 600.0 and keeps its alias; the field table below and the 006/001 timeout tests
 were updated to the new default deliberately, and the 035/001 DoD-1 tests sit at the end.
 """
@@ -423,7 +422,7 @@ def test_the_search_key_value_renders_nowhere_on_a_settings__S028_001_DoD3(
 
 
 # ============================================================================
-# Feature 035, step 001 (``001.library-and-probe.md``) — DoD-1:
+# Feature 035, step 001 — DoD-1:
 # ``Settings().llm_request_timeout_seconds`` defaults to 600.0, and
 # ``RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS`` still overrides it
 # (``DEC-arch-llm-client-library-2``; the alias is unchanged).

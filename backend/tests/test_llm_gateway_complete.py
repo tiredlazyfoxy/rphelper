@@ -6,6 +6,10 @@ text anywhere, no chained cause). Decisions: DEC-035-3 (the `library_clients` se
 (`to_wire_message` builds `messages`, no `system=`), DEC-035-8 (the failure mapping),
 `DEC-arch-llm-client-library-9` (an `openai` server with no credential).
 
+Extended by feature 035 step 006 (DoD-2, tagged `S035_006`): on 0.2.1
+`auth_failed` is read from `LLMError.status` (401/403) only (DEC-035-20), so every status case
+here is status-bearing, and a message naming 401/403 with no status is `unreachable`.
+
 No HTTP: the gateway is given fake library client classes through its keyword-only
 `library_clients` map (`DEC-arch-llm-client-library-11`). Async code is driven with `asyncio.run`
 from sync tests (the suite has no pytest-asyncio).
@@ -223,32 +227,25 @@ def test_complete_returns_the_library_text_unchanged__DoD1() -> None:
 # --- DoD-2: failure mapping --------------------------------------------------------------------
 
 
-def _llm_error(message: str) -> LLMError:
-    """An `LLMError` shaped like the library's, carrying the provider markers."""
-    return LLMError(message, PROVIDER_BODY)
+def _llm_error(message: str, status: int | None = None) -> LLMError:
+    """An `LLMError` shaped like the library's, carrying the provider markers.
+
+    `status` is 0.2.1's HTTP status attribute; since 035 step 006 it alone decides `auth_failed`
+    (DEC-035-20), so every status case passes it.
+    """
+    return LLMError(message, PROVIDER_BODY, status=status, kind=None if status is None else "status")
+
+
+def _status_failure(status: int) -> LLMError:
+    """The library's non-2xx error for `status`: message form, provider markers and the status."""
+    return _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed with status {status}", status)
 
 
 FAILURE_CASES = [
-    pytest.param(
-        _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed with status 401"),
-        "auth_failed",
-        id="status-401",
-    ),
-    pytest.param(
-        _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed with status 403"),
-        "auth_failed",
-        id="status-403",
-    ),
-    pytest.param(
-        _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed with status 500"),
-        "unreachable",
-        id="status-500",
-    ),
-    pytest.param(
-        _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed with status 404"),
-        "unreachable",
-        id="status-404",
-    ),
+    pytest.param(_status_failure(401), "auth_failed", id="status-401"),
+    pytest.param(_status_failure(403), "auth_failed", id="status-403"),
+    pytest.param(_status_failure(500), "unreachable", id="status-500"),
+    pytest.param(_status_failure(404), "unreachable", id="status-404"),
     pytest.param(
         _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed: timeout"),
         "unreachable",
@@ -324,6 +321,61 @@ def test_complete_openai_without_api_key_is_auth_failed_and_calls_nothing__DoD2(
     assert caught.value.detail == {"reason": "auth_failed"}
     assert record.chat_calls == []
     assert record.entered == 0
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
+    assert_no_provider_text(caught.value, "".join(lines) + caplog.text)
+
+
+# --- 035 step 006 DoD-2: the status-based auth split ------------------------------------------
+# DEC-035-20: `auth_failed` comes from `LLMError.status` being 401 or 403, whatever the message
+# says; a message naming 401/403 with no status, and any other status, are `unreachable`.
+
+STATUS_SPLIT = [
+    pytest.param(_llm_error(f"Refused by {PROVIDER_HOST}", 401), "auth_failed", id="status-401-opaque-message"),
+    pytest.param(_llm_error(f"Refused by {PROVIDER_HOST}", 403), "auth_failed", id="status-403-opaque-message"),
+    pytest.param(
+        _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed with status 500", 401),
+        "auth_failed",
+        id="status-401-message-says-500",
+    ),
+    pytest.param(
+        _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed with status 401"),
+        "unreachable",
+        id="message-401-no-status",
+    ),
+    pytest.param(
+        _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed with status 403"),
+        "unreachable",
+        id="message-403-no-status",
+    ),
+    pytest.param(
+        _llm_error(f"Request to http://{PROVIDER_HOST}/v1/responses failed with status 401", 500),
+        "unreachable",
+        id="status-500-message-says-401",
+    ),
+    pytest.param(_status_failure(400), "unreachable", id="status-400"),
+    pytest.param(_status_failure(402), "unreachable", id="status-402"),
+    pytest.param(_status_failure(429), "unreachable", id="status-429"),
+    pytest.param(_status_failure(502), "unreachable", id="status-502"),
+]
+
+
+@pytest.mark.parametrize(("library_error", "reason"), STATUS_SPLIT)
+def test_complete_auth_failed_is_read_from_the_error_status__S035_006_DoD2(
+    library_error: LLMError, reason: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """S035 006 DoD-2: status 401/403 → `auth_failed` whatever the message; otherwise `unreachable`.
+
+    No provider text reaches the message, `detail` or log, and there is no chained cause.
+    """
+    record = LibraryRecord()
+    gateway = gateway_over(fake_library_class(record, error=library_error))
+
+    with captured_log_text(caplog) as lines, pytest.raises(LlmUnreachableError) as caught:
+        run(gateway.complete(MODEL, MESSAGES))
+
+    assert caught.value.code == "llm_unreachable"
+    assert caught.value.detail == {"reason": reason}
     assert caught.value.__cause__ is None
     assert caught.value.__suppress_context__ is True
     assert_no_provider_text(caught.value, "".join(lines) + caplog.text)

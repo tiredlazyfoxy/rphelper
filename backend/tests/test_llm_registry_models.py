@@ -25,7 +25,7 @@ Mechanics (same as ``test_llm_registry_servers.py``):
 
 Tests are suffixed ``__S006_004_DoD<n>``. DoD-22 and DoD-23 are ``[manual/live]``.
 
-Feature 035 step 002 (``docs/plans/035.llm-client-gateway/002.embed-and-factory.md``):
+Feature 035 step 002:
 ``FakeFactory.calls`` entries are ``(kind, base_url, api_key, timeout_seconds)``; the probe
 types come from ``app.services.llm.gateway``; the old real-client-over-``httpx`` tests now
 drive the gateway over fake library clients raising the real ``llm.LLMError``. Its tests are
@@ -878,13 +878,15 @@ def test_a_response_with_no_usable_vector_raises_and_writes_nothing__S006_004_Do
     assert _snapshot(engine) == before
 
 
-#: Library failures in the shapes ``llm-client`` 0.2.0 raises (feature 035 ``context.md``,
-#: "Library facts"), with the reason ``embed`` maps each to (035 DoD-2).
+#: Library failures in the shapes ``llm-client`` raises (feature 035's context, "Library
+#: facts"), with the reason ``embed`` maps each to (035 DoD-2). Since 035 step 006 the auth case
+#: carries the HTTP status as ``LLMError.status``, the only thing ``auth_failed`` is read from
+#: (DEC-035-20, 035 step 006 DoD-2).
 _REQUEST_FAILED = "Request to http://llm.test:8080/v1/embeddings failed"
 _LIBRARY_FAILURES: list[tuple[str, BaseException, str]] = [
     ("transport", LLMError(f"{_REQUEST_FAILED}: connection failure"), "unreachable"),
     ("timeout", LLMError(f"{_REQUEST_FAILED}: timeout"), "unreachable"),
-    ("auth", LLMError(f"{_REQUEST_FAILED} with status 401", "bad key"), "auth_failed"),
+    ("auth", LLMError(f"{_REQUEST_FAILED} with status 401", "bad key", status=401), "auth_failed"),
     (
         "2xx-no-vector",
         LLMError("Invalid response from llama-swap API when embedding: no data"),

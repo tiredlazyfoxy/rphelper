@@ -5,11 +5,12 @@ step `004` (DEC-035-6, DEC-035-7). `compose_stream` optionally yields `accepted`
 own short-lived connection (closed before any provider call) resolves the model at use time,
 assembles context, reads the configuration and the tool scope and opens the chat client; then
 drains the client's `compose` — each text piece becomes a `token` frame verbatim (`<think>`
-included), each tool call runs through this module's private runner over the tool seam — and
-writes the exchange text as one assistant row before `done`. Rounds, tool-call fragments and
-`<think>` markers are the library's business, not this module's (DEC-arch-llm-client-library-8).
-It never catches an error to write a row (019 D4: the harness owns the partial write) and never
-touches a caller's connection.
+included), each tool call runs through this module's private runner over the tool seam, and
+each model-side rejection (step `006`, DEC-035-17) becomes `tool_start` + failed tool row +
+`tool_fail` without dispatching — and writes the exchange text as one assistant row before
+`done`. Rounds, tool-call fragments and `<think>` markers are the library's business, not this
+module's (DEC-arch-llm-client-library-8). It never catches an error to write a row (019 D4: the
+harness owns the partial write) and never touches a caller's connection.
 
 `begin_compose` (step `006`, D1/D2) is the handler-side half: it commits the roleplayer's text
 on the handler's connection, or — textless — checks the zone holds something to retry.
@@ -27,7 +28,7 @@ from app.services.configuration import get_session_configuration, resolve_model_
 from app.services.context import assemble_context
 from app.services.llm.chat import ChatMessage, ToolCall
 from app.services.llm.frames import AcceptedFrame, DoneFrame, Frame, TokenFrame, ToolFailFrame
-from app.services.llm.gateway import ComposeText, ComposeTools
+from app.services.llm.gateway import ComposeRejected, ComposeText, ComposeTools
 from app.services.llm_registry import ChatClientFactory, open_chat_client
 from app.services.messages import append_assistant_message, append_message, list_zone
 from app.services.tools import (
@@ -36,7 +37,7 @@ from app.services.tools import (
     offered_tools,
 )
 from app.services.tools.definitions import ToolDeclaration
-from app.services.tools.seam import TOOL_FAILED_CONTENT, dispatch, tool_start_frame
+from app.services.tools.seam import TOOL_FAILED_CONTENT, dispatch, tool_start_frame, write_failed_tool_row
 
 
 def _declared_name(declaration: ToolDeclaration) -> str | None:
@@ -88,8 +89,12 @@ async def compose_stream(
     declarations in the fixed `memo_search`, `session_search`, `web_search` order and a private
     runner that owns every RPHelper rule about a tool call: each `ComposeText` becomes one
     `token` frame (verbatim, `<think>` included) and is accumulated; each runner-emitted frame
-    (`tool_start`, `tool_result` / `tool_fail`) passes through. On success the joined token
-    text is written as one assistant row on a fresh connection, then `done` carries its id.
+    (`tool_start`, `tool_result` / `tool_fail`) passes through; each `ComposeRejected` yields
+    the call's `tool_start`, writes its failed tool row through the seam's
+    `write_failed_tool_row`, logs a warning with the tool name and kind only (DEC-035-18) and
+    yields its `tool_fail` (`tool_failed`) — `dispatch` is never called for it, and the exchange
+    continues (DEC-035-17). On success the joined token text is written as one assistant row
+    on a fresh connection, then `done` carries its id.
 
     Raises:
         DomainError: model-resolution refusals and `secret_ref_missing` from setup; an
@@ -153,6 +158,18 @@ async def compose_stream(
             if isinstance(item, ComposeText):
                 exchange_parts.append(item.text)
                 yield TokenFrame(text=item.text)
+            elif isinstance(item, ComposeRejected):
+                # A model-side rejection (DEC-035-17): the library never ran a tool, so there
+                # is nothing to dispatch. Same start → write → fail order as a failed dispatch:
+                # the row is written only after the `tool_start` yield returns, so a close at
+                # that yield writes no row (US-132.AC-1, DoD-11).
+                call = item.call
+                yield tool_start_frame(call)
+                write_failed_tool_row(engine, generator, scope, call)
+                # DEC-035-18: the tool name and the kind only, at the seam's failed-dispatch
+                # level — never the arguments (roleplay-derived text) nor any library text.
+                logger.warning("tool rejected tool={} kind={}", call.name, item.kind.value)
+                yield ToolFailFrame(tool=call.name, call_id=call.call_id, code=ToolFailedError.code)
             else:
                 yield item
 

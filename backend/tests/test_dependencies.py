@@ -16,7 +16,7 @@ Feature 024 step ``002`` adds one test at the end of this file for **its** DoD-9
 ``context.md`` D9; its binding comes from 024's ``## Skeleton`` -> "Step 002". Nothing above
 it changed.
 
-Feature 035 step 002 (``docs/plans/035.llm-client-gateway/002.embed-and-factory.md``) changes
+Feature 035 step 002 changes
 that answer: the production factory is now the gateway class ``LlmGateway`` (DEC-035-1,
 step DoD-10); the test is suffixed ``__S035_002_DoD10``.
 

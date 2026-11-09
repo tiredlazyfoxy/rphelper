@@ -1,7 +1,8 @@
 """The LLM gateway — the one module that knows the `llm-client` library.
 
 Feature `035`. Holds the probe-outcome value set (`ProbeOutcome`, `ProbeResult`,
-`EMBED_NO_VECTOR_REASON`), the compose-stream values (`ComposeText`, `ComposeTools`) and
+`EMBED_NO_VECTOR_REASON`), the compose-stream values (`ComposeText`, `ComposeRejected`,
+`ComposeRejectionKind`, `ComposeTools`) and
 `LlmGateway`, which selects a library client class by server `kind` and answers
 RPHelper's operations through it. Library typing gaps are
 absorbed here and nowhere else (DEC-035-5).
@@ -18,7 +19,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Final, cast
 
-from llm import LlamaSwapAPIClient, LLMClient, LLMError, OpenAIAPIClient
+from llm import LlamaSwapAPIClient, LLMClient, LLMError, OpenAIAPIClient, ToolEvent
 
 from app.errors import LlmUnreachableError
 from app.services.llm.chat import ChatMessage, ToolCall, to_wire_message
@@ -59,6 +60,38 @@ class ComposeText:
     """
 
     text: str
+
+
+class ComposeRejectionKind(StrEnum):
+    """The three model-side rejection kinds a `compose` stream reports (DEC-035-17).
+
+    RPHelper's own spellings, not the library's `ToolErrorKind`, so no library type leaves
+    this module (DEC-035-5). Only these three become a `ComposeRejected`; the library's
+    `tool_raised` and `unserialisable_result` kinds never do (`DEC-arch-llm-client-library-15`).
+    """
+
+    NOT_OFFERED = "not_offered"
+    """The model called a tool name that was not offered (`""` included)."""
+    BAD_ARGUMENTS = "bad_arguments"
+    """The model's argument text is unreadable or not a JSON object."""
+    UNKNOWN_ARGUMENT = "unknown_argument"
+    """The model passed an argument name the tool's declaration does not have."""
+
+
+@dataclass(frozen=True)
+class ComposeRejected:
+    """One model-side tool rejection in a `compose` stream (DEC-035-17).
+
+    The library refused the call before any tool callable ran, told the model so, and the
+    exchange goes on. `call` carries the gateway-minted `call_<n>` (from the same
+    per-`compose` counter the tool wrappers use; the provider's own call id is never used),
+    the model's tool name verbatim (`""` kept) and the model's argument text verbatim (not a
+    re-serialisation). `kind` says which check refused it. Nothing else from the library's
+    tool event is carried — not its `output`, `call_id` or model-facing text.
+    """
+
+    call: ToolCall
+    kind: ComposeRejectionKind
 
 
 @dataclass(frozen=True)
@@ -103,12 +136,13 @@ def _normalise_base_url(base_url: str) -> str:
 
 
 def _is_auth_failure(exc: LLMError) -> bool:
-    """Whether a library error is a 401/403 refusal (DEC-arch-llm-client-library-3).
+    """Whether a library error is a 401/403 refusal (DEC-035-20, DEC-arch-llm-client-library-16).
 
-    Reads `exc.message` only — never `description`, which holds the provider's reply body.
+    Reads the error's structured `status` only — never its message or `description` (which
+    holds the provider's reply body). An error carrying no `status` is never an auth failure,
+    whatever its message says. The one auth test behind all four operations.
     """
-    message = exc.message
-    return "status 401" in message or "status 403" in message
+    return exc.status in (401, 403)
 
 
 def _embed_unreachable(reason: str) -> LlmUnreachableError:
@@ -132,14 +166,25 @@ def _chat_unreachable(reason: str) -> LlmUnreachableError:
 def _chat_failure_reason(exc: BaseException) -> str:
     """Classify a library chat failure into `complete`/`compose`'s reason (DEC-035-8).
 
-    A status 401/403 `LLMError` is `auth_failed`; every other failure — another `LLMError`, a
-    `RuntimeError` (a tool raised, the round limit), a `ValueError` (missing callable, unknown
-    argument names, a construction refusal) or any other exception — is `unreachable`. Only
-    the `LLMError` message's status marker is read; nothing of the error is kept or logged.
+    An `LLMError` whose `status` is 401/403 is `auth_failed` (DEC-035-20); every other
+    failure — another `LLMError`, a `RuntimeError` (a tool raised, the round limit), a
+    `ValueError` (missing callable, a construction refusal) or any other exception — is
+    `unreachable`. Only the `LLMError`'s `status` is read; nothing of the error is kept or
+    logged.
     """
     if isinstance(exc, LLMError) and _is_auth_failure(exc):
         return ProbeOutcome.AUTH_FAILED.value
     return ProbeOutcome.UNREACHABLE.value
+
+
+_REJECTION_KINDS: Final[Mapping[str, ComposeRejectionKind]] = MappingProxyType(
+    {kind.value: kind for kind in ComposeRejectionKind}
+)
+"""Library `error_kind` spelling → the gateway's own kind, for the three rejection kinds only.
+
+The library spells them identically; any other kind (`tool_raised`, `unserialisable_result`)
+is absent and so ignored by the `compose` observer (DEC-035-17).
+"""
 
 
 class _Absent:
@@ -174,7 +219,8 @@ def _declaration_function(declaration: Mapping[str, object]) -> Mapping[str, obj
 
     Raises:
         ValueError: the declaration has no `function` mapping — a malformed offer, which
-            `compose` reports as `unreachable` like any other library-side refusal.
+            `compose` reports as `unreachable` like any other library-side refusal
+            (DEC-035-16).
     """
     function = declaration.get("function")
     if not isinstance(function, Mapping):
@@ -217,8 +263,10 @@ def _tool_callable(
 
     The callable's `inspect.signature` lists exactly `properties` as keyword-only parameters,
     each defaulting to `_ABSENT`: the library checks every model-sent argument name against
-    that signature and refuses unknown names itself (DEC-arch-llm-client-library-6). On call it
-    drops the absent arguments and awaits `invoke(name, present_kwargs)`, returning its text.
+    that signature and refuses unknown names itself (DEC-arch-llm-client-library-6, DEC-035-19)
+    — in tolerant mode that refusal reaches `compose`'s observer as an `unknown_argument`
+    rejection, never this callable. On call it drops the absent arguments and awaits
+    `invoke(name, present_kwargs)`, returning its text.
 
     Raises:
         ValueError: a property name is not a valid Python identifier (`inspect.Parameter`
@@ -332,7 +380,7 @@ class LlmGateway:
             async with client:
                 names = await client.list_models()
         except LLMError as exc:
-            # Only the message's status marker is read; the message and description carry
+            # Only the error's `status` is read (DEC-035-20); the message and description carry
             # provider text and are never logged or returned (DEC-035-8).
             if _is_auth_failure(exc):
                 return ProbeResult(outcome=ProbeOutcome.AUTH_FAILED)
@@ -381,7 +429,8 @@ class LlmGateway:
             async with client:
                 vectors = await client.embed_batch(list(texts))
         except LLMError as exc:
-            # Only the message's status / prefix markers are read; neither the message nor the
+            # Only the error's `status` (DEC-035-20) and the message's `Invalid response` prefix
+            # (kept per DEC-arch-llm-client-library-16) are read; neither the message nor the
             # description (provider text) is logged or carried onward (DEC-035-8).
             if _is_auth_failure(exc):
                 reason = ProbeOutcome.AUTH_FAILED.value
@@ -390,7 +439,8 @@ class LlmGateway:
             else:
                 reason = ProbeOutcome.UNREACHABLE.value
         except Exception:
-            # Transport errors, construction refusals and library bugs all read as `unreachable`.
+            # DEC-035-16: transport errors, construction refusals and library bugs — any other
+            # exception out of the library — all read as `unreachable`.
             reason = ProbeOutcome.UNREACHABLE.value
         else:
             return [list(vector) for vector in vectors]
@@ -418,7 +468,7 @@ class LlmGateway:
         Raises:
             LlmUnreachableError: `detail` `{"reason": "auth_failed"}` for a status 401/403
                 failure or kind `"openai"` with no api key; `{"reason": "unreachable"}` for
-                every other `LLMError` and for a library `ValueError` (DEC-035-8). The raised
+                any other exception from the library (DEC-035-8, DEC-035-16). The raised
                 error has no `__cause__` and suppresses its context; no provider text
                 reaches its message, its `detail` or any log record.
         """
@@ -435,10 +485,13 @@ class LlmGateway:
         try:
             client = self._build_client(library_class, model)
             async with client:
-                # DEC-035-5: the library types messages as `List[LLMMessage]`; the wire dicts are
-                # that shape at runtime.
+                # DEC-035-5: still cast under 0.2.1 — `chat` takes `List[LLMMessage]` (a TypedDict),
+                # so mypy rejects the `list[dict[str, object]]` wire dicts [arg-type]; they are that
+                # shape at runtime.
                 text = await client.chat(cast(Any, wire), stream=False)
         except Exception as exc:
+            # DEC-035-16: every exception out of the library is caught, not only `LLMError`;
+            # `_chat_failure_reason` keeps 401/403 as `auth_failed`, all else is `unreachable`.
             reason = _chat_failure_reason(exc)
         else:
             return text
@@ -451,8 +504,8 @@ class LlmGateway:
         model: str,
         messages: Sequence[ChatMessage],
         tools: ComposeTools[E],
-    ) -> AsyncGenerator[ComposeText | E, None]:
-        """Stream one compose exchange: text pieces and the runner's events, in order.
+    ) -> AsyncGenerator[ComposeText | ComposeRejected | E, None]:
+        """Stream one compose exchange: text pieces, rejections and the runner's events, in order.
 
         An async generator (DEC-035-7). On first iteration it starts one task that builds
         exactly one library client with `model=model` and, inside one `async with`, awaits
@@ -472,14 +525,24 @@ class LlmGateway:
             messages: The conversation, oldest first; replayed tool pairs included.
             tools: The offered declarations and the runner (`ComposeTools`).
 
+        From step 006 (DEC-035-17, `DEC-arch-llm-client-library-14`, `-15`, `-17`), the
+        `chat_with_tools` call also passes `tool_errors="result"` and a private synchronous
+        `on_tool_event` observer, and nothing else (no silence limit, no trace switch). The
+        observer turns each library `error` event of kind `not_offered`, `bad_arguments` or
+        `unknown_argument` into one `ComposeRejected` — the next `call_<n>` from the shared
+        counter, the event's name and argument text verbatim — queued in occurrence order;
+        it ignores every other event and consumes no id for them. After a rejection the
+        stream goes on.
+
         Yields:
-            `ComposeText` pieces and the runner's `E` events, in occurrence order.
+            `ComposeText` pieces, `ComposeRejected` values and the runner's `E` events, in
+            occurrence order.
 
         Raises:
             LlmUnreachableError: after every event queued before the failure is yielded —
                 `detail` `{"reason": "auth_failed"}` for a status 401/403 `LLMError`;
-                `{"reason": "unreachable"}` for any other `LLMError`, `RuntimeError` or
-                `ValueError` (DEC-035-8). For kind `"openai"` with no api key, raised with
+                `{"reason": "unreachable"}` for any other exception from the library
+                (DEC-035-8, DEC-035-16). For kind `"openai"` with no api key, raised with
                 `{"reason": "auth_failed"}` before any event. No `__cause__`, no provider
                 text.
         """
@@ -496,7 +559,7 @@ class LlmGateway:
         # DEC-035-7: one unbounded queue carries text pieces, runner events and the end marker
         # in the order they happened. Unbounded because `on_delta` runs inline on the library's
         # read path — backpressure there would stall the provider read for no benefit.
-        queue: asyncio.Queue[ComposeText | E | _EndOfStream] = asyncio.Queue()
+        queue: asyncio.Queue[ComposeText | ComposeRejected | E | _EndOfStream] = asyncio.Queue()
         # Per-`compose` counter: call ids restart at `call_1` for every exchange (DEC-035-6).
         call_numbers = itertools.count(1)
 
@@ -507,6 +570,40 @@ class LlmGateway:
         def emit(event: E) -> None:
             """The runner's `emit`: queue one caller event without blocking."""
             queue.put_nowait(event)
+
+        def on_tool_event(event: ToolEvent) -> None:
+            """The library's tool-event observer: queue one `ComposeRejected` per model-side rejection.
+
+            Only an `error` event whose kind is one of `_REJECTION_KINDS` produces anything:
+            the next `call_<n>` from the counter `invoke` uses, the event's `name` verbatim
+            (`""` kept) and its `arguments` text verbatim. Every other event — `start`,
+            `result`, and `error` of `tool_raised` / `unserialisable_result` — is ignored and
+            consumes no id, because a call that reached a wrapper is already reported by the
+            runner (DEC-035-17, `DEC-arch-llm-client-library-15`). The event's `call_id`,
+            `output` and any library text are never read (DoD-7).
+
+            Synchronous and non-raising: it runs inline on the library's loop, and a raising
+            observer would make the library warn and tell the model the tool failed a second
+            time, so every read below tolerates a malformed event. No I/O — `put_nowait` only,
+            like `on_delta` and `emit` (DEC-035-7).
+            """
+            if event.get("type") != "error":
+                return
+            kind = _REJECTION_KINDS.get(str(event.get("error_kind")))
+            if kind is None:
+                return
+            name = event.get("name")
+            arguments = event.get("arguments")
+            # The id is minted here, when the rejection reaches the observer, from the same
+            # counter as `invoke`: the library delivers events inline in call order, so ids
+            # keep following the order calls happened in across wrappers and rejections
+            # (llm-and-streaming.md § Model-side tool mistakes — the observer).
+            call = ToolCall(
+                call_id=f"call_{next(call_numbers)}",
+                name=name if isinstance(name, str) else "",
+                arguments=arguments if isinstance(arguments, str) else "",
+            )
+            queue.put_nowait(ComposeRejected(call=call, kind=kind))
 
         async def invoke(name: str, present: dict[str, object]) -> str:
             """Mint the call id, build the `ToolCall` and await the runner's output text."""
@@ -530,15 +627,22 @@ class LlmGateway:
             async with client:
                 # DEC-035-10: the tool loop even with nothing offered, so replayed tool pairs
                 # still reach the library. `max_loops=sys.maxsize`: RPHelper sets no round
-                # limit (DEC-arch-llm-client-library-12). DEC-035-5: the library's narrower
-                # `messages` / `tools_definitions` types are cast at this boundary.
+                # limit (DEC-arch-llm-client-library-4). 0.2.1 types `messages` as
+                # `Sequence[Mapping[str, Any]]`, so it needs no cast. DEC-035-5: `tools_definitions`
+                # is still `List[Dict[str, Any]]`, which mypy refuses for the read-only
+                # `list[Mapping[str, object]]` declarations [arg-type], so it stays cast.
                 await client.chat_with_tools(
-                    messages=cast(Any, wire),
+                    messages=wire,
                     tools_definitions=cast(Any, declarations),
                     tools=callables,
                     stream=True,
                     max_loops=sys.maxsize,
                     on_delta=on_delta,
+                    # DEC-arch-llm-client-library-14: tolerant mode asked for explicitly, not
+                    # left to the library default; a model-side mistake reaches the observer and
+                    # the loop continues. No `read_timeout` / `trace` (`-17`).
+                    tool_errors="result",
+                    on_tool_event=on_tool_event,
                 )
 
         def finished(done: asyncio.Task[None]) -> None:
