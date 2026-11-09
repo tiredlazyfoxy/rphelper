@@ -2,7 +2,7 @@
 and `TranslationResponse`.
 
 Every expected value comes from
-`docs/plans/023.partner-translation/001.table-error-model-invalidation.md` (DoD-1, DoD-2,
+`docs/decisions/023.partner-translation.md` (DoD-1, DoD-2,
 DoD-4, DoD-5 and its Interface intent), from `001.context.md` ("Default message", "Test
 shape") and from the feature `context.md` (**D5**, **D7** and the **Wire contract**). No
 expected value is read from the implementation.

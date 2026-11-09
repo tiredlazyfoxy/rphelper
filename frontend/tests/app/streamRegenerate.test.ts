@@ -1,5 +1,5 @@
 // Feature 022, step 005 — regenerate, showsRegenerate and the non-tool zone derivations
-// (DoD-6..DoD-13) (docs/plans/022.discussion-ui/005.live-tools-and-regenerate.md).
+// (DoD-6..DoD-13) (docs/decisions/022.discussion-ui.md).
 //
 // Expected values come from the step's Interface intent and Definition of done, context.md D8,
 // D9, D13 and 005.context.md:

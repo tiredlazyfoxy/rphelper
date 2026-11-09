@@ -1,7 +1,7 @@
 """Tests for the SSE harness in `app/services/llm/frames.py` — feature 019, step 002.
 
-Every expected value comes from `docs/plans/019.streaming-transport-and-stop/
-002.sse-harness.md` (Interface intent + Definition of done), `002.context.md` and the
+Every expected value comes from `docs/decisions/019.streaming-transport-and-stop.md`
+(Interface intent + Definition of done), `002.context.md` and the
 feature `context.md` (**D3**-**D7**, "Test conventions"). Expected wire bytes are written
 out literally from step 001's worked examples (D2: `data: ` + compact JSON with `event`
 first + `\\n\\n`, ids as decimal strings, missing `detail` -> `{}`), never produced by

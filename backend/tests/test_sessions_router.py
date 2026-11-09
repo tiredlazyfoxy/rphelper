@@ -1,6 +1,6 @@
 """Tests for the sessions router: ``/api/sessions...`` and ``/api/characters/{character_id}/sessions``.
 
-Every expected value comes from ``docs/plans/011.rp-sessions/003.sessions-router.md``
+Every expected value comes from ``docs/decisions/011.rp-sessions.md``
 (Interface intent + Definition of done), ``003.context.md`` and the feature ``context.md``
 (the **Wire contract** table — routes, the eight-key ``Session`` object, the four failure
 codes and the native 422 — plus **D2** the body semantics, **D9** the route surface and
@@ -22,7 +22,7 @@ Every path helper builds an **exact** path (``/api/sessions``, ``/api/sessions/<
 ``/api/characters/<id>/sessions`` and ``/api/characters/<id>/setups`` share prefixes).
 ``conftest.py`` is untouched: every fixture below is file-local.
 
-Extended by feature 034, step 002 (``docs/plans/034.session-names/002.rename-route.md``): the
+Extended by feature 034, step 002 (``docs/decisions/034.session-names.md``): the
 narrow ``PATCH /api/sessions/{id}`` rename. 011's DoD-13 "PATCH answers 405" clause is
 replaced accordingly (a PATCH with a non-``name`` key is now 422). See the section at the end.
 """
@@ -1003,7 +1003,7 @@ def test_009_and_010_routes_still_answer_with_this_router_registered__S011_003_D
 # =====================================================================================
 # Feature 018, step 002 — the start route creates and seeds in one request.
 #
-# Expected values come from `docs/plans/018.character-page/002.create-and-seed-route.md`
+# Expected values come from `docs/decisions/018.character-page.md`
 # (DoD-6 .. DoD-9) and the feature `context.md`'s Wire contract (201 `StartedSession`: the
 # eight session keys plus `opening_message`, 012's eight-key `Message` or null; a present
 # `opening_message` must be non-blank, else 422 and nothing is created; 011's failures
@@ -1226,7 +1226,7 @@ def test_an_archived_setup_with_an_opening_message_answers_409_and_creates_nothi
 # =====================================================================================
 # Feature 034, step 001 — every session payload carries `name`.
 #
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# Expected values come from `docs/decisions/034.session-names.md`
 # (DoD-2, DoD-3, DoD-4) and the feature `context.md` ("Wire shape of a session": `name` is a
 # string, or null when never renamed; the server never computes a default label). US-150.AC-1,
 # US-150.AC-6. A stored name is written straight into `sessions.name` in test setup — there is
@@ -1443,7 +1443,7 @@ def test_a_stored_name_is_per_session__S034_001_DoD4(
 # =====================================================================================
 # Feature 034, step 002 — `PATCH /api/sessions/{session_id}` renames an owned session.
 #
-# Expected values come from `docs/plans/034.session-names/002.rename-route.md` (Interface
+# Expected values come from `docs/decisions/034.session-names.md` (Interface
 # intent; DoD-1..DoD-9 and DoD-11 here), DEC-034-1 (`name` is a required key, a string or
 # null, trimmed, blank -> null), DEC-034-2 (any other key is a 422), DEC-034-5 (a rename
 # embeds nothing and needs no embedding model), DEC-arch-session-names-6 (a rename writes

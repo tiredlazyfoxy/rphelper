@@ -1,7 +1,7 @@
 """Tests for the vector arm — feature 025, step 003 (DoD-1..11).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/025.hybrid-search-port/003.vector-arm.md` (Interface intent — the five ordered
+`docs/decisions/025.hybrid-search-port.md` (Interface intent — the five ordered
 steps — and Definition of done), `003.context.md` (the one permitted query form, the
 dimension handling, the ordering rationale and the "Test shape" note) and the feature
 `context.md` — **U2** (the model's errors propagate; an absent or empty vec table yields no

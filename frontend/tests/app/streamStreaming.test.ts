@@ -1,5 +1,5 @@
 // Feature 019, step 004 — the compose call and the streaming state surface
-// (docs/plans/019.streaming-transport-and-stop/004.streaming-state-and-stop-slot.md), DoD-1..DoD-6.
+// (docs/decisions/019.streaming-transport-and-stop.md), DoD-1..DoD-6.
 //
 // Expected values come from the step's Interface intent and Definition of done and from
 // context.md D9, D11, D12, D13 and 004.context.md "Test notes":

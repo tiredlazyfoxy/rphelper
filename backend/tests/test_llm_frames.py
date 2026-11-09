@@ -1,7 +1,7 @@
 """Tests for `app/services/llm/frames.py` — feature 019, step 001 (frame values + encoder).
 
-Every expected value comes from `docs/plans/019.streaming-transport-and-stop/
-001.frames-and-assistant-append.md` (Interface intent + Definition of done), from
+Every expected value comes from `docs/decisions/019.streaming-transport-and-stop.md`
+(Interface intent + Definition of done), from
 `001.context.md` ("Wire field order per event": `event` first, compact separators,
 `ensure_ascii=False`) and from the feature `context.md` (**D2**, "Test conventions"). The
 expected bytes are the plan's worked examples, written out literally — never obtained by

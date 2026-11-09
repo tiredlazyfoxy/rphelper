@@ -64,16 +64,14 @@ Feature → filename slug (use-cases and stories share the slug):
 ## Features
 
 All 20 are `Priority: must`. Sequencing comes from the dependency graph below,
-not from priority. 16 are `delivered` (FEAT-001, 002, 003, 004, 005, 006, 007,
-009, 011, 012, 013, 014, 015, 016, 018, 019) and 4 are `partially delivered`
-(FEAT-008, 010, 017, 020). No FEAT is `proposed` any more — see the Status
-column below and each block's `**Delivered:**`/`**Remaining:**` lines in
-`features.md`. A FEAT is `delivered` when its `Remaining:` is empty. FEAT-010
-is `partially delivered` because shipped behaviour does not satisfy a named
-criterion (US-115.AC-1's streaming half, D-02 in `docs/plans/defects.md`); the lifecycle
-has no "delivered but defective" value. FEAT-008, FEAT-017 and FEAT-020 are
-`partially delivered` because of not-yet-planned session-name items (UC-089,
-US-150, US-151, US-152).
+not from priority. 19 are `delivered` (every FEAT except FEAT-010) and 1 is
+`partially delivered` (FEAT-010). No FEAT is `proposed` any more — see the
+Status column below and each block's `**Delivered:**`/`**Remaining:**` lines
+in `features.md`. A FEAT is `delivered` when its `Remaining:` is empty.
+FEAT-010 is `partially delivered` because shipped behaviour does not satisfy a
+named criterion (US-115.AC-1's streaming half, D-02 in
+`docs/plans/defects.md`); the lifecycle has no "delivered but defective"
+value.
 
 | FEAT | Name | Actors | Realized by (UC) | Realized by (US) | Status |
 |---|---|---|---|---|---|
@@ -84,7 +82,7 @@ US-150, US-151, US-152).
 | FEAT-005 | Database consistency & management | ACT-001 | UC-014–016 | US-017–019 | delivered |
 | FEAT-006 | Characters | ACT-002 | UC-017–019, UC-067 | US-020–022, US-086 | delivered |
 | FEAT-007 | Setups | ACT-002 | UC-020–022, UC-068 | US-023–025, US-087 | delivered |
-| FEAT-008 | RP sessions | ACT-002 | UC-023–026, UC-080, UC-089 | US-026–029, US-117, US-145 (withdrawn), US-150 | partially delivered |
+| FEAT-008 | RP sessions | ACT-002 | UC-023–026, UC-080, UC-089 | US-026–029, US-117, US-145 (withdrawn), US-150 | delivered |
 | FEAT-009 | Session entries & the RP flow | ACT-002 | UC-027–031, UC-078, UC-081–082 | US-030–035, US-109–112, US-120–124, US-149 | delivered |
 | FEAT-010 | Compose discussion | ACT-002, ACT-004 | UC-032–038, UC-079, UC-083–086 | US-036–044, US-113–116, US-125–135, US-146 | partially delivered |
 | FEAT-011 | Partner-text translation | ACT-002 | UC-039–041 | US-045–048 | delivered |
@@ -93,10 +91,10 @@ US-150, US-151, US-152).
 | FEAT-014 | `memo_search` tool | ACT-002, ACT-004 | UC-051–052 | US-063–066 | delivered |
 | FEAT-015 | `session_search` tool | ACT-002, ACT-004 | UC-053–054 | US-067–069, US-138 | delivered |
 | FEAT-016 | `web_search` tool | ACT-002, ACT-004 | UC-055–057 | US-070–073 | delivered |
-| FEAT-017 | My search | ACT-002 | UC-058–060 | US-074–076, US-118, US-137, US-147, US-152 | partially delivered |
+| FEAT-017 | My search | ACT-002 | UC-058–060 | US-074–076, US-118, US-137, US-147, US-152 | delivered |
 | FEAT-018 | Export & import | ACT-001, ACT-002 | UC-061–064 | US-077–082, US-136 | delivered |
 | FEAT-019 | Privacy & isolation | ACT-001, ACT-002 | UC-065–066 | US-083–085 | delivered |
-| FEAT-020 | Workspace shell & navigation | ACT-002 (primary), ACT-001 (admin entry point only) | UC-069–074 | US-088–097, US-151 | partially delivered |
+| FEAT-020 | Workspace shell & navigation | ACT-002 (primary), ACT-001 (admin entry point only) | UC-069–074 | US-088–097, US-151 | delivered |
 
 **Build order** (transcribed verbatim from `features.md`'s `## Relationships`):
 
@@ -113,8 +111,7 @@ above is `must`, so priority carries no sequencing information on its own.
 ## Use cases
 
 UC-001..UC-089, grouped by owning feature, id order. One-liners are the use
-case's own heading text, verbatim. Every UC below is `Status: delivered`
-except UC-089, which is `proposed`.
+case's own heading text, verbatim. Every UC below is `Status: delivered`.
 
 **FEAT-001**
 - UC-001 — Create a new database with the first administrator · **Status:** delivered
@@ -161,7 +158,7 @@ except UC-089, which is `proposed`.
 - UC-025 — Archive and restore a session
 - UC-026 — See sessions ordered by last use
 - UC-080 — Start a session by writing the first message on a character's page · **Status:** delivered
-- UC-089 — Rename a session · **Status:** proposed → not yet planned
+- UC-089 — Rename a session · **Status:** delivered
 
 **FEAT-009**
 - UC-027 — Add a partner entry by pasting
@@ -252,9 +249,8 @@ Total: 89, UC-001..UC-089, no gaps.
 US-001..US-152, grouped by owning feature, id order. `ACs` is the count of
 `US-###.AC-#` criteria on that story. One-liners are the story's own heading
 text, verbatim. Every US below is `Status: delivered` except the ones tagged
-inline: US-150, US-151, US-152 are `proposed` (not yet planned); US-145 is
-`withdrawn`; US-115 (AC-1's streaming half) is `partially delivered` — D-02
-(docs/plans/defects.md).
+inline: US-145 is `withdrawn`; US-115 (AC-1's streaming half) is
+`partially delivered` — D-02 (docs/plans/defects.md).
 
 **FEAT-001**
 - US-001 — Fresh instance with a first admin (ACs: 2) · **Status:** delivered
@@ -304,9 +300,9 @@ inline: US-150, US-151, US-152 are `proposed` (not yet planned); US-145 is
 - US-027 — Archive then restore and resume (ACs: 3)
 - US-028 — List ordered by last use (ACs: 1)
 - US-029 — Sessions are mine alone (ACs: 1)
-- US-117 — Writing the first message on a character's page creates the session (ACs: 4) · **Status:** delivered
+- US-117 — Writing the first message on a character's page creates the session (ACs: 5) · **Status:** delivered
 - US-145 — A session is identified by its start time, not a title (ACs: 2, both withdrawn) · **Status:** withdrawn — reversed by the user 2026-11-05 (C55) · **Superseded by:** US-150
-- US-150 — A session has a name, by default its start date, that the roleplayer can change (ACs: 6) · **Status:** proposed → not yet planned
+- US-150 — A session has a name, by default its start date, that the roleplayer can change (ACs: 6) · **Status:** delivered
 
 **FEAT-009**
 - US-030 — Paste a partner block (ACs: 1)
@@ -419,7 +415,7 @@ inline: US-150, US-151, US-152 are `proposed` (not yet planned); US-145 is
 - US-118 — My search is reachable whether the left column is expanded or collapsed (ACs: 2)
 - US-137 — My-search returns disabled memos, marked as disabled (ACs: 2)
 - US-147 — Name matching is case-insensitive in any script (ACs: 1) · **Status:** delivered
-- US-152 — My search finds a session by its name and shows the name on session results (ACs: 2) · **Status:** proposed → not yet planned
+- US-152 — My search finds a session by its name and shows the name on session results (ACs: 2) · **Status:** delivered
 
 **FEAT-018**
 - US-077 — Admin exports the whole database (ACs: 3)
@@ -446,10 +442,10 @@ inline: US-150, US-151, US-152 are `proposed` (not yet planned); US-145 is
 - US-095 — With no session open, the note wall is not shown at all (ACs: 1)
 - US-096 — A character's page shows its persona, its notes, its setups, its configuration and its sessions in one place (ACs: 1)
 - US-097 — Creating a character opens a draft page; nothing is persisted until the roleplayer enters something (ACs: 2)
-- US-151 — A session's tree row shows its name, and beneath it when it was last used beside its setup label (ACs: 2) · **Status:** proposed → not yet planned
+- US-151 — A session's tree row shows its name, and beneath it when it was last used beside its setup label (ACs: 2) · **Status:** delivered
 
 Total: 152, US-001..US-152, no gaps (US-145 withdrawn, tombstoned in place).
-Total numbered ACs across all stories: 288, of which 285 are active and 3
+Total numbered ACs across all stories: 289, of which 286 are active and 3
 (`US-131.AC-1`, `US-145.AC-1`, `US-145.AC-2`) are withdrawn.
 
 ## Open `_TBD:` items

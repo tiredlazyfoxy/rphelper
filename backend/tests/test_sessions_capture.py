@@ -1,6 +1,6 @@
 """Tests for the model capture in ``start_session`` — feature 017, step 002.
 
-Every expected value comes from ``docs/plans/017.session-configuration/002.registry-reads-and-capture.md``
+Every expected value comes from ``docs/decisions/017.session-configuration.md``
 (Interface intent, DoD-4 .. DoD-10), ``002.context.md`` and the feature ``context.md``:
 **D1** (inside the creation transaction, after the character and setup checks: the character's
 own pair is captured as-is and unvalidated; otherwise the first enabled model; otherwise NULL),

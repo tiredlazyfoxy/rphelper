@@ -29,3 +29,8 @@ The Vitest suite for the frontend: one subfolder per entry mirroring `src/`, plu
 See also: docs/architecture/frontend-structure.md
 
 <!-- agent-ready:end -->
+
+## Conventions
+
+- Stub `fetch` per test with `vi.stubGlobal("fetch", …)` (or a spy) and restore it in `afterEach` (`vi.unstubAllGlobals()` / `vi.restoreAllMocks()`); add no network-mocking library (msw, nock, fetch-mock).
+- Keep `tests/setup.ts` to jest-dom matchers, Testing Library `cleanup`, and inert jsdom polyfills that install only when absent (`matchMedia`, `ResizeObserver`, `scrollIntoView`); add any new jsdom gap there the same way, and never install a `fetch` stub there.

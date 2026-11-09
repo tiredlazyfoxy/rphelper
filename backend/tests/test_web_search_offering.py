@@ -1,7 +1,7 @@
 """Configuration-gated registration of `web_search` (feature 028, step 002).
 
 Covers DoD-8 (the registry builder), DoD-9 (offered at the seam) and DoD-10 (offered at the
-route) of `docs/plans/028.web-search-tool/002.web-search-tool-and-registration.md`. The
+route) of `docs/decisions/028.web-search-tool.md`. The
 adapter, the formatter, the factory and the import shape are in
 `tests/test_web_search_tool.py`; the DoD-14 amendment is one assertion in
 `tests/test_tool_seam.py`. DoD-15 .. DoD-17 are `[manual/live]`.

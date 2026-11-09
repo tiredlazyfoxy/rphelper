@@ -1,7 +1,7 @@
 """Tests for the Google Custom Search provider (feature 028, step 001).
 
 Covers DoD-5 .. DoD-12 of
-``docs/plans/028.web-search-tool/001.search-settings-and-google-provider.md``. Every
+``docs/decisions/028.web-search-tool.md``. Every
 expected value comes from that step file, from ``001.context.md`` ("The Google request",
 "The Google response", "Exception mapping") and from feature 028's ``context.md`` (D1, D5,
 D6, D7, D9). DoD-13 is ``[manual/live]`` and has no test here.

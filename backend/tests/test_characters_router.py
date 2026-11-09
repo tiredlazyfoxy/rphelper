@@ -1,6 +1,6 @@
 """Tests for the characters router: ``/api/characters`` and its six routes.
 
-Every expected value comes from ``docs/plans/009.characters/003.characters-router.md``
+Every expected value comes from ``docs/decisions/009.characters.md``
 (Interface intent + Definition of done), ``003.context.md`` and the feature ``context.md``
 (the **Wire contract** table, D6 router-level auth, D7 the route surface, D8 one 404 plus
 native 422, D9 archive semantics, D10 list order, R5, R6). Bindings come from

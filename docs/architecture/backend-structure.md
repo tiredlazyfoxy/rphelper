@@ -488,8 +488,9 @@ import order (`deployment.md`'s redaction rule).
 `public` / `self` / `registry` / `owner` / `admin` — or the build fails**
 (plan 032, `backend/tests/test_privacy_audit_routes.py`). This is a build-time
 contract, not a review convention: an unclassified route is a failing test, and
-the route enumeration it checks against lives in
-`docs/plans/032.privacy-isolation-audit/context.md`.
+the route enumeration it checks against lives in the test suite itself —
+`ENUMERATED_ROUTES` in `backend/tests/privacy_audit_support.py` — not in a plan
+folder.
 
 It exists because R5 is a *query-level* property and therefore invisible to any
 single reviewer's reading. The companion rule the guard also pins is **refusal

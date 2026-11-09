@@ -12,7 +12,10 @@ the index rebuild, the bootstrap restore, the character page's first reply, the
 degraded embedding path, Unicode name matching, and the unconfigured login
 redirect; then fast/011, 012, 015 and 016 — the in-box Send and its shortcut, one
 autosaving note behaviour with toolbar flags, the translation pending indicator,
-and the muted own text).
+and the muted own text). Updated again by the second 2026-11-09 batch (plans
+033 and 034 — the tabbed character page and its composer's setup choice, and the
+session rename's inline failure — plus the stale markers and mis-cites it
+cleared).
 
 ## Doc map — where to look for what
 
@@ -28,9 +31,9 @@ and the muted own text).
 | `session-stream.md` | **The session stream's backend**: the route surface and the twelve-key wire shape, `PATCH`'s reach, **the single-message delete's reach** (fast/014), create-and-seed (UC-080), settle and re-open, the degraded embedding path, the `(( ))` seam, the compose route and its streaming harness, the tool seam and dispatch, the discussion read |
 | `transfer.md` | **Export and import**: the envelope, the id-serialization rules, the two version constants, the four granularities, what is never exported, the export and import route surfaces, the import policy (mint + remap), the whole-database replace |
 | `frontend-structure.md` | Vite multi-entry (`root: src/`, the emitted layout), **the Node-side config conventions (`import.meta.dirname`, `.ts` relative imports, `allowImportingTsExtensions` in both tsconfigs)**, **`frontend/dev/` — the dev-server helpers outside every entry**, the four entries' boot shapes, **the case-collision naming rule**, pure-data-contract MobX (four rules + five conventions + which store a list belongs to), routing inside the `app` entry, **"ids are strings" and the test that enforces it**, the API client (`ApiError`, `apiPut` / `apiDownload` / `importFile`, the `client_*` codes), the SSE consumer's four outcomes and frame handling, markdown (the one `MarkdownEditor` and its emit rules, the one `MessageBody`), the two stylesheets |
-| `workspace-shell.md` | The `app` entry's screens: the three columns, **all geometry**, the narrow-width behaviour, the wall's two modes, layout persistence, the stream and its per-entry actions (**including delete**), the buried-discussion group, the search-coverage banner, the ruler and the current zone (editability, delete, tool/thinking blocks, the live reply, Regenerate, the model gate), the kind switch and settle, the `(( ))` preview and painting, the stop control, discarding an empty zone, the wall's contents and note drag, **the character page**, **the draft page**, **the user menu**, **the model picker**, and the reversal record for the deleted splitters |
+| `workspace-shell.md` | The `app` entry's screens: the three columns, **all geometry**, the narrow-width behaviour, the wall's two modes, layout persistence, the stream and its per-entry actions (**including delete**), the buried-discussion group, the search-coverage banner, the ruler and the current zone (editability, delete, tool/thinking blocks, the live reply, Regenerate, the model gate), the kind switch and settle, the `(( ))` preview and painting, the stop control, discarding an empty zone, the wall's contents and note drag, **the character page (header + five tabs)**, **the draft page**, **the user menu**, **the model picker**, and the reversal record for the deleted splitters |
 | `ui-conventions.md` | Icons + the shared `IconButton` + the full icon table, the accessibility floor, **the muted tone of the roleplayer's own chat text**, **async feedback** (no success toasts, the failure channel, the one bounded warning, the two sanctioned importers), the inherited frontend facts. **The CRUD conventions are no longer here** |
-| `forms-and-lists.md` | Tables and lists, **no sorting/filtering/pagination**, loading / error / empty states, **create and edit are always a `Modal`** and its three named exceptions, the MobX draft convention, **mutations are never optimistic** and its one exception (note reordering), the confirm convention and what is deliberately not confirmed, page state |
+| `forms-and-lists.md` | Tables and lists, **no sorting/filtering/pagination**, loading / error / empty states, **create and edit are always a `Modal`** and its named exceptions (**including the inline setup create**), the MobX draft convention, **mutations are never optimistic** and its one exception (note reordering), the confirm convention and what is deliberately not confirmed, page state |
 | `admin-surfaces.md` | The `admin` entry in full: 3 routes + 404, shell (no user menu, no sign-out), the admin gate and why it deviates, the Users / LLM Servers / Database pages each with its as-built state, the drift report's granularity and statuses, Create/Sync postconditions, the surviving derived-tables gap, the whole-database export/import controls and their opacity |
 | `llm-and-streaming.md` | **The LLM gateway over `llm-client` 0.2.1** (`probe` / `embed` / `complete` / `compose`; `kind` selects the Responses client class; base-URL normalisation; errors and the privacy-breaking tracing switch; the one total-per-request timeout), use-time validation and `resolve_model_for_use`, the SSE frame protocol, **the four ways a stream ends**, the `<think>` convention, **"Stopping, and what a stop is not"** (UC-085), the tool loop (**owned by the library; RPHelper's per-tool wrapper; no iteration cap; model-side tool mistakes reach the roleplayer as `tool_fail` through the library's tool-event observer**), `web_search`'s provider seam, **context assembly** and its exclusions, language handling, translation |
 | `search-and-retrieval.md` | Hybrid vec+FTS+RRF, the narrow port and its **three variants**, **the forbidden KNN form**, `memo_search`, `session_search` (**vector arm only**), my-search (three port variants + three case-folded name matches, **the session group's name arm merged ahead of its vector hits**, and the accepted unnamed-by-date limitation), the persona-edit fan-out, the embedding lifecycle and its two write postures, rebuild |
@@ -289,6 +292,8 @@ backend/app/services/index_rebuild.py         the index rebuild (UC-016, fast/00
 backend/app/services/bootstrap.py             is_configured + any_user_exists (the no-account guard's read)
 backend/tests/                                pytest target
 backend/tests/test_deployment_files.py        the deployment file contract (nginx access log, one uvicorn)
+backend/tests/privacy_audit_support.py        ENUMERATED_ROUTES — the literal route enumeration the
+                                              classification guard checks; a new API route needs a row
 backend/pyproject.toml + backend/uv.lock      backend deps + tool config; lock committed
 
 frontend/src/{bootstrap,login,admin,app}/     the four Vite entries
@@ -354,7 +359,7 @@ docs/product/quick-reference.md               the id registry
 docs/architecture/                            this doc set
 docs/decisions/                               decisions below architecture; index.md is the DEC registry
 docs/plans/AGENTS.md                          the pipeline contract
-docs/plans/defects.md                         the five defects' file of record (the product round's artifact)
+docs/plans/defects.md                         the defects' file of record (the product round's artifact)
 ```
 
 **`ComposerCore` is the shared composer** (018 D4) — the text area, the geometry,
@@ -380,7 +385,8 @@ version that had not grown a `treeCollapsed` field — or the composer heights �
 would silently delete another version's data. A reader that drops unknowns is
 safe only while it owns everything in its own key.
 Folding the colour scheme into any of them would make the login page's scheme
-depend on a workspace record.
+depend on a workspace record. **The character page's active tab is not stored
+anywhere** (plan 033) — it is component-local view state, so no fifth key.
 
 All three `app` modules are **pure and DOM-free — the storage is passed in as a
 parameter** (008 D8), a minimal `getItem`/`setItem` interface or `null`. Read is
@@ -453,7 +459,8 @@ compared **as text** (`auth_sessions.expires_at` on every request, and the tree'
 sort reads `last_used_at` as a string), and mixed forms compare silently wrong
 (`data-model.md`). **Known deviation, not yet fixed:** `users.created_at` /
 `updated_at` from plan 003 use plain `isoformat()` (microseconds dropped when
-zero) — a **pre-existing defect** owned by a `/bug-fixer` pass against plan 003.
+zero) — a **pre-existing defect**, recorded as defect D-06 in
+`docs/plans/defects.md`.
 It is **not** one of the five defects below (four of which are now closed).
 
 **Every write in one operation uses one instant**, and each service carries its
@@ -474,7 +481,8 @@ protocol only, behind one gateway) · `httpx` (`web_search` only) · **Argon2id 
 only) · **pysqlite with transactional DDL** (`begin()` covers `CREATE TABLE`) ·
 React 19 + TS + Vite multi-entry · Mantine 7
 (`core`/`hooks`/`tiptap`/**`notifications`**; **`form` is NOT a dependency**;
-**`AppShell` in the `admin` entry only**) · MobX 6 + `mobx-react-lite` ·
+**`AppShell` in the `admin` entry only**; **`Tabs` once, on the character page,
+inactive panels kept mounted**) · MobX 6 + `mobx-react-lite` ·
 `react-router-dom` 7 · `@tabler/icons-react` `^3.40` · TipTap (**pinned to major
 2**) + `tiptap-markdown` (edit) + **`react-markdown`** (render, a real dependency
 since plan 013) · **`@dnd-kit/core` + `@dnd-kit/sortable` + `@dnd-kit/utilities`**
@@ -499,9 +507,9 @@ the `frontend/dev/` helpers — is `.ts` / `.tsx`. No `.js` / `.jsx` / `.mjs` /
 | Dependency | Bound |
 |---|---|
 | **`@mantine/notifications`** | **exactly TWO sanctioned importers — `shared/notifyFailure.ts` and `shared/notifyWarning.ts` — and `tests/conventions.test.ts` pins the set.** The outlet is mounted once by `shared/AppProviders` with `autoClose: 5000`, so no call site picks a timeout. Neither function has a success path or a colour parameter |
-| **`@dnd-kit`** (three packages) | **one interaction, two mount points**: reordering notes within a level, on the wall and on the character page's notes grid. Sensors and position-only announcements shared through `app/memoDnd.ts`, so two `DndContext`s keep **one** keyboard path. Nothing else may use it without a requirement |
+| **`@dnd-kit`** (three packages) | **one interaction, two mount points**: reordering notes within a level, on the wall and on the character page's notes list. Sensors and position-only announcements shared through `app/memoDnd.ts`, so two `DndContext`s keep **one** keyboard path. Nothing else may use it without a requirement |
 | **`react-markdown`** | read surfaces only — settled entries, zone messages, read-only notes, through the one `app/MessageBody.tsx`. **Search snippets render as plain text, not markdown** (029 D7): a snippet is a cut fragment and may open a structure it never closes |
-| **TipTap + `tiptap-markdown` + `@mantine/tiptap`** | editing only, through the one `shared/MarkdownEditor.tsx`. **Pinned to TipTap major 2** |
+| **TipTap + `tiptap-markdown` + `@mantine/tiptap`** | editing only, through the one `shared/MarkdownEditor.tsx` (a visible label naming the surface; optional minimum height and trailing toolbar group). **Pinned to TipTap major 2** |
 | **`@mantine/hooks`** | **non-stateful helpers only** — a custom hook must not hold reactive state. Three sanctioned uses: `useMediaQuery(NARROW_VIEWPORT_QUERY)`, `useHover` + `useFocusWithin` for the stream's revealed actions, and `useMediaQuery("(hover: none)")` beside them. `useDisclosure` appears nowhere |
 
 ## The four frontend entries
@@ -546,7 +554,7 @@ the status) → the shared client has already navigated; not-ready → re-probe 
 /sessions/:id           tree | stream | wall
    ?entry=<messageId>     scroll that settled entry into view once + highlight 2000 ms
    ?notes=open            open the note wall on arrival
-/characters/:id         the character page — two columns (UC-073, US-096)
+/characters/:id         the character page — two columns, tabbed, opens on Sessions (UC-073, US-096)
 /characters/new         the character draft page (UC-074, US-097)
 /settings               the two languages and the user's own notes (US-092)
 /search?q=<text>        my-search results (FEAT-017)
@@ -554,6 +562,7 @@ the status) → the shared client has already navigated; not-ready → re-probe 
 
 Six routes, **declared flat and from the start**, shell above `<Routes>`, the
 catch-all 404 **inside** the shell. **Setups have no route.** `/memos` is gone.
+**The character page's tab is not in the URL and not persisted** (plan 033).
 **Only the screen component reads the URL; its children take props** (plan 029) —
 `SessionScreen` may call a router hook, `SessionStream` and `StreamRecord` may
 not, because they are mounted router-free in seven delivered test suites.
@@ -619,7 +628,7 @@ feature, not by path prefix**.
 | **setups** (010) | `GET` / `POST /api/characters/{character_id}/setups` (`include_archived`) · `GET` / `PATCH /api/setups/{setup_id}` · `POST /api/setups/{setup_id}/archive` · `/restore`. **Nested collection, flat single resource** — `character_id` is fixed for a setup's life |
 | **sessions** (011; rename 2026-11-05) | `GET /api/sessions` · `GET /api/characters/{character_id}/sessions` · `GET /api/sessions/{session_id}` · **`PATCH /api/sessions/{session_id}`** (body `{ name: string \| null }`; **`name` is the only accepted key — any other key is a 422**; trimmed, blank/null stores NULL; archived sessions may be renamed; 200 the session; missing/foreign `session_not_found` 404; bumps `updated_at`, **never `last_used_at`**) · `POST /api/sessions/{session_id}/archive` · `/restore`. **No `DELETE`.** Configuration is still never written through the session resource (017 D9's intent, kept by the narrow body). Lists order `last_used_at DESC, id DESC`; every row carries `setup_name` by an owner-scoped LEFT JOIN, shown even when the setup is archived, **and `name`** |
 | **the stream** (012, 014, 019, 021, 022, fast/014 — `routers/stream.py`, `session-stream.md`) | `GET /api/sessions/{id}/entries` · `POST /api/sessions/{id}/entries` (201; `kind` **required and exactly `"partner"`**, every other value a native 422) · `GET /api/sessions/{id}/zone` · `POST /api/sessions/{id}/zone/messages` (201, **no model call**) · **`POST /api/sessions/{id}/zone/compose` (the ONE streaming route)** · `POST /api/sessions/{id}/settle` · `POST /api/sessions/{id}/reopen` · `PATCH /api/messages/{message_id}` · **`DELETE /api/messages/{message_id}`** (200 + body, one current-zone message or one settled entry with its buried group; buried and tool rows refused `message_not_editable`, missing or foreign `message_not_found`) · `GET /api/messages/{message_id}/discussion` (read-only). **Nine JSON routes plus compose.** No stop route, no zone-discard route, no bulk delete, and none may be added |
-| **create-and-seed** (018) | `POST /api/characters/{character_id}/sessions` — owned by `routers/sessions.py`; body omitted / `{}` / `{ setup_id?, opening_message? }`; **201 `StartedSession`** = the `Session` keys (nine since `name` joined them; NULL on create) plus `opening_message` (a `MessageResponse` or null). One transaction; a whitespace-only `opening_message` is a 422 and nothing is created. The route stays JSON; **the first reply is the session screen's one textless compose on arrival** (fast/004) |
+| **create-and-seed** (018) | `POST /api/characters/{character_id}/sessions` — owned by `routers/sessions.py`; body omitted / `{}` / `{ setup_id?, opening_message? }`; **201 `StartedSession`** = the `Session` keys (nine since `name` joined them; NULL on create) plus `opening_message` (a `MessageResponse` or null). One transaction; a whitespace-only `opening_message` is a 422 and nothing is created. **The character page always sends `opening_message`, and `setup_id` only when the composer's setup choice is set** (plan 033); the message-less form has no frontend caller since the inline start control was retired. The route stays JSON; **the first reply is the session screen's one textless compose on arrival** (fast/004) |
 | **memos** (015, 016) | `GET /api/memos?scope&scope_id` · `POST` (201; flags on the body are **ignored** — created enabled, not forced) · `PATCH /{memo_id}` (any subset of `body` / `is_enabled` / `is_forced`; a null key is "not supplied") · `DELETE /{memo_id}` (204 — one of the product's two per-item delete paths; the other is the session message) · **`PUT /api/memos/order`** (body `{ scope, scope_id?, memo_ids: [string] }`; 200 `{ memos: [...] }` with `sort_key` 0..n−1; declared **before** the `{memo_id}` handlers so `order` is not read as an id; **one request is one level**) · `GET /api/sessions/{session_id}/memo-chain` |
 | **configuration** (017 — `routers/configuration.py`) | **seven**: `GET` / `PATCH /api/characters/{character_id}/configuration` · `GET` / `PATCH /api/sessions/{session_id}/configuration` · `GET` / `PATCH /api/me/settings` · **`GET /api/models`** (the enabled set, in first-enabled order `llm_servers.id` then `models.id`). `model: null` clears |
 | **translation** (023) | `POST /api/messages/{message_id}/translation` — an `async def` handler with its own overridable chat-client factory, **no request body** (the target is resolved server-side), 200 `{ message_id, target_language, text, cached }` |
@@ -658,7 +667,9 @@ feature, not by path prefix**.
 - **Every `Session` read carries `setup_name` and `name`** (the stored value,
   null when never renamed — **the server never computes the default label**; the
   client renders the local start date). The create-and-seed route answers the
-  `Session` keys plus `opening_message`.
+  `Session` keys plus `opening_message`. **A rename's returned `Session` is what
+  the client applies** — to the workspace and section lists and the header — and a
+  refused rename fails inline under the editor (plan 034, `DEC-034-13`).
 - **Request validation that is not a domain error** (009 D8): a blank or
   whitespace-only required text field is stripped and refused by **FastAPI's own
   422**, with no domain code. **Unknown body keys are ignored**, not refused —
@@ -682,9 +693,11 @@ feature, not by path prefix**.
   `<a href="/">`. **`AppShell` lives here and only here** — the `app` entry's
   shell is a hand-written CSS grid. The asymmetry is deliberate.
 - **Gate:** `main.tsx` awaits `GET /api/me`, then mounts or redirects — nothing
-  rendered meanwhile. Pure `resolveAdminAccess` + impure `enforceAdminAccess`,
-  reading the user through `shared/currentUser.ts`. **Five boot outcomes**; **a
-  502/network failure is not a deny**.
+  rendered meanwhile. Pure `resolveAdminAccess` + impure `enforceAdminAccess`
+  (resolving to an access result rather than a bare decision) + a pure
+  classification of a thrown value into not-ready or failed, reading the user
+  through `shared/currentUser.ts`. **Five boot outcomes**; **a 502/network
+  failure is not a deny**.
 - **Header:** `Burger`, title, `<a href="/">` — **no user menu, so no sign-out in
   the admin area**; `ColorSchemeToggle` not mounted.
 - **Nav:** static declaration table → `NavLink`s, pure
@@ -696,7 +709,8 @@ feature, not by path prefix**.
   in the open-session transaction, `updated_at` not bumped. **A password reset
   keeps live sessions** (US-010.AC-3). **Change Role = UC-087 / US-140**; self
   target → `self_role_change_refused` 409 on the modal's general key, and the
-  action is **not** hidden on one's own row.
+  action is **not** hidden on one's own row. **A password has no minimum length
+  beyond non-empty.**
 - **LLM Servers:** **two** routes over **one** probe primitive. **Test answers 200
   even for a failing outcome** and writes `last_test_*`; **available-models writes
   nothing and answers 502 `llm_unreachable`**. Probe outcomes are **four** —
@@ -704,11 +718,13 @@ feature, not by path prefix**.
   `reachable` only — unchanged by the 2026-11-08 move to the gateway, which
   builds them on the library's model listing (a 401/403 is `auth_failed`, read
   from the status the library error carries since 0.2.1;
-  `DEC-arch-llm-client-library-3`, `-16`). **No "active" column.** Designation **measures** the dimension
+  `DEC-arch-llm-client-library-3`, `-16`). **No "active" column.** **An
+  Embedding model column** shows the designated model's name with its measured
+  dimension, else an em dash. Designation **measures** the dimension
   with one real embeddings call and is **independent of `is_enabled`**; the
   use-time validator needs **only the designation with its dimension** —
   `is_enabled` is the chat set only, and an embedding model need not (should not)
-  be enabled (revised 2026-10-08; code pending a plan-006 bug fix). API key never returned; empty/untouched = leave,
+  be enabled (revised 2026-10-08; as built). API key never returned; empty/untouched = leave,
   explicit empty string = clear; a non-`$` value is FastAPI's 422. The models
   modal renders `available ∪ already-enabled`, and **a failed probe must not
   disturb the selection** — structurally, because the enabled set rides on the
@@ -773,7 +789,7 @@ not act on these one-liners alone.**
 | **R9** | The assistant's reach is **exactly three tools**, all implemented and registered. **`ToolScope` is built only by the seam, from an owner-scoped session read, and tool arguments never carry ids.** A failed tool is a tool *result* — the exchange continues. **`web_search` is the one tool that is not a scoped read** — no scope ids, no database access, only the query leaves — and it additionally needs **instance credentials** to be offered at all, so on an unconfigured instance the reach is two tools. The assistant never files anything into the record |
 | **R10** | The roleplayer's text is committed **before** any model call; the `accepted` frame makes that observable, and it arrives on the failure path too. **Model-resolution failures arrive INSIDE the stream**, after `accepted`. **The harness persists accumulated `token` text whenever no `done` passed through** — disconnect, domain error, synthesized error, terminal-less exhaustion — written **before** the error frame; whitespace-only text writes no row. Retry re-runs generation **without re-inserting anything**. An enormous paste warns but is **never refused** |
 | **R11** | **The ruler: settle is the only door into the record**, with one exception — a pasted partner block, born settled. The **current zone is a set, not a row** (`related_to IS NULL AND settled_at IS NULL`), so US-125 needs no constraint. **Settle's head is the last NON-TOOL zone row; a zone holding only tool rows is `zone_empty`**, and tool rows are buried with the group. **Settling never requires an assistant answer.** Re-open is settle's exact inverse, gated on an empty zone, and applies only to a head that **has** a buried group — otherwise `nothing_to_reopen`, which covers a pasted partner block, a lone directly-settled turn and a lone decision. **Deleting the last settled row makes the one before it the re-open target.** **Abandoning an empty zone is frontend-only — no route, no backend surface; a zone-discard route is forbidden.** Facts about `messages`: **raw `messages` is touched by exactly THREE operations — settle, re-open and single-message delete** (fast/014) — and every other read goes through a **selectable**; the burial and settle columns are written **only** by settle and re-open; inserts are the zone append, the partner filing, the assistant row and the character page's opening message; `text`/`updated_at` are the edit route's; **deletes are single-message delete only** — one zone message, or one settled entry with its buried group |
-| **R12** | `(( ))` is **parsed once, at settle, and stored text is never re-parsed.** Wholly parenthesised (after trimming, starts `((` and ends `))`) → `kind='decision'`, filed **verbatim**; otherwise `kind='turn'` with every shortest fragment stripped along with the spaces and tabs before it. **A fragment-free turn is filed byte-for-byte; a turn can never strip to empty.** **Partner text gets no special treatment.** Three layers: server decides (`services/parens.py`, called from exactly one place), system prompt instructs, client previews and paints **in the zone only** (`app/parens.ts`) and is never authoritative. **An edit can never turn a turn into a decision or back.** Recorded constraint: the convention assumes double parentheses never occur in the roleplayer's own prose (US-130's `Constraint:`) |
+| **R12** | `(( ))` is **parsed once, at settle, and stored text is never re-parsed.** Wholly parenthesised (after trimming, starts `((` and ends `))`) → `kind='decision'`, filed **verbatim**; otherwise `kind='turn'` with every shortest fragment stripped along with the spaces and tabs before it. **A fragment-free turn is filed byte-for-byte; a turn can never strip to empty.** **Partner text gets no special treatment.** Three layers: server decides (`services/parens.py`, called from exactly one place), system prompt instructs, client previews and paints **in the zone only** (`app/parens.ts`) and is never authoritative. **An edit can never turn a turn into a decision or back.** Recorded constraint: the convention assumes double parentheses never occur in the roleplayer's own prose (US-130's `Constraint:`); **nested or tripled parentheses are deliberately unsupported** (`session-stream.md`) |
 
 **The parallel `<think>` rule** (R12's neighbour, `US-146`): reasoning streams as
 ordinary `token` frames wrapped in `<think>` … `</think>` and is **persisted** on
@@ -1160,6 +1176,7 @@ splitter, and its stored height sizes nothing else.
 |---|---|
 | Tree column, expanded | `252px` |
 | Tree column, collapsed (icon rail) | `48px` |
+| Tree overlay, below 820px | fixed to the viewport's left edge, full height, `252px` wide, above the page |
 | Wall, floating (absolute overlay + shadow) | `min(320px, 84vw)` |
 | Wall, pinned (a real grid column) | `320px` |
 | Stream column | `max-width: 720px`, centred, `padding-inline: 18px` |
@@ -1179,7 +1196,8 @@ splitter, and its stored height sizes nothing else.
   in `shell.css`**) and each column paints `bg="var(--mantine-color-body)"` as a
   Mantine style prop. **Both halves or the divider becomes a stripe of page.**
 - **Below 820px:** the left track is **always 48px**; the rail's expand **lifts
-  the same nav column out of the track** as an overlay (`nav-overlay-open`); the
+  the same nav column out of the track** as an overlay (`nav-overlay-open`),
+  positioned against the viewport rather than the grid; the
   overlay's open state is **not persisted** and `navCollapsed` is **neither read
   nor written** at that width; dismissal is the collapse control, any in-entry
   navigation, or crossing back — **no click-outside and no backdrop**.
@@ -1230,7 +1248,8 @@ wrapping button's `color`, never on the icon.
 BookWriter, which has none. Variant **`"subtle"`**; `sizeVariant` defaults to
 `"main"`; **the props type is deliberately not widened** with `children`, a
 `variant` escape hatch, a raw `size` or an `aria-label` override. **A rotated
-chevron is passed as a tiny module-level component, not as a new prop.**
+chevron is passed as a tiny module-level component, not as a new prop.** **A busy
+icon-only control is simply disabled** (plan 033) — no loading prop was added.
 
 **Three scopes:** `IconButton` governs toolbar / header / composer / inline
 actions; **table rows use the overflow `Menu`**, so a row holds exactly one
@@ -1252,18 +1271,19 @@ tree-header text input**.
 | Discard an **empty** current zone | `IconX`, "Discard empty zone"; **absent**, not disabled, otherwise |
 | Re-open a settled block | `IconArrowBackUp`, "Re-open last entry" |
 | Edit entry, message or note | `IconEdit` — one glyph, **two label families** ("Edit entry" / "Edit message") |
-| Rename a session | `IconEdit`, "Rename session" — tree row and session header; swaps the label for an in-place editor (Enter/blur commits, Escape cancels, not optimistic) |
+| Rename a session | `IconEdit`, "Rename session" — tree row and session header; swaps the label for an in-place editor (Enter/blur commits, Escape cancels, not optimistic; a refusal fails inline under the editor, plan 034) |
 | Delete a settled entry or a zone message | `IconTrash` — one glyph, **two labels** ("Delete entry" / "Delete message"); opens the red confirm; absent on tool rows, in the read-only discussion and while editing; disabled while busy or streaming (fast/014) |
 | Save | `IconDeviceFloppy` |
+| Save / cancel the inline new-setup form | `IconDeviceFloppy`, "Save setup" / `IconX`, "Cancel new setup" — icon-only, disabled while the save is in flight (plan 033) |
 | Collapse / expand (generic) | `IconChevronDown`, **rotated** — one icon, not a pair |
 | Show / hide a settled entry's discussion | `IconChevronDown` rotated; "Show discussion" / "Hide discussion" |
 | Expand / collapse a character in the tree | `IconChevronDown` rotated `-90°`, "Collapse &lt;name&gt;" / "Expand &lt;name&gt;", `sizeVariant` `"chevron"`; **absent** for a character with no sessions |
 | Collapse the tree | `IconChevronLeft`, "Collapse tree" |
 | Expand the tree from the rail | `IconMenu2`, "Expand tree" |
 | New character (tree header and rail) | `IconPlus`, "New character" |
-| New session / setup / import-session | `IconPlus` as a **labelled** button |
+| New setup | `IconPlus` — **icon-only, in the Setups tab's header**; opens the inline new-setup form (plan 033). **There is no new-session control**: the character page's composer starts a session |
 | New note | `IconPlus`, "New note" — **icon-only, in the note group's header**, at every mount; the only way to open a draft (fast/012) |
-| Archive / restore | `IconArchive` / `IconArchiveOff` — left sections on the character page, menu items in a table row |
+| Archive / restore | `IconArchive` / `IconArchiveOff` — **icon-only in the character page's header** (plan 033), menu items in a table row |
 | Session configuration | `IconSettings` |
 | My search | `IconSearch` on the collapsed rail; the expanded tree header is a **text input** |
 | Memos / open the note wall | `IconNotes`, "Open notes"; present only while the wall is not visible |
@@ -1274,13 +1294,14 @@ tree-header text input**.
 | Collapse / expand a tool call | `IconTool` (**decorative**) plus the rotated `IconChevronDown` toggle |
 | Collapse / expand thinking | `IconBulb` beside "Thinking", plus the rotated `IconChevronDown` toggle |
 | Overflow menu | `IconDots` — traces to no feature |
-| Export / import | `IconDownload` / `IconUpload` |
+| Export / import | `IconDownload` / `IconUpload` — **icon-only** for the character and draft pages' header Export and the Sessions list's "Import session" (plan 033) |
 | User menu — settings · admin area · export my data · import · log out | `IconSettings` · `IconShield` · `IconDownload` · `IconUpload` · `IconLogout` |
 | Admin nav — Users · LLM Servers · Database | `IconUsers` · `IconServer2` · `IconDatabase` |
 
 **Every glyph `_TBD:` this table used to carry is closed.** `IconMessageCheck` is
 **not used anywhere**. **The row "Copy as plain text (composer)" is removed, not
 deferred** — no plan built a composer copy and no brief contains one.
+
 **`IconPin`'s collision is accepted and named** (user decision): the wall's pin
 and a note's "forced" flag are the same glyph and **do co-occur on one screen**,
 disambiguated by **label** and **location**.
@@ -1331,6 +1352,9 @@ coverage banner — renders **there and not also as a notification**.
   (it must not persist, US-044.AC-4); the **retry** is the labelled **Regenerate**
   in the zone (it must persist, US-044.AC-3 / AC-5, and it is derived from
   persisted rows so it survives a reload).
+- **Inline, not notified** (plans 033, 034): the inline new-setup form's failure,
+  the character page composer's "Could not load setups to choose from.", and a
+  refused session rename — each in its own place.
 
 ## CRUD conventions — `forms-and-lists.md`
 
@@ -1348,8 +1372,11 @@ sessions yet.").
 **Create and edit are always a `Modal`**, with **three named exceptions**:
 in-place edit of a settled entry / zone message / note (**committing it emptied
 removes the item, with no confirm** — a note per US-141, an entry or zone message
-per US-149); the character **draft page**; and **starting a session** (a
-one-choice inline control — a Setup select plus a "Start session" button). **The
+per US-149); the character **draft page**; and **the inline setup create** on the
+character page's Setups tab (plan 033, user decision — the modal's draft lifetime
+kept, the dialog dropped; **editing a setup stays a modal**). **Starting a session
+is no longer an exception**: the inline start control (011 D1) is retired, and a
+session starts only by writing in the character page's composer. **The
 settings page's Languages form is a *reading* of the draft-page exception, not a
 fourth one** — the route *is* the form. **Blur-save replaced the character page's
 explicit Save** (009 D2 → 018 D7); `/settings` keeps its Save because it is a
@@ -1364,8 +1391,9 @@ functions** `clientErrors(draft)` / `errors(draft)` / `canSubmit(draft)` and an
 `serverErrors` is keyed by field **plus a general key**, mapped **by status or
 code, never by parsing prose**. **Fresh draft per open** via conditional mount;
 modal open/target flags are component-local `useState` (view state, not domain
-state) — **as are every expand/collapse flag and a discussion group's fetched
-rows**, which is why the live-reply→persisted-row swap is a **remount**.
+state) — **as are every expand/collapse flag, a discussion group's fetched
+rows and the character page's active tab**, which is why the
+live-reply→persisted-row swap is a **remount**.
 
 **Mutations are never optimistic** — re-load after every mutation, `void` + a
 non-rethrowing catch. The workspace **narrows the scope** rather than skipping it:
@@ -1374,7 +1402,9 @@ exactly one row from the `PATCH` response**; **a delete removes exactly the rows
 the server's answer names, and only after it answers** (fast/014); every stream
 mutation failure goes through `notifyFailure` **and then re-reads**; and **a
 returned row is applied only if its `updated_at` is not older than the one already
-held** (015 D5).
+held** (015 D5). **A session rename applies the returned session** to the lists and
+the header, and the character page's Sessions list adopts a newer row made
+elsewhere by the same apply-a-row rule (plan 034).
 **The one sanctioned exception is note reordering** (016 D7, U1) — optimistic on
 drop, a **total** revert on failure applied to the level as it then is, further
 drags in that level disabled while in flight, and an inline per-level failure
@@ -1415,9 +1445,12 @@ probe** — failed-probe resilience by construction, one shared picker module.
 **The `MarkdownEditor`'s two emit rules:** `onChange` from `onUpdate` **only**,
 and **every programmatic content or editability write passes `emitUpdate: false`**
 — both library defaults go the wrong way, and either alone makes an unedited note
-write itself back on mount. It takes **one optional trailing toolbar group**,
-rendered at the toolbar's right end and not at all when read-only — notes put
-their two flag controls there (fast/012). **A file input inside a Mantine `Menu.Item` loses its
+write itself back on mount. Its label is a **visible field label that also names
+the editable surface** (018, bug fix). It takes **one optional trailing toolbar
+group**, rendered at the toolbar's right end and not at all when read-only — notes
+put their two flag controls there (fast/012) — and **an optional minimum height**,
+whose first caller is the persona on the character page (plan 033). **A file
+input inside a Mantine `Menu.Item` loses its
 change event when the dropdown unmounts**, so the user menu's "Import…" triggers
 a hidden input **outside** the menu.
 
@@ -1527,6 +1560,8 @@ be wrong. The doc named beside it owns the reasoning.
 - **No `.env` templating on deploy** — a deliberate deviation from BookWriter;
   `deploy.sh` refuses to restart without a hand-placed `.env` (`deployment.md`,
   `DEC-F013-5`).
+- **Nested or tripled parentheses in the roleplayer's text** — deliberately
+  unsupported by the `(( ))` rules (`session-stream.md`).
 
 ## Open `_TBD:` items across the doc set
 
@@ -1559,7 +1594,7 @@ regression, and a plan treating one as unanswered is reading a stale copy.
 | **The ENCODING of `sessions.model_ref`** (`data-model.md`) | **Two columns with a both-or-neither CHECK and no FK** — `model_server_id` + `model_name` (017 D4). `model_ref` and `tools` as literal column names are **deliberately absent** from the schema |
 | **Whether UC-080's first message also draws an assistant reply** (`backend-structure.md`) | **Design closed: yes**, and the route **stays JSON** because the compose happens on the session once it exists (018 D2). **Built by fast/004** (defect D-01 closed): the session screen issues one textless compose on arrival (`DEC-F004-1` .. `-5`) |
 | **Where the archive toggle sits** (`frontend-structure.md`) | **Closed in full** (018 D11): **three section-local toggles** — the tree header's "Show archived" for characters, "Show archived setups", "Show archived sessions" — **none persisted**, because showing archived material is a lookup, not a preference |
-| **Whether the character page's composer carries the kind switch or a setup choice** (`workspace-shell.md`) | **Neither** (`US-117.AC-4`, 018 D1). There is no partner block yet for the switch's default to read, and UC-080 names no setup — so the session is created with `setup_id` NULL, which R2 makes first-class |
+| **Whether the character page's composer carries the kind switch or a setup choice** (`workspace-shell.md`) | **A setup choice yes, the kind switch no** (plan 033, user decision; revising 018 D1's "neither"). The composer offers an **optional** setup choice, default none, and the chosen `setup_id` travels with the opening message in the one create request; with none chosen the session is created with `setup_id` NULL, which R2 makes first-class. There is still no kind switch — no partner block exists yet for its default to read. `US-117.AC-4` / UC-080 were amended at finalization to match |
 | **US-120's settled-decision default for the kind switch** (`workspace-shell.md`) | **`US-120.AC-3`:** a settled **decision** does not participate in the alternation. **And 013 D8 settles the empty-record case**: with no `partner`/`turn` entry at all the default is ***my turn***, because a wrong *partner* default files the roleplayer's own paste as a partner block, which is born settled and **not re-openable** |
 | **The discard-empty-zone glyph** (`ui-conventions.md`) | **`IconX`**, labelled "Discard empty zone" (013 D3). `IconX` already means "dismiss" on the wall, and `IconTrash` would promise deleting content that by the rule is never there |
 | **The enabled/disabled note toggle's glyphs** (`ui-conventions.md`) | **`IconCircleCheck` / `IconCircleOff`** (015 D14) — a two-icon swap whose labels name the **action**; the card additionally dims and strikes a disabled note's body, so the state is legible without reading the button |
@@ -1574,7 +1609,7 @@ regression, and a plan treating one as unanswered is reading a stale copy.
 | **The two named divergences from `docs/product/`** — a stopped tool call, and a stopped translation's cache (`llm-and-streaming.md`) | **Both acceptance criteria were amended on 2026-10-06 and now state what the build does.** `US-133.AC-1`: a stopped tool call **ends** the exchange. `US-133.AC-2` + its `Constraint:`: not caching a stopped translation is **best-effort**. The section is retitled **"Stopping, and what a stop is not"** and is settled design — the engineering reasons are kept, and **no doc in this folder now records either as awaiting a product change** |
 | **UC-012's `user → character → session` inconsistency** (R4, and flagged here) | **Reconciled by the product round (challenge C42).** UC-012's exception flow no longer names a user level for the model, so the doc set no longer has to choose between it and UC-050/UC-047. Nothing about the prohibition changed — it never turned on which reading was right |
 | **No frame carried the id of the roleplayer's own committed row** (`llm-and-streaming.md`) | **The `accepted` frame**, emitted **once, before the first `token`, and only when the compose carried text**. It makes R10's ordering observable and arrives on the failure path too, so an in-place edit of a just-sent message can `PATCH` without waiting for a reload (US-115) |
-| **`@dnd-kit` available with nothing requiring it** (`frontend-structure.md`) | **Used — US-102 is the requirement.** One interaction, **two** mount points (the wall and the character page's notes grid), three packages, shared sensors and position-only announcements in `app/memoDnd.ts` |
+| **`@dnd-kit` available with nothing requiring it** (`frontend-structure.md`) | **Used — US-102 is the requirement.** One interaction, **two** mount points (the wall and the character page's notes list), three packages, shared sensors and position-only announcements in `app/memoDnd.ts` |
 
 **Also closed, in the previous delta, and still closed:** the observability
 posture · `sessions.model_ref` after the character is configured with a model
@@ -1649,6 +1684,22 @@ not serve `/`" reading is superseded — see `deployment.md`'s Decision history.
   entry's actions stay revealed meanwhile (fast/015, `DEC-F015-1` .. `-4`).
 - **The tone of the roleplayer's own chat text** (`ui-conventions.md`) — muted in
   the zone and the Discussion group (fast/016, `DEC-F016-1` .. `-4`).
+
+**Closed at the second 2026-11-09 finalization batch (plans 033, 034):**
+
+- **The character page's shape** (`workspace-shell.md`, `frontend-structure.md`,
+  `forms-and-lists.md`, `ui-conventions.md`) — a header (icon-only Archive /
+  Restore / Export) over five tabs opening on Sessions; the tab is component-local,
+  every section mounted once; setups created inline from the Setups tab's '+'; the
+  Sessions tab is the composer above the list; **sessions start only by writing**
+  — the inline start control is retired (plan 033,
+  `docs/decisions/033.character-page-tabs.md`).
+- **The session rename's result and failure** (`workspace-shell.md`,
+  `forms-and-lists.md`) — the returned session is applied, and a refusal fails
+  inline under the editor, keeping the typed text (plan 034, `DEC-034-13`).
+- **Stale "code pending" markers on the embedding-model validator**
+  (`data-model.md`, `llm-and-streaming.md`, this file) — removed: the validator
+  already ignores `is_enabled`.
 
 **Revised (decision revision, 2026-10-08): the composer's text area.** "The
 composer grows with its content" is **superseded**: no auto-grow, a native
@@ -1732,9 +1783,9 @@ artifact: cite it, never edit it.
 **Separately, and not one of the five:** the **`users.created_at` /
 `updated_at` fixed-width timestamp deviation** (`data-model.md`). It predates
 this round, came out of the finalization of plans 001..007, and is a
-**pre-existing known defect owned by a `/bug-fixer` pass against plan 003**. It is
-**not** a `_TBD:` and **not** `D-06`. Until it lands, nothing may compare those
-two columns as text against a fixed-width value.
+**pre-existing known defect, recorded as defect D-06 in `docs/plans/defects.md`**,
+with its owner still open. It is **not** a `_TBD:`. Until it lands, nothing may
+compare those two columns as text against a fixed-width value.
 
 ## Not `_TBD:` but flagged for another owner
 

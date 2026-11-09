@@ -416,7 +416,7 @@ def test_update_request_ignores_unknown_keys__S015_001_DoD10() -> None:
 
 
 # ==========================================================================================
-# Feature 016, step 001 (`docs/plans/016.note-wall/001.reorder-backend.md`) — the
+# Feature 016, step 001 (`docs/decisions/016.note-wall.md`) — the
 # `memo_order_mismatch` error (D6) and the reorder request model. Suffix `__S016_001_DoD<n>`.
 # ==========================================================================================
 

@@ -3,7 +3,7 @@
 Covered routes: ``GET /api/export``, ``GET /api/characters/{character_id}/export`` and
 ``GET /api/sessions/{session_id}/export``.
 
-Every expected value comes from ``docs/plans/030.export-granularities/003.export-routes.md``
+Every expected value comes from ``docs/decisions/030.export-granularities.md``
 (its Interface intent and DoD-3 .. DoD-10), from ``003.context.md`` (why the three routes live
 in ``routers/transfer.py`` and why they answer a raw ``Response``), and from the feature
 ``context.md`` — §"Routes" (the guards, the 200/``application/json``/``Content-Disposition``
@@ -718,7 +718,7 @@ def test_earlier_routes_still_answer_with_the_transfer_router_registered__S030_0
 # =====================================================================================
 # Feature 034, step 001 — the roleplayer exports carry `schema_version` 2 and `name`.
 #
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# Expected values come from `docs/decisions/034.session-names.md`
 # DoD-5 (every granularity emits `schema_version` 2; every exported session row carries
 # `name`, the stored value or null) and `transfer.md` § "Session names travel". The name is
 # written straight into `sessions.name` in test setup. Test names end `__S034_001_DoD<n>`.

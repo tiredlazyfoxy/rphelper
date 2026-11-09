@@ -1,7 +1,7 @@
 """Tests for the resolvers, the session configuration read and the use-time model check in
 ``app.services.configuration`` — feature 017, step 003.
 
-Every expected value comes from ``docs/plans/017.session-configuration/003.resolver-and-use-time-check.md``
+Every expected value comes from ``docs/decisions/017.session-configuration.md``
 (Interface intent, DoD-1 .. DoD-10), ``003.context.md`` and the feature ``context.md``: the Wire
 contract's level rules (``system_prompt`` inherits from ``character`` else null; each tool inherits
 from ``character`` else ``True`` with level ``default``; the languages inherit from ``user`` else

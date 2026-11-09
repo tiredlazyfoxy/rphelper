@@ -1,6 +1,6 @@
 """Tests for `app/services/embedding.py` — feature 024, step 002 (DoD-1..8 and DoD-10).
 
-Every expected value comes from `docs/plans/024.embedding-lifecycle/002.embedding-service.md`
+Every expected value comes from `docs/decisions/024.embedding-lifecycle.md`
 (its Interface intent and Definition of done), from `002.context.md` (the fake's contract,
 the api_key_ref re-select, the sync-bridge notes) and from the feature `context.md`
 (**D1** the sync bridge and one embed call per write, **D4** the vector-row forms, **D8** the

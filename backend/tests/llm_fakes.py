@@ -2,7 +2,7 @@
 deterministic vector function.
 
 Owned by feature 024 step `002`'s test-coder; **steps 003, 004, 005 and 006 import it**.
-Its contract comes from `docs/plans/024.embedding-lifecycle/context.md` ("Test conventions"
+Its contract comes from `docs/decisions/024.embedding-lifecycle.md` ("Test conventions"
 -> "`backend/tests/llm_fakes.py`") and `002.context.md` ("The fake — what it must offer").
 Nothing here was derived from any implementation.
 

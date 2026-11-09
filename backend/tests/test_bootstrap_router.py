@@ -1,13 +1,13 @@
 """Tests for ``POST /api/bootstrap/create`` and the router-level ``require_unconfigured`` guard.
 
-Every expected value comes from ``docs/plans/003.first-run-bootstrap/003.bootstrap-router-and-guard.md``
+Every expected value comes from ``docs/decisions/003.first-run-bootstrap.md``
 (Interface intent + Definition of done), ``003.context.md`` and the feature ``context.md``
 (D2 the 409, D6 the router-level guard, D9 no cookie, D15 what the insert writes, D16 the
 422 backstop). Bindings come from ``## Skeleton`` in ``status.md`` (steps 001, 002, 003).
 
 Covers step 003 DoD-1 .. DoD-9. DoD-10 .. DoD-13 are ``[manual/live]`` and carry no test.
 
-Feature 004 step 004 (``docs/plans/004.authentication-session/004.bootstrap-signs-in.md``)
+Feature 004 step 004 (``docs/decisions/004.authentication-session.md``)
 makes the 201 set the session cookie: 003 DoD-2's ``Set-Cookie`` half is deleted and the
 new tests (suffix ``__S004_004_DoD<n>``) cover 004/004 DoD-1, DoD-2, DoD-3, DoD-4, DoD-6.
 

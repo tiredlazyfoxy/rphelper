@@ -225,14 +225,19 @@ The **pure/impure split is kept**, now asynchronous:
 
 ```
 resolveAdminAccess(currentUser: CurrentUser | null) -> AdminAccessDecision   // pure
-enforceAdminAccess(): Promise<AdminAccessDecision>                            // impure
+classifyAdminAccessError(error) -> "not-ready" | "failed"                    // pure
+enforceAdminAccess(signal?) -> Promise<AdminAccessResult>                     // impure
 ```
 
 `resolveAdminAccess` is a total function over the fetched identity and returns a
-decision; `enforceAdminAccess` performs the fetch and navigates on deny. The
-split survives the change to async for the same reason it existed: the decision
-table is testable without a network, a router or a DOM, and the navigation is a
-one-line effect with nothing to get wrong.
+decision; `enforceAdminAccess` performs the fetch (cancellable), navigates on
+deny and returns an **access result** to the entry rather than nothing. A fetch
+that fails without yielding an identity is sorted by a second pure function into
+one of two classes — **not ready** or **failed** — so the entry handles each class
+by name instead of inspecting the error itself. The split survives the change to
+async for the same reason it existed: the decision table and the error
+classification are testable without a network, a router or a DOM, and the
+navigation is a one-line effect with nothing to get wrong.
 
 The same three deny cases, mapped onto cookie-session semantics:
 
@@ -321,8 +326,9 @@ FEAT-003 (plan 005) because this column was specified with no backing column. It
 is nullable and renders as an **em dash** when the account has never logged in.
 
 **Create modal.** Fields: username, password, password confirmation, role
-select. Client validation: username required, password at or above a minimum
-length, confirmation must match. Server errors are mapped **by status**, never by
+select. Client validation: username required, password non-empty — **there is no
+minimum length beyond non-empty**, matching the server — and the confirmation must
+match. Server errors are mapped **by status**, never by
 parsing a message, which keeps the UI from breaking when the backend's prose
 changes. **As built (plan 005) the mapping is half-built, deliberately:**
 
@@ -391,9 +397,15 @@ it is forbidden.
 US-015.AC-2, US-015.AC-3, US-015.AC-4
 
 A table of registered servers. Columns: **name**, **backend type** (badge),
-**base URL**, **has API key**, **enabled-model count**, a **last-test badge**, and
-the trailing action column. Row overflow menu: Edit, Select Models, Set
-Embedding, Clear Embedding (conditional), Delete, **Test connection**.
+**base URL**, **has API key**, **enabled-model count**, **embedding model**, a
+**last-test badge**, and the trailing action column. Row overflow menu: Edit,
+Select Models, Set Embedding, Clear Embedding (conditional), Delete, **Test
+connection**.
+
+**The embedding model column** shows, for the server holding the designation, the
+designated model's name together with its measured dimension ("N dimensions"),
+and an **em dash** on every other row. Like the enabled-model count it describes
+the registry, not anything user-owned.
 
 **There is no "active" column and no active switch** (plan 006, user decision).
 This page used to list both; `data-model.md`'s `llm_servers` declares no such

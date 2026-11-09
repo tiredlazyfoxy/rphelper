@@ -1,7 +1,7 @@
 """Tests for `app/services/transfer_import.py`'s validation half — feature 031, step 001.
 
-Every expected value comes from the spec: `docs/plans/031.import-and-id-remapping/
-001.envelope-validation.md` (Interface intent + Definition of done), `001.context.md`
+Every expected value comes from the spec: `docs/decisions/031.import-and-id-remapping.md`
+(Interface intent + Definition of done), `001.context.md`
 (§"Pinned messages"), the feature `context.md` (§"The failure contract",
 §"Granularity table sets", §"Deserialization") — and from the rows this file seeds
 itself. Nothing is read from the implementation.
@@ -1262,7 +1262,7 @@ def test_database_export_still_serializes_the_two_fk_less_ids_as_strings__S031_0
 # =====================================================================================
 # Feature 034, step 001 — accepted schema versions: 2 (current) and 1 (one named upgrade).
 #
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# Expected values come from `docs/decisions/034.session-names.md`
 # DoD-7 .. DoD-10, DEC-034-7, DEC-arch-session-names-7 and `transfer.md` § "Accepted schema
 # versions": version 2 is unchanged (a `sessions` row without `name` is `malformed_payload`);
 # version 1's `sessions` rows lack `name` and import with `name` NULL; nothing else is relaxed

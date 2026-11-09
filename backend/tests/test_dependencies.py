@@ -1,6 +1,6 @@
 """Tests for the role ladder (``app.roles``) and the HTTP authentication seam (``app.dependencies``).
 
-Every expected value comes from ``docs/plans/004.authentication-session/002.ladder-and-dependencies.md``
+Every expected value comes from ``docs/decisions/004.authentication-session.md``
 (Interface intent + Definition of done), ``002.context.md`` and the feature ``context.md``
 (D3 the typed 401/403, D6 the cookie flags, D7 what resolution requires, D8 where the ladder
 and the dependencies live). Bindings come from ``## Skeleton`` -> ``Step 002`` (and
@@ -12,7 +12,7 @@ DoD-13 and DoD-14 are ``[manual/live]``.
 
 Feature 024 step ``002`` adds one test at the end of this file for **its** DoD-9 (the shared
 ``get_llm_client_factory`` dependency, D9). Its expected values come from
-``docs/plans/024.embedding-lifecycle/002.embedding-service.md`` and that feature's
+``docs/decisions/024.embedding-lifecycle.md`` and that feature's
 ``context.md`` D9; its binding comes from 024's ``## Skeleton`` -> "Step 002". Nothing above
 it changed.
 

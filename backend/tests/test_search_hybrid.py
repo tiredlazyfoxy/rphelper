@@ -1,7 +1,7 @@
 """End-to-end tests for the `search` entry point — feature 025, step 004 (DoD-1..15).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/025.hybrid-search-port/004.search-entry-point.md` (Interface intent and Definition
+`docs/decisions/025.hybrid-search-port.md` (Interface intent and Definition
 of done), `004.context.md` (the hydration reads, the arm order, the "Test shape" note) and the
 feature `context.md` — **U1** (the variant → arms table and the caller's extra predicate),
 **U2** (the model's errors propagate; an absent vec/FTS table is empty, not an error; the model

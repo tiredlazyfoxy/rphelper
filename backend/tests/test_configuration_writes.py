@@ -1,7 +1,7 @@
 """Tests for the session, character and user configuration writes in
 ``app.services.configuration`` — feature 017, step 004.
 
-Every expected value comes from ``docs/plans/017.session-configuration/004.configuration-writes.md``
+Every expected value comes from ``docs/decisions/017.session-configuration.md``
 (Interface intent, DoD-1 .. DoD-11), ``004.context.md`` and the feature ``context.md``: the Wire
 contract's level rules (``system_prompt`` and each tool inherit from ``character``, a tool no level
 sets is on with level ``default``, the languages inherit from ``user``, ``level`` is ``session``

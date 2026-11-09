@@ -2,7 +2,7 @@
 translations inside `edit_message_text`'s transaction.
 
 Every expected value comes from
-`docs/plans/023.partner-translation/001.table-error-model-invalidation.md` (DoD-6..9 and its
+`docs/decisions/023.partner-translation.md` (DoD-6..9 and its
 Interface intent), from `001.context.md` ("Built state at the touch sites", "Test shape")
 and from the feature `context.md` (**D11**, US-111.AC-1, R5). No expected value is read from
 the implementation.

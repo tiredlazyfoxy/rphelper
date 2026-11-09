@@ -1,6 +1,6 @@
 """Feature 012, step 001 — the five new domain errors and `app/models/stream.py`.
 
-Expected values come from `docs/plans/012.messages-and-settle/001.table-selectables-errors-models.md`
+Expected values come from `docs/decisions/012.messages-and-settle.md`
 (DoD-7..11) and feature 012's `context.md`: the **Wire contract** (`Message` on the wire —
 exactly eight keys, every id a decimal string, never `user_id` / `related_to` / the tool
 columns), **D13** (the five codes and their statuses, a fixed non-empty default message,
@@ -11,7 +11,7 @@ exactly `"partner"`). Tests are suffixed `__S012_001_DoD<n>`.
 `test_errors.py` is not this step's file, so the error classes' own coverage lives here
 alongside the models they answer for, exactly as 009, 010 and 011 placed theirs.
 
-Amended by feature 024, step 005 (`docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md`,
+Amended by feature 024, step 005 (`docs/decisions/024.embedding-lifecycle.md`,
 DoD-8 and DoD-9; `context.md` **Wire contract**): `SettleResponse`, `ReopenResponse` and
 `MessageResponse` each gained `search_coverage_incomplete`, a boolean always present on the
 backend wire. The existing key-set and exact-equality pins accept the new key — every other

@@ -1,7 +1,7 @@
 """Tests for the `web_search` Tool adapter (feature 028, step 002).
 
 Covers DoD-1 .. DoD-7, DoD-11, DoD-12 and DoD-13 of
-`docs/plans/028.web-search-tool/002.web-search-tool-and-registration.md`. The offering and
+`docs/decisions/028.web-search-tool.md`. The offering and
 gating clauses (DoD-8, DoD-9, DoD-10) live in `tests/test_web_search_offering.py`; the
 DoD-14 amendment is one assertion in `tests/test_tool_seam.py`. DoD-15 .. DoD-17 are
 `[manual/live]` and carry no test.

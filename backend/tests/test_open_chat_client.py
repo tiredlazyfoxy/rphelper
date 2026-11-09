@@ -1,7 +1,7 @@
 """Tests for ``open_chat_client`` in ``app.services.llm_registry`` — feature 021 step 003, amended by
 feature 035 step 004.
 
-Every expected value comes from ``docs/plans/021.compose-loop-and-tools/003.chat-stream-client.md``
+Every expected value comes from ``docs/decisions/021.compose-loop-and-tools.md``
 (Interface intent, DoD-9), its ``003.context.md`` and the feature ``context.md`` D14: the helper
 re-reads the server's ``api_key_ref``, resolves it with ``resolve_secret`` (a missing variable ->
 ``secret_ref_missing`` before any client is built) and returns the factory's client for the

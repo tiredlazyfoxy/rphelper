@@ -1,6 +1,6 @@
 """Tests for feature 023, step 002 — `app/services/translation.py`, the translate flow.
 
-Every expected value comes from `docs/plans/023.partner-translation/002.translation-service.md`
+Every expected value comes from `docs/decisions/023.partner-translation.md`
 (Goal, Interface intent, DoD-1..DoD-18), from `002.context.md` ("The eligible-row read", "The
 write transaction", "The model call", "Cause sentences", "Logging", "Test shape") and from the
 feature `context.md` (**D2**, **D3**, **D4**, **D5**, **D6**, **D8**, **D9**, **D10**, the Wire

@@ -2,7 +2,7 @@
 
 Every expected value comes from the step's Definition of done and the feature context
 (D2, D4, D6, D8, D11, D12, D15, R3, R5, R6). The module is called only through the frozen
-interface recorded under `## Skeleton` in `docs/plans/015.memos/status.md`:
+interface recorded under `## Skeleton` in `docs/decisions/015.memos.md`:
 
 - `Memo` (frozen dataclass, no `user_id`)
 - `create_memo(connection, generator, user_id, scope, scope_id, body) -> Memo`
@@ -10,7 +10,7 @@ interface recorded under `## Skeleton` in `docs/plans/015.memos/status.md`:
 - `update_memo(connection, user_id, memo_id, body=None, is_enabled=None, is_forced=None)`
 - `delete_memo(connection, user_id, memo_id) -> None`
 
-Feature 016 step 001 (`docs/plans/016.note-wall/001.reorder-backend.md`) amends the
+Feature 016 step 001 (`docs/decisions/016.note-wall.md`) amends the
 allocation (D5: `MIN(sort_key) - 1`, newest first) and adds `reorder_memos(connection,
 user_id, scope, scope_id, memo_ids) -> list[Memo]` (D6); its tests are suffixed
 `__S016_001_DoD<n>`, and amended 015 tests carry that suffix appended to their 015 name.
@@ -19,7 +19,7 @@ Targets (users, characters, setups, sessions) are raw-inserted with their commit
 columns; memos are created through the service except where a DoD needs a precise state
 (another user's row, chosen `sort_key` values, a disabled or forced row).
 
-Feature 024 step 004 (`docs/plans/024.embedding-lifecycle/004.memo-write-paths.md`, DoD-10,
+Feature 024 step 004 (`docs/decisions/024.embedding-lifecycle.md`, DoD-10,
 `context.md` "Regression fallout") makes a memo create and a memo **body** edit require a
 designated embedding model (D5, strict per D8). That is a **precondition**, not a changed
 expectation: the `engine` fixture now also seeds the designation (one `llm_servers` row and one
@@ -897,7 +897,7 @@ _FASTAPI_IMPORT = re.compile(r"^\s*(?:from|import)\s+fastapi\b", re.MULTILINE)
 _FORBIDDEN_IMPORT_ROOT = "app.services"
 
 #: Feature 024 step 004 — **approved deviation** (user decision, 2026-10-04, recorded under
-#: `## Ultra phase` in `docs/plans/024.embedding-lifecycle/status.md`). `app/services/memos.py`
+#: DEC-024-18 in `docs/decisions/024.embedding-lifecycle.md`). `app/services/memos.py`
 #: must import the embedding seam (`004.memo-write-paths.md` Interface intent, `context.md` D5 /
 #: D7 / D9), which the two guards below forbade outright. The guards are **narrowed to permit
 #: only this one named module** — the skeleton re-exports `LlmClient`, `LlmClientFactory` and

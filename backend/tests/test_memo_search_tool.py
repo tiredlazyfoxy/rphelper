@@ -1,7 +1,7 @@
 """`services/tools/memo_search.py` — feature 026, step 002 (DoD-1..14).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/026.memo-search-tool/002.memo-search-tool-adapter.md` (Interface intent and
+`docs/decisions/026.memo-search-tool.md` (Interface intent and
 Definition of done), `002.context.md` (the seam details and the seeding notes) and the feature
 `context.md` — **D3** (the adapter runs step 001's sync search off the event loop, and is
 registered in the production registry), **D4** (the content line `[<level>] <snippet>` with

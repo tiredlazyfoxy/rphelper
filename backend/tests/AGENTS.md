@@ -145,3 +145,14 @@ See also: docs/architecture/backend-structure.md
 - Live tests are opt-in: `pytest -m live`. The default run deselects `live` (`addopts` carries `-m 'not live'`) and needs no network.
 - `LLAMA_SWITCH_URL` points the live suite at a real llama-swap, given with or without the `/v1` suffix; without it the live tests skip (DEC-035-12).
 - `LLAMA_SWITCH_CHAT_MODEL` names the chat model for the live `complete`, `compose` and model-side-rejection checks; those checks skip without it.
+- Configure `Settings` through its `RPHELPER_*` environment variables (`monkeypatch.setenv`), not keyword arguments: its fields carry a `validation_alias` and no `populate_by_name`, so `Settings(data_dir=...)` is silently ignored.
+- Keep each registry delta test in the shape `set(tables) - PRE_<n>_TABLES - LATER_THAN_<n>_TABLES == NEW_<n>_TABLES` (`test_db_schema.py`); a feature that adds a table appends it to every earlier `LATER_THAN_<n>_TABLES` set.
+- When a feature declares a table listed in `UNDECLARED_NAMES` (`test_admin_db_router.py`), replace that entry with a name that is still undeclared.
+- Do not write a "value will not cast" test: SQLite type affinity accepts almost any value, so exercise refusals through `NOT NULL` or `UNIQUE` instead.
+- Rely on the fake embedder's vectors being exactly float32-representable, so they round-trip through `sqlite_vec` and L2 distances compare exactly (`llm_fakes.py`).
+- Give bulk vector fixtures at least 200 candidate and 200 non-candidate snowflake-scale ids spread with a prime stride and interleaved (`test_search_vector.py`); any vector-depth test needs at least `ARM_DEPTH` rows.
+- Build the privacy-audit world only through `audit_world` (`privacy_audit_support.py`); never seed it ad hoc in an audit module.
+- Set the LLM dependency overrides (`FAKE_SEAM_OVERRIDE_KEYS`) only through `install_fake_model_seam`; a half-installed seam lets the real client through.
+- Add a row to `ENUMERATED_ROUTES` for every new API route, or the route-classification guard fails.
+- Make every privacy sentinel a single lowercase alphanumeric token (they begin `sntl`) that never appears in a username, server name or model name.
+- A test that touches logging restores each logger's `.filters` as well as `level`, `handlers` and `propagate`.

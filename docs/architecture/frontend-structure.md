@@ -573,12 +573,13 @@ it rather than choosing again.
   unexplained `false` override reads as a mistake.
 - **View state stays component-local, with the lifetime of its mount.** Modal
   open/target flags (`forms-and-lists.md`), and equally a tool block's or a
-  thinking block's expanded flag and **a settled entry's discussion group,
-  including the rows it has fetched** (022 D5, D11). The reasoning is the modal
-  rule's: it has no meaning outside the component that renders it. The payoff is
-  concrete in one place — because the flag is initialised once per mount, the
-  live-reply-to-persisted-row swap collapses the blocks by **remounting** rather
-  than by any code that closes them (`workspace-shell.md`).
+  thinking block's expanded flag, **a settled entry's discussion group, including
+  the rows it has fetched** (022 D5, D11), and **the character page's active tab**
+  (plan 033). The reasoning is the modal rule's: it has no meaning outside the
+  component that renders it. The payoff is concrete in one place — because the
+  flag is initialised once per mount, the live-reply-to-persisted-row swap
+  collapses the blocks by **remounting** rather than by any code that closes them
+  (`workspace-shell.md`).
 
 ### Which store a list belongs to — scope, not size
 
@@ -595,6 +596,11 @@ screen:
 (011 D15), and the rule that makes that safe is: **effects take the workspace
 state as a parameter, never hold it as a field.** A store holding another store is
 a hidden edge in the dependency graph and makes the section untestable on its own.
+**The same edge runs the other way for a mutation made outside the section**
+(plan 034): while the character page's Sessions section is mounted, it adopts a
+newer row from the workspace `SessionsState` — a rename made in the tree or the
+session header — by the apply-a-row rule, never adding, removing or reordering
+rows. The workspace store is again read through a parameter, not held.
 
 **Mutations apply the server's returned row through one upsert rule rather than
 refetching the list** (009 D11) — which is the narrowed re-load
@@ -710,8 +716,9 @@ measurement-shaped claim, and it is not replaced with an invented one.
 /sessions/:id           the workspace with a session open — tree | stream | wall
    ?entry=<messageId>     scroll that settled entry into view once + highlight 2000 ms
    ?notes=open            open the note wall on arrival
-/characters/:id         the character page — two columns (UC-073, US-096); its
-                          composer starts a session (UC-080, US-117)
+/characters/:id         the character page — two columns, tabbed, opening on
+                          Sessions (UC-073, US-096); its composer starts a
+                          session (UC-080, US-117)
 /characters/new         the character draft page (UC-074, US-097)
 /settings               the two languages and the user's own notes (US-092, UC-047)
 /search?q=<text>        my-search results (FEAT-017)
@@ -724,6 +731,14 @@ and a catch-all 404 inside it (see "The `app` entry" above).
 of a route — the tree is present on all of them, and what changes is the centre
 column and whether the wall exists. Geometry, collapse and the wall's two modes
 are `workspace-shell.md`'s and are not described here.
+
+**The character page's tab is not part of its address** (plan 033). The active tab
+is component-local view state, neither in the URL nor persisted, so every link to
+`/characters/<id>` — my-search's character and setup hits included — lands on the
+Sessions tab. Every tab's section is mounted and loads once when the page opens,
+so a tab switch issues no request. Recorded because a tab is exactly what someone
+moves into a query parameter while adding a deep link; that is a new decision,
+not a tidy-up.
 
 **Only the screen component reads the URL; its children take props** (plan 029,
 step 006). `SessionScreen` is the one module in the session chain that may call a
@@ -760,7 +775,7 @@ Four corrections against the previous route list:
   left column twice.
 - **Setups have no route**, and that holds as built (010 D1). The character page
   holds the persona, notes, setups, resolved configuration and sessions in one
-  place (US-096).
+  place (US-096), across its tabs.
 - **`/memos` is gone.** User-level notes live on the settings screen (US-092); the
   other three levels live on the wall (UC-072, UC-075).
 
@@ -777,6 +792,11 @@ exposes one route.
 
 As built (018 D5), through `app/sessionsApi.ts`'s start-with-message call:
 
+- **The request carries the setup chosen in the composer, when one is chosen**
+  (plan 033): the opening message and the optional `setup_id` travel in the one
+  create request, and with no setup chosen the key is left out. **The page no
+  longer issues a message-less start** — plan 033 retired the inline start
+  control, so the section's start-without-a-message call has no caller.
 - **The response's `Session` keys are applied to the workspace
   `SessionsState`**, so the tree shows the new session without a list reload.
   (Eight as built at 018; `name` makes nine, always NULL on create.)
@@ -1239,9 +1259,24 @@ and a toolbar while the read surfaces need neither.
 markdown `value`, `onChange(markdown)`, `readOnly`, and an optional **`autoFocus`**
 (016 D9) over `@mantine/tiptap` + `tiptap-markdown`, importing the stylesheet
 itself. **Every markdown editing surface reuses it** — notes (015), the user
-level's notes on `/settings` (017), the character persona (018). **TipTap is
-pinned to major 2**, because both peers bind to it and a routine install of 3
-breaks them.
+level's notes on `/settings` (017), the character persona (018), the setup forms.
+**TipTap is pinned to major 2**, because both peers bind to it and a routine
+install of 3 breaks them.
+
+**The label is a visible field label that also names the editing surface** (018,
+bug fix). It renders as the form's ordinary visible label above the editor, and
+the editable surface takes its accessible name from that label, so a sighted
+reader and a screen reader see the same name for the same field. Recorded because
+the wrapper's first form rendered the label in a way that left the surface
+unnamed.
+
+**An optional minimum height for the editable surface** (plan 033, user
+decision). A caller may ask for a taller editing area; omitted, the editor sizes
+as before. **The persona on the character page's Main info tab is its first
+caller**, because the user wanted the persona's writing area substantially
+taller. It is a parameter of the one wrapper rather than a second editor, for the
+same reason the toolbar group below is. The mechanism is in
+`docs/decisions/033.character-page-tabs.md`.
 
 **An optional trailing toolbar group** (user decision, fast/012). A caller may hand
 the wrapper extra controls; they render as **one trailing controls group at the
@@ -1300,11 +1335,16 @@ painted `MessageBody`.
     (R3, US-102, `llm-and-streaming.md`), which is why `@dnd-kit`'s keyboard sensor
     is required rather than optional (`ui-conventions.md`'s accessibility floor).
   - **There are two `DndContext`s — the note wall's and the character page's notes
-    grid — and their configuration is shared, not duplicated** (018 D8). The
+    list — and their configuration is shared, not duplicated** (018 D8). The
     sensors and the position-only announcements live in **`app/memoDnd.ts`**, so
     the two mount points keep **one** keyboard path. Two contexts with two sensor
     sets is how one of them silently loses its keyboard sensor.
   - Nothing else may use `@dnd-kit` without a requirement that asks for it.
+- **Mantine `Tabs` is used once, on the character page** (plan 033) — its first
+  use in the product. **Mantine's default of keeping inactive panels mounted is
+  kept deliberately**, so every section loads once when the page opens and a tab
+  switch issues no request (`workspace-shell.md`). It brought no stylesheet rule:
+  the tabs are Mantine component and style props only.
 - No component library other than Mantine, no Tailwind, no CSS modules, no
   styled-components (`overview.md`).
 

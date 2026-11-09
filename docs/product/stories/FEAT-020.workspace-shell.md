@@ -80,7 +80,7 @@
 
 ### US-151 — A session's tree row shows its name, and beneath it when it was last used beside its setup label
 - **Actor:** ACT-002 · **Feature:** FEAT-020 · **Exercises:** UC-069
-- **Status:** proposed
+- **Status:** delivered
 - **Story:** As a roleplayer, I want each session row to show its name and when I last used it, so that I can tell storylines under one character apart at a glance.
 - **Acceptance criteria:**
   - **US-151.AC-1** — Given a session in the tree, when the roleplayer views its row, then the row shows its name and, beneath it, when the session was last used, with its setup label (US-088) beside that moment.

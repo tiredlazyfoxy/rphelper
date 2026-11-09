@@ -1,6 +1,6 @@
 """Tests for step 003 of feature 007 — the DDL executor ``app.db.sync``.
 
-Step file: ``docs/plans/007.schema-drift-and-remediation/003.batch-ddl-executor-and-errors.md``.
+Step file: ``docs/decisions/007.schema-drift-and-remediation.md``.
 Feature context: ``context.md`` D4 (Create and Sync by postcondition), D5 (the rebuild and its
 all-or-nothing failure), D7 (Create never drops), D8 (the foreign-key dance), D9 (the two error
 codes and the table-name safety rule), R5 (no counts); ``003.context.md``.

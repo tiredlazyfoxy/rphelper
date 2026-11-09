@@ -1,6 +1,6 @@
 """Feature 021 step 004 — the tool seam (`app/services/tools/seam.py`).
 
-Expected values come from `docs/plans/021.compose-loop-and-tools/004.tool-seam.md`
+Expected values come from `docs/decisions/021.compose-loop-and-tools.md`
 (Interface intent + DoD-2..DoD-10), `004.context.md` and the feature `context.md` (D5 offered
 rule, D6 the seam, D7 the tool row and its payload table, D13 `tool_failed`, D15 the import
 exception, the Literals table). Bindings come from `status.md` `## Skeleton` -> Steps 001,

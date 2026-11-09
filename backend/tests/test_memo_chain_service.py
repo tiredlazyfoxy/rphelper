@@ -2,7 +2,7 @@
 
 Every expected value comes from the step's Definition of done and the feature context
 (R2, R3, R5, D4, D7, D8, D11, D12). The module is called only through the frozen interface
-recorded under `## Skeleton` in `docs/plans/015.memos/status.md`:
+recorded under `## Skeleton` in `docs/decisions/015.memos.md`:
 
 - `MemoReach = Literal["forced", "searchable", "disabled"]`
 - `MemoChainLevel` (frozen dataclass: `scope`, `scope_id`, `memos`)

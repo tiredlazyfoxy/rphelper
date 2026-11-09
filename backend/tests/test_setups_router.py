@@ -1,6 +1,6 @@
 """Tests for the setups router: ``/api/characters/{character_id}/setups`` and ``/api/setups/...``.
 
-Every expected value comes from ``docs/plans/010.setups/003.setups-router.md`` (Interface
+Every expected value comes from ``docs/decisions/010.setups.md`` (Interface
 intent + Definition of done), ``003.context.md`` and the feature ``context.md`` (the **Wire
 contract** table, D5 the route surface and router-level auth, D8 the two 404 codes plus
 native 422, D9 archive semantics, R2, R5, R6). Bindings come from ``## Skeleton`` in

@@ -239,6 +239,15 @@ The `Session` keys were eight until `name` joined them (2026-11-05,
 no name, and the default label is the client's to compute.
 A whitespace-only `opening_message` is a **422** and nothing is created.
 
+**What the character page sends** (plan 033). The page's composer always sends
+`opening_message`, and sends `setup_id` alongside it **only when the roleplayer
+chose a setup** in the composer; with no choice the key is left out. The route's
+contract did not change for this — `setup_id` was always an optional key. The
+message-less form of the body (omitted, `{}`, or a `setup_id` alone) is still
+accepted, but **has no frontend caller** since plan 033 retired the inline start
+control; it is kept because removing an accepted body form is a contract change
+with nothing to gain.
+
 **US-117.AC-1 makes creating the session and seeding its zone a single outcome**,
 so they are a single `with connection.begin():` in `services/sessions.py`, in
 this order (018 D3, 017 D1):
@@ -272,9 +281,9 @@ zone** and is never settled: UC-080's "opening message of that turn's discussion
 *is* a zone row, inserted through the same transaction-neutral zone-insert helper
 the stream's append uses (018 D3), so R11's "settle is the only door into the
 record" is untouched and this route is not a second exception beside the pasted
-partner block. When no `setup_id` is supplied the session is created with
-`setup_id` NULL — UC-080 names no setup, and R2 makes that the first-class case
-rather than a degraded one.
+partner block. When no setup is chosen the session is created with `setup_id`
+NULL — the setup choice is optional and defaults to none, and R2 makes that the
+first-class case rather than a degraded one.
 
 **The opening message is answered by the session screen, not by this route**
 (fast/004, which closed defect D-01). `US-117.AC-3` and UC-080 step 5 require the
@@ -434,6 +443,13 @@ match (012 D8, user decision on the classifier):
   strip to nothing necessarily starts with `((` and ends with `))` once trimmed,
   so it is a decision instead; an unbalanced `((` or a stray parenthesis survives
   stripping unchanged.
+- **Nested or tripled parentheses are deliberately unsupported** (plan 012).
+  The shortest-span rule does not balance brackets, so a turn such as
+  `x (((y))) z` files as `x) z`: the span taken starts at the first `((` and ends
+  at the first `))`, and the parenthesis left over survives. This is accepted,
+  not a defect to fix: the convention rests on double parentheses never occurring
+  in the roleplayer's own prose (US-130's `Constraint:`), and a balancing parser
+  would be a second, different rule the client's preview would then have to match.
 
 The invariant this doc owns: **stored text is never re-parsed.** `PATCH
 /api/messages/{message_id}` takes the new text literally and does **not** call

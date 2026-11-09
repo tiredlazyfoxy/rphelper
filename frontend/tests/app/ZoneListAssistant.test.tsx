@@ -1,6 +1,6 @@
 // Feature 022, step 006 — role-aware zone rows, the read-only row mode, the live -> persisted
 // transition and the Regenerate control (DoD-1..DoD-5, DoD-9, DoD-10)
-// (docs/plans/022.discussion-ui/006.zone-rows-live-reply-regenerate.md).
+// (docs/decisions/022.discussion-ui.md).
 //
 // Expected values come from the step's Interface intent and Definition of done, context.md D4
 // (row 3), D5, D6, D8, D9, D10, D12, D14, the UI strings table and 006.context.md:

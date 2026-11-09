@@ -1,5 +1,5 @@
 // Feature 022, step 007 — the collapsed, read-only Discussion group mounted under settled entries
-// (DoD-1..DoD-4, DoD-8, DoD-9) (docs/plans/022.discussion-ui/007.discussion-group.md).
+// (DoD-1..DoD-4, DoD-8, DoD-9) (docs/decisions/022.discussion-ui.md).
 //
 // Expected values come from the step's Interface intent and Definition of done, context.md D5,
 // D11, D12, the UI strings table and 007.context.md:

@@ -92,7 +92,7 @@ invitation**, and the reason is a constraint worth keeping (010 D13, 011 D18):
 | Line | Where | Why neutral |
 |---|---|---|
 | "No setups yet." | the character page's Setups section | a setup is **optional** (R2 — no flow may require one), so an invitation to create one would nag the roleplayer about an object they may never want |
-| "No sessions yet." | the character page's Sessions section | the section already carries the start control beside it; the line states a fact, not a call to action |
+| "No sessions yet." | the character page's Sessions section | the composer that starts a session already sits above the list in the same tab (plan 033); the line states a fact, not a call to action |
 
 So the improvement the doc welcomes is still welcome, with one bound: an
 empty-state line for an optional object says that it is empty and no more.
@@ -109,7 +109,9 @@ modal outside the admin area, and it is the shape every later one copies:
 conditionally mounted, a fresh draft per open, open/target flags in
 component-local `useState`, a server failure rendered **inside** the modal, and on
 success the returned row applied to the list and then the modal closed — in that
-order, so the list is already correct when the form disappears.
+order, so the list is already correct when the form disappears. **Since plan 033
+the setup modal is edit-only**: setup *create* is the inline exception below,
+which keeps every part of this shape except the dialog.
 
 ### The named exceptions
 
@@ -121,13 +123,19 @@ predictable place to appear.
 |---|---|---|
 | **In-place edit** of a settled entry, a current-zone message and a note (UC-078, US-104, US-109, US-110, US-115) | `workspace-shell.md` | one text field rendered in the position where its content belongs; UC-078 requires it to be edited *where it sits*. Committing it emptied removes the item (a note per US-141, an entry or zone message per US-149) |
 | **The character draft page** (UC-074, US-097) | `workspace-shell.md` | it persists nothing until there is content, so there is nothing to submit |
-| **Starting a session** (011 D1, user decision) | `workspace-shell.md`'s character page | a **one-choice inline control** — a Setup select plus a "Start session" button in the Sessions section header. One optional choice is not a form, and a modal around a single select is friction with nothing to hold |
+| **Inline setup create** (plan 033, user decision — a create modal was rejected) | `workspace-shell.md`'s character page, Setups tab | it **is** a form, and it keeps the modal convention's **draft lifetime** — conditionally mounted at the top of the list, a fresh draft per open, a failure rendered inside the form, the returned row applied before it closes — and drops only the dialog. Cancel discards with no request. What the modal rule protects, a visible form lifetime and one place for its failure, survives because the form's mount *is* its lifetime. **Edit stays a modal** |
 | **Renaming a session** (UC-089, US-150) | `workspace-shell.md`'s tree row and session header | **one single-line field in the position of the label it replaces** — the in-place edit reading applied to a label. Unlike the content editors above, **emptying it does not remove anything**: it clears the name and the label falls back to the start date. The commit is **not optimistic** — the label changes when the server answers (below) |
 
-Every create and every multi-field edit is still a modal.
+**The inline start control is retired** (plan 033). It was a named exception here
+(011 D1) — a Setup select plus a "Start session" button that created a session
+with no message. Plan 033 removed the message-less start: a session now starts
+only by writing its first message in the character page's composer, which carries
+the optional setup choice itself (`workspace-shell.md`).
+
+Every other create, and every multi-field edit, is still a modal.
 
 **The settings page's Languages form is a reading of the second exception, not a
-fourth one** (017 D15). `/settings` carries the two languages edited on the page
+fifth one** (017 D15). `/settings` carries the two languages edited on the page
 with an explicit **Save**, and the character page's persona block did the same
 before blur-save replaced it. The reading: **the route *is* the form** — there is
 no list the form appears over and no other content the modal would protect, so
@@ -249,10 +257,11 @@ already-enabled` union and the failure behaviour, and differ only in their
 against the one that can.
 
 **Draft lifetime — a fresh instance per open.** `useState(() => new XDraft(...))`
-inside a **conditionally mounted** modal body, so opening the modal constructs a
-draft and closing it discards one. **Not** a long-lived draft that is reset on
-close: a reset function is one more thing to keep in step with the field list, and
-a forgotten field is a stale value shown to the next user of the dialog.
+inside a **conditionally mounted** modal body — or, for the inline setup create
+form, the conditionally mounted form itself — so opening it constructs a draft
+and closing it discards one. **Not** a long-lived draft that is reset on close: a
+reset function is one more thing to keep in step with the field list, and a
+forgotten field is a stale value shown to the next user of the dialog.
 
 ## Mutations are never optimistic
 
@@ -290,11 +299,18 @@ built (013 D15, 014 D1, 015 D5):
   zone — and takes the coverage flag from the response (fast/014, DEC-F014-9).
   Nothing is removed before the answer arrives, so this is a narrowed re-load,
   not an optimistic write. An aborted delete changes nothing and says nothing.
-- **A session rename re-reads the session lists once the server has answered**
-  (the tree, and the character page's Sessions list when it is mounted), and the
-  open session's header takes the returned session. The editor keeps the typed
-  text until then; a failure goes through `notifyFailure` and leaves the old
-  label.
+- **A session rename applies the returned session once the server has answered**
+  — to the held session lists and to the open session's header — rather than
+  re-reading the lists: the response already carries the row. The character
+  page's Sessions list, when it is mounted, **adopts the newer row from the
+  workspace list** by the apply-a-row rule below; it never gains, loses or
+  reorders rows that way. A rename never moves `last_used_at`, so no row changes
+  position. **A failure renders inline under the editor**, which stays open with
+  the typed text, and nothing is applied, so the old label stays — inline rather
+  than `notifyFailure` because the editor is the failure's in-page place
+  (`ui-conventions.md`'s async-feedback rule). Plan 034 refined
+  `DEC-arch-session-names-4` this way; the editor's semantics are in
+  `docs/decisions/034.session-names.md`.
 - **Every stream mutation failure goes through `notifyFailure` and then
   re-reads**, so a failed mutation never leaves the client's view of the stream
   diverged from the server's.

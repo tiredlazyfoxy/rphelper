@@ -1,7 +1,7 @@
 """Tests for `import_owned` — feature 031, step 002 (remap engine + user/character import).
 
-Every expected value comes from the spec — `docs/plans/031.import-and-id-remapping/
-002.remap-and-owned-import.md` (Interface intent + Definition of done),
+Every expected value comes from the spec — `docs/decisions/031.import-and-id-remapping.md`
+(Interface intent + Definition of done),
 `002.context.md` (§"Registry facts", §"Test guidance"), the feature `context.md`
 (§"Remap rules for the three roleplayer granularities", §"The failure contract") — and
 from the rows this file seeds itself. Nothing is read from the implementation.
@@ -1502,7 +1502,7 @@ def test_another_granularity_is_refused_as_wrong__S031_002_DoD11(
 # =====================================================================================
 # Feature 034, step 001 — session names through the user and character imports.
 #
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# Expected values come from `docs/decisions/034.session-names.md`
 # DoD-6 (a renamed session keeps its name through the roleplayer import, US-150.AC-5), DoD-7
 # (a version-1 file whose session rows lack `name` imports with every `name` NULL), DoD-8 /
 # DoD-9 (everything else is still `malformed_payload`), DEC-034-7 and `transfer.md` §

@@ -1,6 +1,6 @@
 """Tests for the stream router: the seven JSON routes of feature 012's wire contract.
 
-Every expected value comes from ``docs/plans/012.messages-and-settle/004.stream-router.md``
+Every expected value comes from ``docs/decisions/012.messages-and-settle.md``
 (Interface intent + Definition of done), ``004.context.md`` and the feature ``context.md``
 (the **Wire contract** — the seven routes, the eight-key ``Message`` object, the failure
 table — plus **D2** zone-only edit, **D3** every content write bumps the session, **D9** text
@@ -10,12 +10,12 @@ status codes; step 001's ``messages`` Table for the one raw insert DoD-5 needs).
 
 Covers step 004 DoD-1 .. DoD-20. DoD-21 is ``[manual/live]`` and carries no test.
 
-Amended by feature 014, step 001 (``docs/plans/014.entry-editing-and-copy-out/
-001.settled-edit-backend.md``, D1 / D2): ``PATCH /api/messages/{id}`` now edits a settled
+Amended by feature 014, step 001 (``docs/decisions/014.entry-editing-and-copy-out.md``, DEC-014-1 / DEC-014-2):
+``PATCH /api/messages/{id}`` now edits a settled
 entry of any kind; only a buried message stays 409 ``message_not_editable``. 012 DoD-13's
 settled-refusal cases are rewritten as successes; the 014 cases carry ``__S014_001_DoD<n>``.
 
-Amended by feature 024, step 005 (``docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md``
+Amended by feature 024, step 005 (``docs/decisions/024.embedding-lifecycle.md``
 DoD-9; ``context.md`` **Wire contract**, **D6**, **D8**, **U5**): settle, re-open, partner filing
 and the settled-row edit now answer ``search_coverage_incomplete``. This file designates no
 embedding model, so the degraded path answers ``true`` wherever the session text is non-empty and
@@ -1385,8 +1385,8 @@ def test_011_routes_still_answer_with_this_router_registered__S012_004_DoD20(
 # =====================================================================================
 # Feature 014, step 001 — PATCH on settled entries (D1, D2)
 #
-# Expected values come from ``docs/plans/014.entry-editing-and-copy-out/
-# 001.settled-edit-backend.md`` (DoD-9 .. DoD-12) and ``001.context.md``. The route and
+# Expected values come from ``docs/decisions/014.entry-editing-and-copy-out.md``
+# (DoD-9 .. DoD-12) and ``001.context.md``. The route and
 # its wire shapes are 012's, unchanged.
 # =====================================================================================
 

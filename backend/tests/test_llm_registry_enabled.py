@@ -1,6 +1,6 @@
 """Tests for the enabled-model reads in ``app.services.llm_registry`` — feature 017, step 002.
 
-Every expected value comes from ``docs/plans/017.session-configuration/002.registry-reads-and-capture.md``
+Every expected value comes from ``docs/decisions/017.session-configuration.md``
 (Interface intent, DoD-1 .. DoD-3), its ``002.context.md`` and the feature ``context.md``:
 **D7** (the enabled set is exactly what ``validate_chat_model`` accepts — ``is_enabled`` rows whose
 server exists, an enabled embedding-designated model included — ordered by ``llm_servers.id`` then

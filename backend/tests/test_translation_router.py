@@ -1,6 +1,6 @@
 """Tests for feature 023, step 003 — `POST /api/messages/{message_id}/translation`.
 
-Every expected value comes from `docs/plans/023.partner-translation/003.translation-route.md`
+Every expected value comes from `docs/decisions/023.partner-translation.md`
 (Goal, Interface intent, DoD-1..DoD-6), from `003.context.md` ("Built state at the touch sites",
 "The probe", "Test shape") and from the feature `context.md` (the **Wire contract** — the success
 shape and every failure code/status — plus **D1**, **D4**, **D5**, **D6**, **D12**). Nothing is

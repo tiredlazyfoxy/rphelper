@@ -31,9 +31,9 @@ Decided at the finalization of plans 001..007 (user decision H2), resolving plan
 **Known deviation, not yet fixed:** `users.created_at` and `users.updated_at`, as
 written by plan 003's first-administrator insert, use the plain `isoformat()`
 form, which **drops the microseconds when they are zero** — so they do not share
-the fixed width. Owned by a **`/bug-fixer` pass against plan 003**. Until it
-lands, nothing may compare those two columns as text against a fixed-width
-value.
+the fixed width. It is **recorded as defect D-06 in `docs/plans/defects.md`**,
+which owns it until a fix lands. Until then, nothing may compare those two
+columns as text against a fixed-width value.
 
 ## Identifiers — snowflake ids, minted before the INSERT
 
@@ -380,8 +380,7 @@ index or view from `models` to `sessions` exists, and none may be added.
   live `vec0` table. There is **no cross-flag cascade** between the two flags. We
   chose this because an embedding model is not a chat model and must never appear
   in the chat selector; requiring enablement forced the admin to pollute the chat
-  model list. _Code pending: the validator still checks `is_enabled`; a bug fix
-  against plan 006 step 004 will align it._
+  model list. The validator is built this way.
 - **`embedding_dim` is measured, not read from metadata**: designating embeds one
   short fixed string against the chosen model and records the returned vector's
   length (`admin-surfaces.md`, US-015.AC-3/AC-4).
@@ -536,8 +535,9 @@ requirement sets it.
 `YYYY-MM-DD` in the roleplayer's own timezone. We chose to compute it rather than
 store it because the server cannot know the roleplayer's timezone: a date written
 at creation would have to be supplied by the client on every creation path (the
-start control, the character page's first message, and an emptied rename), and an
-import would land UTC-derived dates that read one day off near midnight. NULL
+character page's composer, which starts a session with its first message, and an
+emptied rename), and an import would land UTC-derived dates that read one day off
+near midnight. NULL
 therefore has one meaning — "never renamed" — and emptying a name returns the
 row to it. The cost, accepted knowingly, is that the default is display-only: it
 is not text the server can search (`search-and-retrieval.md`). Detail and the
@@ -1046,7 +1046,7 @@ archiving is not a delete.
 ### The as-built archive semantics, one rule for all three entities
 
 Set by plan 009 for characters and matched by plans 010 and 011 (009 D9, 010 D5,
-010 D9, 011 D2, 011 D13). R6 fixes *what* archiving means; these are the
+010 D9, 011 D3, 011 D13). R6 fixes *what* archiving means; these are the
 postures it leaves open, and they are recorded so the three entities do not
 diverge:
 
@@ -1057,7 +1057,7 @@ diverge:
 - **A no-op writes nothing**, including no `updated_at` bump. Archiving something
   already archived is not a change.
 - **A real state change bumps `updated_at` and never `last_used_at`** — archiving
-  is not use (011 D2).
+  is not use (011 D3/D13).
 - **Editing an archived object is allowed** and leaves `archived_at` unchanged.
   R6 says a restored object comes back fully usable; refusing edits meanwhile
   would make archiving a soft freeze, which it is not.
@@ -1372,8 +1372,8 @@ rather than of the envelope:
   Reason: an embedding model is not a chat model, so requiring enablement forced
   it into the chat selector, and it produced an index rebuild refusing with
   `no_embedding_model` while a model was designated with dimension 1024. FEAT-004
-  (US-015, UC-013) never required enablement, so no product change. _Code pending
-  a bug fix against plan 006 step 004._
+  (US-015, UC-013) never required enablement, so no product change. The code
+  matches.
 - **2026-11-05 — messages can be deleted.** Until fast/014 no path removed a
   message row except the whole-database replace. A single-message delete now
   removes one current-zone row, or one settled row with its buried group, and

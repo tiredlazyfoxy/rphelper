@@ -1,6 +1,6 @@
 """Step 007 — the log sentinel sweep (DoD-1..DoD-9; DoD-10 is ``[manual/live]``).
 
-Written from ``docs/plans/032.privacy-isolation-audit/007.log-sentinel-sweep.md`` (the
+Written from ``docs/decisions/032.privacy-isolation-audit.md`` (the
 ten-item Definition of done **is** the specification), ``007.context.md`` (mechanics, the
 step-001 dependency) and ``context.md`` (the citation mapping for logs). Bound to the
 support module frozen by ``status.md`` ``## Skeleton`` -> "Step 002 — frozen interface".

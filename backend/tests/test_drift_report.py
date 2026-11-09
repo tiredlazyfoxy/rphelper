@@ -1,6 +1,6 @@
 """Tests for step 002 of feature 007 — the pure comparison and the registry walk.
 
-Step file: ``docs/plans/007.schema-drift-and-remediation/002.comparison-walk-and-health-drift.md``.
+Step file: ``docs/decisions/007.schema-drift-and-remediation.md``.
 Feature context: ``context.md`` D1 (the compared set and the deliberately uncompared set), D2 (the
 three statuses), D3 (the ``metadata.tables``-only walk), R5 (no counts); ``002.context.md``
 ("Comparison rules that are easy to get subtly wrong").

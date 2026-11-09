@@ -88,7 +88,9 @@ dependency graph below, not from priority (challenge C4, rejected).
   `memo_search` returns correct results with no setup level present;
   `session_search` still finds past sessions by the same person or situation
   when neither has a setup; no flow may require choosing a setup before an
-  RP can start. Archives and restores, same rule as FEAT-006 and FEAT-008.
+  RP can start; a session starts one way, by writing its opening message,
+  with the setup choice optional there. Archives and restores, same rule as
+  FEAT-006 and FEAT-008.
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 2, round 3,
   round 6, round 10.
 
@@ -96,14 +98,13 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** A roleplay run under a character, optionally with a setup;
   always resumable, ordered by last use.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** partially delivered
-- **Delivered:** 011.rp-sessions (2026-10-02); US-027.AC-3 by 012.messages-and-settle (2026-10-02); UC-080 / US-117.AC-1 / AC-2 / AC-4 by 018.character-page (2026-10-03); UC-080 step 5 / US-117.AC-3 by fast/004.character-page-first-reply (2026-10-07); US-145 by 011.rp-sessions (2026-10-02) and 029.my-search (2026-10-05) (since withdrawn, 2026-11-05)
-- **Remaining:** UC-089, US-150 — not built, not yet planned
+- **Status:** delivered
+- **Delivered:** 011.rp-sessions (2026-10-02); US-027.AC-3 by 012.messages-and-settle (2026-10-02); UC-080 / US-117.AC-1 / AC-2 / AC-4 by 018.character-page (2026-10-03); UC-080 step 5 / US-117.AC-3 by fast/004.character-page-first-reply (2026-10-07); US-145 by 011.rp-sessions (2026-10-02) and 029.my-search (2026-10-05) (since withdrawn, 2026-11-05); UC-080 / US-117.AC-4 / AC-5 by 033.character-page-tabs (2026-10-08); UC-089 / US-150 by 034.session-names (2026-11-06)
 - **Realized by:** UC-023, UC-024, UC-025, UC-026, UC-080, UC-089, US-026,
   US-027, US-028, US-029, US-117, US-145 (withdrawn), US-150
 - **Note:** No "finished" state — a session stays open indefinitely.
   Archiving removes it from the working list and is restorable, same rule as
-  FEAT-006 and FEAT-007. A session can also start by writing the first
+  FEAT-006 and FEAT-007. A session starts one way, by writing its opening
   message on its character's page (FEAT-020): the message creates the
   session with a turn being drafted and opens that message's discussion.
   A session has a name, by default its start date, so starting one asks for
@@ -394,9 +395,8 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** One search box reaching everything the roleplayer owns, from
   any screen.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** partially delivered
-- **Delivered:** 029.my-search (2026-10-05); US-147 by fast/006.unicode-name-matching (2026-10-07)
-- **Remaining:** US-152 — not built, not yet planned
+- **Status:** delivered
+- **Delivered:** 029.my-search (2026-10-05); US-147 by fast/006.unicode-name-matching (2026-10-07); US-152 by 034.session-names (2026-11-06)
 - **Realized by:** UC-058, UC-059, UC-060, US-074, US-075, US-076, US-118,
   US-137, US-147, US-152
 - **Note:** Distinct from FEAT-014/FEAT-015, not an overlap (challenge C7,
@@ -483,9 +483,8 @@ dependency graph below, not from priority (challenge C4, rejected).
   when it is collapsed.
 - **Actors:** ACT-002 (primary), ACT-001 (admin entry point only) ·
   **Priority:** must
-- **Status:** partially delivered
-- **Delivered:** 008.app-shell-frame (2026-10-01); UC-069 / US-088 / US-089 by 011.rp-sessions (2026-10-02); UC-072 / US-094 / US-095 by 016.note-wall (2026-10-03); US-092 by 017.session-configuration (2026-10-03); UC-073 / UC-074 / US-096 / US-097 by 018.character-page (2026-10-03); US-118 by 029.my-search (2026-10-05)
-- **Remaining:** US-151 — not built, not yet planned
+- **Status:** delivered
+- **Delivered:** 008.app-shell-frame (2026-10-01); UC-069 / US-088 / US-089 by 011.rp-sessions (2026-10-02); UC-072 / US-094 / US-095 by 016.note-wall (2026-10-03); US-092 by 017.session-configuration (2026-10-03); UC-073 / UC-074 / US-096 / US-097 by 018.character-page (2026-10-03); US-118 by 029.my-search (2026-10-05); UC-073 / UC-074 / US-096 / US-097 by 033.character-page-tabs (2026-10-08); US-151 by 034.session-names (2026-11-06)
 - **Realized by:** UC-069, UC-070, UC-071, UC-072, UC-073, UC-074, US-088,
   US-089, US-090, US-091, US-092, US-093, US-094, US-095, US-096, US-097,
   US-151

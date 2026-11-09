@@ -94,12 +94,19 @@ time is one nobody can find later:
   escape hatch, a raw `size`, or an `aria-label` override. Each would reintroduce
   the divergence the `label`-feeds-both rule exists to prevent.
 
+**A busy icon-only control is `disabled` while its operation is in flight**
+(plan 033) — Export in the character page's header and "Import session" in its
+Sessions list header are the first two. The props type was **not** widened with a
+loading state for them; the one control whose glyph changes while work is in
+flight, the translation flicker, gets its loader by being handed a different
+`icon` (fast/015, below).
+
 **A rotated chevron is passed as a tiny module-level component, not as a new
-prop** (022, `004.context.md`). Several controls need `IconChevronDown` rendered
-with a rotation style; the as-built pattern is a module-level component that
-renders the Tabler icon with the rotation applied, handed to `IconButton`'s
-`icon`. Recorded because the obvious alternative is a `rotate` prop, and the
-props type is deliberately closed.
+prop** (022; `docs/decisions/022.discussion-ui.md`). Several controls need
+`IconChevronDown` rendered with a rotation style; the as-built pattern is a
+module-level component that renders the Tabler icon with the rotation applied,
+handed to `IconButton`'s `icon`. Recorded because the obvious alternative is a
+`rotate` prop, and the props type is deliberately closed.
 
 **Two controls deliberately sit outside the rule**, each because it wraps no
 Tabler icon:
@@ -144,8 +151,8 @@ a row, and the overflow-menu rule exists to keep a *row* from collapsing.
 | **Copy settled turn out** | `IconCopy`, labelled "Copy as plain text" — on `turn` entries **only** | FEAT-009 |
 | Regenerate (retry a compose) | **labelled subtle `Button`** with `IconRefresh` as its left section | FEAT-010, US-044 |
 | Translate / flicker | `IconLanguage` | FEAT-011 |
-| New session / character / setup | `IconPlus` | FEAT-006 / FEAT-007 / FEAT-008 |
-| Archive / restore | `IconArchive` / `IconArchiveOff` | FEAT-006 / FEAT-007 / FEAT-008 |
+| New character / setup | `IconPlus` | FEAT-006 / FEAT-007 |
+| Archive / restore | `IconArchive` / `IconArchiveOff` — icon-only in the character page's header; labelled items in a table row's menu | FEAT-006 / FEAT-007 / FEAT-008 |
 | Session configuration | `IconSettings` | FEAT-013 |
 | My search | `IconSearch` — the collapsed rail's button; the expanded tree header is a **text input** | FEAT-017 |
 | Memos / the note wall | `IconNotes` | FEAT-012 / FEAT-020 |
@@ -153,11 +160,12 @@ a row, and the overflow-menu rule exists to keep a *row* from collapsing.
 | **Rename a session** | `IconEdit`, labelled "Rename session" — on the tree row and in the open session's header; swaps the label for an in-place editor (`workspace-shell.md`) | FEAT-008, US-150 |
 | **Delete a settled entry or a zone message** | `IconTrash`, labelled "Delete entry" (settled) / "Delete message" (zone); opens the red confirm | FEAT-009, US-149 |
 | Save | `IconDeviceFloppy` | FEAT-013 |
+| Save / cancel the inline new-setup form | `IconDeviceFloppy`, labelled "Save setup", and `IconX`, labelled "Cancel new setup" — both icon-only and disabled while the save is in flight; Cancel sends nothing (plan 033) | FEAT-007 |
 | Collapse / expand (chevron) | `IconChevronDown`, rotated | FEAT-010 / FEAT-020 |
 | Show / hide a settled entry's discussion | `IconChevronDown`, rotated; "Show discussion" / "Hide discussion" | FEAT-010, US-040 |
 | Re-open a settled block | `IconArrowBackUp`, "Re-open last entry" | FEAT-010 |
 | Overflow menu | `IconDots` | — |
-| Export / import | `IconDownload` / `IconUpload` | FEAT-018 |
+| Export / import | `IconDownload` / `IconUpload` — icon-only for the character page's Export and its Sessions list's "Import session" (plan 033) | FEAT-018 |
 | Admin nav — Users | `IconUsers` | FEAT-003 |
 | Admin nav — LLM Servers | `IconServer2` | FEAT-004 |
 | Admin nav — Database | `IconDatabase` | FEAT-005 |
@@ -279,20 +287,27 @@ Notes on individual choices:
   confirm (`forms-and-lists.md`). **`IconTrash` means the server deletes stored
   text**: the empty-zone discard keeps `IconX` precisely because it deletes
   nothing stored (`workspace-shell.md`).
-- **`IconArchive` / `IconArchiveOff` and `IconDeviceFloppy` appear as left
-  sections of labelled buttons** on the character page (plan 009), and
-  **`IconArchive` / `IconArchiveOff` also appear as labelled items of a table
-  row's overflow menu** for setups and sessions (plans 010, 011). The glyph is the
-  same; whether it is a button or a menu item is the table rule above.
-- **`IconPlus` is a labelled button, not an icon-only control, wherever it creates
-  a child of the thing on screen** — "New setup", "Start session", "Import
-  session" (plans 010, 011, 031). It is icon-only in the tree header and the
-  collapsed rail, where there is no room for words and the surrounding context
-  supplies the noun, **and in a note group's header**: the '+' labelled "New note"
-  beside the group's title, at every mount (user decision, fast/012). It replaced
-  the labelled "New note" button that sat below the list; the group's title
-  already supplies the noun, and the header '+' is the one way to open a draft
-  (`workspace-shell.md`).
+- **`IconArchive` / `IconArchiveOff` and Export's `IconDownload` are icon-only
+  `IconButton`s in the character page's header** (plan 033; plans 009 and 030
+  shipped them as left sections of labelled buttons). The header holds the page's
+  object-level actions, and the labels survive as each control's tooltip and
+  accessible name. **`IconArchive` / `IconArchiveOff` also appear as labelled
+  items of a table row's overflow menu** for setups and sessions (plans 010, 011).
+  The glyph is the same; whether it is a button or a menu item is the table rule
+  above. `IconDeviceFloppy` keeps its labelled-button form where a form has an
+  explicit Save (`/settings`), and is icon-only on the inline new-setup form.
+- **`IconPlus` is icon-only wherever it creates a child from a list or section
+  header** — "New character" in the tree header and the collapsed rail, where
+  there is no room for words and the surrounding context supplies the noun; the
+  '+' labelled "New note" beside a note group's title, at every mount (user
+  decision, fast/012), which replaced the labelled "New note" button below the
+  list and is the one way to open a draft (`workspace-shell.md`); and the '+'
+  labelled "New setup" in the character page's Setups header, which opens the
+  inline create form (plan 033). **The labelled `IconPlus` buttons of plans 010,
+  011 and 031 are gone**: "New setup" became the header '+'; "Start session" no
+  longer exists, because plan 033 retired the message-less start; and "Import
+  session" is an icon-only `IconUpload` in the Sessions list header. In every
+  case the header's title supplies the noun the label used to carry.
 - **The wall's pin and a note's "forced" flag are the same glyph, and the
   collision is accepted.** `IconPin` means "keep this panel open" on the wall's
   header and "put this note in the system prompt" on a note card. **They do
@@ -506,7 +521,9 @@ rule alone.
 | Log out failing from the user menu (008 D7) | `notifyFailure`, and the client **stays** — it never navigates on a failed logout | the menu that raised it has already closed, so there is no place of its own left to render in |
 | The character screen and the tree (plan 009) | **inline** — a screen `Alert`, tree text plus Retry, "Character not found" | each failure has a place; plan 009 adds no `notifyFailure` call site |
 | The Setups section and its modal (plan 010) | **inline**, inside the section or inside the modal | same; plan 010 adds none either |
-| The Sessions section, the tree's sessions load, the session screen (plan 011) | **inline**, including the non-blocking "Could not load setups to choose from." | a list that could not load must not become a precondition for starting a session |
+| The inline new-setup form (plan 033) | **inline**, inside the form, which stays open | the form is on screen and is where the roleplayer is looking |
+| The Sessions section, the tree's sessions load, the session screen (plan 011) | **inline** | each load has a region of its own |
+| The character page composer's setup list (plan 033) | **inline** — the non-blocking "Could not load setups to choose from." under the composer | a list that could not load must not become a precondition for starting a session (R2) |
 | Loading the stream (013 D15) | **inline** — "Could not load the stream" plus Retry | a place of its own exists |
 | Every stream **mutation** failure — settle, re-open, partner filing, a zone edit, re-open's refusal (013 D15), a message delete (fast/014) | `notifyFailure`, then a re-read | a mutation has no region of its own; the stream is the content, not a form |
 | A successful message delete (fast/014) | **nothing** — the row leaves the stream | the missing row is the success signal |
@@ -514,6 +531,7 @@ rule alone.
 | The character page's composer send (018 D4) | `notifyFailure` | same as the stream's composer |
 | The character page's configuration block (018 D9) | **inline**, under the control that failed | each control has its own place |
 | A discussion group's lazy load (022 D11) | **inline, inside the group** | the group is on screen and is where the roleplayer is looking |
+| A session rename (plan 034) | **inline**, under the editor, which keeps the typed text | the editor is on screen and is the failure's place |
 | A failed generation's **reason** (US-044.AC-4) | `notifyFailure` | the criterion is that it must not persist |
 | An **export** — `app` entry or admin page (plan 030) | **nothing in the `app` entry**: the browser's own download is the success signal. The admin page renders an inline size line ("Export downloaded — 12.3 KB") | page text is not a notification, so the size line does not break the no-success-toast rule |
 | A failed export (plan 030) | **inline** red `Alert`, separate from the drift report's error | it has a page to render on |
@@ -645,7 +663,7 @@ Recorded here so a reader building a screen has the stack in one place:
   its emit rules.
 - **`@dnd-kit`** is used for exactly two mount points and one interaction:
   reordering notes within a level, on the wall and on the character page's notes
-  grid (UC-076, US-102, US-103), with the sensors and announcements shared through
+  list (UC-076, US-102, US-103), with the sensors and announcements shared through
   one module. See `workspace-shell.md` and `frontend-structure.md`. It is not
   available for anything else without a requirement that asks for it.
 
@@ -653,6 +671,11 @@ Recorded here so a reader building a screen has the stack in one place:
 
 ## Decision history
 
+- **2026-10-08 — the character page's header and list-header actions become
+  icon-only** (plan 033, user decision): Archive / Restore and Export in the page
+  header, the Setups '+' and "Import session"; a busy icon control is `disabled`,
+  with `IconButton` not widened; the inline new-setup form's Save / Cancel join
+  the icon table. Detail in `docs/decisions/033.character-page-tabs.md`.
 - **2026-10-08 — Send becomes an icon-only control inside the composer's text
   box** (fast/011, user decision); Settle stays labelled and Send is the named
   exception to "a control that spends a model call carries words". Mechanism in

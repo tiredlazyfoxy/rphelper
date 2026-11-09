@@ -1,6 +1,6 @@
 """Feature 032 step 006 — admin surfaces, reverse lookup and the admin frontend.
 
-Step file: ``docs/plans/032.privacy-isolation-audit/006.admin-surfaces-and-reverse-lookup.md``.
+Step file: ``docs/decisions/032.privacy-isolation-audit.md``.
 This module covers **DoD-1..DoD-7** (the backend half). DoD-8 and DoD-9 (the ``admin``
 frontend entry) live in ``frontend/tests/adminPrivacyAudit.test.ts``; DoD-10 is
 ``[manual/live]`` and has no test here.

@@ -1,7 +1,7 @@
 """The shared two-user audit world for feature 032 — privacy-isolation-audit.
 
 Written by step 002's test-coder against
-``docs/plans/032.privacy-isolation-audit/002.audit-world-and-route-guard.md`` (Interface
+``docs/decisions/032.privacy-isolation-audit.md`` (Interface
 intent), ``002.context.md`` (coverage list, sentinel fields, guard mechanics) and
 ``context.md`` (the 74-row enumeration, the class table, the shared vocabulary). Every
 signature here is the one frozen by ``status.md`` ``## Skeleton`` -> "Step 002 — frozen

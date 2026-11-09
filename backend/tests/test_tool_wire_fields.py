@@ -1,6 +1,6 @@
 """Feature 022, step 001 — tool name, status and arguments on the wire (DoD-1, 2, 4, 5, 6).
 
-Every expected value comes from `docs/plans/022.discussion-ui/001.tool-fields-on-the-wire.md`
+Every expected value comes from `docs/decisions/022.discussion-ui.md`
 (Interface intent + Definition of done), `001.context.md` (the payload table, rows 1–12) and
 the feature `context.md` (**D3**: the tool view, eleven wire keys, never `tool_payload` /
 `call_id` / `content` / `code`). Bindings come from `status.md` `## Skeleton`, Step 001:

@@ -3,7 +3,7 @@
 Covered route: ``GET /api/admin/database/export``, added to the admin database router so that
 it inherits that router's router-level ``require_admin`` guard (``003.context.md``).
 
-Every expected value comes from ``docs/plans/030.export-granularities/003.export-routes.md``
+Every expected value comes from ``docs/decisions/030.export-granularities.md``
 (DoD-1, DoD-2, DoD-3, DoD-9, DoD-10), from ``003.context.md`` and from the feature
 ``context.md`` — §"Routes" (the 200 / ``application/json`` /
 ``Content-Disposition: attachment; filename="rphelper-<granularity>-<timestamp>.json"``
@@ -273,7 +273,7 @@ def test_the_database_envelope_carries_the_whole_instances_rows__S030_003_DoD1(
 
 
 # --- 034/001 DoD-5: schema version 2, session rows carry `name` -----------------------
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md` DoD-5:
+# Expected values come from `docs/decisions/034.session-names.md` DoD-5:
 # `SCHEMA_VERSION` is 2, every export emits it, and every session row carries `name`.
 
 #: A stored session name (non-ASCII), written directly into `sessions.name` in setup.

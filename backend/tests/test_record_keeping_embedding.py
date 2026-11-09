@@ -1,7 +1,7 @@
 """Tests for the record-keeping write paths' degraded session refresh and the coverage flag
 — feature 024, step 005 (DoD-1..8).
 
-Every expected value comes from `docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md`
+Every expected value comes from `docs/decisions/024.embedding-lifecycle.md`
 (its Interface intent and Definition of done), from `005.context.md` (the placement — the
 refresh is the **last** statement of settle's / re-open's block, so the composed text observes
 the post-settle state — and the "Test shape") and from the feature `context.md`:

@@ -1,7 +1,7 @@
 """Tests for ``app.services.users`` — list, create, disable, enable, set password, set role.
 
 Every expected value comes from
-``docs/plans/005.admin-shell-and-users/002.users-service-and-errors.md`` (Interface intent +
+``docs/decisions/005.admin-shell-and-users.md`` (Interface intent +
 Definition of done), ``002.context.md`` and the feature ``context.md`` (D3, D4, D6, R5, the
 routers-versus-services rule). Bindings come from ``## Skeleton`` -> ``Step 002`` (and
 ``Step 001`` for the bulk revoke helper) in feature 005's ``status.md``.

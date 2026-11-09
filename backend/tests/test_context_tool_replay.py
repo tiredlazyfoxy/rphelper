@@ -1,6 +1,6 @@
 """Feature 021 step 002 — tool-row replay and `<think>` stripping in `to_chat_messages`.
 
-Expected values come from `docs/plans/021.compose-loop-and-tools/002.chat-messages-and-replay.md`
+Expected values come from `docs/decisions/021.compose-loop-and-tools.md`
 (DoD-3..DoD-7, DoD-10), the feature `context.md` (D4's worked examples, D7's payload shape,
 D9's replay rule, the Literals table) and 020's kind-tag convention (`[my turn]` + line feed).
 Bindings come from `status.md` `## Skeleton` -> Steps 001-002:

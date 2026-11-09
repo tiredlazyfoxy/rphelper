@@ -1,6 +1,6 @@
 """Tests for tool rows in `app/services/messages.py` and `ToolFailedError` — feature 021, step 001.
 
-Every expected value comes from `docs/plans/021.compose-loop-and-tools/001.tool-rows-and-settle.md`
+Every expected value comes from `docs/decisions/021.compose-loop-and-tools.md`
 (Interface intent + Definition of done), `001.context.md` and the feature `context.md`
 (**D7** tool-row columns and payload shape, **D8** edit refusal, **D13** `tool_failed`, R5,
 012's eight-key wire contract). Bindings come from `status.md` `## Skeleton`, Step 001:

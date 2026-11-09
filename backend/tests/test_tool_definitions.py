@@ -1,6 +1,6 @@
 """Feature 021 step 004 — the three tool declarations (`app/services/tools/definitions.py`).
 
-Expected values come from `docs/plans/021.compose-loop-and-tools/004.tool-seam.md`
+Expected values come from `docs/decisions/021.compose-loop-and-tools.md`
 (Interface intent + DoD-1, DoD-10's `definitions.py` clause) and the feature `context.md`
 (D5 names and offered order, D6 "tools never receive ids from the model", the Literals table).
 Bindings come from `status.md` `## Skeleton` -> Step 004:

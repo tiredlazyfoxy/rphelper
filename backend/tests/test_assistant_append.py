@@ -1,7 +1,7 @@
 """Tests for `append_assistant_message` in `app/services/messages.py` — feature 019, step 001.
 
-Every expected value comes from `docs/plans/019.streaming-transport-and-stop/
-001.frames-and-assistant-append.md` (Interface intent + Definition of done), `001.context.md`
+Every expected value comes from `docs/decisions/019.streaming-transport-and-stop.md`
+(Interface intent + Definition of done), `001.context.md`
 ("Touch sites": `StreamMessage`'s fields, the `messages` columns, `current_zone` =
 `related_to IS NULL AND settled_at IS NULL`) and the feature `context.md` (**D8**, R5, R11,
 "Test conventions"). Bindings come from `status.md` `## Skeleton`, Step 001:

@@ -1,5 +1,5 @@
 // Feature 022, step 006 — the live reply beneath the zone rows (DoD-6..DoD-8)
-// (docs/plans/022.discussion-ui/006.zone-rows-live-reply-regenerate.md).
+// (docs/decisions/022.discussion-ui.md).
 //
 // Expected values come from the step's Interface intent and Definition of done, context.md D4,
 // D5, D6, D7, the UI strings table and 006.context.md:

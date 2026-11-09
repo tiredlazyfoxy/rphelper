@@ -1,6 +1,6 @@
 """Tests for `app/services/settle.py` under tool rows and `<think>` — feature 021, step 001.
 
-Every expected value comes from `docs/plans/021.compose-loop-and-tools/001.tool-rows-and-settle.md`
+Every expected value comes from `docs/decisions/021.compose-loop-and-tools.md`
 (Interface intent + Definition of done), `001.context.md` and the feature `context.md`
 (**D4** strip rule and worked examples, **D7** tool-row columns, **D8** settle head rule,
 R11, R12, 012's settle behaviour as already pinned by `tests/test_settle_service.py`).

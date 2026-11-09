@@ -1,6 +1,6 @@
 """Tests for `app/services/setups.py` — feature 010, step 002.
 
-Every expected value comes from `docs/plans/010.setups/002.setups-service.md` (its
+Every expected value comes from `docs/decisions/010.setups.md` (its
 Definition of done and Interface intent), from `002.context.md` (the scope-predicate
 table, the list read's rollback) and from the feature context's D3 / D5 / D6 / D8 / D9 /
 D10 plus the owner-scope (R5), no-delete (R6) and no-default-setup (R2) constraints. Each

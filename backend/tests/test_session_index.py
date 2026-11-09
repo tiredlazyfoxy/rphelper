@@ -1,6 +1,6 @@
 """Tests for `app/services/session_index.py` — feature 024, step 003 (DoD-1..12).
 
-Every expected value comes from `docs/plans/024.embedding-lifecycle/003.session-index.md`
+Every expected value comes from `docs/decisions/024.embedding-lifecycle.md`
 (its Interface intent and Definition of done — **DoD-1 pins the composed string verbatim**),
 from `003.context.md` (the test shape, the refresh order, the degraded catch) and from the
 feature `context.md` (**D5** archived sessions included, **D6** the exact composition and the

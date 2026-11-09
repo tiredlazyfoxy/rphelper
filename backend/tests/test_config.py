@@ -1,7 +1,7 @@
 """Tests for ``app.config`` — the ``Settings`` model and its cached accessor.
 
 Every expected value in this module comes from the field table in
-``docs/plans/001.backend-foundation/001.context.md``. Covers DoD-1 .. DoD-7 of
+``docs/decisions/001.backend-foundation.md``. Covers DoD-1 .. DoD-7 of
 ``001.scaffold-and-config.md``.
 
 Feature 035 step 001 (DoD-1, ``DEC-arch-llm-client-library-2``) raises the outbound-call timeout default from

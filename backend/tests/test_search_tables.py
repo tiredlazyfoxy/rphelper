@@ -1,6 +1,6 @@
 """Tests for `app/db/search_tables.py` — feature 024, step 001 (DoD-1..7, 9, 10).
 
-Every expected value comes from `docs/plans/024.embedding-lifecycle/001.search-tables.md`
+Every expected value comes from `docs/decisions/024.embedding-lifecycle.md`
 (its Interface intent and Definition of done), from `001.context.md` (the DDL forms, the
 **record row predicate** `settled_at IS NOT NULL AND related_to IS NULL`, the trigger set
 and the back-fill rule) and from the feature `context.md` (**D2** ensure-on-write and

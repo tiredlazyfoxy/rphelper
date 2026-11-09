@@ -1,6 +1,6 @@
 """Tests for step 001 of feature 007 — the drift report's value types and the two shape readers.
 
-Step file: ``docs/plans/007.schema-drift-and-remediation/001.drift-value-types-and-shape-readers.md``.
+Step file: ``docs/decisions/007.schema-drift-and-remediation.md``.
 Feature context: ``context.md`` D1 (compared set, normalisation, implicit indexes), D2 (three
 statuses, no ``seed-missing``), R5 (no counts).
 

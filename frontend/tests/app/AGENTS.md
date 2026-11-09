@@ -126,3 +126,4 @@ See also: docs/architecture/frontend-structure.md
 ## Conventions
 
 - Every `MarkdownEditor` stub in a test file that renders notes must render `toolbarActions` inside its root, so note flags stay reachable (fast/012.notes-autosave-toolbar-flags).
+- The sanctioned way to stub the editor is `vi.mock("../../src/shared/MarkdownEditor", ...)` returning a `<label>`-labelled `<textarea>` that honours `label`, `value`, `onChange` and `readOnly` (with a `useId` id so several editors never share one).

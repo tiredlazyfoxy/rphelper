@@ -1,6 +1,6 @@
 """Tests for the persona / setup-text fan-out — feature 024, step 006 (DoD-1..7).
 
-Every expected value comes from `docs/plans/024.embedding-lifecycle/006.persona-setup-fanout.md`
+Every expected value comes from `docs/decisions/024.embedding-lifecycle.md`
 (its Interface intent and Definition of done — **DoD-1 pins the new sheet verbatim**), from
 `006.context.md` (the test shape and the placement) and from the feature `context.md`:
 

@@ -3,7 +3,7 @@
 The owner-scoped excerpt read: `SessionExcerpt` and `list_session_excerpts`.
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/027.session-search-tool/002.session-excerpts.md` (Interface intent and Definition
+`docs/decisions/027.session-search-tool.md` (Interface intent and Definition
 of done), `002.context.md` (the touch sites and the test-seeding notes) and the feature
 `context.md` — **D3** (the excerpt is the settled entries' text in ascending id order joined by
 `"\\n\\n"`, empties skipped; over `1500` characters it becomes `…` plus the last `1500`;
@@ -48,7 +48,7 @@ Nothing here asks the code under test what the answer is.
   decision's text must be in the excerpt.
 
 Each test name ends `__S027_002_DoD<n>` with the DoD item it covers. Feature 034 step 003's
-DoD-10 (`docs/plans/034.session-names/003.my-search-names.md`, DEC-034-5: a session's name
+DoD-10 (`docs/decisions/034.session-names.md`, DEC-034-5: a session's name
 never enters the `session_search` tool) adds one guard here, ending `__S034_003_DoD10`; the
 tool's own output is checked end to end in `tests/test_privacy_audit_search_tools.py`.
 

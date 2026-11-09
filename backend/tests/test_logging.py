@@ -1,7 +1,7 @@
 """Tests for ``app.logging`` — the two loguru sinks and the stdlib bridge.
 
 Every expected value in this module comes from ``002.logging.md``'s Definition of done
-and the sink table in ``docs/plans/001.backend-foundation/002.context.md``. Covers
+and the sink table in ``docs/decisions/001.backend-foundation.md``. Covers
 DoD-1 .. DoD-8; DoD-9 and DoD-10 are ``[manual/live]`` and carry no test.
 
 Two facts about this subject shape the file:

@@ -1,7 +1,7 @@
 """Tests for feature 032 step 001 — logging and engine redaction hardening.
 
 Every expected value in this module comes from
-``docs/plans/032.privacy-isolation-audit/001.logging-redaction-hardening.md``'s
+``docs/decisions/032.privacy-isolation-audit.md``'s
 Definition of done (DoD-1 .. DoD-7). DoD-8 is ``[manual/live]`` (a real uvicorn run)
 and carries no test. Each item cites **US-084.AC-1**: operator-facing logs are an
 administrative surface, so no log record at any level may carry user text

@@ -19,7 +19,7 @@ vi.mock("@mantine/notifications", async (importOriginal) => {
 const PASTE_SENTENCE = "This paste is very large and will take up a lot of the assistant's context.";
 
 // Feature 031, step 006 — the second warning id. The sentence is pinned verbatim in
-// `docs/plans/031.import-and-id-remapping/006.context.md`; the id is the frozen
+// `docs/decisions/031.import-and-id-remapping.md`; the id is the frozen
 // `### Step 006` member `"import-search-coverage"`.
 const COVERAGE_SENTENCE =
   "Imported material won't appear in semantic search until an administrator rebuilds the search index.";

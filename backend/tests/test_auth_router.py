@@ -1,6 +1,6 @@
 """Tests for the auth router: ``POST /api/auth/login``, ``POST /api/auth/logout``, ``GET /api/me``.
 
-Every expected value comes from ``docs/plans/004.authentication-session/003.auth-router.md``
+Every expected value comes from ``docs/decisions/004.authentication-session.md``
 (Interface intent + Definition of done), ``003.context.md`` and the feature ``context.md``
 (D1 the uniform refusal, D2 400 never 401, D6 the cookie flags, D7 what a live session is,
 D9 idempotent 204 logout, D10 the paths and the identity model, D13 no normalization).

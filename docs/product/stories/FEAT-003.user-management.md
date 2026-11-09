@@ -41,5 +41,5 @@
   - **US-140.AC-1** — Given an account that is not the acting administrator's own, when the administrator changes its role, then the account holds the new role.
   - **US-140.AC-2** — Given the administrator targets their own account, when they try to change its role, then the change is refused and the role is unchanged.
   - **US-140.AC-3** — Given a user holds an active session and their role is changed, when they next act, then they act with the new role, without logging in again.
-- **Source:** `[confirmed: user]` finalization 2026-10-01, C31; shipped in docs/plans/005.admin-shell-and-users/.
+- **Source:** `[confirmed: user]` finalization 2026-10-01, C31; shipped by 005.admin-shell-and-users.
 <!-- product-spec:end -->

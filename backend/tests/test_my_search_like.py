@@ -1,7 +1,7 @@
 """`services/search/my_search.py` — feature 029, step 001 (DoD-1..10).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/029.my-search/001.like-corpora.md` (Interface intent and Definition of done),
+`docs/decisions/029.my-search.md` (Interface intent and Definition of done),
 `001.context.md` (the two tables, the escaping note and the seeding notes) and the feature
 `context.md` — **U2** (characters match on `name` / `sheet`, setups on `name` /
 `description`), **U3** (archived rows are included and flagged), **D2** (the per-kind cap is

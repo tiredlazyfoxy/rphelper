@@ -1,5 +1,5 @@
 // Feature 022, step 005 — live tool calls fed by the compose run's tool frames (DoD-1..DoD-5)
-// (docs/plans/022.discussion-ui/005.live-tools-and-regenerate.md).
+// (docs/decisions/022.discussion-ui.md).
 //
 // Expected values come from the step's Interface intent and Definition of done, context.md D7
 // (supersedes 019 D18) and 005.context.md ("The atomic clear"):

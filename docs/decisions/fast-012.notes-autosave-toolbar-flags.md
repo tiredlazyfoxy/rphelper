@@ -24,7 +24,7 @@ wall's contents, `ui-conventions.md`'s icon table (note flags, New note) and
 - **Date:** 2026-10-08 · **Decided by:** user
 - **Question:** Plan 033 gave the character page's notes an opt-in header-add mode with explicit Save/Cancel, and plan 015 placed the flags beside the card and added a labelled "New note" button. Which survives?
 - **Decision:** Neither. Every mount follows one behaviour (DEC-F012-4).
-- **Supersedes (named in text; no DEC entry exists for any of them to flip):** plan 033 D6 (the opt-in header-add mode with Save/Cancel); 033 step 002 DoD-1 and DoD-3 .. DoD-9 (DoD-2 now holds for every mount; DoD-10 still holds); plan 015 step 007 DoD-4 (flag placement), DoD-11 and DoD-14 (the labelled "New note" button).
+- **Supersedes:** DEC-033-6 (033 D6), in part — the opt-in header-add mode with Save/Cancel. Also, named in text only: 033 step 002 DoD-1 and DoD-3 .. DoD-9 (DoD-2 now holds for every mount; DoD-10 still holds); plan 015 step 007 DoD-4 (flag placement), DoD-11 and DoD-14 (the labelled "New note" button).
 - **Reason:** User decision: a note behaves the same at every mount, and the blur-save rule already governs the character page's other content.
 - **Lands in:** `frontend/src/app/MemoLevelGroup.tsx`, `frontend/src/app/memoLevelState.ts`, `frontend/src/app/CharacterNotesSection.tsx`
 - **Cites:** `workspace-shell.md` "One note behaviour at every mount"; `forms-and-lists.md` "Deliberately NOT confirmed" (emptied in-place editor)

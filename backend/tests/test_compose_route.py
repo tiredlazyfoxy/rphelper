@@ -1,6 +1,6 @@
 """Feature 021 step 006 — the compose route (`POST /api/sessions/{id}/zone/compose`).
 
-Expected values come from `docs/plans/021.compose-loop-and-tools/006.compose-route.md`
+Expected values come from `docs/decisions/021.compose-loop-and-tools.md`
 (Interface intent, DoD-1..DoD-12), `006.context.md` and the feature `context.md` (D1 commit then
 stream, D2 textless compose = retry, D3 model failures as `error` frames, D5 offered tools, D8
 tool-only zone counts as empty, D14 the two overridable dependencies) and 019's frame wire

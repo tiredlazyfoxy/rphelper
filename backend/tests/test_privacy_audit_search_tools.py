@@ -1,6 +1,6 @@
 """Search, tools, context and index-write sweep — step 004 of feature 032, DoD-1..DoD-10.
 
-Specification: ``docs/plans/032.privacy-isolation-audit/004.search-and-tools-sweep.md``
+Specification: ``docs/decisions/032.privacy-isolation-audit.md``
 (Definition of done items 1..10, every one ``[test]``; there is no ``[manual/live]``
 item), with ``004.context.md`` for the declared behaviour each clause re-asserts and
 ``context.md`` for the shared vocabulary, the sentinel convention and the leak-fix
@@ -9,7 +9,7 @@ support-module record in ``status.md`` supplies only *how to call*.
 
 Requirement covered by every item: **US-085.AC-1**.
 
-Feature 034, step 003 (``docs/plans/034.session-names/003.my-search-names.md``) adds
+Feature 034, step 003 (``docs/decisions/034.session-names.md``) adds
 ``sessions.name`` to DoD-1's searchable targets and one test of its own for its DoD-10
 (the ``session_search`` tool never outputs a session's name, DEC-034-5) and DoD-11 (one
 user's session name never reaches another user's ``/api/search``, DEC-034-4).

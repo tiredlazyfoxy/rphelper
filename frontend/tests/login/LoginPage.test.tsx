@@ -1,5 +1,5 @@
 // Feature 004, step 005 — the `login` entry's page, its submit, the hand-off to `/`, and the
-// entry wiring (docs/plans/004.authentication-session/005.login-entry.md).
+// entry wiring (docs/decisions/004.authentication-session.md).
 // Covers DoD-3, DoD-4, DoD-5, DoD-6, DoD-7, DoD-8, DoD-9, DoD-10, DoD-11, DoD-12, DoD-13,
 // DoD-14 at the rendered level. DoD-15..DoD-19 are [manual/live] and have no test.
 //

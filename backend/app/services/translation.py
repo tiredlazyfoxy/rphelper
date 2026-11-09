@@ -52,7 +52,7 @@ FALLBACK_TARGET_LANGUAGE: Final = "English"
 """The target language when no preferred language resolves at user or session level (D3).
 
 The cache key uses the **effective** target, so a fallback translation is stored under this
-value. `docs/plans/023.partner-translation/outcome.md` records the conflict with
+value (DEC-023-3, `docs/decisions/023.partner-translation.md`). This conflicts with
 `features.md`'s FEAT-013 note; the user chose this fallback.
 """
 

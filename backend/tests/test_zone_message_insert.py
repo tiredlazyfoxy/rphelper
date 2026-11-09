@@ -1,7 +1,7 @@
 """Feature 018, step 001 — the shared, transaction-neutral zone insert in
 `app/services/messages.py`, and `append_message` running through it.
 
-Expected values come from `docs/plans/018.character-page/001.zone-insert-and-models.md`
+Expected values come from `docs/decisions/018.character-page.md`
 (Interface intent, DoD-1..4) and the feature `context.md` (**D3** — one transaction, one
 insert; the Wire contract's "current-zone row"; "Test conventions"). Tests are suffixed
 `__S018_001_DoD<n>`.

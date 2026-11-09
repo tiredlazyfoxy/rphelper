@@ -43,7 +43,7 @@ feature that builds session names cites these ids and does not re-decide them.
 - **Cites:** `workspace-shell.md` § the tree row and geometry; US-151
 
 ### DEC-arch-session-names-4 — Rename interaction: in-place edit of the label
-- **Status:** accepted
+- **Status:** accepted; refined in part by DEC-034-11 (a failure renders inline under the editor instead of through `notifyFailure`; on success the returned session is applied instead of re-reading the lists)
 - **Stage:** — · **Feature:** arch-session-names · **Step:** —
 - **Date:** 2026-11-05 · **Decided by:** architect (default; the planner may refine)
 - **Question:** How does the roleplayer rename a session from the tree row and from the session header?

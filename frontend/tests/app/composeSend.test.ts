@@ -1,5 +1,5 @@
 // Feature 021, step 007 — Send on *my turn* composes; `composeZone` text becomes optional
-// (docs/plans/021.compose-loop-and-tools/007.send-to-compose.md), DoD-1..DoD-6 (DoD-7 is the
+// (docs/decisions/021.compose-loop-and-tools.md), DoD-1..DoD-6 (DoD-7 is the
 // amendment of 013's tests in streamMutations.test.ts / Composer.test.tsx; DoD-8 is manual/live).
 //
 // Expected values come from the step's Interface intent and Definition of done, context.md D2 and

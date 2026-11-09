@@ -1,6 +1,6 @@
 """Feature 020 step 001 — chat value type, system-prompt renderer, message mapper.
 
-Expected values come from `docs/plans/020.context-assembly/context.md` ("The prompt
+Expected values come from `docs/decisions/020.context-assembly.md` ("The prompt
 format", "Kind tags on settled messages", D1-D12) and the step's Definition of done.
 Headings and lead-ins are asserted as whole lines / line starts by exact text (D10); the
 prose after a lead-in's colon is never asserted, except for the language names (D4).
