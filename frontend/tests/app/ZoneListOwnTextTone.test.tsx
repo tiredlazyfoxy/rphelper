@@ -1,6 +1,6 @@
 // Fast feature 016 — own-text-muted: the roleplayer's own (user-role) message bodies render
 // inside a muted-tone wrapper, in the zone and in the read-only Discussion group (DoD-1..DoD-5)
-// (docs/plans/fast/016.own-text-muted/plan.md).
+// (fast/016.own-text-muted, docs/decisions/fast-016.own-text-muted.md).
 //
 // Expected values come from the plan's Interface intent and Definition of done and the frozen
 // test hook in status.md `## Skeleton`:

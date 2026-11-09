@@ -311,8 +311,9 @@ audit actually found** — a `session_vec` empty-text delete that computed its i
 without the owner predicate. The proof that the rest holds is
 `backend/tests/test_privacy_audit_search_tools.py`, which is the cross-user
 evidence for my-search, the hybrid port, the three tools and the vector/FTS write
-paths together. A fix to defect D-04 (below) adds a delete on the degraded path
-and is therefore directly bound by this rule.
+paths together. **The degraded path's clear** (fast/005, below) is a delete on a
+derived store and is bound by this rule: it resolves the session id through an
+owner-scoped read of `sessions` before it deletes the vector.
 
 ### The query-side no-model rule — no lexical-only degrade
 
@@ -673,7 +674,7 @@ persona edits become slow enough to be disruptive, the fallback is
 **mark-stale-plus-rebuild**: flag the affected sessions with a staleness marker,
 let FEAT-005's rebuild (UC-016) reconcile them, and accept temporarily stale
 search results in between. That was the runner-up, and the design is **partly**
-shaped for it: the degraded-write path already tolerates a stale `session_vec`
+shaped for it: the degraded-write path already tolerates a missing `session_vec`
 row as an expected state rather than as drift. **The marker itself does not
 exist** — "no staleness marker and no staleness column" is a decision, not an
 open question (024 U5, and the embedding lifecycle below) — so taking this flip
@@ -776,8 +777,9 @@ vectors (`data-model.md` closes that `_TBD:` with "no FTS tables for either", an
 keeps `session_fts` uncreated for the same reason) — so a port variant over them
 would carry **no arm at all**: nothing to rank, nothing to fuse, a `SearchScope`
 whose only content is a `WHERE`. The match is a plain **escaped,
-case-insensitive substring over one needle, not tokenised**, and the three
-`LIKE` matches share one escape rule — user input never acts as a wildcard.
+case-insensitive substring over one needle, not tokenised** — case-insensitive
+**in any script**, through one Unicode case fold (below) — and the three `LIKE`
+matches share one escape rule and one fold — user input never acts as a wildcard.
 
 **The session group's name arm** (2026-11-05). Owner-scoped like every other
 query here; a NULL `name` never matches. Its hits are merged with the session
@@ -807,20 +809,26 @@ characters and setups that makes the port universal again; for session names it
 also replaces the merge above with the port's own fusion. Worth naming because the
 `LIKE` path is otherwise the kind of shortcut that gets copied.
 
-**Defect D-05 — `LIKE` folds case for ASCII letters only.** SQLite's `LIKE` is
-case-insensitive for ASCII and **case-sensitive for every other script**, so a
-character or setup whose name is written in a non-Latin script matches **only in
-the case typed** (029 D3). **The session name arm inherits the same caveat** — it
-uses the same `LIKE` — so a non-Latin session name matches only in the case
-typed, and any fix to D-05 must cover all three matches. `US-147` requires name matching to be case-insensitive
-**in any script**, so the build does not satisfy it. This is a defect, not an open
-question: the requirement is settled and only the code is short. See
-`docs/plans/defects.md` D-05 — which also records why it matters more here than it
-looks (`vision.md`'s premise is a roleplayer composing in a language they are not
-confident in, so a non-Latin script is the expected case) and the constraint any
-fix must preserve: **the escape handling must survive, because user input may
-never be allowed to act as a wildcard.** Entries and memos go through the
-FTS/vector arms and are unaffected.
+**Case folding — in any script** (fast/006; this closed defect D-05). SQLite's
+`LIKE` folds case for ASCII letters only, so all three matches — characters,
+setups and session names — compare **both sides through one Unicode case fold**:
+the column through a case-folding SQL function the engine registers on every
+application connection (`backend-structure.md`'s Database access), and the
+needle through the same fold before it is bound. The escape rule is untouched —
+the fold maps none of the escaped characters to anything else — so **user input
+still never acts as a wildcard**. **It is case folding only**: no accent or
+diacritic folding and no Unicode normalization, so `É` matches `é`, `é` does
+**not** match `e`, a precomposed and a decomposed spelling of one letter do not
+match each other, and `ß` matches `ss`. **Ordering stays binary over the raw
+`name`**, never folded. A registered function rather than a stored folded column
+because no matched column has an index to lose, and a stored column would need a
+schema change plus a backfill (`DEC-F006-1` .. `-4`). **Flip condition:** per-row
+folding becoming visible in latency on large sheets, or a requirement for
+accent-insensitive matching — the move is then to a stored folded/normalized
+column, which is a schema change, not a predicate tweak. **The session-name arm,
+added after this fix, uses the same fold**; the 2026-11-05 statement here that
+it "inherits" an ASCII-only caveat was wrong and is corrected (`DEC-F006-5`).
+Entries and memos go through the FTS/vector arms and are unaffected.
 
 ### Fail-whole: no partial groups, no lexical-only degrade (029 U1)
 
@@ -1094,17 +1102,23 @@ What differs is what the **write** paths do with that error:
 |---|---|
 | memo create / body edit | **fails the transaction** — nothing is stored |
 | **character persona edit, setup text edit** | **fails the transaction** — nothing is stored |
-| message edit, settle, re-open, **partner filing**, **settled-entry delete** (`session_vec`) | **succeeds, degraded** — the write commits and the response says search coverage is incomplete (US-112) |
+| message edit, settle, re-open, **partner filing**, **settled-entry delete** (`session_vec`) | **succeeds, degraded** — the write commits, the session's `session_vec` row is cleared, and the response says search coverage is incomplete (US-112) |
 
-**The caught set on the degraded path is `no_embedding_model` — including the
-`dimension_mismatch` form — and `llm_unreachable`** (024 U3, D8).
-`llm_unreachable` is in the set because "the designated server did not answer" is
-exactly as much a platform gap as "no model is designated", and US-112 is about
-platform gaps never blocking the record. **The strict path catches neither** and
-lets both propagate, at **409** and **502** respectively. So `no_embedding_model`
-has two callers — one that lets it out of the transaction and one that swallows it
-and reports degradation in the write's own response — and that split *is* the
-asymmetry's implementation (`backend-structure.md` carries the same table).
+**The caught set on the degraded path is three errors — `no_embedding_model`
+(including the `dimension_mismatch` form), `llm_unreachable` and
+`secret_ref_missing`** (024 U3, D8; widened by fast/005). `llm_unreachable` is in
+the set because "the designated server did not answer" is exactly as much a
+platform gap as "no model is designated", and `secret_ref_missing` because
+credentials the instance cannot use are the same kind of gap; US-112 is about
+platform gaps never blocking the record. **It is a named set, not a base type, on
+purpose**: any other failure — a programming error, a SQL error — still
+propagates and rolls the write back, so a bug never turns into "coverage
+incomplete" (`DEC-F005-1`). **The strict path catches none of them** and lets
+them propagate, at **409**, **502** and **500** respectively. So
+`no_embedding_model` has two callers — one that lets it out of the transaction
+and one that swallows it and reports degradation in the write's own response —
+and that split *is* the asymmetry's implementation (`backend-structure.md`
+carries the same table).
 
 **This reverses, for one of the two paths, what this doc previously stated for
 both — and the asymmetry is deliberate, recorded so nobody harmonises it later.**
@@ -1140,43 +1154,40 @@ applied to a new write, not a new rule.
 
 Consequences to hold:
 
-- **A missing or stale `session_vec` row is an expected state, not drift.**
+- **A degraded write clears the session's `session_vec` row** (fast/005) rather
+  than leaving it stale. After one, the session has **no** vector, and it is
+  absent from semantic search until UC-016's rebuild re-embeds it.
+- **A missing `session_vec` row is an expected state, not drift.**
   FEAT-005's report must not flag it the way it flags a memo with no `memo_vec`
-  row; UC-016's rebuild is its remedy. The memo-side invariant is unaffected.
-- **Nothing records *which* sessions carry a stale vector**, so the remedy is the
+  row; UC-016's rebuild is its remedy. The memo-side invariant is unaffected. A
+  **stale** row is now possible only from a superseded designation (the sharp
+  edge under "Changing the embedding designation" below), never from the
+  degraded path.
+- **Only `session_vec` is cleared.** Memo writes never degrade — they fail hard
+  (above) — and the FTS indexes are trigger-maintained and ensured before the
+  embedding step, so a degraded write leaves them current.
+- **Nothing records *which* sessions lost their vector**, so the remedy is the
   whole-index rebuild (UC-016) rather than a targeted re-embed. **The design
   question is answered: no staleness marker and no staleness column** (024 U5).
   A per-session marker was considered and declined — it would be a data-model
   change, and the rebuild already reconciles everything with no record of what
   needed it.
 - The roleplayer-facing half is a banner above the stream (US-112,
-  `workspace-shell.md`); the backend half is a caught `no_embedding_model` or
-  `llm_unreachable` reported in the write's own response
-  (`backend-structure.md`, which carries the same table).
+  `workspace-shell.md`); the backend half is a caught error from the set above,
+  reported in the write's own response (`backend-structure.md`, which carries the
+  same table).
 
-#### Two defects live on the degraded path
+#### The two degraded-path defects are closed (fast/005)
 
-Recorded as defects rather than as design, because in both cases the design
-question is answered and only the code is short.
-
-- **A failed degraded embed leaves the existing vector stale — defect D-04.**
-  "No marker, no column" stands as the *recording* decision, but
-  **`US-112.AC-3`** — new at the 2026-10-06 product finalization — requires
-  material that could not be embedded to have its **existing vectors cleared**,
-  not left in place. The build leaves them, so after a degraded edit
-  `session_search` can still return that session on the strength of text it no
-  longer contains. The product reversed 024's U5 on this point; U5 was applied
-  correctly at the time. See `docs/plans/defects.md` D-04, which also records the
-  **accepted consequence of the fix** — material that could not be embedded drops
-  out of semantic search entirely until the rebuild — and note that any such
-  delete is bound by the owner-scoped-ids rule above, because the derived tables
-  carry no user column.
-- **`secret_ref_missing` is not in the caught set — defect D-03.** An unset
-  `$ENV_VAR` key on the designated server makes a settle or a settled edit fail
-  with a **500**, refusing the roleplayer's own text. `US-112.AC-1` was widened at
-  the same finalization to cover "credentials the instance cannot use", so the
-  build does not satisfy it. See `docs/plans/defects.md` D-03. The strict path is
-  unaffected — it is allowed to fail loudly.
+D-03 and D-04 lived here and are repaired; the text above states the as-built
+behaviour. `secret_ref_missing` is in the caught set (D-03), and a degraded write
+**clears** the session's vector instead of leaving it stale (D-04). The clear
+resolves the session id through an **owner-scoped read of `sessions`** before it
+deletes the vector, as the derived-store rule above requires (`DEC-F005-2`). The
+**accepted consequence** is the one `docs/product/` records: material whose
+embedding could not be produced drops out of semantic search entirely until the
+rebuild. "No marker, no column" (024 U5's first half) still stands; only its
+second half — leave the vector in place — is reversed.
 
 ---
 
@@ -1189,17 +1200,39 @@ UC-016 is a distinct admin operation from drift remediation (UC-015), and
 recomputes **content** (re-embeds every memo and session against the designated
 embedding model — real time, real LLM calls, real cost on a metered provider).
 
-Rebuild does:
+Rebuild does, **as built** (fast/002), inside **one all-or-nothing transaction**:
 
-1. Validate the designated embedding model (`no_embedding_model` if absent).
-2. Re-declare the `vec0` tables if `embedding_dim` has changed.
-3. Re-embed every memo and every session, **for every user**.
-4. Rebuild the FTS5 indexes from their external content tables.
+1. Validate the designated embedding model (`no_embedding_model` if absent) —
+   before anything is touched.
+2. **Drop and re-create both `vec0` tables** at the designated dimension —
+   **always**, not only when the dimension changed — so that after a rebuild every
+   vector came from it: orphan vectors, vectors from a superseded model at the
+   same dimension, and the tables' absence after a restore are all handled by
+   construction (`DEC-F002-5`).
+3. Re-embed every memo and every session, **for every user**, in chunks
+   (`DEC-F002-7`).
+4. Rebuild the FTS5 indexes: the memo index in full from its external content;
+   the message index **cleared and refilled from record rows only** — never a full
+   rebuild from `messages`, which would index zone and buried rows — then re-issue
+   the FTS triggers, which repairs triggers a Sync dropped (`DEC-F002-8`).
 5. Report completion (UC-016 step 3).
 
+**The route** is `POST /api/admin/database/rebuild`: admin-only, **synchronous
+and blocking**, with no job runner and no progress stream (`backend-structure.md`'s
+admin database surface; `DEC-F002-1`). **A failure leaves the previous index
+exactly as it was** — vector rows, vector-table dimensions and FTS contents
+(`DEC-F002-2`).
+
+**Operational consequence, recorded so it is not "fixed" unknowingly:** the
+transaction holds the SQLite write lock across every embedding call, so **other
+writes block for the rebuild's duration**. That is accepted for a rare,
+confirmed admin operation. Turning it into a per-table or per-chunk rebuild would
+give up all-or-nothing and leave a mixed index with no record of which part is
+new; it is the same trade as the write-lock flip condition above.
+
 It is also the remedy for the degraded path above: every session whose
-`session_vec` went stale while no embedding model was designated comes back into
-coverage at step 3, with no record of which sessions those were and none needed.
+`session_vec` was cleared by a degraded write comes back into coverage at step 3,
+with no record of which sessions those were and none needed.
 
 **Step 3 is the one place in the system where a single operation touches every
 user's content, and it must not become a privacy hole.** The rebuild reads memo
@@ -1214,9 +1247,10 @@ replaces.** A rebuild's "N rows indexed" is an aggregate over *every* user's
 material, so publishing it tells the administrator that other users have content
 and roughly how much — which is the count R5 forbids, arriving by the one route
 nobody checks. A count of *tables* rebuilt would qualify; a memo, session or row
-count would not. The rebuild is unbuilt (`fast/002.vector-index-rebuild`), so
-this is a requirement on that plan rather than an as-built fact;
-`admin-surfaces.md` carries the same statement on the page that will show it.
+count would not. **As built, the response is exactly that**: the fixed list of
+the four derived tables rebuilt, and nothing derived from content
+(`DEC-F002-3`); `admin-surfaces.md` carries the same statement on the page that
+shows it.
 
 ### Changing the embedding designation neither forces nor prompts a rebuild
 
@@ -1247,6 +1281,19 @@ between that state and a correct one is knowing to press the button.
 
 ## Decision history
 
+- **2026-10-07 — the index rebuild is built (fast/002).** Step 2 always drops and
+  re-creates both vector tables rather than only on a dimension change; one
+  all-or-nothing transaction that holds the write lock across embedding; the
+  message index refilled from record rows only; the report is the fixed list of
+  rebuilt tables. Detail in `DEC-F002-1` .. `-10`.
+- **2026-10-07 — the degraded path's two defects are closed (fast/005).** The
+  caught set becomes three named errors (`secret_ref_missing` added, D-03), and a
+  degraded write clears the session's vector instead of leaving it stale (D-04),
+  reversing the second half of 024 U5. Detail in `DEC-F005-1`, `-2`.
+- **2026-10-07 — name matching folds case in any script (fast/006).** D-05 is
+  closed: both sides of every name match go through one Unicode case fold, case
+  only, escaping unchanged. Supersedes 029 D3's ASCII-only bullet. Detail in
+  `DEC-F006-1` .. `-4`.
 - **2026-11-05 — my-search's session group gains a name arm.** A third `LIKE`
   match, over `sessions.name`, merged ahead of the session variant's vector hits
   (deduplicated, still at most 20); fail-whole unchanged; D-05's case caveat
@@ -1254,3 +1301,7 @@ between that state and a correct one is knowing to press the button.
   start date, because that label is client-computed and never stored. Hydration
   carries `name`; results show the session label rule. `session_fts` stays
   uncreated. Detail in `DEC-arch-session-names-5`.
+- **2026-11-09 — correction to the 2026-11-05 line.** "D-05's case caveat extends
+  to it" was wrong when written: D-05 had been closed by fast/006 on 2026-10-07,
+  and the session-name arm uses the same Unicode case fold as the character and
+  setup matches. Detail in `DEC-F006-5`.

@@ -13,7 +13,8 @@ the post-settle state — and the "Test shape") and from the feature `context.md
 - **D8** the degraded posture catches `NoEmbeddingModelError` **and** `LlmUnreachableError`
   — widened by fast feature 005 to the named set that also includes `SecretRefError`;
 - **U5**'s second half (leave the existing row as it is) is **reversed** by fast feature 005
-  (`docs/plans/fast/005.degraded-embedding-path/plan.md`, US-112.AC-3): a degraded write now
+  (`fast/005.degraded-embedding-path`, `docs/decisions/fast-005.degraded-embedding-path.md`,
+  US-112.AC-3): a degraded write now
   clears the session's existing `session_vec` row. No test here asserts that a degraded catch
   keeps a pre-existing vector;
 - the **Wire contract** — `search_coverage_incomplete` on `SettleResponse`, `ReopenResponse`
@@ -1126,7 +1127,8 @@ def test_settle_answers_the_coverage_flag_false_with_a_model__S024_005_DoD8(
 
 # =========================================================================== F005 — the wire
 # Fast feature 005 — degraded-embedding-path. Expected values come from
-# `docs/plans/fast/005.degraded-embedding-path/plan.md` (DoD-1, 2, 5, 13) and its `context.md`.
+# `fast/005.degraded-embedding-path` (`docs/decisions/fast-005.degraded-embedding-path.md`)
+# (DoD-1, 2, 5, 13) and its `context.md`.
 
 
 def test_a_settled_row_patch_with_an_unset_credential_answers_2xx__F005_DoD1(

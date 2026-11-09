@@ -64,27 +64,28 @@ Feature → filename slug (use-cases and stories share the slug):
 ## Features
 
 All 20 are `Priority: must`. Sequencing comes from the dependency graph below,
-not from priority. 13 are `delivered` (FEAT-002, 003, 004, 006, 007, 011, 012,
-013, 014, 015, 016, 018, 019) and 7 are `partially delivered` (FEAT-001,
-005, 008, 009, 010, 017, 020). No FEAT is `proposed` any more — see the Status
+not from priority. 16 are `delivered` (FEAT-001, 002, 003, 004, 005, 006, 007,
+009, 011, 012, 013, 014, 015, 016, 018, 019) and 4 are `partially delivered`
+(FEAT-008, 010, 017, 020). No FEAT is `proposed` any more — see the Status
 column below and each block's `**Delivered:**`/`**Remaining:**` lines in
-`features.md`. FEAT-009, FEAT-010 and FEAT-017 are `partially delivered`
-because shipped behaviour does not satisfy a named criterion (recorded in
-`docs/plans/defects.md`); the lifecycle has no "delivered but defective"
-value. FEAT-008, FEAT-017 and FEAT-020 are also `partially delivered` because
-of not-yet-planned session-name items (UC-089, US-150, US-151, US-152).
+`features.md`. A FEAT is `delivered` when its `Remaining:` is empty. FEAT-010
+is `partially delivered` because shipped behaviour does not satisfy a named
+criterion (US-115.AC-1's streaming half, D-02 in `docs/plans/defects.md`); the lifecycle
+has no "delivered but defective" value. FEAT-008, FEAT-017 and FEAT-020 are
+`partially delivered` because of not-yet-planned session-name items (UC-089,
+US-150, US-151, US-152).
 
 | FEAT | Name | Actors | Realized by (UC) | Realized by (US) | Status |
 |---|---|---|---|---|---|
-| FEAT-001 | First-run bootstrap | ACT-003 | UC-001–003 | US-001–003, US-148 | partially delivered |
+| FEAT-001 | First-run bootstrap | ACT-003 | UC-001–003 | US-001–003, US-148 | delivered |
 | FEAT-002 | Authentication & session | ACT-001, ACT-002 | UC-004–005 | US-004–007 | delivered |
 | FEAT-003 | User management | ACT-001 | UC-006–009, UC-087 | US-008–011, US-140 | delivered |
 | FEAT-004 | LLM server connections | ACT-001 | UC-010–013 | US-012–016 | delivered |
-| FEAT-005 | Database consistency & management | ACT-001 | UC-014–016 | US-017–019 | partially delivered |
+| FEAT-005 | Database consistency & management | ACT-001 | UC-014–016 | US-017–019 | delivered |
 | FEAT-006 | Characters | ACT-002 | UC-017–019, UC-067 | US-020–022, US-086 | delivered |
 | FEAT-007 | Setups | ACT-002 | UC-020–022, UC-068 | US-023–025, US-087 | delivered |
 | FEAT-008 | RP sessions | ACT-002 | UC-023–026, UC-080, UC-089 | US-026–029, US-117, US-145 (withdrawn), US-150 | partially delivered |
-| FEAT-009 | Session entries & the RP flow | ACT-002 | UC-027–031, UC-078, UC-081–082 | US-030–035, US-109–112, US-120–124, US-149 | partially delivered |
+| FEAT-009 | Session entries & the RP flow | ACT-002 | UC-027–031, UC-078, UC-081–082 | US-030–035, US-109–112, US-120–124, US-149 | delivered |
 | FEAT-010 | Compose discussion | ACT-002, ACT-004 | UC-032–038, UC-079, UC-083–086 | US-036–044, US-113–116, US-125–135, US-146 | partially delivered |
 | FEAT-011 | Partner-text translation | ACT-002 | UC-039–041 | US-045–048 | delivered |
 | FEAT-012 | Memos | ACT-002, ACT-004 | UC-042–046, UC-075–076, UC-088 | US-049–057, US-098–104, US-119, US-141 | delivered |
@@ -113,13 +114,11 @@ above is `must`, so priority carries no sequencing information on its own.
 
 UC-001..UC-089, grouped by owning feature, id order. One-liners are the use
 case's own heading text, verbatim. Every UC below is `Status: delivered`
-except the ones tagged inline: UC-002, UC-016 are `deferred`; UC-080 is
-`partially delivered` (step 5 is the US-117.AC-3 defect, see
-`docs/plans/defects.md`); UC-089 is `proposed`.
+except UC-089, which is `proposed`.
 
 **FEAT-001**
 - UC-001 — Create a new database with the first administrator · **Status:** delivered
-- UC-002 — Bring up an instance from an existing export · **Status:** deferred → docs/plans/fast/003.bootstrap-from-export/
+- UC-002 — Bring up an instance from an existing export · **Status:** delivered
 - UC-003 — Bootstrap is unavailable once the instance is configured · **Status:** delivered
 
 **FEAT-002**
@@ -142,7 +141,7 @@ except the ones tagged inline: UC-002, UC-016 are `deferred`; UC-080 is
 **FEAT-005**
 - UC-014 — View a per-table drift report · **Status:** delivered
 - UC-015 — Remediate drift · **Status:** delivered
-- UC-016 — Rebuild the vector index · **Status:** deferred → docs/plans/fast/002.vector-index-rebuild/
+- UC-016 — Rebuild the vector index · **Status:** delivered
 
 **FEAT-006**
 - UC-017 — Create a character
@@ -161,7 +160,7 @@ except the ones tagged inline: UC-002, UC-016 are `deferred`; UC-080 is
 - UC-024 — Resume a session
 - UC-025 — Archive and restore a session
 - UC-026 — See sessions ordered by last use
-- UC-080 — Start a session by writing the first message on a character's page · **Status:** partially delivered → docs/plans/defects.md
+- UC-080 — Start a session by writing the first message on a character's page · **Status:** delivered
 - UC-089 — Rename a session · **Status:** proposed → not yet planned
 
 **FEAT-009**
@@ -253,16 +252,15 @@ Total: 89, UC-001..UC-089, no gaps.
 US-001..US-152, grouped by owning feature, id order. `ACs` is the count of
 `US-###.AC-#` criteria on that story. One-liners are the story's own heading
 text, verbatim. Every US below is `Status: delivered` except the ones tagged
-inline: US-148, US-150, US-151, US-152 are `proposed` (not yet planned); US-145 is `withdrawn`; US-002, US-019 are `deferred`; US-112 (AC-1's widened half and AC-3),
-US-115 (AC-1's streaming half), US-117 (AC-3) and US-147 (name matching folds
-case ASCII-only) are `partially delivered` — each points at
-`docs/plans/defects.md`.
+inline: US-150, US-151, US-152 are `proposed` (not yet planned); US-145 is
+`withdrawn`; US-115 (AC-1's streaming half) is `partially delivered` — D-02
+(docs/plans/defects.md).
 
 **FEAT-001**
 - US-001 — Fresh instance with a first admin (ACs: 2) · **Status:** delivered
-- US-002 — Instance from an export (ACs: 2) · **Status:** deferred → docs/plans/fast/003.bootstrap-from-export/
+- US-002 — Instance from an export (ACs: 2) · **Status:** delivered
 - US-003 — Bootstrap refused once configured (ACs: 2) · **Status:** delivered
-- US-148 — Unconfigured instance leads to setup (ACs: 4) · **Status:** proposed → not yet planned
+- US-148 — Unconfigured instance leads to setup (ACs: 4) · **Status:** delivered
 
 **FEAT-002**
 - US-004 — Log in with correct credentials (ACs: 2) · **Status:** delivered
@@ -287,7 +285,7 @@ case ASCII-only) are `partially delivered` — each points at
 **FEAT-005**
 - US-017 — Drift report lists per-table status (ACs: 1) · **Status:** delivered
 - US-018 — Remediation creates missing tables (ACs: 7) · **Status:** delivered
-- US-019 — Vector index rebuild (ACs: 1) · **Status:** deferred → docs/plans/fast/002.vector-index-rebuild/
+- US-019 — Vector index rebuild (ACs: 1) · **Status:** delivered
 
 **FEAT-006**
 - US-020 — Create a character (ACs: 2)
@@ -306,7 +304,7 @@ case ASCII-only) are `partially delivered` — each points at
 - US-027 — Archive then restore and resume (ACs: 3)
 - US-028 — List ordered by last use (ACs: 1)
 - US-029 — Sessions are mine alone (ACs: 1)
-- US-117 — Writing the first message on a character's page creates the session (ACs: 4) · **Status:** partially delivered → docs/plans/defects.md
+- US-117 — Writing the first message on a character's page creates the session (ACs: 4) · **Status:** delivered
 - US-145 — A session is identified by its start time, not a title (ACs: 2, both withdrawn) · **Status:** withdrawn — reversed by the user 2026-11-05 (C55) · **Superseded by:** US-150
 - US-150 — A session has a name, by default its start date, that the roleplayer can change (ACs: 6) · **Status:** proposed → not yet planned
 
@@ -320,7 +318,7 @@ case ASCII-only) are `partially delivered` — each points at
 - US-109 — A partner block is edited in place and saved when focus leaves it; search reflects the new text (ACs: 2)
 - US-110 — Any settled entry is edited in place and saved when focus leaves it; search reflects the new text (ACs: 2)
 - US-111 — Editing any settled entry discards its cached translation (ACs: 3)
-- US-112 — Whatever stops an embedding being produced, an edit still saves, and the roleplayer is told search coverage is incomplete (ACs: 3) · **Status:** partially delivered → docs/plans/defects.md
+- US-112 — Whatever stops an embedding being produced, an edit still saves, and the roleplayer is told search coverage is incomplete (ACs: 3) · **Status:** delivered
 - US-120 — The current zone's kind switch has two positions with an alternating default (ACs: 3)
 - US-121 — A pasted partner block files itself immediately; double parentheses in partner text get no special treatment (ACs: 2)
 - US-122 — A settled decision sits in the record, reaches the assistant as context, and is found by session search (ACs: 2)
@@ -340,7 +338,7 @@ case ASCII-only) are `partially delivered` — each points at
 - US-044 — The LLM going away mid-discussion loses none of my text (ACs: 5)
 - US-113 — A discussion appears beneath its answer in the same stream, and collapses there when the answer is settled (ACs: 2)
 - US-114 — The assistant's tool calls and thinking are visible while it works and are tucked away once it finishes (ACs: 3)
-- US-115 — Any message in the current zone is edited in place, the assistant's included, not findable by session search, with no new reply (ACs: 3) · **Status:** partially delivered → docs/plans/defects.md
+- US-115 — Any message in the current zone is edited in place, the assistant's included, not findable by session search, with no new reply (ACs: 3) · **Status:** partially delivered → D-02 (docs/plans/defects.md), streaming half of AC-1
 - US-116 — A collapsed discussion cannot be edited (ACs: 1)
 - US-125 — A ruler separates the settled record above from exactly one current zone below (ACs: 1)
 - US-126 — Settle takes the last message in the current zone, whoever wrote it (ACs: 2)
@@ -420,7 +418,7 @@ case ASCII-only) are `partially delivered` — each points at
 - US-076 — Results never include another user's material (ACs: 1)
 - US-118 — My search is reachable whether the left column is expanded or collapsed (ACs: 2)
 - US-137 — My-search returns disabled memos, marked as disabled (ACs: 2)
-- US-147 — Name matching is case-insensitive in any script (ACs: 1) · **Status:** partially delivered → docs/plans/defects.md
+- US-147 — Name matching is case-insensitive in any script (ACs: 1) · **Status:** delivered
 - US-152 — My search finds a session by its name and shows the name on session results (ACs: 2) · **Status:** proposed → not yet planned
 
 **FEAT-018**

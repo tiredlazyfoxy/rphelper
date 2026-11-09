@@ -395,11 +395,15 @@ They stay compatible with R5 through **opacity**, not through scoping: the
 product offers no viewer, no search, no preview, no diff and no rendering of a
 whole-database export, in either direction. The admin page reports a byte size
 after an export and shows **nothing at all** of an import — no preview, no
-counts, no table list, before or after (`admin-surfaces.md`). Both are reachable
-only from an admin route — `import_database` will also be reachable from
-`fast/003`'s bootstrap route (UC-002) when that lands — and `import_database`'s
-single-admin guard lives **in the service**, not in the router, so a second
-caller cannot forget it.
+counts, no table list, before or after (`admin-surfaces.md`). The export is
+reachable only from an admin route. **The replace has two callers** — the admin
+database import and the bootstrap restore (`POST /api/bootstrap/import`, UC-002;
+built by `fast/003.bootstrap-from-export`) — and both run it through **one
+shared in-transaction helper**, `import_database_in_transaction`, which the
+bootstrap restore calls inside its own transaction after creating the schema
+(`backend-structure.md`). The single-admin guard lives **in that shared
+helper**, not in either router, so neither caller can forget it
+(`DEC-F003-1`).
 
 The architecture must therefore not grow an export-preview, export-diff or
 export-browse surface. That is R5's own rule, and it is the natural next feature

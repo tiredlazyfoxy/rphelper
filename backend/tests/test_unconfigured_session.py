@@ -1,6 +1,7 @@
 """fast/010.unconfigured-to-bootstrap — a session cookie on an unconfigured instance.
 
-Covers the plan's backend DoD items (``docs/plans/fast/010.unconfigured-to-bootstrap/plan.md``):
+Covers the plan's backend DoD items (``fast/010.unconfigured-to-bootstrap``,
+``docs/decisions/fast-010.unconfigured-to-bootstrap.md``):
 
 - DoD-8  a stale cookie on ``GET /api/me`` against a schema-less database answers 401
          ``not_authenticated``, not 500 (US-148.AC-3);

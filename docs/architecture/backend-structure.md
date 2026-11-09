@@ -39,9 +39,11 @@ backend/
     roles.py             # Role enum + ROLE_LADDER + one pure "at least this
                          #   rung" comparison; no fastapi (plan 003, plan 004)
     dependencies.py      # CurrentUser, require_user, require_role(min_role)
-                         #   and the session-cookie set/clear writers (plan 004)
+                         #   and the session-cookie set/clear writers (plan 004);
+                         #   the no-account guard inside require_user (fast/010)
     db/
-      engine.py          # connection, PRAGMAs, sqlite-vec extension load
+      engine.py          # connection, PRAGMAs, sqlite-vec extension load, and
+                         #   the rp_casefold function registration (fast/006)
       schema.py          # the table-definition registry + the four named
                          #   Core selectables over `messages` (data-model.md)
       search_tables.py   # the vec0 and FTS5 tables: ensure-on-write DDL and
@@ -53,11 +55,12 @@ backend/
                          #   "Schema evolution" below
     routers/
       health.py          # /api/health
-      bootstrap.py       # FEAT-001
+      bootstrap.py       # FEAT-001 — create (plan 003) and restore (fast/003)
       auth.py            # FEAT-002, and /api/me
       admin_users.py     # FEAT-003 — /api/admin/users (plan 005)
       admin_llm.py       # FEAT-004 — /api/admin/llm-servers (plan 006)
-      admin_db.py        # FEAT-005 — /api/admin/database (plan 007)
+      admin_db.py        # FEAT-005 — /api/admin/database (plan 007), and the
+                         #   whole-index rebuild (fast/002)
       characters.py      # FEAT-006 (plan 009)
       setups.py          # FEAT-007 (plan 010)
       sessions.py        # FEAT-008 (plan 011); owns the character-addressed
@@ -76,7 +79,13 @@ backend/
     services/
       health.py                  # /api/health's probe SQL — NOT a domain service; see
                                  #   "Routers versus services" (decided in plan 001)
-      bootstrap.py  auth.py  users.py
+      bootstrap.py               # is_configured, the first-administrator create
+                                 #   (plan 003), the restore from an export
+                                 #   (fast/003 — runs the shared in-transaction
+                                 #   import helper), and any_user_exists, the read
+                                 #   behind require_user's no-account guard
+                                 #   (fast/010)
+      auth.py  users.py
       passwords.py               # the password-hashing seam: hash + verify (plan 003)
       llm_registry.py            # servers, models, the probe primitive, designation,
                                  #   the enabled set and first-enabled order, and
@@ -162,7 +171,11 @@ backend/
       transfer.py                # export only — read-only by design (plan 030)
       transfer_import.py         # validation, deserialization, the remap engine,
                                  #   the three roleplayer imports, the database
-                                 #   replace (plan 031 — transfer.md)
+                                 #   replace (plan 031 — transfer.md), and
+                                 #   import_database_in_transaction, the shared
+                                 #   in-transaction replace that the admin import
+                                 #   and the bootstrap restore both call
+                                 #   (fast/003, DEC-F003-1)
     models/                      # pydantic request/response models; ids.py holds
                                  #   the id aliases, secret_ref.py the "$"-pointer
                                  #   field type (plan 006); memos.py,
@@ -493,9 +506,11 @@ service touching user-owned data takes it as a **required positional argument**.
 read-side and write-side twins of one deliberate hole (plans 030, 031). They are
 reachable only from an admin route, and they stay R5-compatible through
 **opacity** rather than scoping: no viewer, no preview, no search, no diff, no
-count. `import_database`'s single-admin guard lives in the service, not the
-router. Recorded here so a reviewer auditing "every read takes `user_id`" finds
-the exception stated rather than discovering it; `transfer.md` has the reasoning.
+count. The single-admin guard lives in the shared in-transaction import helper
+that both the admin import and the bootstrap restore call — not in either router
+(fast/003, `DEC-F003-1`). Recorded here so a reviewer auditing "every read takes
+`user_id`" finds the exception stated rather than discovering it; `transfer.md`
+has the reasoning.
 
 ### Authorization as router dependencies
 
@@ -561,7 +576,8 @@ four share one fact — the cookie's name and flags — and are used by two rout
 **What `require_user` resolves**, stated because three docs depend on it:
 
 ```
-cookie → SHA-256 digest → an auth_sessions row, not revoked, not expired
+cookie → (no account can exist? → 401 not_authenticated)
+       → SHA-256 digest → an auth_sessions row, not revoked, not expired
        → join users → the account must be enabled
        → CurrentUser { id, username, role }   # role read LIVE from users
 ```
@@ -570,6 +586,37 @@ Consequence: **a role change or a disable takes effect on the caller's next
 request**, with no session rewrite. `auth_sessions` carries no `role` column
 (`data-model.md`), so there was never a cached role to go stale. `require_role`
 runs the same resolution and then compares the rung.
+
+**The no-account guard** (fast/010.unconfigured-to-bootstrap). A request that
+carries a session cookie against a database where **no account can exist** — no
+`users` table at all, or one with zero rows — is refused with **401
+`not_authenticated`** before any session lookup, **never a 500**. A stale cookie
+left over from an earlier database (a wiped file, a fresh instance on the same
+origin) therefore lands the browser on the ordinary sign-in path rather than an
+error page. With no cookie, `require_user` answers 401 without touching the
+database, as before. `require_role` inherits the guard because it resolves
+through `require_user`.
+
+- **The predicate is "any user exists", deliberately not `is_configured`**
+  (`DEC-F010-4`). "No account exists" is a fact about authentication; "no
+  administrator exists" is a fact about bootstrap, and only the former belongs
+  in the authentication dependency. So session refusal is a **strict subset** of
+  "bootstrap is open": on a database that holds users but no administrator,
+  `/api/health` reports `configured: false` and bootstrap is admitted, yet a
+  valid cookie still authenticates. That combination cannot arise through the
+  product and is accepted. Keying the guard on `is_configured` was the rejected
+  first version: it would sign everyone out the moment the last administrator
+  was demoted. Named so nobody "aligns" the two predicates later.
+- **Placement** (`DEC-F010-5`): the guard sits in `app/dependencies.py`, on the
+  router side; its read, `any_user_exists`, sits in `services/bootstrap.py`
+  beside `is_configured`, is transaction-neutral and is safe on a schema-less
+  database. That keeps every SQL statement in `services/` and follows the
+  existing `dependencies → services` direction, with no new service-to-service
+  import.
+- **Cost and flip** (`DEC-F010-6`): every cookie-bearing request pays two small
+  reads before session resolution, accepted without measurement. **Flip
+  condition:** if per-request auth cost ever shows, the guard narrows to run
+  only after session resolution fails on a missing table.
 
 `require_role(Role.admin)` sits on **every** route in `admin_users.py`,
 `admin_llm.py` and `admin_db.py` — as a router-level dependency, not per handler,
@@ -605,12 +652,12 @@ bootstrap route cannot forget it.
 
 #### The bootstrap route surface — FEAT-001
 
-**Realizes:** FEAT-001, UC-001, UC-003
+**Realizes:** FEAT-001, UC-001, UC-002, UC-003
 
 | Route | Answers | Notes |
 |---|---|---|
 | `POST /api/bootstrap/create` | **201** + the new administrator's identity — id as a decimal string, username, role — **and `Set-Cookie`** | request = username + password, nothing else accepted onto the account; **the body carries no token** |
-| `POST /api/bootstrap/import` | — | **reserved**, not built: `fast/003.bootstrap-from-export` adds it under the same guard (UC-002, deferred) |
+| `POST /api/bootstrap/import` | **204**, no body, **and no `Set-Cookie`** | the restore from a whole-database export (UC-002; fast/003.bootstrap-from-export). Request = the export as a raw JSON object, exactly as the admin import takes it (`transfer.md`). Errors: **400** `export_invalid`, **409** `already_configured`, **409** `database_not_empty`, and FastAPI's own **422** |
 
 - **The create signs the operator in.** It mints an `auth_sessions` row **inside
   the same transaction** that applies the registry and inserts the first
@@ -618,15 +665,26 @@ bootstrap route cannot forget it.
   writer in `app/dependencies.py` (plan 004, which closed the deferral plan 003
   shipped with). The body still carries no token or session field — the cookie
   is the only carrier, exactly as for login.
+- **The restore signs nobody in — a deliberate asymmetry with the create**
+  (`DEC-F003-2`). There is no session to hand out: an import never restores
+  `auth_sessions`, and the restored accounts' credentials travel in the export.
+  The bootstrap entry hands the operator off to `/login`, where they sign in
+  with the export's own credentials (`frontend-structure.md`, `DEC-F003-3`).
+- **The restore is one transaction**: the unconfigured re-check, then
+  `create_all` over the registry, then the FTS ensure, then the shared
+  in-transaction import the admin import also runs (`transfer.md`). Because DDL
+  is transactional in this backend ("Transactional DDL", below), a failed
+  restore leaves **no tables behind** — the instance stays unconfigured and
+  bootstrap is still offered (`DEC-F003-1`).
 - **`require_unconfigured` is attached to the router, not the handler**, and is
   declared in `routers/bootstrap.py` itself rather than in a shared module: its
-  only consumer is that router. A router-level guard is what lets `fast/003`'s
-  import route inherit the refusal for free.
+  only consumer is that router. A router-level guard is what gives the restore
+  route its refusal for free.
 - `already_configured` answers **409** (the per-code status record below).
 
 #### The admin route surfaces — FEAT-003, FEAT-004, FEAT-005
 
-**Realizes:** FEAT-003, FEAT-004, FEAT-005, UC-006..UC-015, UC-087
+**Realizes:** FEAT-003, FEAT-004, FEAT-005, UC-006..UC-016, UC-087
 
 All three live under **`/api/admin/`**, one prefix per router, each with
 `require_role(Role.admin)` attached once at router level. No document fixed the
@@ -676,21 +734,24 @@ Four decisions embedded in it:
 - **The clear-designation path is server-scoped**, so it cannot collide with
   `{server_id}` in the route table.
 
-**`/api/admin/database` — `routers/admin_db.py` (plan 007), plus the two
-transfer routes (plans 030, 031).** Five routes:
+**`/api/admin/database` — `routers/admin_db.py` (plan 007, and the rebuild of
+fast/002), plus the two transfer routes (plans 030, 031).** Six routes:
 
 | Route | Answers |
 |---|---|
 | `GET /api/admin/database/tables` | **200**, the whole drift report |
 | `POST /api/admin/database/tables/{table_name}/create` | **200**, the per-table report **re-derived after the apply** |
 | `POST /api/admin/database/tables/{table_name}/sync` | the same |
+| `POST /api/admin/database/rebuild` | **200**, the names of the four derived tables it rebuilt; **409** `no_embedding_model` with no usable designation (fast/002.vector-index-rebuild — UC-016, `admin-surfaces.md`, `search-and-retrieval.md`; `DEC-F002-1`..`DEC-F002-10`) |
 | `GET /api/admin/database/export` | **200**, the whole-database export as a JSON file attachment (plan 030, `transfer.md`) |
 | `POST /api/admin/database/import` | **204**, and the session cookie cleared (plan 031, `transfer.md`) |
 
-The first three take no body and no query parameter. The import is **the first
-admin-database route that takes a body**, and it is a raw JSON object rather
-than a pydantic model — one of the two named exceptions above. Neither transfer
-route needs a per-handler guard: `require_role(Role.admin)` is on the router.
+The three drift routes and the rebuild take no body and no query parameter. The
+rebuild re-derives all four derived tables in **one transaction** from the
+relational rows. The import is **the first admin-database route that takes a
+body**, and it is a raw JSON object rather than a pydantic model — one of the two
+named exceptions above. Neither transfer route nor the rebuild needs a
+per-handler guard: `require_role(Role.admin)` is on the router.
 
 - **Each apply answers with the re-derived row**, giving US-018.AC-2 a
   server-side witness beside the page's re-load.
@@ -1212,7 +1273,7 @@ The named errors the design requires:
 | `database_not_empty` | A whole-database import reaches an instance holding content (`US-077.AC-3`) | nothing | FEAT-018, UC-061 |
 | `already_configured` | A bootstrap route is reached on a configured instance (UC-003) | nothing | FEAT-001 |
 | `invalid_credentials` | A login attempt fails for **any** reason — unknown username, wrong password, or a disabled account | nothing | FEAT-002, US-006.AC-3 |
-| `not_authenticated` | A guarded route is reached with no session cookie, or one that does not resolve to a live session | nothing | FEAT-002 |
+| `not_authenticated` | A guarded route is reached with no session cookie, or one that does not resolve to a live session — **including a cookie on a database where no account can exist** (the no-account guard above) | nothing | FEAT-002 |
 | `insufficient_role` | An authenticated, enabled caller's role is below the required rung | nothing — **it names neither the caller's role nor the required one** | FEAT-002 |
 
 **`account_disabled` is struck** (plan 004). Nothing raises it: a correct password
@@ -1358,8 +1419,10 @@ moves to a 4xx. No code changed with this decision.
 
 - **`configured`** is FEAT-001's signal: a database with at least one
   administrator exists. The bootstrap entry uses it to decide whether to offer
-  bootstrap at all; UC-003's refusal is the server-side enforcement of the same
-  fact.
+  bootstrap at all, and the login entry uses it to send a signed-out visitor on
+  an unconfigured instance to the bootstrap offer instead of the form
+  (fast/010.unconfigured-to-bootstrap, `frontend-structure.md`). UC-003's
+  refusal is the server-side enforcement of the same fact.
 - **`schema`** is a coarse roll-up of FEAT-005's drift check (the detailed
   per-table report is admin-only, `admin_db.py`). It is safe unauthenticated
   because it names no table contents and no user.
@@ -1397,11 +1460,11 @@ still reaches `probe_health` as a **parameter**.
 - **`status` roll-up:** a non-`"ok"` `schema` gives `"degraded"`; otherwise
   `configured` false gives `"unconfigured"`; otherwise `"ok"`.
 - **All three `status` values answer HTTP 200** (decided in plan 001). The body
-  *is* the answer, and every consumer — the bootstrap entry, the container
-  healthcheck, an operator — must be able to read it; returning `"degraded"` as a
-  503 would make the SPA discard the very body that explains the condition. **A
-  probe that cannot read the database at all is a 500** — that is the case where
-  there is no body worth reading.
+  *is* the answer, and every consumer — the bootstrap entry, the login entry, the
+  container healthcheck, an operator — must be able to read it; returning
+  `"degraded"` as a 503 would make the SPA discard the very body that explains the
+  condition. **A probe that cannot read the database at all is a 500** — that is
+  the case where there is no body worth reading.
 - **Later features widen this function; they do not rewrite it.** `configured` is
   sharpened by FEAT-001's bootstrap (plan 003) and `"drift"` is filled in by
   FEAT-005 (plan 007); the response shape above is unchanged by either.
@@ -1420,9 +1483,9 @@ because a declared table really is absent and the roll-up gives a non-`"ok"`
 like a fault and will be reported as one; it is not. Two consequences for
 clients:
 
-- **The bootstrap entry branches on `configured` alone and never on `status`**
-  (`frontend-structure.md`). `configured` is FEAT-001's signal; `status` is an
-  operator's roll-up.
+- **The bootstrap and login entries branch on `configured` alone and never on
+  `status`** (`frontend-structure.md`). `configured` is FEAT-001's signal;
+  `status` is an operator's roll-up.
 - **`status: "unconfigured"` is the narrower case** of a database whose tables
   exist with no administrator row in them.
 
@@ -1580,6 +1643,10 @@ One SQLite connection factory in `db/engine.py`, which on every connection:
   reads happen,
 - loads the `sqlite-vec` extension, so `vec0` tables and the KNN operators are
   available on every connection rather than only where someone remembered,
+- registers the **`rp_casefold`** SQL function, which every name match
+  (characters, setups, session names) goes through so that matching is
+  case-insensitive in every script (fast/006.unicode-name-matching,
+  `data-model.md`, `search-and-retrieval.md`; `DEC-F006-1`..`DEC-F006-5`),
 - and runs the pysqlite driver with **transactional DDL** (below).
 
 ### Transactional DDL — the driver never opens or commits on its own
@@ -1624,10 +1691,11 @@ with FEAT-001 (`backend/tests/test_db_engine.py`) is the check.
 
 ### The PRAGMA and WAL lifecycle — one listener, every connection
 
-All three are applied by a **single SQLAlchemy `connect` event listener on the
-engine**, which runs on every new connection — extension load, then
-`foreign_keys`, then `journal_mode` — and **none of it is applied per
-transaction**. One mechanism, no first-open special case:
+All four are applied by a **single SQLAlchemy `connect` event listener on the
+engine**, which runs on every new connection — extension load, then the
+`rp_casefold` registration, then `foreign_keys`, then `journal_mode` — and
+**none of it is applied per transaction**. One mechanism, no first-open special
+case:
 
 - `PRAGMA foreign_keys = ON` genuinely is per-connection state and must be re-set
   on every connection, so the listener is required for it regardless. **One code
@@ -1635,6 +1703,13 @@ transaction**. One mechanism, no first-open special case:
   on both paths ("Schema evolution", below).
 - `PRAGMA journal_mode = WAL` is a **persistent, file-level** property. Re-asserting
   it on a connection that already sees WAL is a cheap idempotent no-op.
+- **`rp_casefold` exists only on connections from `get_engine`**, because it is
+  registered by this listener and nowhere else. A raw `sqlite3` connection opened
+  outside the engine — a test fixture, an operator's shell — does not have it,
+  and any query that calls it there fails. It is a per-connection registration,
+  not a schema object, so the admin schema-drift check never sees it and never
+  reports it (fast/006). Its place between the extension load and the PRAGMAs is
+  `DEC-F006-2`.
 
 The rejected alternative was setting WAL once, at first open. That is a second
 mechanism with its own ordering question ("first open" of what, by whom, before
@@ -1812,6 +1887,9 @@ wrongly:
    at startup nor FEAT-005's admin-triggered Sync**: it is a one-time,
    operator-triggered operation on an instance that has no schema at all, it uses
    no Alembic and no `db/sync.py`, and fact 2's "no DDL at startup" is untouched.
+   The bootstrap restore (fast/003) uses the same request-time `create_all`,
+   inside the same transaction as its import (the bootstrap route surface,
+   above).
    "Inside the same transaction" is true only because of the engine's
    transactional-DDL setting (Database access, above).
 
@@ -1870,9 +1948,10 @@ startup" is untouched — `main.py`'s lifespan still runs none.
 table's **FTS triggers** with it. The next ensure-on-write restores the triggers,
 but it does **not** back-fill an already-existing FTS table — so between the Sync
 and the next full rebuild, that lexical index is **stale** for every row written
-in between. `fast/002.vector-index-rebuild` rebuilding both FTS tables is the
-only repair, which makes rebuild-after-Sync an operational step rather than an
-optional tidy-up (`admin-surfaces.md`).
+in between. The whole-index rebuild (`POST /api/admin/database/rebuild`, built by
+fast/002.vector-index-rebuild) re-derives both FTS tables and is the only repair,
+which makes rebuild-after-Sync an operational step rather than an optional
+tidy-up (`admin-surfaces.md`).
 
 The flip condition is recorded in `overview.md`.
 
@@ -1902,15 +1981,25 @@ exception flow). The two postures, as built:
 | memo **delete** | its `memo_vec` and `memo_fts` rows go in the same transaction; no model is needed |
 | character **persona** edit, setup **description** edit (the `session_vec` fan-out) | **fails the transaction** |
 | character / setup **create**, or a **name-only** edit | nothing — no session text changed, so no model is needed |
-| settled-entry edit, settle, re-open, **partner filing** (`session_vec`) | **succeeds, degraded** — the row is stored and the response carries `search_coverage_incomplete` |
+| settled-entry edit, settle, re-open, **partner filing** (`session_vec`) | **succeeds, degraded** — the row is stored, the session's existing `session_vec` row is cleared, and the response carries `search_coverage_incomplete` |
 | zone append, zone-row edit | nothing — a zone row is not indexed; the coverage flag is false |
 
-**The caught set on the degraded path is `no_embedding_model` (including the
-dimension-mismatch form) and `llm_unreachable`** (024 U3, D8). The strict path
-catches neither and lets both propagate, at 409 and 502 respectively. So
-**`no_embedding_model` has two callers** — one that lets it out of the
-transaction, one that swallows it and reports degradation in the write's own
-response — and that split is the whole of the asymmetry's implementation.
+**The caught set on the degraded path is three codes: `no_embedding_model`
+(including the dimension-mismatch form), `llm_unreachable`, and
+`secret_ref_missing`** — the last because `US-112.AC-1` covers credentials the
+instance cannot use (fast/005.degraded-embedding-path, `DEC-F005-1`). Any other
+exception propagates. The strict path catches none of the three and lets each
+propagate under its own status — **409**, **502** and **500** respectively. So
+each of the three has two callers — one that lets it out of the transaction, one
+that swallows it and reports degradation in the write's own response — and that
+split is the whole of the asymmetry's implementation.
+
+**A degraded write clears the material's existing vector rather than leaving it
+stale** (`US-112.AC-3`, `DEC-F005-2`). The clear resolves its row through an
+owner-scoped query first, because the derived tables carry no user column
+(plan 032's finding). The accepted consequence is stated with the route-level
+view in `session-stream.md`. There is still no staleness marker and no
+staleness column (024 U5).
 
 **This asymmetry is deliberate and is named here so nobody harmonises the two
 later.** In short: a memo exists *in order to be retrieved*, so an unembedded one
@@ -1923,28 +2012,10 @@ route-level view of the degraded path.
 **One qualifier on the memo rule, added by the import** (plan 031). The strict
 transaction is what makes a memo with no vector an **anomaly** — but **no import
 embeds anything**, at any granularity, so after plan 031 a memo without a vector
-is also a perfectly **normal post-import state**, until
-`fast/002.vector-index-rebuild` runs. The transaction rule is unchanged for every
+is also a perfectly **normal post-import state**, until the whole-index rebuild
+(fast/002.vector-index-rebuild) runs. The transaction rule is unchanged for every
 write that goes through the API; what changed is that "no vector" is no longer
 diagnostic on its own (`transfer.md`).
-
-**Two defects live on the degraded path**, recorded here because this is the
-section a reader checks before changing it, and neither is behaviour this doc
-endorses:
-
-- **`secret_ref_missing` is not in the caught set — defect D-03.** An unset
-  `$ENV_VAR` key on the designated server therefore makes a settle or a settled
-  edit fail with a **500** and refuses the roleplayer's own text.
-  `US-112.AC-1` was widened at the 2026-10-06 product finalization to cover
-  "credentials the instance cannot use", so the build does not satisfy it. See
-  `docs/plans/defects.md` D-03.
-- **A failed degraded embed leaves any existing vector stale — defect D-04.**
-  There is no staleness marker and no staleness column (024 U5), and the recorded
-  remedy is the whole-index rebuild (UC-016). `US-112.AC-3`, new at the same
-  finalization, requires the material's existing vectors to be **cleared**
-  instead. See `docs/plans/defects.md` D-04, and note plan 032's finding that any
-  such delete must resolve its row ids through an owner-scoped query first —
-  the derived tables carry no user column.
 
 ## Decision history
 

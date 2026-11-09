@@ -11,9 +11,8 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** Bring an unconfigured instance to a usable state: create a new
   database with a first admin, or import an existing database export.
 - **Actors:** ACT-003 · **Priority:** must
-- **Status:** partially delivered
-- **Delivered:** docs/plans/003.first-run-bootstrap/ (2026-09-29); US-001.AC-2 by docs/plans/004.authentication-session/ (2026-09-29)
-- **Remaining:** UC-002, US-002 → docs/plans/fast/003.bootstrap-from-export/; US-148 (not yet planned)
+- **Status:** delivered
+- **Delivered:** 003.first-run-bootstrap (2026-09-29); US-001.AC-2 by 004.authentication-session (2026-09-29); UC-002 / US-002 by fast/003.bootstrap-from-export (2026-10-07); US-148 by fast/010.unconfigured-to-bootstrap (2026-10-07)
 - **Realized by:** UC-001, UC-002, UC-003, US-001, US-002, US-003, US-148
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
 
@@ -22,7 +21,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   disabled account cannot log in.
 - **Actors:** ACT-001, ACT-002 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/004.authentication-session/ (2026-09-29); US-007.AC-1 by docs/plans/008.app-shell-frame/ (2026-10-01)
+- **Delivered:** 004.authentication-session (2026-09-29); US-007.AC-1 by 008.app-shell-frame (2026-10-01)
 - **Realized by:** UC-004, UC-005, US-004, US-005, US-006, US-007
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 7.
 
@@ -32,7 +31,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   reaching content.
 - **Actors:** ACT-001 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/005.admin-shell-and-users/ (2026-09-29)
+- **Delivered:** 005.admin-shell-and-users (2026-09-29)
 - **Realized by:** UC-006, UC-007, UC-008, UC-009, UC-087, US-008, US-009,
   US-010, US-011, US-140
 - **Note:** Disabling an account ends that user's sessions. The account list
@@ -44,7 +43,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   OpenAI); enable specific models; designate the embedding server and model.
 - **Actors:** ACT-001 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/006.llm-server-connections/ (2026-09-30); US-014 + US-016.AC-3 by docs/plans/017.session-configuration/ (2026-10-03); US-016.AC-2 by docs/plans/011.rp-sessions/ (2026-10-02) and docs/plans/019.streaming-transport-and-stop/ (2026-10-04)
+- **Delivered:** 006.llm-server-connections (2026-09-30); US-014 + US-016.AC-3 by 017.session-configuration (2026-10-03); US-016.AC-2 by 011.rp-sessions (2026-10-02) and 019.streaming-transport-and-stop (2026-10-04)
 - **Realized by:** UC-010, UC-011, UC-012, UC-013, US-012, US-013, US-014,
   US-015, US-016
 - **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 7.
@@ -53,9 +52,8 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Purpose:** Report per-table schema drift and let an admin remediate it
   (create missing tables, rebuild the vector index).
 - **Actors:** ACT-001 · **Priority:** must
-- **Status:** partially delivered
-- **Delivered:** docs/plans/007.schema-drift-and-remediation/ (2026-09-30)
-- **Remaining:** UC-016, US-019 → docs/plans/fast/002.vector-index-rebuild/
+- **Status:** delivered
+- **Delivered:** 007.schema-drift-and-remediation (2026-09-30); UC-016 / US-019 by fast/002.vector-index-rebuild (2026-10-07)
 - **Realized by:** UC-014, UC-015, UC-016, US-017, US-018, US-019
 - **Note:** Owns drift, remediation and vector-index rebuild — see the
   Relationships boundary below against FEAT-018, which owns export/import.
@@ -66,7 +64,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   setups and partners, that the assistant composes replies as.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/009.characters/ (2026-10-02); US-021.AC-2 by docs/plans/020.context-assembly/ (2026-10-04)
+- **Delivered:** 009.characters (2026-10-02); US-021.AC-2 by 020.context-assembly (2026-10-04)
 - **Realized by:** UC-017, UC-018, UC-019, UC-067, US-020, US-021, US-022,
   US-086
 - **Note:** Archives and restores — out of the working list, nothing
@@ -81,7 +79,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   own memos and acting as a search anchor for a situation.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/010.setups/ (2026-10-02); US-023.AC-2 / US-024.AC-1 / US-024.AC-3 / US-025.AC-1 by docs/plans/011.rp-sessions/ (2026-10-02); US-024.AC-2 by docs/plans/012.messages-and-settle/ (2026-10-02); US-025.AC-2 by docs/plans/015.memos/ (2026-10-03), docs/plans/026.memo-search-tool/ (2026-10-05) and docs/plans/027.session-search-tool/ (2026-10-05)
+- **Delivered:** 010.setups (2026-10-02); US-023.AC-2 / US-024.AC-1 / US-024.AC-3 / US-025.AC-1 by 011.rp-sessions (2026-10-02); US-024.AC-2 by 012.messages-and-settle (2026-10-02); US-025.AC-2 by 015.memos (2026-10-03), 026.memo-search-tool (2026-10-05) and 027.session-search-tool (2026-10-05)
 - **Realized by:** UC-020, UC-021, UC-022, UC-068, US-023, US-024, US-025,
   US-087
 - **Note:** Setup is optional — a genuine absence, not a default that is
@@ -99,9 +97,8 @@ dependency graph below, not from priority (challenge C4, rejected).
   always resumable, ordered by last use.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** partially delivered
-- **Delivered:** docs/plans/011.rp-sessions/ (2026-10-02); US-027.AC-3 by docs/plans/012.messages-and-settle/ (2026-10-02); UC-080 / US-117.AC-1 / AC-2 / AC-4 by docs/plans/018.character-page/ (2026-10-03); US-145 by docs/plans/011.rp-sessions/ (2026-10-02) and docs/plans/029.my-search/ (2026-10-05) (since withdrawn, 2026-11-05)
-- **Remaining:** US-117.AC-3 (UC-080 step 5) — specified, not built, no
-  plan owns it; UC-089, US-150 — not built, not yet planned
+- **Delivered:** 011.rp-sessions (2026-10-02); US-027.AC-3 by 012.messages-and-settle (2026-10-02); UC-080 / US-117.AC-1 / AC-2 / AC-4 by 018.character-page (2026-10-03); UC-080 step 5 / US-117.AC-3 by fast/004.character-page-first-reply (2026-10-07); US-145 by 011.rp-sessions (2026-10-02) and 029.my-search (2026-10-05) (since withdrawn, 2026-11-05)
+- **Remaining:** UC-089, US-150 — not built, not yet planned
 - **Realized by:** UC-023, UC-024, UC-025, UC-026, UC-080, UC-089, US-026,
   US-027, US-028, US-029, US-117, US-145 (withdrawn), US-150
 - **Note:** No "finished" state — a session stays open indefinitely.
@@ -122,10 +119,8 @@ dependency graph below, not from priority (challenge C4, rejected).
   blocks, the roleplayer's own turns, and decisions — three kinds, still
   independent and still addable in any order.
 - **Actors:** ACT-002 · **Priority:** must
-- **Status:** partially delivered
-- **Delivered:** docs/plans/012.messages-and-settle/ (2026-10-02); docs/plans/013.stream-and-zone-ui/ (2026-10-02); docs/plans/014.entry-editing-and-copy-out/ (2026-10-02); US-111 by docs/plans/023.partner-translation/ (2026-10-04); US-112 by docs/plans/024.embedding-lifecycle/ (2026-10-04); US-122.AC-2 by docs/plans/027.session-search-tool/ (2026-10-05); US-149 by fast/014.message-delete (2026-11-05)
-- **Remaining:** US-112.AC-1 (widened half), US-112.AC-3 — shipped
-  behaviour does not satisfy them → docs/plans/defects.md
+- **Status:** delivered
+- **Delivered:** 012.messages-and-settle (2026-10-02); 013.stream-and-zone-ui (2026-10-02); 014.entry-editing-and-copy-out (2026-10-02); US-111 by 023.partner-translation (2026-10-04); US-112 by 024.embedding-lifecycle (2026-10-04); US-112.AC-1 (widened half) / AC-3 by fast/005.degraded-embedding-path (2026-10-07); US-122.AC-2 by 027.session-search-tool (2026-10-05); US-149 by fast/014.message-delete (2026-11-05)
 - **Realized by:** UC-027, UC-028, UC-029, UC-030, UC-031, UC-078, UC-081,
   UC-082, US-030, US-031, US-032, US-033, US-034, US-035, US-109, US-110,
   US-111, US-112, US-120, US-121, US-122, US-123, US-124, US-149
@@ -167,9 +162,9 @@ dependency graph below, not from priority (challenge C4, rejected).
   roleplayer and the assistant work out the settled reply.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
 - **Status:** partially delivered
-- **Delivered:** docs/plans/012.messages-and-settle/ (2026-10-02); docs/plans/013.stream-and-zone-ui/ (2026-10-02); docs/plans/019.streaming-transport-and-stop/ (2026-10-04); docs/plans/020.context-assembly/ (2026-10-04); docs/plans/021.compose-loop-and-tools/ (2026-10-04); docs/plans/022.discussion-ui/ (2026-10-04)
+- **Delivered:** 012.messages-and-settle (2026-10-02); 013.stream-and-zone-ui (2026-10-02); 019.streaming-transport-and-stop (2026-10-04); 020.context-assembly (2026-10-04); 021.compose-loop-and-tools (2026-10-04); 022.discussion-ui (2026-10-04)
 - **Remaining:** US-115.AC-1's streaming half — a reply still streaming is
-  not editable → docs/plans/defects.md
+  not editable → D-02 (docs/plans/defects.md)
 - **Realized by:** UC-032, UC-033, UC-034, UC-035, UC-036, UC-037, UC-038,
   UC-079, UC-083, UC-084, UC-085, UC-086, US-036, US-037, US-038, US-039,
   US-040, US-041, US-042, US-043, US-044, US-113, US-114, US-115, US-116,
@@ -238,7 +233,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   into the roleplayer's preferred language, on demand.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/023.partner-translation/ (2026-10-04)
+- **Delivered:** 023.partner-translation (2026-10-04)
 - **Realized by:** UC-039, UC-040, UC-041, US-045, US-046, US-047, US-048
 - **Note:** Nothing is translated until the roleplayer flicks it; the result
   is cached after first use so the second look is instant and costs nothing.
@@ -260,7 +255,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   enabled or disabled.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/015.memos/ (2026-10-03); docs/plans/016.note-wall/ (2026-10-03); US-054 / US-055.AC-1 / US-098 / US-102.AC-1 / US-103.AC-1 by docs/plans/020.context-assembly/ (2026-10-04); US-055.AC-2 by docs/plans/026.memo-search-tool/ (2026-10-05)
+- **Delivered:** 015.memos (2026-10-03); 016.note-wall (2026-10-03); US-054 / US-055.AC-1 / US-098 / US-102.AC-1 / US-103.AC-1 by 020.context-assembly (2026-10-04); US-055.AC-2 by 026.memo-search-tool (2026-10-05)
 - **Realized by:** UC-042, UC-043, UC-044, UC-045, UC-046, UC-075, UC-076,
   UC-088, US-049, US-050, US-051, US-052, US-053, US-054, US-055, US-056,
   US-057, US-098, US-099, US-100, US-101, US-102, US-103, US-104, US-119,
@@ -298,7 +293,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   live `user → session`.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/017.session-configuration/ (2026-10-03); UC-048 / US-059 by docs/plans/018.character-page/ (2026-10-03); US-107 by docs/plans/021.compose-loop-and-tools/ (2026-10-04)
+- **Delivered:** 017.session-configuration (2026-10-03); UC-048 / US-059 by 018.character-page (2026-10-03); US-107 by 021.compose-loop-and-tools (2026-10-04)
 - **Realized by:** UC-047, UC-048, UC-049, UC-050, UC-077, US-058, US-059,
   US-060, US-061, US-062, US-105, US-106, US-107, US-108, US-139, US-142,
   US-143, US-144
@@ -344,7 +339,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   memo chain.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/026.memo-search-tool/ (2026-10-05)
+- **Delivered:** 026.memo-search-tool (2026-10-05)
 - **Realized by:** UC-051, UC-052, US-063, US-064, US-065, US-066
 - **Note:** Forced memos are excluded because they are already in context;
   disabled memos are excluded because they reach the assistant by no path.
@@ -361,7 +356,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   meaning.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/027.session-search-tool/ (2026-10-05)
+- **Delivered:** 027.session-search-tool (2026-10-05)
 - **Realized by:** UC-053, UC-054, US-067, US-068, US-069, US-138
 - **Note:** Semantic only — no structured matching on partner name or setup,
   because the partner is free text and the setup is optional (challenge C5).
@@ -380,7 +375,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   roleplayer's behalf.
 - **Actors:** ACT-002, ACT-004 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/028.web-search-tool/ (2026-10-05)
+- **Delivered:** 028.web-search-tool (2026-10-05)
 - **Realized by:** UC-055, UC-056, UC-057, US-070, US-071, US-072, US-073
 - **Note:** Three justified uses (challenge C2): a real-world fact (a place,
   a weapon, a procedure, a period detail); an idiom or naturalness check
@@ -400,9 +395,8 @@ dependency graph below, not from priority (challenge C4, rejected).
   any screen.
 - **Actors:** ACT-002 · **Priority:** must
 - **Status:** partially delivered
-- **Delivered:** docs/plans/029.my-search/ (2026-10-05)
-- **Remaining:** US-147 — name matching folds case ASCII-only →
-  docs/plans/defects.md; US-152 — not built, not yet planned
+- **Delivered:** 029.my-search (2026-10-05); US-147 by fast/006.unicode-name-matching (2026-10-07)
+- **Remaining:** US-152 — not built, not yet planned
 - **Realized by:** UC-058, UC-059, UC-060, US-074, US-075, US-076, US-118,
   US-137, US-147, US-152
 - **Note:** Distinct from FEAT-014/FEAT-015, not an overlap (challenge C7,
@@ -427,7 +421,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   per-user, per-character, per-session — each carrying its own memos.
 - **Actors:** ACT-001, ACT-002 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** export halves by docs/plans/030.export-granularities/ (2026-10-05); import halves by docs/plans/031.import-and-id-remapping/ (2026-10-05)
+- **Delivered:** export halves by 030.export-granularities (2026-10-05); import halves by 031.import-and-id-remapping (2026-10-05)
 - **Realized by:** UC-061, UC-062, UC-063, UC-064, US-077, US-078, US-079,
   US-080, US-081, US-082, US-136
 - **Note:** Owns export/import at every granularity — see the Relationships
@@ -465,7 +459,7 @@ dependency graph below, not from priority (challenge C4, rejected).
   user's material.
 - **Actors:** ACT-001, ACT-002 · **Priority:** must
 - **Status:** delivered
-- **Delivered:** docs/plans/032.privacy-isolation-audit/ (2026-10-06)
+- **Delivered:** 032.privacy-isolation-audit (2026-10-06)
 - **Realized by:** UC-065, UC-066, US-083, US-084, US-085
 - **Note:** Absolute — every listing, search and tool is scoped to the
   owning user; administrative surfaces expose no user content. This is how
@@ -490,7 +484,7 @@ dependency graph below, not from priority (challenge C4, rejected).
 - **Actors:** ACT-002 (primary), ACT-001 (admin entry point only) ·
   **Priority:** must
 - **Status:** partially delivered
-- **Delivered:** docs/plans/008.app-shell-frame/ (2026-10-01); UC-069 / US-088 / US-089 by docs/plans/011.rp-sessions/ (2026-10-02); UC-072 / US-094 / US-095 by docs/plans/016.note-wall/ (2026-10-03); US-092 by docs/plans/017.session-configuration/ (2026-10-03); UC-073 / UC-074 / US-096 / US-097 by docs/plans/018.character-page/ (2026-10-03); US-118 by docs/plans/029.my-search/ (2026-10-05)
+- **Delivered:** 008.app-shell-frame (2026-10-01); UC-069 / US-088 / US-089 by 011.rp-sessions (2026-10-02); UC-072 / US-094 / US-095 by 016.note-wall (2026-10-03); US-092 by 017.session-configuration (2026-10-03); UC-073 / UC-074 / US-096 / US-097 by 018.character-page (2026-10-03); US-118 by 029.my-search (2026-10-05)
 - **Remaining:** US-151 — not built, not yet planned
 - **Realized by:** UC-069, UC-070, UC-071, UC-072, UC-073, UC-074, US-088,
   US-089, US-090, US-091, US-092, US-093, US-094, US-095, US-096, US-097,
@@ -590,7 +584,8 @@ order are unchanged by this round. Three `docs/architecture/` items raised
 for this layer are answered by this round — the `user → character → session`
 wording (UC-012), what session creation does with no enabled model (US-143),
 and whether the character page's first message draws a reply (US-117.AC-3
-stands, and is recorded as a defect in `docs/plans/defects.md`). A fourth, on
-discarding a translation when a non-partner settled row is edited, is answered
-by US-111.AC-3.
+stands; it was recorded as defect D-01 in `docs/plans/defects.md`, since
+closed by `fast/004.character-page-first-reply`). A fourth, on discarding a
+translation when a non-partner settled row is edited, is answered by
+US-111.AC-3.
 <!-- product-spec:end -->

@@ -152,7 +152,7 @@ tree becomes an off-canvas overlay":
 | Wall, floating | `min(320px, 84vw)` | 320px reads a note body at 12px without wrapping every line; the `84vw` cap keeps a sliver of stream visible on a narrow screen so the overlay reads as an overlay |
 | Wall, pinned | `320px` | no `vw` term — pinned, it is a grid column and the grid already bounds it |
 | Stream column | `max-width: 720px`, centred, `padding-inline: 18px` | a measure for prose, not for the viewport; the stream is read, not scanned |
-| Composer | same 720px / 18px as the stream | the composer is the stream's last item visually and must share its left edge |
+| Composer | session screen: same 720px / 18px as the stream; character page's start composer: **fills its container** — no 720px cap, no 18px padding | on the session screen the composer is the stream's last item visually and must share its left edge; on the character page there is no stream whose edge it must share, and the user wanted the full width there (user decision, fast/011) |
 | Composer text area | starts at `rows` **3** in the session composer, **10** in the character page's start composer; **native vertical handle** (`resize: vertical`); **no auto-grow**; scrolls internally; a dragged height is persisted per place | the roleplayer sizes the writing area themselves and it stays that size; 10 lines where a session is started, because the user wanted the larger area there especially (2026-10-08 decision, below) |
 | Responsive threshold | `820px` | below it the tree becomes a 48px rail with a lifted overlay, and a pinned wall reverts to floating |
 
@@ -212,9 +212,10 @@ composer appears, differing only in the default and the persistence field:
 | Persisted height | `rphelper.composer-heights`, field `chat` | same key, field `start` |
 
 Both are rendered through the shared presentational `ComposerCore` (018 D4, below),
-so the default line count and the persistence field are a **parameter of
-`ComposerCore`**, supplied by each host. The exact prop shape is left to the plan
-that builds it. The height is written **on drag end**, not per pixel of the drag;
+so the default line count, the persistence field and the full-width choice are
+**parameters of `ComposerCore`**, supplied by each host (as built by
+fast/011 and its bug fix; the prop shape is a code matter). The height is written
+**on drag end**, not per pixel of the drag;
 the record and its rules are under "Layout persistence" below. The handle is a
 property of the Mantine `Textarea` (its own props / style props), **not** a rule in
 `shell.css`, which holds layout only and is pinned by `tests/stylesheets.test.ts`.
@@ -234,10 +235,31 @@ and no other layout geometry reads it. The reversal record at the end of this do
 carries the history, including the earlier "grows with its content" rule this
 replaces, so nobody re-adds `autosize` by citing it.
 
-**As built, the code still follows the old rule.** Plans 013/006 (D9) and 018/003
-were built to "grows with its content" — `autosize`, a 42px minimum, no handle. The
-rule above is the design of record; the code change is delivered by a follow-up
-fast feature, and until it lands the composer in the code is the old one.
+**As built** (fast/011, 2026-10-08, with its bug fix the same day). Plans 013/006
+(D9) and 018/003 had built "grows with its content" — `autosize`, a 42px minimum,
+no handle; fast/011 replaced that with the rule above, and the composer in the code
+is the one described here. How the in-box controls are kept from covering the
+native handle, and when the height is saved, are `DEC-F011-2` and `DEC-F011-3`.
+
+**Send, Stop and the keyboard** (user decision, fast/011). The composer's own
+controls sit in two places:
+
+- **Inside the text box, at its bottom-right:** Send — an icon-only control
+  labelled "Send" (`ui-conventions.md`'s icon table) — or, while a generation
+  streams, Stop in the same spot (the stop control below).
+- **In the row beneath the box:** the send-blocked reason, Settle and the
+  empty-zone discard. On the character page the Setup select sits under the box
+  instead (below).
+
+**Ctrl+Enter, and Cmd+Enter on macOS, in the composer's text box sends** — exactly
+when Send is shown and enabled, so never while Stop shows, never while a
+send-blocked reason holds, and never during IME composition (the Enter that
+confirms a composed character is not a send). **Plain Enter and Shift+Enter insert
+a newline.** The rule is the same in both hosts, because both are `ComposerCore`.
+**The stream's edit boxes have no shortcut**: they are blur-commit editors of
+existing text, and a send shortcut there would have nothing to send. The shortcut
+is Send's primary path, which is why Send itself can be a small icon in the box it
+sends from (`ui-conventions.md`).
 
 `820px` rather than a Mantine breakpoint token: the number is the point at which
 252 + 720 + 320 stops fitting, which is a property of these three constants and not
@@ -348,9 +370,8 @@ navigation that brought the roleplayer here, not stored state.
 ## Layout persistence
 
 **Three** localStorage records, under three keys, in three pure modules. The third,
-`rphelper.composer-heights`, is the 2026-10-08 decision and is **not yet built**
-(see the composer rule under "Geometry"); the module name is the suggested one and
-the plan that builds it may settle it.
+`rphelper.composer-heights`, is the 2026-10-08 decision, built by fast/011's bug
+fix (see the composer rule under "Geometry").
 
 ```ts
 // src/app/workspaceLayout.ts  →  key "rphelper.workspace-layout"
@@ -362,7 +383,7 @@ type WorkspaceLayout = {
 // src/app/treeCollapse.ts     →  key "rphelper.tree-collapsed"
 //   a JSON array of collapsed character ids (strings)
 
-// src/app/composerHeights.ts  →  key "rphelper.composer-heights"   (suggested)
+// src/app/composerHeights.ts  →  key "rphelper.composer-heights"
 type ComposerHeights = {
   chat: number | null;   // session composer, pixel height; null = default rows 3
   start: number | null;  // character page start composer; null = default rows 10
@@ -446,8 +467,9 @@ fallback path above is unit-testable with no DOM, which is what the pipeline's
 test-coder needs (`docs/plans/AGENTS.md`). `App` owns the real storage and threads
 it to the two readers: `WorkspaceShell` and, through `SessionRoute`,
 `SessionScreen` (016 D2). The composer heights add the two composer hosts as
-readers; how the storage reaches them is the building plan's call, under the same
-rule — a parameter, never a global.
+readers, under the same rule — a parameter, never a global: `App` threads the same
+storage on through the session screen to the session composer, and through the
+character page to the start composer (fast/011's bug fix).
 
 ---
 
@@ -480,7 +502,9 @@ context menu and no separate action column: the actions sit in the entry's own
 header. **Edit, copy, the translation flicker, re-open and delete are one revealed
 group**, and the reveal is `ui-conventions.md`'s — Mantine's `useHover` +
 `useFocusWithin` + a touch query, applied as opacity so the controls stay in the
-DOM and the tab order. The stream is a column of documents, not a table, so
+DOM and the tab order. **The group is also revealed while that entry's
+translation is pending** (fast/015, DEC-F015-4), so the flicker's pending glyph is
+seen without hovering. The stream is a column of documents, not a table, so
 `forms-and-lists.md`'s table-row overflow-menu rule does not reach here — that
 rule exists to keep a *row* from collapsing under four icon buttons.
 
@@ -842,10 +866,13 @@ state. Stated here because a Settle greyed out until an assistant row exists is
 the obvious implementation and is exactly the trap US-134/US-135 were written to
 close.
 
-**Settle and Send are labelled buttons, not icons.** Settle is the most
-consequential action in the product and is the primary button; Send is secondary.
+**Settle is a labelled button, not an icon.** Settle is the most consequential
+action in the product and is the primary button, in the row beneath the composer.
 This resolved the open `_TBD:` that proposed `IconMessageCheck`
-(`ui-conventions.md`).
+(`ui-conventions.md`). **Send is no longer labelled** (user decision, fast/011):
+it is an icon-only control inside the text box, and Ctrl/Cmd+Enter is its primary
+path ("Geometry" above; `ui-conventions.md` records it as the named exception to
+"controls that spend a model call carry words").
 
 ### The enormous-paste warning sits on the composer, and only there
 
@@ -938,7 +965,8 @@ while streaming (019 D13). Reasoning, since both arrangements are defensible:
   (`llm-and-streaming.md`).
 
 **Settle is unaffected and stays exactly where it is.** It remains the primary
-labelled button beside the Send/Stop slot, enabled or not on its own rules above
+labelled button in the row beneath the box whose bottom-right corner holds the
+Send/Stop slot (fast/011), enabled or not on its own rules above
 — a generation in flight does not disable it, because the zone may already hold a
 message worth settling.
 
@@ -1047,7 +1075,10 @@ that (R3, US-101). **Both are always visible** (`ui-conventions.md`'s
 accessibility floor, where the deliberate difference from the stream's revealed
 actions is recorded). A disabled note renders struck through and dimmed but keeps
 its forced marker visible, so the state that will be restored on re-enable is
-readable before re-enabling.
+readable before re-enabling. **The two flag controls sit at the right end of the
+note's markdown editor toolbar** (user decision, fast/012) — the shared editor's
+optional trailing toolbar group (`frontend-structure.md`) — while the reach line
+and any failure text stay under the editor.
 
 Each note carries a one-line statement of its current reach — forced, searchable
 or disabled — because the two icons say what is *set* and the roleplayer needs to
@@ -1091,6 +1122,25 @@ stream entry, for the same reason. As built (015):
   is removed by emptying it, and a new note with no text is never persisted. The
   two halves are one rule seen from either end.
 - A note is created **enabled and not forced** (R3, US-053), directly in its level.
+
+**One note behaviour at every mount** — the wall's levels, the character page's
+notes and Settings' "Your notes" (user decision, fast/012). The shared group has no
+per-mount mode:
+
+- **The header '+' beside the group title is the only way to open a draft.** It
+  is icon-only, labelled "New note", offered once the level has loaded and
+  disabled while a draft is open. There is no labelled "New note" button anywhere.
+- **The draft is the first item of the list** and **saves when focus leaves it**:
+  blank text drops it with no request, anything else is one create. Saved notes
+  save on focus leaving them, and blank text deletes them with no confirm (above).
+- **There are no Save and Cancel buttons** on a draft or on a saved note.
+- **A flag click toggles only the flag; it does not save the body.** The toolbar
+  holding the flags is inside the note's focus-leave boundary, so moving focus
+  from the text to a flag is not "leaving the note"; the body saves when focus
+  later leaves the note (`DEC-F012-1`).
+
+This supersedes the character page's opt-in "header-add" mode with explicit
+Save/Cancel that plan 033 introduced (its D6) — `DEC-F012-2`.
 
 ### `@dnd-kit` is finally used
 
@@ -1250,13 +1300,15 @@ point of the affordance.
 
 **It is the same composer as the stream's, not a second one**, and that is now
 true at the file level (018 D4): **`ComposerCore`** holds the text area, the
-geometry above, the labelled Send, the enormous-paste warning and the
-send-blocked reason, and the stream's `Composer` and the page's
-`CharacterComposer` are its **two hosts**, adding only their own controls through
-slots. **The one geometry difference between the hosts is a parameter, not a
-fork**: each host passes its default line count (3 for the stream, 10 here) and its
-persisted-height field (`chat` / `start`) to `ComposerCore` (2026-10-08 decision,
-"Geometry" above). Stated this way because the obvious implementation writes a second composer
+geometry above, the in-box Send, the Ctrl/Cmd+Enter shortcut, the
+enormous-paste warning and the send-blocked reason, and the stream's `Composer`
+and the page's `CharacterComposer` are its **two hosts**, adding only their own
+controls through slots. **The geometry differences between the hosts are
+parameters, not a fork**: each host passes its default line count (3 for the
+stream, 10 here), its persisted-height field (`chat` / `start`) and — on this page
+only — the full-width choice to `ComposerCore` (2026-10-08 decision and fast/011,
+"Geometry" above). Here the Setup select sits under the text box, with Send inside
+the box above it. Stated this way because the obvious implementation writes a second composer
 for this page and the two then drift on the first change to either — the same
 failure the note cards above are protected from.
 
@@ -1276,16 +1328,31 @@ NULL**, which R2 makes a first-class case rather than a degraded one. The
 roleplayer who wants a setup uses the Sessions section's start control above,
 which exists for exactly that choice.
 
-**The opening message draws no assistant reply, and that is
-`docs/plans/defects.md` D-01.** `US-117.AC-3` and UC-080 step 5 require the
-assistant to answer that first message as it would any other discussion message.
-As built, the route creates the session and writes the message as a current-zone
-row and **nothing answers it**; the roleplayer must send again on the session
-screen to get a candidate. The design question is **closed** — yes, it should
-draw a reply, and the create route stays JSON because the compose happens on the
-session once it exists (018 D2). What is missing is the code: 018 deferred the
-reply to a later plan and no later plan took it. Recorded as a defect, not as work
-owed by a shipped plan.
+**The opening message draws the assistant's reply, with no second send**
+(`US-117.AC-3`, UC-080 step 5; `fast/004.character-page-first-reply`, which closed
+defect D-01). The create route stays JSON and calls no model (018 D2); once the
+navigation lands on the new session, the **session screen** draws the reply with
+one textless compose — the same exchange Regenerate issues — so it renders as the
+ordinary live reply, Stop reaches it, and a failure goes through `notifyFailure`
+(`session-stream.md`; DEC-F004-1, DEC-F004-3). **A send from the character page
+gets exactly one reply.** The trigger is a one-shot intent carried by that
+navigation and consumed on arrival, never a reading of the zone
+(`frontend-structure.md`; DEC-F004-2): reopening any session whose zone ends with
+an unanswered message — a legitimate resting state after a stop or a refused
+send — draws nothing.
+
+**A reload or a navigation away while that first reply streams behaves like
+Stop** (DEC-F004-4): the partial text persists as an ordinary zone row, nothing
+re-fires on return because the intent was already consumed, and Regenerate is the
+way to redraw.
+
+**The page composer deliberately takes no send-blocked reason** (DEC-F004-5) — a
+deliberate asymmetry between the two hosts of `ComposerCore`, so it is not
+"fixed" into symmetry. Creating the session calls no model and needs none, and
+the character page holds no models list to compute a reason from. With no usable
+model the session is still created with the message as a zone row (R10, US-143),
+and the refused reply surfaces on the session screen — through `notifyFailure`
+and, once its configuration loads, through the session composer's own reason.
 
 ### The draft page
 
@@ -1496,8 +1563,7 @@ one rather than (B)'s. The native handle no longer collides with anything, becau
   wanted a larger, adjustable writing area — especially when starting a session —
   and chose a dragged, persisted height over auto-grow, since the two cannot
   coexist. The "grows with its content" rule is **no longer the design**; do not
-  re-add `autosize` by citing it. The code change is delivered by a follow-up fast
-  feature.
+  re-add `autosize` by citing it. Built by fast/011 and its bug fix (2026-10-08).
 
 **What was genuinely lost.** (A)'s custom-property channel gave a pointer-move
 zero component re-renders, and `frontend-structure.md` cited it as the concrete
@@ -1530,3 +1596,14 @@ number driving layout geometry outside the composer's own text area.
   beside the setup label. One label rule everywhere a session is named; rename
   from the tree row and the session header. Detail in `DEC-arch-session-names-1`,
   `DEC-arch-session-names-3` and `DEC-arch-session-names-4`.
+- **2026-10-08 — Send moves into the composer's text box; Ctrl/Cmd+Enter sends;
+  the start composer is full width** (fast/011, user decision). Send is icon-only
+  at the box's bottom-right, Stop takes the same spot while streaming, and the
+  blocked reason, Settle and Discard sit in the row beneath. The vertical-resize,
+  no-auto-grow and persisted-height rule of the same date is built. Mechanism in
+  `DEC-F011-1`..`DEC-F011-4`.
+- **2026-10-08 — one note behaviour at every mount** (fast/012, user decision).
+  Header '+' is the only way to open a draft; drafts and saved notes save on
+  focus leave; no Save/Cancel; flag controls in the note's editor toolbar.
+  Supersedes plan 033's opt-in header-add mode (D6). Detail in `DEC-F012-1`..
+  `DEC-F012-4`.

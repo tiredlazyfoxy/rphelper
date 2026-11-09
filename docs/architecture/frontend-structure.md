@@ -20,9 +20,12 @@ the `.tsx` and Vite / Vitest pick the `.ts` — a green typecheck and an
 the rule: `src/app/appBoot.ts` beside `src/app/AppBoot.tsx`, which is why the boot
 state module ships as **`appBootState.ts`**. Two things make this worth a
 paragraph rather than a footnote: the symptom is **React reporting an `undefined`
-element type**, which points nowhere near the cause; and the escape hatch is not
-available — **`allowImportingTsExtensions` is set in neither tsconfig**, so a
-specifier cannot disambiguate itself. A single test guards one folder (plan 005's
+element type**, which points nowhere near the cause; and the escape hatch does
+not help under `src/`. **Both tsconfigs do set `allowImportingTsExtensions`**
+(for the Node-side files — "Node-side config conventions" below), but an
+extensionless specifier remains legal and is the normal form throughout `src/`,
+so the flag disambiguates nothing there: the case-collision rule, not the flag,
+is what prevents the problem. A single test guards one folder (plan 005's
 DoD-14, `src/app/`); the rule is the whole tree's.
 
 **The `app` entry's visual shell is in `workspace-shell.md`** — the three columns,
@@ -48,6 +51,9 @@ frontend/
   tsconfig.json             # strict; covers src/ and tests/
   tsconfig.node.json        # covers vite.config.ts (Node, not browser)
   vite.config.ts            # the build AND the Vitest block — no vitest.config.*
+  dev/                      # dev-server-only helpers imported by vite.config.ts:
+                            #   in no entry, never bundled; typechecked through
+                            #   the config's imports (see "frontend/dev/" below)
   src/                      # the build's root
     global.css              # hand-written stylesheet 1 of 2: resets only
     shell.css               # hand-written stylesheet 2 of 2: workspace layout
@@ -69,8 +75,9 @@ frontend/
 
 ```ts
 // vite.config.ts (shape)
-// configDir = the directory holding vite.config.ts (frontend/)
-plugins: [react()],                              // @vitejs/plugin-react
+const configDir = import.meta.dirname;           // frontend/ — see "Node-side config conventions"
+plugins: [react(), devRequestLogPlugin(), devEntryRoutingPlugin()],
+                                                 // @vitejs/plugin-react + two serve-only dev plugins
 root: resolve(configDir, "src"),
 build: {
   outDir: "../dist",                             // frontend/dist, relative to root
@@ -84,7 +91,10 @@ build: {
     },
   },
 },
-server: { port: 8193, strictPort: true, proxy: { "/api": "http://localhost:8184" } },
+server: {
+  port: 8193, strictPort: true,
+  proxy: { "/api": { target: "http://localhost:8184", configure: configureProxyLogging } },
+},
 test: { root: configDir /* frontend/, so tests/ and tests/setup.ts are found */ },
 ```
 
@@ -109,13 +119,56 @@ Consequently:
   under `frontend/tests/` and the setup file are still found.
 
 **The remaining Vite specifics**, which the block's `(shape)` label leaves partial
-by design but no build can omit: `@vitejs/plugin-react` is the plugin; `base`
-stays at its default; **`server.strictPort` is on**, so a busy 8193 fails loudly
-instead of moving to 8194, where the proxy assumption silently stops holding; and
-there is **exactly one** proxy rule, matching `deployment.md`'s "one prefix only".
-**Knock-on of the root:** Vite's `publicDir` now defaults to `src/public`, which
-does not exist yet — a feature that adds static assets puts them there or sets
-`publicDir` explicitly.
+by design but no build can omit: `@vitejs/plugin-react` is the plugin the build
+uses — the other two are serve-only and inert under `vite build`; `base` stays at
+its default; **`server.strictPort` is on**, so a busy 8193 fails loudly instead of
+moving to 8194, where the proxy assumption silently stops holding; and there is
+**exactly one** proxy rule, matching `deployment.md`'s "one prefix only" — in
+object form only so it can carry the request logger's hook. **Knock-on of the
+root:** Vite's `publicDir` now defaults to `src/public`, which does not exist
+yet — a feature that adds static assets puts them there or sets `publicDir`
+explicitly.
+
+### Node-side config conventions
+
+`vite.config.ts` and everything under `frontend/dev/` run in Node, not in a
+browser, and follow three rules (`DEC-F008-6`):
+
+- **The config's own directory is `import.meta.dirname`**, not a CommonJS
+  `__dirname` or a value derived from the current working directory. The config is
+  an ES module; `import.meta.dirname` is the module-native form, and it keeps
+  every resolved path independent of where Vite was launched from.
+- **Relative imports between Node-side files carry their `.ts` extension.** Node
+  resolves an ES-module specifier literally, with no extension search, so the
+  explicit extension is what lets the config load the `dev/` helpers when it runs.
+- **Both tsconfigs set `allowImportingTsExtensions`**, which makes those
+  specifiers legal to the typechecker. It is permitted because both configs are
+  `noEmit` — the typechecker never writes output whose import paths would then be
+  wrong. Both rather than only the Node one, because the tests under
+  `frontend/tests/` import the `dev/` helpers through the browser-side config.
+
+This **supersedes** plan 002's mandate that the config compute its directory with
+`__dirname`. That mandate predates the `dev/` helpers; once the config imported
+TypeScript modules of its own, the CommonJS form and extensionless specifiers
+stopped being loadable, and the module-native form is the one that works in both
+the dev server and Vitest.
+
+### `frontend/dev/` — dev-server helpers, outside every entry
+
+Modules the dev server runs and the browser never receives. They are imported by
+`vite.config.ts` only, belong to no entry, and are never bundled; `vite build`
+does not execute them, so no dev code reaches `dist/`.
+
+| Module | Holds |
+|---|---|
+| `dev/proxyLog.ts` | the dev proxy's request logger — one line per `/api` request, attached through the proxy rule's hook (`deployment.md`'s "The dev request log") |
+| `dev/requestLog.ts` | the serve-only plugin that logs every request the proxy does not — pages, modules, assets, dev-server internals |
+| `dev/entryRouting.ts` | the serve-only plugin that mirrors prod nginx's entry routing in dev, plus the module-script `src` absolutizer (`deployment.md`'s "The app document at `/` — prod and dev") |
+
+All three are **serve-only and attach silently**: the dev server's chain is built
+by Vitest too, so attaching must neither print nor throw. Their output and
+redaction rules are `deployment.md`'s; their mechanisms are `DEC-F007-*`,
+`DEC-F008-*` and `DEC-F009-*`.
 
 ### The emitted layout nginx depends on
 
@@ -136,9 +189,10 @@ getting it wrong is invisible until deployment — as plan 002's own first build
 showed. The half of the seam that is **not** this doc's — serving the `app`
 document at `/` and on its client routes — is decided in `deployment.md`'s "The
 app document at `/` — prod and dev" (prod: the image build copies
-`dist/app/index.html` to `dist/index.html`). In dev the same mapping is done by a
-serve-only Vite plugin (`apply: "serve"`) that rewrites navigation URLs, and
-`root` and the four inputs are unchanged.
+`dist/app/index.html` to `dist/index.html`). In dev the same mapping is done by the
+serve-only routing plugin in **`dev/entryRouting.ts`** (`apply: "serve"`), which
+rewrites navigation URLs; `root` and the four inputs are unchanged, and the build
+is unaffected.
 
 ### `src/shared/` is one folder for all four entries — and that does not violate UC-066
 
@@ -187,6 +241,14 @@ The HttpOnly `SameSite=Lax` session cookie is carried automatically by that
 document navigation — which is exactly why the split is safe and why no entry
 contains auth-token plumbing (`overview.md`).
 
+**An unconfigured instance leads every unauthenticated visit to the bootstrap
+offer**, through one chain (fast/010): `/` or `/admin/` → a 401 from their boot
+request → the shared client's navigation to `/login` → the login entry's probe →
+`/bootstrap/`. **The login entry is the single owner of that redirect**; no other
+entry probes `configured` to leave its own page, and the backend answers a stale
+cookie on an account-less database with 401 rather than 500 so the chain starts
+(`backend-structure.md`'s `require_user`).
+
 **The user menu's "Admin area" item is one of these navigations, not a router
 link.** UC-071/US-093 puts an admin entry point in the workspace's user menu
 (`workspace-shell.md`), and `/admin` is a different entry and a different document
@@ -203,7 +265,7 @@ still the backend's `require_role` (`backend-structure.md`, R5).
 |---|---|---|
 | `bootstrap` | Create-new-database (with first admin), import-an-export, and the already-configured refusal | FEAT-001, UC-001, UC-002, UC-003 |
 | `login` | Sign in — one form; being signed out *is* arriving at it (see "The `login` entry" below) | FEAT-002, UC-004, UC-005 |
-| `admin` | Account list + lifecycle; LLM servers, connection test, enabled models, embedding designation; drift report + remediation; whole-database export **and** import — both built (plans 030, 031); the vector rebuild remains unbuilt (`fast/002`) | FEAT-003, FEAT-004, FEAT-005, FEAT-018 (admin half), UC-006, UC-007, UC-008, UC-009, UC-010, UC-011, UC-012, UC-013, UC-014, UC-015, UC-061 |
+| `admin` | Account list + lifecycle; LLM servers, connection test, enabled models, embedding designation; drift report + remediation; whole-database export **and** import — both built (plans 030, 031); the index rebuild — built (fast/002) | FEAT-003, FEAT-004, FEAT-005, FEAT-018 (admin half), UC-006, UC-007, UC-008, UC-009, UC-010, UC-011, UC-012, UC-013, UC-014, UC-015, UC-016, UC-061 |
 | `app` | The workspace — tree, stream and note wall (`workspace-shell.md`); the character page; settings; session configuration; my-search; user/character/session export **and** import — both built (plans 030, 031), the import effects in `app/importUploads.ts` | FEAT-006, FEAT-007, FEAT-008, FEAT-009, FEAT-010, FEAT-011, FEAT-012, FEAT-013, FEAT-017, FEAT-018 (user half), FEAT-020 |
 
 The `admin` entry contains **no** component that renders a character, setup,
@@ -321,6 +383,15 @@ by plan 004):
   surface), so the operator arrives signed in; there is no detour through
   `/login`. A create refused with `already_configured` flips the page to the
   refusal state instead.
+- **The offer has a second choice, "Restore from an export"** (fast/003): a
+  static notice that credentials and API keys do not travel in an export and
+  that the environment (`.env`) must be supplied separately for the restored
+  instance to reach a model server (`DEC-F003-3`), a file picker, and a
+  "Restore database" action — **no confirm modal**, because the instance it
+  replaces is empty by the server's own guard.
+  The restore signs nobody in, so on success the entry makes a document
+  navigation to **`/login`**, not `/`; a refusal renders in the choice's own
+  inline alert, never as a notification (`DEC-F003-2` .. `-4`, `-7`).
 - **No `basename`**, no stylesheet import of its own, and no API surface beyond
   `/api/health` and the bootstrap routes.
 - **The refusal is UX over a server-side guard**, exactly as the admin gate is:
@@ -332,15 +403,29 @@ by plan 004):
 
 **Realizes:** FEAT-002, UC-004, UC-005, US-006.AC-3
 
-- **No request on mount at all** — no `/api/me`, no probe, no gate. One form, one
-  route (`POST /api/auth/login`), every failure rendered **in place** in the
-  form's general alert.
+- **One request on mount: a `GET /api/health` probe reading `configured` alone**
+  (fast/010). No `/api/me` and no gate. **Only a strict `configured === false`**
+  leaves the page — a document navigation to `/bootstrap/`; `true`, and anything
+  else (an unreadable body, a not-ready answer, an error, a transport failure),
+  shows the form, with no retry and no notification. Nothing renders while the
+  probe is in flight or after the hand-off. The safe default is deliberately the
+  opposite of the `bootstrap` entry's: there it is "offer", here it is "form",
+  because a garbled answer must not send a user of a configured instance to a page
+  whose create the server would refuse (`DEC-F010-1`, `-3`).
+- **One form, one route** (`POST /api/auth/login`), every failure rendered **in
+  place** in the form's general alert.
 - **A document navigation to `/` on success, for both roles, with no role
   branch.** An administrator reaches `/admin` from the user menu, which is
   FEAT-020's surface.
-- **No not-ready-yet state**, because it makes no request before the user acts —
-  the condition that created that state for the `bootstrap` entry and the `admin`
-  gate.
+- **No not-ready-yet state.** The probe's only job is to find an unconfigured
+  instance; a server that is not ready shows the form, and the outage surfaces on
+  the user's own sign-in attempt, in the form's general alert. A re-probe loop in
+  front of a form that works whenever the server does would be a second loop for
+  nothing.
+- **Two entry-local readers of `{ configured }`**, the `bootstrap` entry's and
+  this one, with their different safe defaults. They are not shared because only
+  `shared/` crosses entries and the defaults differ. **Flip condition:** a third
+  entry needing the probe lifts the reader into `shared/` (`DEC-F010-2`).
 - **No disabled-account screen.** A disabled account receives the identical
   refusal, rendered identically, as a wrong password (US-006.AC-3,
   `invalid_credentials`). The entry's screen list used to name a
@@ -530,7 +615,10 @@ Precedent set by FEAT-001 (plan 003), extended by FEAT-002 (plan 004):
   page-state module** — `src/login/loginDraft.ts`, with no `loginState.ts`. A
   store holding no field the draft does not already hold is a store somebody will
   later find a use for. The convention is "one subject, one module", not "one
-  page, two modules" — do not add an empty page store for symmetry.
+  page, two modules" — do not add an empty page store for symmetry. **The login
+  entry's `src/login/loginGate.ts` (fast/010) is a second subject, not a page
+  store**: the `configured` probe's phase and its effect, kept out of the draft
+  because the probe is not form state (`DEC-F010-3`).
 
 The `app` entry's modules, as built, so a reader can find one without a search.
 Every one of them is a data class plus its own free functions, or a pure module
@@ -540,7 +628,7 @@ with no class at all:
 |---|---|
 | `app/appBootState.ts` | the boot state above |
 | `app/shellState.ts`, `app/workspaceLayout.ts`, `app/treeCollapse.ts` | the shell's state and two of the three pure persistence modules (`workspace-shell.md`) |
-| `app/composerHeights.ts` (suggested name; **not yet built**, 2026-10-08) | **pure** — the third persistence module: the two composers' dragged heights (`workspace-shell.md`) |
+| `app/composerHeights.ts` (2026-10-08; built by fast/011's bug fix) | **pure** — the third persistence module: the two composers' dragged heights (`workspace-shell.md`) |
 | `app/charactersState.ts`, `app/sessionsState.ts` | the two workspace-level list stores |
 | `app/sessionScreenState.ts`, `app/sessionsSectionState.ts` | the session screen and the character page's Sessions section |
 | `app/streamState.ts`, `app/streamApi.ts` | the stream's store (one per `SessionStream` mount) and its client — seven calls, ids as strings |
@@ -558,8 +646,7 @@ with no class at all:
 **Three localStorage keys, three pure modules, and a written reason for not being
 one** (008 D8, 011 D7, extended 2026-10-08): `rphelper.workspace-layout` in
 `app/workspaceLayout.ts`, `rphelper.tree-collapsed` in `app/treeCollapse.ts`, and
-`rphelper.composer-heights` in `app/composerHeights.ts` (suggested name; not yet
-built). The tree's collapsed set and the composer heights are **deliberately not
+`rphelper.composer-heights` in `app/composerHeights.ts` (fast/011). The tree's collapsed set and the composer heights are **deliberately not
 fields of the layout record**, because that reader drops unknown keys on write.
 `workspace-shell.md` holds all three records' shapes, the total-read rules and the
 storage-as-a-parameter mechanism that keeps the modules DOM-free.
@@ -704,6 +791,17 @@ As built (018 D5), through `app/sessionsApi.ts`'s start-with-message call:
   `useParams()` value on arrival is that same string. The navigation is an
   in-entry router navigation, not a document navigation: the character page and
   the workspace are both the `app` entry.
+- **The push carries a one-shot first-reply marker in router state** (fast/004).
+  `SessionScreen` — the one module allowed to read the router — captures it once
+  per session id and clears it with a `replace` of the same URL, then hands the
+  fact to the stream as a **plain prop**, so `SessionStream` stays router-free.
+  The stream then issues **one textless compose** through the existing compose
+  path, at most once per stream state, and only when the last non-tool row is the
+  roleplayer's (`DEC-F004-2`, `-3`). A **reload** or a later arrival carries no
+  marker and does nothing: it reads like a stop, with Regenerate available
+  (`DEC-F004-4`). **Rejected:** triggering on "the zone holds only the
+  roleplayer's message" — that state also arises after a stop or a failed
+  compose, where an automatic reply would answer for the roleplayer.
 
 **`/characters/new` is this doc's design inference, not a requirement**: UC-074 and
 US-097 require a **draft page** that persists nothing until the roleplayer types
@@ -842,8 +940,9 @@ One module in `shared/`, used by every entry:
 - A `401` triggers a document navigation to `/login`. A `403` does not — it is a
   genuine authorization failure and is rendered, not redirected. (This is why the
   login route's own refusal is a 400, never a 401 — `backend-structure.md`.) The
-  navigation target is exactly `/login`, without a trailing slash, which nginx
-  must resolve — an open seam recorded in `deployment.md`.
+  navigation target is exactly `/login`, without a trailing slash; prod nginx and
+  the dev server both answer it with a relative 302 to `/login/`
+  (`deployment.md`'s "Slash-less entry paths").
 
 ### The verbs and the two non-JSON additions
 
@@ -1104,7 +1203,9 @@ Mapped onto the **stream** store (`workspace-shell.md` for what it renders):
 - **`regenerate` is a textless compose that shares the compose run** (022 D8) —
   the same handle, the same stop, the same settle-mid-stream behaviour, the same
   outcome table. **It never touches the composer's draft.** It is a second entry
-  point into one effect, not a second effect.
+  point into one effect, not a second effect. **The first reply after a
+  character-page start is a third entry point into the same effect** (fast/004),
+  run at most once per stream state (the routing section above).
 - **`error` renders a visible failure without discarding anything already in the
   zone or in the settled record above the ruler** (R10, UC-032) — the one rule
   here that is a product guarantee rather than a transport detail.
@@ -1141,6 +1242,15 @@ itself. **Every markdown editing surface reuses it** — notes (015), the user
 level's notes on `/settings` (017), the character persona (018). **TipTap is
 pinned to major 2**, because both peers bind to it and a routine install of 3
 breaks them.
+
+**An optional trailing toolbar group** (user decision, fast/012). A caller may hand
+the wrapper extra controls; they render as **one trailing controls group at the
+right end of the toolbar**. Omitted, the toolbar is unchanged; in `readOnly` there
+is no toolbar, so nothing renders. **Notes use it for their two flag controls**
+(`workspace-shell.md`), because the user wanted the flags in the editor's own
+toolbar; the setup forms and the persona editor pass nothing. The slot only
+renders what it is given — it never writes the editor, so the "never echo" rule
+below is untouched. The mechanism is `DEC-F012-3`.
 
 **The "never echo" rule, and the two library defaults that both go the wrong
 way** (plan 009, step 005). `onChange` is emitted **from `onUpdate` only**, and

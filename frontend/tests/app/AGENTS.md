@@ -122,3 +122,7 @@ Vitest suites for the `app` entry (`src/app/`): one or more modules per componen
 See also: docs/architecture/frontend-structure.md
 
 <!-- agent-ready:end -->
+
+## Conventions
+
+- Every `MarkdownEditor` stub in a test file that renders notes must render `toolbarActions` inside its root, so note flags stay reachable (fast/012.notes-autosave-toolbar-flags).

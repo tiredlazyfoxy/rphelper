@@ -5,7 +5,8 @@
 // This file previously held 033 step 002's opt-in `headerAdd` tests; that prop is removed and
 // its Save / Cancel draft is superseded (012 context.md "Contracts this supersedes").
 //
-// Expected behaviour comes from docs/plans/fast/012.notes-autosave-toolbar-flags/plan.md
+// Expected behaviour comes from fast/012.notes-autosave-toolbar-flags
+// (docs/decisions/fast-012.notes-autosave-toolbar-flags.md)
 // (Interface intent, Definition of done) and its context.md:
 // - Header: the Title with a '+' icon button named "New note" beside it, ready state only,
 //   disabled while a draft is open. No labelled "New note" button anywhere.

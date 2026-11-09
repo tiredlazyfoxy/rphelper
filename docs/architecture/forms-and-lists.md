@@ -355,7 +355,7 @@ The actions that use it, and why each is destructive:
 | **A lossy `Sync`** on the drift page — **conditional** | FEAT-005, US-018.AC-3, US-018.AC-4 | the rebuild drops the columns the registry no longer declares, and their data goes with them; every surviving column's data is preserved (plan 007) |
 | **Replace the whole database (import)** | FEAT-018, UC-061 | it replaces **every** row, including the administrator's own account, and signs them out (plan 031) |
 | **Delete entry / Delete message** — red | FEAT-009, US-149 | permanent: there is no undo and no restore, and a settled entry takes its buried discussion with it (fast/014) |
-| Rebuild the vector index — **not yet realized** | FEAT-005 | expensive: re-embeds every memo and session, real time and real metered LLM calls (UC-016). UC-016 is deferred to `fast/002.vector-index-rebuild` |
+| Rebuild the vector index | FEAT-005, UC-016 | expensive: re-embeds every memo and session, real time and real metered LLM calls (UC-016). Realized by `fast/002.vector-index-rebuild`; the confirm's button reads "Rebuild" (DEC-F002-10) |
 
 **The lossy-Sync confirm is conditioned on data loss, not on the action's
 name.** It fires only when the row lists **at least one extra column**; a Sync

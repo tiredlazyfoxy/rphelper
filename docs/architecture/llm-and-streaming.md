@@ -311,7 +311,7 @@ data: {"event":"done","message_id":"7250416938275332096"}                      \
 
 | Event | Meaning | Client effect |
 |---|---|---|
-| `accepted` | the roleplayer's own message is committed to the zone; emitted **once, before the first `token`, and only when the compose carried text** — a textless compose (the retry) emits no `accepted`, because no row was inserted (021 D2, U1) | adopt `message_id` for the message just sent, so an in-place edit of it can `PATCH` without waiting for a reload |
+| `accepted` | the roleplayer's own message is committed to the zone; emitted **once, before the first `token`, and only when the compose carried text** — a textless compose emits no `accepted`, because no row was inserted (021 D2, U1). The textless compose has **two callers**: the retry, and the first reply the session screen draws after a session is started from the character page (fast/004, `session-stream.md`, `DEC-F004-1`) | adopt `message_id` for the message just sent, so an in-place edit of it can `PATCH` without waiting for a reload |
 | `token` | an increment of assistant text | append to the in-flight message in the current zone |
 | `tool_start` | a tool call has been issued | show the tool as running |
 | `tool_result` | the tool returned | mark it complete |

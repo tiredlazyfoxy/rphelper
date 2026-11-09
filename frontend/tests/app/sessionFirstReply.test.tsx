@@ -1,5 +1,6 @@
 // Fast feature 004 — character-page-first-reply: component and router level (DoD-6..DoD-12)
-// (docs/plans/fast/004.character-page-first-reply/plan.md). Store-level clauses (DoD-1..DoD-5)
+// (fast/004.character-page-first-reply, docs/decisions/fast-004.character-page-first-reply.md).
+// Store-level clauses (DoD-1..DoD-5)
 // live in streamFirstReply.test.ts; DoD-13 is the verifier's suite/typecheck gate; DoD-14..16
 // are [manual/live] and carry no test.
 //

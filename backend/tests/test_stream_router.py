@@ -23,7 +23,8 @@ embedding model, so the degraded path answers ``true`` wherever the session text
 three exact-equality bodies were widened; every other assertion is untouched. The flag's own
 behaviour is covered in ``test_record_keeping_embedding.py``.
 
-Amended by fast feature 014 (``docs/plans/fast/014.message-delete/plan.md``, context.md P2):
+Amended by fast feature 014 (``fast/014.message-delete``,
+``docs/decisions/fast-014.message-delete.md``):
 ``DELETE /api/messages/{message_id}`` now exists and answers 200 with ``deleted_ids`` and
 ``search_coverage_incomplete``. 012 DoD-17's "no route accepts DELETE" guard is narrowed to
 exempt exactly that one path, and its "DELETE answers 405" case is removed (it contradicts the
@@ -1551,7 +1552,8 @@ def test_another_users_settled_entry_answers_404_message_not_found__S014_001_DoD
 # =====================================================================================
 # Fast feature 014 — DELETE /api/messages/{message_id}
 #
-# Expected values come from ``docs/plans/fast/014.message-delete/plan.md`` (Interface intent,
+# Expected values come from ``fast/014.message-delete``
+# (``docs/decisions/fast-014.message-delete.md``) (Interface intent,
 # DoD-11 .. DoD-13) and its ``context.md`` (P1 refusals, P2 route and response). Binding
 # (status.md ``## Skeleton``): ``DELETE /api/messages/{message_id}``, status 200, body
 # ``DeleteMessageResponse(deleted_ids: list[SnowflakeOut], search_coverage_incomplete: bool)``.

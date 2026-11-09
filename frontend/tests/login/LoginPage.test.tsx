@@ -8,7 +8,7 @@
 // their visible labels. The entry module itself is evaluated with the same recipe as
 // `tests/entries.test.tsx` (vi.resetModules, a fresh #root, pushState, dynamic import).
 //
-// fast/010.unconfigured-to-bootstrap (docs/plans/fast/010.unconfigured-to-bootstrap/plan.md):
+// fast/010.unconfigured-to-bootstrap (docs/decisions/fast-010.unconfigured-to-bootstrap.md):
 // the page now probes GET /api/health on mount and shows the form only once the probe has
 // settled on a configured instance (or failed). Its DoD-7: every pre-existing case keeps its
 // assertions; the only change is that `stubFetch` now answers `/api/health` with

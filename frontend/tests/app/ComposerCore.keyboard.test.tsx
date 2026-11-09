@@ -1,5 +1,6 @@
 // Fast feature 011 — composer-send-icon-and-shortcut: Ctrl/Cmd+Enter sends from the composer
-// (docs/plans/fast/011.composer-send-icon-and-shortcut/plan.md, DoD-1..DoD-5).
+// (fast/011.composer-send-icon-and-shortcut,
+// docs/decisions/fast-011.composer-send-icon-and-shortcut.md, DoD-1..DoD-5).
 //
 // Expected behaviour comes from the plan's Interface intent ("Keyboard send") and DoD:
 //   - Ctrl+Enter or Cmd+Enter (metaKey) in the "Composer" text box calls onSend exactly once iff

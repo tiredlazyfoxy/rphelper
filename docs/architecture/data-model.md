@@ -1247,9 +1247,14 @@ around 2^60.
 had left the question to FEAT-017's plan, and plan 029 answered it: both are
 matched by a SQLite **`LIKE` substring** over their own columns — `name` plus
 `sheet` for a character, `name` plus `description` for a setup — because the two
-tables are small enough that an index is not worth its sync cost. The as-built
-limitation that comes with `LIKE`, and **defect D-05** against `US-147`, are
-recorded **once**, in `search-and-retrieval.md`, which owns the query layer.
+tables are small enough that an index is not worth its sync cost. **As built, the
+match is case-insensitive in every script** (fast/006, closing defect D-05
+against `US-147`): both sides of every name match — characters, setups and
+session names alike — go through one registered SQLite case-fold function,
+`rp_casefold`, so no stored folded column and no schema change was needed. It
+folds case only: no accent folding and no normalization. The query layer is
+recorded **once**, in `search-and-retrieval.md`; the mechanism is
+`DEC-F006-1`..`DEC-F006-5`.
 
 ## Schema drift and rebuild
 
@@ -1317,8 +1322,11 @@ expensive and an expensive one look routine.
 - **A Sync rebuild preserves every surviving column's data**; only columns the
   registry no longer declares lose theirs, and a rebuild that cannot complete
   rolls back completely (`admin-surfaces.md`, `backend-structure.md`).
-- **Only the structural half shipped.** UC-016's rebuild is
-  `fast/002.vector-index-rebuild`'s.
+- **Plan 007 shipped the structural half only; the content half is built too.**
+  UC-016's rebuild was built by `fast/002.vector-index-rebuild`: one
+  administrator request that re-derives all four derived tables in one
+  transaction (`admin-surfaces.md`, `search-and-retrieval.md`;
+  `DEC-F002-1`..`DEC-F002-10`).
 - **`db/schema.py` was not edited by FEAT-005's feature**: the registry gained no
   table and no column. This is what "the registry stays the truth" looks like in
   practice.

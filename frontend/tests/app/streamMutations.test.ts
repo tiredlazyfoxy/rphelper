@@ -22,7 +22,7 @@
 // Partner, paste, settle, re-open and edit cases are unchanged (settle still appends via
 // …/zone/messages).
 //
-// Amended by fast feature 014 (docs/plans/fast/014.message-delete/plan.md, context.md P5-P6):
+// Amended by fast feature 014 (fast/014.message-delete, docs/decisions/fast-014.message-delete.md):
 //   - deleteZoneMessage: success filters the row out of the zone and resolves true; abort
 //     resolves false silently with no re-read; any other failure notifies, re-reads the zone
 //     and resolves false; never sets busy, never rejects;

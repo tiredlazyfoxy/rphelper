@@ -5,7 +5,14 @@ rule. Every line here is a pointer or a fact — the reasoning lives in the doc
 named beside it. **Where this file and another doc disagree, the other doc wins.**
 
 Recomputed at the finalization of plans 008..032 (2026-10-06), after that pass's
-four batches landed.
+four batches landed. Updated by the 2026-11-09 finalization batch (fast/001,
+007, 008, 009, 013 — the dev and container harness, the dev request logs, dev
+root routing, and build-and-deploy; then fast/002, 003, 004, 005, 006 and 010 —
+the index rebuild, the bootstrap restore, the character page's first reply, the
+degraded embedding path, Unicode name matching, and the unconfigured login
+redirect; then fast/011, 012, 015 and 016 — the in-box Send and its shortcut, one
+autosaving note behaviour with toolbar flags, the translation pending indicator,
+and the muted own text).
 
 ## Doc map — where to look for what
 
@@ -20,14 +27,14 @@ four batches landed.
 | `backend-structure.md` | FastAPI layout, routers/services split **and the service-to-service import pattern**, the JSON id boundary **and its two named exceptions**, `require_role` / `require_user` / `require_unconfigured`, the bootstrap / auth / three admin / six roleplayer route surfaces, **every route is classified at build time**, the typed error model and **the per-code status record**, the 500 posture, `/api/health`, configuration (`Settings`) and the `"$ENV_VAR"` secret pointer, database access (engine, PRAGMAs, transactional DDL, `get_connection`), **SQLAlchemy Core**, schema evolution (registry + admin-applied Alembic batch DDL), the two transaction rules and their asymmetry, the logging call site |
 | `session-stream.md` | **The session stream's backend**: the route surface and the twelve-key wire shape, `PATCH`'s reach, **the single-message delete's reach** (fast/014), create-and-seed (UC-080), settle and re-open, the degraded embedding path, the `(( ))` seam, the compose route and its streaming harness, the tool seam and dispatch, the discussion read |
 | `transfer.md` | **Export and import**: the envelope, the id-serialization rules, the two version constants, the four granularities, what is never exported, the export and import route surfaces, the import policy (mint + remap), the whole-database replace |
-| `frontend-structure.md` | Vite multi-entry (`root: src/`, the emitted layout), the four entries' boot shapes, **the case-collision naming rule**, pure-data-contract MobX (four rules + five conventions + which store a list belongs to), routing inside the `app` entry, **"ids are strings" and the test that enforces it**, the API client (`ApiError`, `apiPut` / `apiDownload` / `importFile`, the `client_*` codes), the SSE consumer's four outcomes and frame handling, markdown (the one `MarkdownEditor` and its emit rules, the one `MessageBody`), the two stylesheets |
+| `frontend-structure.md` | Vite multi-entry (`root: src/`, the emitted layout), **the Node-side config conventions (`import.meta.dirname`, `.ts` relative imports, `allowImportingTsExtensions` in both tsconfigs)**, **`frontend/dev/` — the dev-server helpers outside every entry**, the four entries' boot shapes, **the case-collision naming rule**, pure-data-contract MobX (four rules + five conventions + which store a list belongs to), routing inside the `app` entry, **"ids are strings" and the test that enforces it**, the API client (`ApiError`, `apiPut` / `apiDownload` / `importFile`, the `client_*` codes), the SSE consumer's four outcomes and frame handling, markdown (the one `MarkdownEditor` and its emit rules, the one `MessageBody`), the two stylesheets |
 | `workspace-shell.md` | The `app` entry's screens: the three columns, **all geometry**, the narrow-width behaviour, the wall's two modes, layout persistence, the stream and its per-entry actions (**including delete**), the buried-discussion group, the search-coverage banner, the ruler and the current zone (editability, delete, tool/thinking blocks, the live reply, Regenerate, the model gate), the kind switch and settle, the `(( ))` preview and painting, the stop control, discarding an empty zone, the wall's contents and note drag, **the character page**, **the draft page**, **the user menu**, **the model picker**, and the reversal record for the deleted splitters |
-| `ui-conventions.md` | Icons + the shared `IconButton` + the full icon table, the accessibility floor, **async feedback** (no success toasts, the failure channel, the one bounded warning, the two sanctioned importers), the inherited frontend facts. **The CRUD conventions are no longer here** |
+| `ui-conventions.md` | Icons + the shared `IconButton` + the full icon table, the accessibility floor, **the muted tone of the roleplayer's own chat text**, **async feedback** (no success toasts, the failure channel, the one bounded warning, the two sanctioned importers), the inherited frontend facts. **The CRUD conventions are no longer here** |
 | `forms-and-lists.md` | Tables and lists, **no sorting/filtering/pagination**, loading / error / empty states, **create and edit are always a `Modal`** and its three named exceptions, the MobX draft convention, **mutations are never optimistic** and its one exception (note reordering), the confirm convention and what is deliberately not confirmed, page state |
 | `admin-surfaces.md` | The `admin` entry in full: 3 routes + 404, shell (no user menu, no sign-out), the admin gate and why it deviates, the Users / LLM Servers / Database pages each with its as-built state, the drift report's granularity and statuses, Create/Sync postconditions, the surviving derived-tables gap, the whole-database export/import controls and their opacity |
 | `llm-and-streaming.md` | **The LLM gateway over `llm-client` 0.2.1** (`probe` / `embed` / `complete` / `compose`; `kind` selects the Responses client class; base-URL normalisation; errors and the privacy-breaking tracing switch; the one total-per-request timeout), use-time validation and `resolve_model_for_use`, the SSE frame protocol, **the four ways a stream ends**, the `<think>` convention, **"Stopping, and what a stop is not"** (UC-085), the tool loop (**owned by the library; RPHelper's per-tool wrapper; no iteration cap; model-side tool mistakes reach the roleplayer as `tool_fail` through the library's tool-event observer**), `web_search`'s provider seam, **context assembly** and its exclusions, language handling, translation |
-| `search-and-retrieval.md` | Hybrid vec+FTS+RRF, the narrow port and its **three variants**, **the forbidden KNN form**, `memo_search`, `session_search` (**vector arm only**), my-search (three port variants + three `LIKE` matches, **the session group's name arm merged ahead of its vector hits**, and the accepted unnamed-by-date limitation), the persona-edit fan-out, the embedding lifecycle and its two write postures, rebuild |
-| `deployment.md` | Ports, TLS (none — **and the clipboard consequence**), the three dev launch paths (`start.ps1`, `start.sh`, `docker-compose.dev.yml`), prod topology, the single-generator guarantee, nginx directives (the five deliberate deviations, **the app document at `/` in prod and dev — one URL space, the dev routing plugin**, and the two open seams), compose, configuration conventions (incl. the two unprefixed search variables), **logging** (loguru, two sinks, the redaction rule, the access-log filter), operational notes |
+| `search-and-retrieval.md` | Hybrid vec+FTS+RRF, the narrow port and its **three variants**, **the forbidden KNN form**, `memo_search`, `session_search` (**vector arm only**), my-search (three port variants + three case-folded name matches, **the session group's name arm merged ahead of its vector hits**, and the accepted unnamed-by-date limitation), the persona-edit fan-out, the embedding lifecycle and its two write postures, rebuild |
+| `deployment.md` | Ports, TLS (none — **and the clipboard consequence**), the three dev launch paths (`start.ps1`, `start.sh`, the dev compose `docker-compose.yml` — **no nginx in dev**), **the dev request log (one line per request, two loggers)**, prod topology as built (root `Dockerfile`, `docker/nginx.conf`, `docker/supervisord.conf`, the image-based `docker-compose.prod.yml`), **build and deploy (`build.sh` / `deploy.sh`, the shared store, no `.env` templating)**, the single-generator guarantee, nginx directives (the five deliberate deviations, **the app document at `/` in prod and dev — one URL space, the dev routing plugin**, the slash-less entry redirects, `^~ /api/`), configuration conventions (incl. the two unprefixed search variables and `.env.example`), **logging** (loguru, two sinks, the redaction rule, **every access-log surface and its check**), operational notes |
 
 Requirements are **not** here. They are in `docs/product/` and are cited by id.
 The id registry is `docs/product/quick-reference.md`.
@@ -63,9 +70,11 @@ a candidate — splitting it would overturn the exception's own reason.
 | Vite dev server | **8193** |
 | nginx published by compose | **8193** → container `:80` |
 
-RPHelper = BookWriter minus 1, so both run in parallel. **Vite dev server and
-dev-compose nginx share 8193 — run one or the other, never both.** No TLS
-anywhere (`_TBD:` in `deployment.md`).
+RPHelper = BookWriter minus 1, so both run in parallel. **The host Vite dev
+server, the dev compose and the prod compose all publish 8193 — run one at a
+time; the second fails to bind.** The dev compose runs **no nginx**: it is the
+`start.sh` pair in stock images, with 8193 published on `api`. No TLS anywhere
+(`_TBD:` in `deployment.md`).
 
 ## Commands
 
@@ -82,7 +91,16 @@ Frontend (run from frontend/)
   typecheck  npm run typecheck
 ```
 
-Dev: `start.ps1 -app` and `start.ps1 -ui` in **separate terminals**.
+Dev: `start.ps1 -app` (alias `-api`) and `start.ps1 -ui` (alias `-web`) in
+**separate terminals**; or `start.sh` for both in **one terminal**; or the dev
+compose with plain `docker compose up`.
+
+Ship (`deployment.md`'s "Build and deploy"; both need `DOCKER_STORE`):
+
+```
+build.sh                                   on a developer machine; HEAD must carry exactly one vX.Y.Z tag
+deploy.sh [--images|--config|--all] [--no-restart]    on the server, from $DOCKER_STORE/rphelper; default --all
+```
 
 ## Backend toolchain and packaging
 
@@ -148,6 +166,11 @@ Dev: `start.ps1 -app` and `start.ps1 -ui` in **separate terminals**.
   "Fixing" them to `RPHELPER_SEARCH_CSE_*` breaks nothing loudly and **silently
   unconfigures web search** on every working instance.
   `routers/stream.py`'s registry dependency is the only reader of either field.
+- **`.env.example` at the repo root is the documented variable list**, checked
+  against the `Settings` aliases by a deployment file-contract test.
+- **`DOCKER_STORE`** — read by `build.sh` and `deploy.sh` only, on both machines;
+  the store is `$DOCKER_STORE/rphelper`. Not an application setting; never reaches
+  the container.
 - The full `Settings` model is `backend-structure.md`'s. Explicit validation
   aliases, `lru_cache` accessor, env file relative to the backend working
   directory. **Ports are not settings.**
@@ -171,6 +194,11 @@ Dev: `start.ps1 -app` and `start.ps1 -ui` in **separate terminals**.
   route-classification guard — **an unclassified route fails the build**) and
   **`test_privacy_audit_search_tools.py`** (cross-user proof for my-search, the
   port, the three tools and the vector/FTS write paths).
+- **`backend/tests/test_deployment_files.py`** — the deployment file contract:
+  nginx's path-only access log and its placement, no edit to the base image's
+  nginx config, exactly one uvicorn under supervisord. **The build and deploy
+  scripts are tested offline** with stub `docker` / `7z` / `git` binaries
+  (`DEC-F013-8`).
 
 ## Frontend toolchain, packaging and tests
 
@@ -180,10 +208,19 @@ Dev: `start.ps1 -app` and `start.ps1 -ui` in **separate terminals**.
   `tsconfig.node.json` (`vite.config.ts`). No `paths` aliases.
   `noUnusedLocals` / `noUnusedParameters` / `noFallthroughCasesInSwitch` on;
   **`exactOptionalPropertyTypes` and `noUncheckedIndexedAccess` deliberately
-  OFF**. **`allowImportingTsExtensions` is set in neither.**
+  OFF**. **`allowImportingTsExtensions: true` in BOTH** — legal because both are
+  `noEmit` (`DEC-F008-6`).
+- **Node-side files** (`vite.config.ts`, `frontend/dev/`) use
+  **`import.meta.dirname`** — never `__dirname` — and **`.ts` relative import
+  specifiers**. This supersedes plan 002's `__dirname` mandate. Under `src/`,
+  extensionless specifiers stay the normal form, so the flag does not replace the
+  case-collision rule below (`frontend-structure.md`).
 - **One `vite.config.ts` that also carries the Vitest block** — there is no
   `vitest.config.*`. The build is **rooted at `frontend/src`** and emits to
   **`frontend/dist`**; the Vitest block keeps **`frontend/`** as its root.
+  Plugins: `react()`, then the two serve-only dev plugins (request log, entry
+  routing), in that order; the one `/api` proxy rule is object-form with a
+  `configure` hook.
 - Test stack: **Vitest + Testing Library + jsdom**; `npm test` runs once and
   exits. **No ESLint, no JS linter** — `tsc --noEmit` is the gate, and a rule a
   linter would have grepped becomes a Vitest test.
@@ -193,7 +230,8 @@ Dev: `start.ps1 -app` and `start.ps1 -ui` in **separate terminals**.
   annotated `number`, `parseInt`, `Number.parseInt` — no exception list, no
   suppression comment), **`tests/stylesheets.test.ts`** (what `shell.css` may
   hold), and **`tests/conventions.test.ts`** (the `@mantine/notifications`
-  importer set).
+  importer set). **Two redaction checks for the dev request lines:**
+  `tests/proxy-log.test.ts` and `tests/request-log.test.ts`.
 - **No two module paths may differ only in letter case** (008 D13). The
   filesystem is case-insensitive and TypeScript's resolver is not, so `tsc` picks
   the `.tsx` and Vite/Vitest pick the `.ts` from one specifier — a green typecheck
@@ -208,7 +246,8 @@ backend/app/{routers,services,models,db}/     backend code (mypy target: app)
 backend/app/ids.py                            the snowflake generator (not services/, not db/)
 backend/app/roles.py                          Role enum + ROLE_LADDER + pure rung comparison; NO fastapi
 backend/app/dependencies.py                   CurrentUser, require_user, require_role(min_role),
-                                              the session-cookie set/clear writers, get_llm_client_factory
+                                              the session-cookie set/clear writers, get_llm_client_factory,
+                                              the no-account guard (its read is services/bootstrap.py's)
 backend/app/errors.py                         the typed hierarchy + register_exception_handlers(app);
                                               the ONE framework-coupled leaf every service may import
 backend/app/logging.py                        loguru sinks + InterceptHandler + _SILENCED_LOGGERS /
@@ -217,7 +256,8 @@ backend/app/secrets.py                        "$ENV_VAR" pointer resolution
 backend/app/db/{schema,drift,sync}.py          registry + the four named selectables / introspection /
                                               Alembic batch DDL; sync.py may import drift.py, never the reverse
 backend/app/db/search_tables.py               the vec0 + FTS5 tables and the FTS triggers — OUTSIDE metadata
-backend/app/db/engine.py                      one connect listener, per-path engine cache, get_connection
+backend/app/db/engine.py                      one connect listener (sqlite-vec load, then the rp_casefold
+                                              registration, then PRAGMAs), per-path engine cache, get_connection
 backend/app/models/secret_ref.py              the "$"-pointer field type — a non-"$" value is FastAPI's 422
 backend/app/models/ids.py                     SnowflakeOut / SnowflakeIn — the ONLY id conversion site
 backend/app/routers/bootstrap.py              also declares require_unconfigured (its only consumer)
@@ -244,7 +284,11 @@ backend/app/services/llm/{chat,frames}.py     STAY: ChatMessage + strip_think + 
                                               of the library's history, DEC-035-4); the frame types, encoder and
                                               streaming harness
 backend/app/services/{transfer,transfer_import}.py         export only (read-only) / import + the replace
+                                              (the replace also runs inside the bootstrap restore, fast/003)
+backend/app/services/index_rebuild.py         the index rebuild (UC-016, fast/002)
+backend/app/services/bootstrap.py             is_configured + any_user_exists (the no-account guard's read)
 backend/tests/                                pytest target
+backend/tests/test_deployment_files.py        the deployment file contract (nginx access log, one uvicorn)
 backend/pyproject.toml + backend/uv.lock      backend deps + tool config; lock committed
 
 frontend/src/{bootstrap,login,admin,app}/     the four Vite entries
@@ -255,11 +299,14 @@ frontend/src/shared/                          api.ts (+ apiPut, apiDownload, the
 frontend/src/shared/notReady.ts               the one not-ready-yet predicate; used by bootstrap AND the admin gate
 frontend/src/shared/ConfirmModal.tsx          the one confirm component; cancel left of confirm
 frontend/src/shared/importFile.ts             readExportFile (parses client-side) + postExportFile; NO FormData
+frontend/src/bootstrap/{restoreExport.ts,RestoreExportForm.tsx}  the restore-from-an-export choice (fast/003)
+frontend/src/login/loginGate.ts               the login entry's configured probe + its store (fast/010)
+frontend/src/app/firstReply.ts                the one-shot first-reply router-state marker (fast/004)
 frontend/src/admin/                           gate, not-ready screen, shell state, nav table, shell, 404,
                                               app, page store, drafts — all beside main.tsx
 frontend/src/app/appBootState.ts              the app entry's boot state (named for the case-collision rule)
 frontend/src/app/{shellState,workspaceLayout,treeCollapse}.ts        the shell + two of the three PURE persistence modules
-frontend/src/app/composerHeights.ts           PURE — the third persistence module (suggested name; NOT YET BUILT, 2026-10-08)
+frontend/src/app/composerHeights.ts           PURE — the third persistence module (2026-10-08; built by fast/011's bug fix)
 frontend/src/app/{charactersState,sessionsState}.ts                  the two workspace-level list stores
 frontend/src/app/{sessionScreenState,sessionsSectionState}.ts
 frontend/src/app/{streamState,streamApi}.ts   the stream's store (one per SessionStream mount) + its seven calls
@@ -278,11 +325,28 @@ frontend/src/app/MessageBody.tsx              the stream's ONE renderer, three v
 frontend/src/app/{StreamRecord,ZoneList,KindSwitch,Composer,SessionStream}.tsx
 frontend/src/app/{AssistantBody,ThinkingBlock,ToolBlock,LiveMessage,DiscussionGroup,SearchScreen}.tsx
 frontend/src/<entry>/<page>State.ts, *Draft.ts   a single-entry store lives in its entry folder beside main.tsx
+frontend/dev/proxyLog.ts                      dev only — the /api proxy's request logger (timed to response headers)
+frontend/dev/requestLog.ts                    dev only — serve-only plugin logging every non-/api request
+frontend/dev/entryRouting.ts                  dev only — serve-only plugin mirroring nginx's entry routing
+                                              + module-script src absolutizer; in no entry, never bundled
 frontend/tests/                               Vitest target — outside src/, mirrors it
 frontend/dist/{bootstrap,login,admin,app}/index.html   the emitted layout nginx resolves against
 frontend/src/global.css                       hand-written stylesheet 1 of 2 — resets only; imported by AppProviders
 frontend/src/shell.css                        hand-written stylesheet 2 of 2 — workspace layout only;
                                               imported by src/app/main.tsx alone
+
+Dockerfile                                    two stages; checks the four entry documents, copies app → dist/index.html
+docker/nginx.conf                             server-level config replacing the base image's default site
+docker/supervisord.conf                       nginx (foreground) + exactly ONE uvicorn on 127.0.0.1:8184
+docker-compose.yml                            DEV compose — the start.sh pair in stock images, no nginx
+docker-compose.prod.yml                       PROD compose — image-based (iezious/rphelper:latest, no build:);
+                                              staged into the store as docker-compose.yml, never run from the repo
+build.sh / deploy.sh                          build + ship the image / load + start it on the server
+start.ps1 / start.sh                          host dev launchers (two terminals / one terminal)
+.env.example                                  the documented environment variable list
+$DOCKER_STORE/rphelper/                       the shared store: rphelper-latest.7z, docker-compose.yml, deploy.sh
+iezious/rphelper:{latest,<X.Y.Z>}             the image tags build.sh produces
+
 data/rphelper.sqlite                          state 1 of 2; /app/data in prod
 data/logs/rphelper.log                        state 2 of 2 — the rotating sink (data/ is the only writable volume)
 docs/product/                                 requirements — read-only
@@ -294,12 +358,12 @@ docs/plans/defects.md                         the five defects' file of record (
 ```
 
 **`ComposerCore` is the shared composer** (018 D4) — the text area, the geometry,
-the labelled Send, the enormous-paste warning and the send-blocked reason — with
-the stream's `Composer` and the character page's `CharacterComposer` as its two
-hosts, adding their own controls through slots. No second composer exists. The
-per-host default line count (3 / 10) and persisted-height field (`chat` /
-`start`) are a **parameter** of `ComposerCore` (2026-10-08; prop shape is the
-building plan's call).
+the in-box icon-only Send, the Ctrl/Cmd+Enter shortcut, the enormous-paste warning
+and the send-blocked reason — with the stream's `Composer` and the character
+page's `CharacterComposer` as its two hosts, adding their own controls through
+slots. No second composer exists. The per-host default line count (3 / 10),
+persisted-height field (`chat` / `start`) and the start composer's full width are
+**parameters** of `ComposerCore` (2026-10-08; built by fast/011, `DEC-F011-1`..`-4`).
 
 localStorage keys — **four keys, never consolidated**:
 
@@ -307,7 +371,7 @@ localStorage keys — **four keys, never consolidated**:
 |---|---|---|
 | **`rphelper.workspace-layout`** | `app/workspaceLayout.ts` | the `app` entry only — `{ navCollapsed, wallPinned }`, two booleans and no numbers |
 | **`rphelper.tree-collapsed`** | `app/treeCollapse.ts` | the `app` entry only — a JSON array of collapsed character ids (strings) |
-| **`rphelper.composer-heights`** | `app/composerHeights.ts` (suggested; **not yet built**) | the `app` entry only — `{ chat: number \| null, start: number \| null }`, pixel heights, `null` = default rows; written on drag end; no upper clamp |
+| **`rphelper.composer-heights`** | `app/composerHeights.ts` (fast/011) | the `app` entry only — `{ chat: number \| null, start: number \| null }`, pixel heights, `null` = default rows; written on drag end; no upper clamp |
 | **`rphelper.color-scheme`** | Mantine's `localStorageColorSchemeManager` (`overview.md`) | all four entries; both schemes, dark default |
 
 **The three `app` records are three keys deliberately** (011 D7, extended
@@ -390,7 +454,7 @@ sort reads `last_used_at` as a string), and mixed forms compare silently wrong
 (`data-model.md`). **Known deviation, not yet fixed:** `users.created_at` /
 `updated_at` from plan 003 use plain `isoformat()` (microseconds dropped when
 zero) — a **pre-existing defect** owned by a `/bug-fixer` pass against plan 003.
-It is **not** one of the five defects below.
+It is **not** one of the five defects below (four of which are now closed).
 
 **Every write in one operation uses one instant**, and each service carries its
 own private `_now_text()` rather than importing a sibling's.
@@ -416,7 +480,8 @@ React 19 + TS + Vite multi-entry · Mantine 7
 since plan 013) · **`@dnd-kit/core` + `@dnd-kit/sortable` + `@dnd-kit/utilities`**
 · SSE over POST · HttpOnly `SameSite=Lax` cookie over **server-side
 `auth_sessions`** (opaque 32-byte token, stored as a SHA-256 digest, absolute
-720 h) · nginx + uvicorn under `supervisord` in one container.
+720 h) · nginx + uvicorn under `supervisord` in one container, **deployed from a
+pre-built image** (`build.sh` → shared store → `deploy.sh`).
 
 No Tailwind / CSS modules / styled-components. **Exactly two hand-written
 stylesheets:** `global.css` (resets only, imported by `shared/AppProviders`
@@ -425,8 +490,9 @@ workspace's layout only, imported by `src/app/main.tsx` alone). Everything else
 is Mantine. **`postcss-preset-mantine` is not installed.**
 
 **TypeScript only — no JavaScript source.** Every authored file under `frontend/`
-— components, stores, tests, and Node-side config such as `vite.config.ts` — is
-`.ts` / `.tsx`. No `.js` / `.jsx` / `.mjs` / `.cjs`, no `allowJs`, no `checkJs`.
+— components, stores, tests, and Node-side config such as `vite.config.ts` and
+the `frontend/dev/` helpers — is `.ts` / `.tsx`. No `.js` / `.jsx` / `.mjs` /
+`.cjs`, no `allowJs`, no `checkJs`.
 
 ### Dependencies with a bounded sanctioned use
 
@@ -453,6 +519,19 @@ Cross-entry navigation is a **document** navigation; the cookie travels with it.
 **`bootstrap`, `login` and `app` declare no basename**; `admin` declares
 `"/admin"` with **no** trailing slash while nginx serves `/admin/` **with** one —
 two near-identical strings in two files, and making them agree breaks the match.
+
+**Dev and prod answer the same URLs** (`deployment.md`'s routing table): the app
+document at `/` and on every app client route; `/bootstrap/…`, `/login/…`,
+`/admin/…` to their entry documents; slash-less `/bootstrap`, `/login`, `/admin`
+→ a **relative 302** to the slash form; `/app/` is not a user-facing URL. Prod:
+nginx (no `location /app/`; `DEC-F001-2` .. `-4`). Dev: the serve-only plugin in
+`frontend/dev/entryRouting.ts` (`DEC-F009-2`).
+
+**An unconfigured instance always reaches the bootstrap offer** (fast/010): `/`
+and `/admin/` → 401 → `/login/` → the login entry's one `GET /api/health` probe
+→ strictly `configured === false` → `/bootstrap/`; anything else, or any failure,
+shows the form. The login entry is the **single owner** of that redirect; it
+renders nothing while probing (`DEC-F010-1` .. `-3`).
 
 **The `app` entry's boot has five outcomes**, the same five the `admin` gate has:
 nothing rendered in flight; 401 (**branched on the code `not_authenticated`**, not
@@ -495,6 +574,10 @@ pure comparison, **no `fastapi`** (`db/schema.py` imports it);
 cookie writers, `get_llm_client_factory`. `require_user` resolves cookie → digest
 → live, unrevoked, unexpired `auth_sessions` row → enabled `users` row → **role
 read live**, so a role change or disable bites on the **next request**.
+**A cookie on a database where no account can exist** (no `users` table, or zero
+users) answers **401 `not_authenticated`, never 500** — the no-account guard runs
+before session resolution; a database with users but no admin is not refused
+(fast/010, `DEC-F010-4` .. `-6`).
 `require_unconfigured` lives in `routers/bootstrap.py`.
 
 **An admin calling a roleplayer route is an ordinary owner, never a
@@ -514,11 +597,11 @@ feature, not by path prefix**.
 | Route | Answers |
 |---|---|
 | `POST /api/bootstrap/create` | **201** + identity **+ `Set-Cookie`** (same transaction as `create_all` + the admin insert); no token in the body; router-level `require_unconfigured` |
-| `POST /api/bootstrap/import` | reserved — `fast/003.bootstrap-from-export` (UC-002 deferred) |
+| `POST /api/bootstrap/import` | **204**, no body, **no `Set-Cookie`** — restores a whole-database export into an unconfigured instance in one transaction (schema creation + import); `400 export_invalid`, `409 already_configured`, `409 database_not_empty`, `422`; router-level `require_unconfigured`. The frontend then sends the operator to `/login/` (fast/003, `DEC-F003-1` .. `-5`) |
 | `POST /api/auth/login` | **200** + identity + `Set-Cookie`; **never 401**; any failure = `invalid_credentials` **400**, uniform for unknown user / wrong password / disabled (US-006.AC-3) |
 | `POST /api/auth/logout` | **204**, idempotent, **no `require_user`**, revokes the calling session only |
 | `GET /api/me` | `{id, username, role}`, `id` a decimal string; **401** `not_authenticated`. **Unchanged by FEAT-013** — settings are their own pair |
-| `GET /api/health` | unauthenticated roll-up, **200 whatever it says**; `schema` precedence `missing` > `drift` > `ok` |
+| `GET /api/health` | unauthenticated roll-up, **200 whatever it says**; `schema` precedence `missing` > `drift` > `ok`. `configured` is read by the `bootstrap` and `login` entries |
 
 ### Admin — `require_role(Role.admin)` once per router
 
@@ -526,7 +609,7 @@ feature, not by path prefix**.
 |---|---|
 | `/api/admin/users` (plan 005) | `GET`, `POST` (201), `POST /{user_id}/{disable\|enable\|password\|role}` — **six**, named actions, not one `PATCH`; no query params |
 | `/api/admin/llm-servers` (plan 006) | **nine**: `GET` (rows carry enabled model names), `POST` (201), `PATCH /{id}`, `DELETE /{id}` (204), `POST /{id}/test`, `GET /{id}/available-models`, `POST /{id}/models` (replace set; POST not PUT), `POST` / `DELETE /{id}/embedding-model` |
-| `/api/admin/database` (plans 007, 030, 031) | **five**: `GET /tables`, `POST /tables/{table_name}/create`, `POST /tables/{table_name}/sync` (all 200, no body, no query, no ids on the wire; the apply answers the **re-derived** row; `{table_name}` resolved **in `db/sync.py`**, never interpolated), `GET /export` (the whole-database export as a file attachment), `POST /import` (**204** + the session cookie cleared; the **first** admin-database route with a body, and a raw JSON object) |
+| `/api/admin/database` (plans 007, 030, 031; fast/002) | **six**: `GET /tables`, `POST /tables/{table_name}/create`, `POST /tables/{table_name}/sync` (all 200, no body, no query, no ids on the wire; the apply answers the **re-derived** row; `{table_name}` resolved **in `db/sync.py`**, never interpolated), `GET /export` (the whole-database export as a file attachment), `POST /import` (**204** + the session cookie cleared; the **first** admin-database route with a body, and a raw JSON object), **`POST /rebuild`** (fast/002: synchronous and blocking, one all-or-nothing transaction, no body; 200 `{ tables_rebuilt }` — the fixed list of the four derived tables, nothing derived from content; `409 no_embedding_model` with no designation) |
 
 ### Roleplayer — router-level `require_user`
 
@@ -536,7 +619,7 @@ feature, not by path prefix**.
 | **setups** (010) | `GET` / `POST /api/characters/{character_id}/setups` (`include_archived`) · `GET` / `PATCH /api/setups/{setup_id}` · `POST /api/setups/{setup_id}/archive` · `/restore`. **Nested collection, flat single resource** — `character_id` is fixed for a setup's life |
 | **sessions** (011; rename 2026-11-05) | `GET /api/sessions` · `GET /api/characters/{character_id}/sessions` · `GET /api/sessions/{session_id}` · **`PATCH /api/sessions/{session_id}`** (body `{ name: string \| null }`; **`name` is the only accepted key — any other key is a 422**; trimmed, blank/null stores NULL; archived sessions may be renamed; 200 the session; missing/foreign `session_not_found` 404; bumps `updated_at`, **never `last_used_at`**) · `POST /api/sessions/{session_id}/archive` · `/restore`. **No `DELETE`.** Configuration is still never written through the session resource (017 D9's intent, kept by the narrow body). Lists order `last_used_at DESC, id DESC`; every row carries `setup_name` by an owner-scoped LEFT JOIN, shown even when the setup is archived, **and `name`** |
 | **the stream** (012, 014, 019, 021, 022, fast/014 — `routers/stream.py`, `session-stream.md`) | `GET /api/sessions/{id}/entries` · `POST /api/sessions/{id}/entries` (201; `kind` **required and exactly `"partner"`**, every other value a native 422) · `GET /api/sessions/{id}/zone` · `POST /api/sessions/{id}/zone/messages` (201, **no model call**) · **`POST /api/sessions/{id}/zone/compose` (the ONE streaming route)** · `POST /api/sessions/{id}/settle` · `POST /api/sessions/{id}/reopen` · `PATCH /api/messages/{message_id}` · **`DELETE /api/messages/{message_id}`** (200 + body, one current-zone message or one settled entry with its buried group; buried and tool rows refused `message_not_editable`, missing or foreign `message_not_found`) · `GET /api/messages/{message_id}/discussion` (read-only). **Nine JSON routes plus compose.** No stop route, no zone-discard route, no bulk delete, and none may be added |
-| **create-and-seed** (018) | `POST /api/characters/{character_id}/sessions` — owned by `routers/sessions.py`; body omitted / `{}` / `{ setup_id?, opening_message? }`; **201 `StartedSession`** = the `Session` keys (nine since `name` joined them; NULL on create) plus `opening_message` (a `MessageResponse` or null). One transaction; a whitespace-only `opening_message` is a 422 and nothing is created |
+| **create-and-seed** (018) | `POST /api/characters/{character_id}/sessions` — owned by `routers/sessions.py`; body omitted / `{}` / `{ setup_id?, opening_message? }`; **201 `StartedSession`** = the `Session` keys (nine since `name` joined them; NULL on create) plus `opening_message` (a `MessageResponse` or null). One transaction; a whitespace-only `opening_message` is a 422 and nothing is created. The route stays JSON; **the first reply is the session screen's one textless compose on arrival** (fast/004) |
 | **memos** (015, 016) | `GET /api/memos?scope&scope_id` · `POST` (201; flags on the body are **ignored** — created enabled, not forced) · `PATCH /{memo_id}` (any subset of `body` / `is_enabled` / `is_forced`; a null key is "not supplied") · `DELETE /{memo_id}` (204 — one of the product's two per-item delete paths; the other is the session message) · **`PUT /api/memos/order`** (body `{ scope, scope_id?, memo_ids: [string] }`; 200 `{ memos: [...] }` with `sort_key` 0..n−1; declared **before** the `{memo_id}` handlers so `order` is not read as an id; **one request is one level**) · `GET /api/sessions/{session_id}/memo-chain` |
 | **configuration** (017 — `routers/configuration.py`) | **seven**: `GET` / `PATCH /api/characters/{character_id}/configuration` · `GET` / `PATCH /api/sessions/{session_id}/configuration` · `GET` / `PATCH /api/me/settings` · **`GET /api/models`** (the enabled set, in first-enabled order `llm_servers.id` then `models.id`). `model: null` clears |
 | **translation** (023) | `POST /api/messages/{message_id}/translation` — an `async def` handler with its own overridable chat-client factory, **no request body** (the target is resolved server-side), 200 `{ message_id, target_language, text, cached }` |
@@ -631,8 +714,10 @@ feature, not by path prefix**.
   disturb the selection** — structurally, because the enabled set rides on the
   list payload.
 - **Database page:** the drift report plus per-row `Create` / `Sync`, **plus
-  Export and Import** (plans 030, 031). **Rebuild index (UC-016 / US-019) is still
-  absent** — `docs/plans/fast/002.vector-index-rebuild`.
+  Export and Import** (plans 030, 031), **plus Rebuild index (UC-016 / US-019)**
+  (fast/002): **always offered, never disabled**, behind a confirm; a missing
+  designation answers `no_embedding_model` in the rebuild's **own** inline
+  `Alert`.
   - **Statuses (three, fixed):** in sync → **`green`**, drifted → **`yellow`**,
     missing → **`red`**; the status word is rendered as text, colour is redundant.
     The fourth, `seed-missing`, was looked at and declined (the Seed `_TBD:`).
@@ -656,7 +741,8 @@ feature, not by path prefix**.
     `message_fts` are outside it — **and a Sync rebuild of `memos` or `messages`
     drops that table's FTS triggers.** The next ensure-on-write restores the
     triggers but does **not** back-fill, so that lexical index is stale for every
-    row written until a full rebuild. **The views half of this gap is gone**: no
+    row written until a full rebuild — which now exists (fast/002) and also
+    re-issues the triggers. **The views half of this gap is gone**: no
     SQL view exists anywhere in the schema.
   - **Export/import are opaque.** After an export the page renders **one inline
     size line** ("Export downloaded — 12.3 KB", 1024-based) and nothing else; the
@@ -664,9 +750,8 @@ feature, not by path prefix**.
     four-step sequence: **file picker → red confirm → upload → redirect to
     `/login`**. Failures render in their **own** inline red `Alert`, separate from
     the drift report's, and never as a notification.
-  - **`fast/002`'s response is expected to carry no count** — a requirement on
-    that unbuilt plan, not an as-built fact. "Counts and completion" permits
-    completion, and **at most counts not derived from user content**.
+  - **The rebuild's response carries no count** (fast/002, `DEC-F002-3`) — the
+    fixed list of the four rebuilt tables and nothing derived from user content.
 - **Dropped from BookWriter, deliberately:** `AssistantModesPage`,
   `SubAgentsPage`. Do not re-add.
 
@@ -705,8 +790,10 @@ accepted | token | tool_start | tool_result | tool_fail | error | done
 ```
 
 - **`accepted` is emitted once, before the first `token`, and only when the
-  compose carried text** — a textless retry emits none, because no row was
-  inserted. It carries the **roleplayer's** committed zone row id.
+  compose carried text** — a textless compose emits none, because no row was
+  inserted. It carries the **roleplayer's** committed zone row id. **The textless
+  compose has two callers**: Regenerate's retry, and the session screen's one
+  first reply after the character page creates a session (fast/004).
 - `done` is mandatory on success and carries the **assistant's** row id. **Both
   ids are decimal strings, and they name different rows.**
 - **Four ways a stream ends:** `done` (success), `error` (server-side failure),
@@ -829,18 +916,23 @@ governs translation's target, held in **one constant in
 |---|---|---|---|
 | `memo_search` (FEAT-014) | vec + FTS, RRF | `user_id`, `is_enabled AND NOT is_forced`, the 4-level chain | `is_enabled` gates first, pinned by a test **on the compiled clause**. At most **8 hits**, no paging; the declaration stays `query` only. The model receives `[<level>] <snippet>` per line — **scope literal only, no names, no ids**. Zero hits is a **success** (`No matching notes.`); the `tool_result` summary is `<N> memos` |
 | `session_search` (FEAT-015) | **vec only — no BM25, no RRF blend** | `user_id`, `character_id`, `id != current`, `archived_at IS NULL` — **four terms** | Semantic-only is a product decision (challenge C5). At most **5 hits** (lower than 8 because each carries a long excerpt). One block per hit: `### Session <YYYY-MM-DD> · setup: <name>` plus **the last 1500 characters** of the session's `settled_entries` text, blank-line joined, decisions included, a cut excerpt starting `…`; `(no settled entries)` when there are none. **No persona, no setup description, no ids.** The setup's name shows even when archived. **The excerpt is the tool's own owner-scoped read, not a port feature** |
-| my-search (FEAT-017) | vec + FTS, RRF **within each kind** | `user_id` only | ACT-002 UI, **not** a tool. **The product's count of five corpora is unchanged; the mechanism is three port variants plus three `LIKE` matches** (029 U2; session names 2026-11-05) — characters, setups, and **a name arm on the session group, its hits first, deduplicated against the vector hits, still at most 20**. **Accepted limitation: a never-renamed session is not found by its start date** (the default label is client-computed, never stored). Session results show the session label rule. Grouped by kind in UC-059's order, **at most 20 per group**, no paging. **Applies no `is_enabled`/`is_forced` predicate at all** (ratified by US-137); a disabled hit is **dimmed, struck through, with a gray "Disabled" badge**. **Archived material is included and marked "Archived"** — the deliberate asymmetry with `session_search`. **Fails whole** on a vector-arm error. **Known cost: each search embeds the query twice** |
+| my-search (FEAT-017) | vec + FTS, RRF **within each kind** | `user_id` only | ACT-002 UI, **not** a tool. **The product's count of five corpora is unchanged; the mechanism is three port variants plus three case-folded substring name matches** (029 U2; session names 2026-11-05; fold by fast/006, `DEC-F006-1` .. `-5`) — characters, setups, and **a name arm on the session group, its hits first, deduplicated against the vector hits, still at most 20**. **Accepted limitation: a never-renamed session is not found by its start date** (the default label is client-computed, never stored). Session results show the session label rule. Grouped by kind in UC-059's order, **at most 20 per group**, no paging. **Applies no `is_enabled`/`is_forced` predicate at all** (ratified by US-137); a disabled hit is **dimmed, struck through, with a gray "Disabled" badge**. **Archived material is included and marked "Archived"** — the deliberate asymmetry with `session_search`. **Fails whole** on a vector-arm error. **Known cost: each search embeds the query twice** |
 
 **Three port variants, and the variant fixes the arms** — no caller chooses:
 **memo** (vec + lexical, fused), **session** (vector only), **entry** (lexical
 only, over `message_fts` scoped to `settled_entries`). **Characters and setups are
 not variants**: no index exists, so they are matched by an **escaped,
-case-insensitive, non-tokenised `LIKE` substring outside the port** — `name` +
+case-folded, non-tokenised substring match outside the port** — `name` +
 `sheet`, `name` + `description`. **Session names are matched the same way** —
 `sessions.name`, by my-search, beside the session variant's vector arm, never
 through the port and never by `session_search`. That is the one deviation from
 "all surfaces go through one port" (now three matches), and the flip condition is
-named: an FTS or vector index over any of the three.
+named: an FTS or vector index over any of the three. **All three matches are
+case-insensitive in any script** (fast/006, D-05 closed): both sides go through
+one Unicode case fold — the column through the `rp_casefold` SQLite function the
+engine registers on every application connection — **case only** (no accent folding, no
+normalization), the escape rule unchanged, ordering binary over the raw `name`
+(`DEC-F006-1` .. `-5`).
 
 **The port applies `user_id` itself, in every statement including hit
 hydration**; beyond that a variant accepts an **optional clause builder** which
@@ -894,8 +986,8 @@ delete trigger is what cleans `message_fts` after a single-message delete**
 the port's candidate set is owner-scoped first — and **every write to a derived
 store must resolve the row ids it will touch through an owner-scoped query
 first** (plan 032, step 004). `write_vector` / `delete_vector` take **no user
-id**. This is **the one leak the audit found**, and a fix to defect D-04 is
-directly bound by it.
+id**. This is **the one leak the audit found**, and the degraded path's
+`session_vec` clear (fast/005, D-04 closed) is bound by it.
 
 **`session_vec`'s text spans three sources, and the ORDER is load-bearing:**
 **persona (`characters.sheet`) → setup text (`setups.description`, absent with no
@@ -921,10 +1013,12 @@ table.** A memo create/body edit **and a character persona / setup text edit**
 with no embedding model **fail the whole transaction**; a settled-entry edit,
 settle, re-open, a **partner filing** and **the delete of a settled entry**
 **succeed, degraded** (US-112), with `search_coverage_incomplete` in the write's
-own response. **The caught set on the degraded path is `no_embedding_model`
-(including the `dimension_mismatch` form) and `llm_unreachable`**; the strict path
-catches neither and lets both propagate at **409** and **502**. Do not harmonise
-the two.
+own response. **The caught set on the degraded path is three — `no_embedding_model`
+(including the `dimension_mismatch` form), `llm_unreachable` and
+`secret_ref_missing`** — a named set, not a base type, so any other error still
+rolls back (fast/005, `DEC-F005-1`); **a degraded write clears the session's
+`session_vec` row** (`DEC-F005-2`). The strict path catches none and lets them
+propagate at **409**, **502** and **500**. Do not harmonise the two.
 **A memo without a vector is a normal post-import state** after plan 031, so "no
 vector" is no longer diagnostic on its own.
 
@@ -1069,7 +1163,7 @@ splitter, and its stored height sizes nothing else.
 | Wall, floating (absolute overlay + shadow) | `min(320px, 84vw)` |
 | Wall, pinned (a real grid column) | `320px` |
 | Stream column | `max-width: 720px`, centred, `padding-inline: 18px` |
-| Composer | same 720px / 18px; text area starts at `rows` **3** (session) / **10** (character page start composer), **native vertical handle**, **no auto-grow**, internal scroll, dragged height persisted |
+| Composer | session: same 720px / 18px; character page start composer: **full width**, no cap, no padding (fast/011); text area starts at `rows` **3** (session) / **10** (start composer), **native vertical handle**, **no auto-grow**, internal scroll, dragged height persisted; Send / Stop **inside the box** at its bottom-right, blocked reason · Settle · Discard in the row beneath |
 | Responsive threshold | `820px` (= 252 + 720 + 320; **not** a Mantine token) |
 
 - The shell is a **hand-written CSS grid, not `AppShell`**, and **two tracks, not
@@ -1096,12 +1190,17 @@ splitter, and its stored height sizes nothing else.
   `CharacterComposer`, both through `ComposerCore` with the default and the
   persistence field as a parameter. Height persisted **on drag end** under
   **`rphelper.composer-heights`** = `{ chat: number | null, start: number | null }`
-  (`null` = default rows), its own pure module (suggested `app/composerHeights.ts`):
+  (`null` = default rows), its own pure module (`app/composerHeights.ts`):
   total read, per-field fallback to `null` on absent/bad JSON/wrong type/
   non-finite/non-positive, **no upper clamp**, storage passed as a parameter. A
   third key, not a field of `rphelper.workspace-layout`, because that reader drops
-  unknown keys on write (011 D7's reasoning). **Not yet built** — 013/006 D9 and
-  018/003 shipped the old rule; a follow-up fast feature delivers it.
+  unknown keys on write (011 D7's reasoning). **Built** by fast/011 and its bug fix
+  (2026-10-08), replacing the "grows with its content" composer 013/006 D9 and
+  018/003 had shipped.
+- **Ctrl+Enter / Cmd+Enter in the composer sends** exactly when Send is shown and
+  enabled — never while Stop shows, never during IME composition; plain Enter and
+  Shift+Enter insert a newline; the stream's edit boxes have no shortcut
+  (fast/011).
 - With **no session open the wall is not shown at all** (US-095).
 
 **`shell.css` holds eleven selectors and one media query, and nothing else.**
@@ -1143,13 +1242,13 @@ tree-header text input**.
 
 | Action | Icon / form |
 |---|---|
-| Send message in discussion | **labelled button**, not an icon |
+| Send message in discussion | `IconSend`, "Send", `sizeVariant` `"main"` — **icon-only, inside the composer's text box** at its bottom-right; Ctrl/Cmd+Enter is its primary path (fast/011; the named exception to "a control that spends a model call carries words") |
 | Settle | **labelled primary button**, not an icon |
 | Regenerate (retry a compose) | **labelled subtle `Button`** with `IconRefresh` as its left section |
 | Kind switch — *partner* / *my turn* | **two labelled segments**, no icons |
-| Stop generation | `IconPlayerStop` — **replaces Send while streaming; never both** |
+| Stop generation | `IconPlayerStop` — **replaces Send while streaming, in the same in-box spot; never both** |
 | Copy a settled turn out | `IconCopy`, "Copy as plain text" — on **`turn` entries only** |
-| Translate / flicker | `IconLanguage` — "Show translation" / "Cancel translation" / "Show original" |
+| Translate / flicker | `IconLanguage` — "Show translation" / "Cancel translation" / "Show original"; **while pending a spinning loader replaces the glyph** and the entry's actions group stays revealed (fast/015) |
 | Discard an **empty** current zone | `IconX`, "Discard empty zone"; **absent**, not disabled, otherwise |
 | Re-open a settled block | `IconArrowBackUp`, "Re-open last entry" |
 | Edit entry, message or note | `IconEdit` — one glyph, **two label families** ("Edit entry" / "Edit message") |
@@ -1162,15 +1261,16 @@ tree-header text input**.
 | Collapse the tree | `IconChevronLeft`, "Collapse tree" |
 | Expand the tree from the rail | `IconMenu2`, "Expand tree" |
 | New character (tree header and rail) | `IconPlus`, "New character" |
-| New session / setup / note / import-session | `IconPlus` as a **labelled** button |
+| New session / setup / import-session | `IconPlus` as a **labelled** button |
+| New note | `IconPlus`, "New note" — **icon-only, in the note group's header**, at every mount; the only way to open a draft (fast/012) |
 | Archive / restore | `IconArchive` / `IconArchiveOff` — left sections on the character page, menu items in a table row |
 | Session configuration | `IconSettings` |
 | My search | `IconSearch` on the collapsed rail; the expanded tree header is a **text input** |
 | Memos / open the note wall | `IconNotes`, "Open notes"; present only while the wall is not visible |
 | Pin / unpin the wall | `IconPin`, "Pin notes" / "Unpin notes"; active state is the button's colour |
 | Dismiss the wall | `IconX`, "Close notes" |
-| Note forced / not forced | `IconPin`, "Force note" / "Stop forcing note" |
-| Note enabled / disabled | `IconCircleCheck` while enabled, `IconCircleOff` while disabled; "Disable note" / "Enable note" |
+| Note forced / not forced | `IconPin`, "Force note" / "Stop forcing note"; in the note's editor toolbar (fast/012) |
+| Note enabled / disabled | `IconCircleCheck` while enabled, `IconCircleOff` while disabled; "Disable note" / "Enable note"; in the note's editor toolbar (fast/012) |
 | Collapse / expand a tool call | `IconTool` (**decorative**) plus the rotated `IconChevronDown` toggle |
 | Collapse / expand thinking | `IconBulb` beside "Thinking", plus the rotated `IconChevronDown` toggle |
 | Overflow menu | `IconDots` — traces to no feature |
@@ -1190,9 +1290,16 @@ serving many rows names its row. **Hover-revealed actions must also reveal on
 `:focus-within`** — the mechanism is **Mantine hooks, not CSS** (`useHover` +
 `useFocusWithin` + `useMediaQuery("(hover: none)")`, applied as **opacity**, so
 the controls stay in the DOM and the tab order; no stylesheet selector exists for
-it and none may be added). **A note's flag icons are always shown, and that is the
-convention** — the deliberate difference from the stream's revealed actions is
-recorded. **Note reordering has a keyboard path and it is required, not
+it and none may be added). **An entry's actions are also revealed while that
+entry's translation is pending** (fast/015, `DEC-F015-4`). **A note's flag icons
+are always shown, and that is the convention** — the deliberate difference from
+the stream's revealed actions is recorded.
+
+**The roleplayer's own chat text is muted** (`ui-conventions.md`; fast/016): in
+the current zone and the read-only Discussion group, the user's own message bodies
+take the theme's muted tone; assistant and tool rows, the live reply, the settled
+record and inline accent chips keep their colours; a component style prop, no
+stylesheet (`DEC-F016-1` .. `-4`). **Note reordering has a keyboard path and it is required, not
 optional.** A status badge sits **beside** its link, never inside it; a named list
 is a `ul` + `aria-label`; a region holding several blocks is
 `<section aria-labelledby>`.
@@ -1279,8 +1386,7 @@ order** and the server either applies it or refuses it outright
 disable account · delete LLM connection · **clear embedding** (US-015.AC-2) · **a
 lossy Sync, only when a column will be dropped** (US-018.AC-3/AC-4) · **replace
 the whole database** (red, step 2 of four) · **delete a settled entry or a zone
-message from its trash control** (red, US-149) · rebuild index (**not yet
-realized**). **Deliberately NOT confirmed:** re-enable · saving an enabled-model
+message from its trash control** (red, US-149) · rebuild index (fast/002). **Deliberately NOT confirmed:** re-enable · saving an enabled-model
 set · `Create` · archiving a character, a setup or a session (named one by one) ·
 **the three roleplayer imports** (additive, they destroy nothing) · the export ·
 **committing an emptied in-place editor** (note, entry or zone message — emptying
@@ -1309,7 +1415,9 @@ probe** — failed-probe resilience by construction, one shared picker module.
 **The `MarkdownEditor`'s two emit rules:** `onChange` from `onUpdate` **only**,
 and **every programmatic content or editability write passes `emitUpdate: false`**
 — both library defaults go the wrong way, and either alone makes an unedited note
-write itself back on mount. **A file input inside a Mantine `Menu.Item` loses its
+write itself back on mount. It takes **one optional trailing toolbar group**,
+rendered at the toolbar's right end and not at all when read-only — notes put
+their two flag controls there (fast/012). **A file input inside a Mantine `Menu.Item` loses its
 change event when the dropdown unmounts**, so the user menu's "Import…" triggers
 a hidden input **outside** the menu.
 
@@ -1329,7 +1437,7 @@ a hidden input **outside** the menu.
 | Settle's order | **bury (step 4) before stamping the head (step 5)** — once the head carries `settled_at` it is no longer in the zone and the burial set stops identifying itself. Driven by the id list read from `current_zone` **in the same transaction** |
 | Single-message delete's order | **one transaction**: classify the target through `message_states` → delete its translations → delete its buried group (settled head only) → delete the target → FTS ensure (the delete trigger cleans the index) → refresh `session_vec` (settled only, degraded path) → bump the session. **Forced by foreign keys with no CASCADE** (`session-stream.md`, DEC-F014-7, DEC-F014-8) |
 | The tool registry | **three tools**, offered order `memo_search`, `session_search`, `web_search`; `web_search` additionally needs **instance credentials** |
-| `session_fts` | **declared in doc history and never created** — its columns `title` / `partner_label` do not exist on `sessions`. **`sessions.name` (2026-11-05) does not create it** — the name is matched by `LIKE`; flip condition: FTS over `name` alone |
+| `session_fts` | **declared in doc history and never created** — its columns `title` / `partner_label` do not exist on `sessions`. **`sessions.name` (2026-11-05) does not create it** — the name is matched by a case-folded substring match (`DEC-F006-1` .. `-5`); flip condition: FTS over `name` alone |
 | Session label rule | **one rule, every place a session is named** (tree, header, character page Sessions tab, my-search): `name`, or when NULL the **local `YYYY-MM-DD`** of `created_at`, computed by the client. Tree row line 2: `last_used_at` as **local `YYYY-MM-DD HH:MM`** · setup label. A rename bumps `updated_at` only (`DEC-arch-session-names-1`, `-3`, `-6`) |
 | Language of last resort | **English**, `US-142` — **a last resort, never a configured default**. Nothing writes it to a column or offers it in a picker. One constant in `services/translation.py`; the same fallback governs the prompt's instruction |
 | Narrow viewport | the media query is written **`(width < 820px)`**, and the identical string is exported as **`NARROW_VIEWPORT_QUERY`** |
@@ -1338,6 +1446,9 @@ a hidden input **outside** the menu.
 | The whole-database replace | allowed **only** on an instance with no users, or exactly one user who is an administrator — otherwise `database_not_empty`. In one transaction it wipes every `metadata` table plus `auth_sessions` and `translations`, **drops** `memo_vec` and `session_vec`, and inserts the export's rows **with their own ids**. Answers **204 with the cookie cleared**. **The vec0 tables' absence after a restore is a legitimate state transition, not drift** |
 | Import mechanics | fresh snowflakes **per table in ascending old-id order**; every FK plus `messages.related_to` and `memos.scope_id` rewritten; `user_id` (and a `scope='user'` memo's `scope_id`) set to the caller; **the payload's `users` row is never written**; a model pair kept only if it exists in the importing instance's `models`, else **both columns nulled**; timestamps and archived state preserved; **the self-reference written in two passes** (insert with `related_to` null, then `UPDATE`) because foreign keys are **immediate**. **Importing the same export twice yields duplicates and nothing warns** |
 | FTS on import | **`ensure_fts_tables` runs inside the import transaction and the triggers index the inserts** — lexical search works immediately, semantic does not. **No import embeds anything**, at any granularity |
+| Image version | **exactly one `vX.Y.Z` tag on HEAD**, resolved on the host (the build context has no `.git`); tags `:latest` + `:X.Y.Z`; none or two-plus fails the build (`DEC-F013-1`, `-2`) |
+| The shipped archive | `$DOCKER_STORE/rphelper/rphelper-latest.7z`, written to a temp name in the store and renamed only on success (`DEC-F013-6`) |
+| Dev request-log line | `<METHOD> <path> <status> <ms>ms` or `<METHOD> <path> proxy error <CODE>`; path cut at `?` / `#`; no prefix; `/api` timed to response headers, everything else to response end, `-` for an aborted request (`DEC-F007-1` .. `-5`, `DEC-F008-2` .. `-4`) |
 
 ## Flip-condition index
 
@@ -1361,7 +1472,9 @@ be wrong. The doc named beside it owns the reasoning.
 | **nginx cutting legitimately slow compose rounds (no frame for over 300 s)** | `proxy_read_timeout 300s` kept below the library's 600 s total | `deployment.md` |
 | **Probes against dead hosts becoming a real annoyance** | one total-per-request timeout at 600 s → a short bound beside a long total, as a second setting. Library 0.2.1's silence limit covers streamed requests only, so it is not that bound (`DEC-arch-llm-client-library-17`) | `llm-and-streaming.md`, `backend-structure.md` |
 | **The library's tolerant tool-error default changing** | nothing — the gateway passes the tolerant mode explicitly so a default flip cannot end exchanges on model-side mistakes (`DEC-arch-llm-client-library-14`) | `docs/decisions/arch-llm-client-library.md` |
-| **Characters, setups or session names gaining an FTS or vector index** | the `LIKE` path outside the port → they become port variants (or a session-variant arm) and the `LIKE` path goes | `search-and-retrieval.md` |
+| **Characters, setups or session names gaining an FTS or vector index** | the case-folded substring path outside the port → they become port variants (or a session-variant arm) and that path goes | `search-and-retrieval.md` |
+| **Per-row case folding showing in latency on large sheets, or a requirement for accent-insensitive matching** | the registered case-fold function over the raw columns → a stored folded/normalized column, which is a schema change (`DEC-F006-1`) | `search-and-retrieval.md` |
+| **A third frontend entry needing the `/api/health` `configured` probe** | two entry-local `{ configured }` readers with different safe defaults → one reader in `shared/` (`DEC-F010-2`) | `frontend-structure.md` |
 | **Finding a never-renamed session by its start date becoming a requirement** | the accepted limitation of the name arm → match the date form of `created_at` too, which needs a timezone the server does not have | `search-and-retrieval.md`, `data-model.md` |
 | **FEAT-015's promise needing lexical recall in real use** | `session_search`'s vector-only arm — **and it is no longer one switch**: it needs an index over session text first (`name` is a label, not that text) | `search-and-retrieval.md`, `overview.md` |
 | **My-search's duplicate query embedding becoming visible in latency or cost** | the port taking text rather than a vector | `search-and-retrieval.md` |
@@ -1403,17 +1516,17 @@ be wrong. The doc named beside it owns the reasoning.
 - **TLS** — HTTP-only posture inherited, with the clipboard consequence recorded.
 - **Metrics and alerting** — unspecified, and recorded as an **absence** rather
   than a `_TBD:`. Logging **is** specified.
-- **Rebuild index (UC-016 / US-019)** — designed, **not built**; owned by
-  `docs/plans/fast/002.vector-index-rebuild`. There is **no CLI alternative**, so
-  the remedy needs a running application.
-- **`POST /api/bootstrap/import` (UC-002)** — reserved, not built; owned by
-  `docs/plans/fast/003.bootstrap-from-export`.
+- **A CLI rebuild** — there is **no CLI alternative** to the index rebuild (built
+  by fast/002), so the remedy needs a running application.
 - **Abandoning a current zone is NOT here** — it is **resolved** (UC-086, US-134,
   US-135), frontend-only, no route; R11's ban on a zone-discard route stands.
 - **Out of scope for the single-message delete** (fast/014, DEC-F014-12): deleting
   a buried or tool row alone, deleting in the read-only discussion view, undo or
   soft delete, bulk delete or a clear-zone route, reordering or re-kinding
   neighbours, and any translation-cache invalidation beyond the deleted rows' own.
+- **No `.env` templating on deploy** — a deliberate deviation from BookWriter;
+  `deploy.sh` refuses to restart without a hand-placed `.env` (`deployment.md`,
+  `DEC-F013-5`).
 
 ## Open `_TBD:` items across the doc set
 
@@ -1425,8 +1538,6 @@ be wrong. The doc named beside it owns the reasoning.
 | `admin-surfaces.md` | **Seed** exists in the inherited drift report and is **required by no UC** — RPHelper has no seed data at all, so it is recorded as prior art and deliberately not written up as a requirement. FEAT-005's plan (007) looked and declined without resolving it, so it stays open; the status set is correspondingly three values, not BookWriter's four |
 | `overview.md`, `deployment.md` | **TLS / the exposure model.** Nothing in `docs/product/` states an exposure model. The cookie's `Secure` flag is no longer part of it (shipped off with a flip condition) and neither is the clipboard fallback (recorded with the same flip) |
 | `deployment.md` | **`client_max_body_size 64m` is a judgement, not a measured figure.** `docs/product/` states no size bound, only that a paste is never refused. Raise it if a real import exceeds it; never lower it below what US-035.AC-2 implies |
-| `deployment.md` | **Two nginx seams, one owner — `fast/001.dev-and-container-harness`, pending its finalization:** the **`location /app/` block**, which serves a URL space the root-mounted `app` entry never uses; and **`/login` without a trailing slash**, the exact target of the client's 401 navigation and the bootstrap refusal link, which does not match `location /login/` (the required behaviour — a relative 302 to `/login/` — is now fixed by the decided routing contract; only the prod directive's record is pending) |
-| `deployment.md` | **NEW — nginx's own `access_log` still records full request URIs including query strings**, so `GET /api/search?q=<user text>` lands in it even though the application's access log no longer does. The fix — a `log_format` without `$args` / `$request_uri`, or `access_log off` for `/api/` — belongs to the deployment surface and is **owned by `fast/001`**. Found during plan 032's planning and explicitly out of its scope |
 | `ui-conventions.md` | **No wider accessibility target** (WCAG level, screen-reader matrix) is stated in `docs/product/`. The floor is what the icon and interaction contracts require, not a considered accessibility posture |
 | `forms-and-lists.md` | **No sorting, filtering or pagination**, assuming small cardinality. `docs/product/` states no cardinality bound; a deployment with many accounts, or any future admin list over content-scale data, needs this revisited. **(This row's file changed — it used to be `ui-conventions.md`'s.)** |
 | `overview.md` | **No concurrency target exists.** The design assumes one active roleplayer at a time per instance, which SQLite's single-writer model suits; `docs/product/` states no multi-user-concurrency expectation either way |
@@ -1443,10 +1554,10 @@ regression, and a plan treating one as unanswered is reading a stale copy.
 |---|---|
 | **Sparse snowflake rowids in `vec0` / FTS5** (`data-model.md`) | **Measured and verified** (024 D3, U6): sqlite-vec 0.1.9 / SQLite 3.47.1, 5000 × 768-d — insert, size and **unfiltered** KNN identical for dense and snowflake ids; FTS5 external content passes `integrity-check` at ~2^60. **Snowflakes stay the keys, no surrogate dense key.** One real defect came with it — **the forbidden pushdown form** |
 | **Whether editing a NON-partner settled message discards its cached translation** (`data-model.md`) | **`US-111.AC-3` requires exactly what the build does**: editing **any** settled entry discards it. `edit_message_text` deletes on any text change, inside the edit transaction. The design inference became the requirement |
-| **Whether `characters` / `setups` get FTS tables** (`data-model.md`) | **No.** Both are matched by a SQLite `LIKE` substring over their own columns (`name` + `sheet`, `name` + `description`); **no FTS table, no vectors, no schema change** (029 U2). The as-built `LIKE` limitation is **defect D-05** |
+| **Whether `characters` / `setups` get FTS tables** (`data-model.md`) | **No.** Both are matched by an escaped substring match over their own columns, case-folded through `rp_casefold` since fast/006, (`name` + `sheet`, `name` + `description`); **no FTS table, no vectors, no schema change** (029 U2). The former ASCII-only case limitation (**defect D-05**) is closed by fast/006 |
 | **What session creation does when NO model is enabled** (R4, `data-model.md`) | **`US-143`:** the session **is created** and **captures none** until the roleplayer picks one — both columns NULL, and **nothing fills them later on its own**. Creation is never refused for want of a model, which keeps UC-080 reachable on a fresh instance. The refusal moves to **send** time, as `model_not_chosen` (`US-144`) |
 | **The ENCODING of `sessions.model_ref`** (`data-model.md`) | **Two columns with a both-or-neither CHECK and no FK** — `model_server_id` + `model_name` (017 D4). `model_ref` and `tools` as literal column names are **deliberately absent** from the schema |
-| **Whether UC-080's first message also draws an assistant reply** (`backend-structure.md`) | **Design closed: yes**, and the route **stays JSON** because the compose happens on the session once it exists (018 D2). **The code is missing — recorded as defect D-01**, not as work owed by a shipped plan |
+| **Whether UC-080's first message also draws an assistant reply** (`backend-structure.md`) | **Design closed: yes**, and the route **stays JSON** because the compose happens on the session once it exists (018 D2). **Built by fast/004** (defect D-01 closed): the session screen issues one textless compose on arrival (`DEC-F004-1` .. `-5`) |
 | **Where the archive toggle sits** (`frontend-structure.md`) | **Closed in full** (018 D11): **three section-local toggles** — the tree header's "Show archived" for characters, "Show archived setups", "Show archived sessions" — **none persisted**, because showing archived material is a lookup, not a preference |
 | **Whether the character page's composer carries the kind switch or a setup choice** (`workspace-shell.md`) | **Neither** (`US-117.AC-4`, 018 D1). There is no partner block yet for the switch's default to read, and UC-080 names no setup — so the session is created with `setup_id` NULL, which R2 makes first-class |
 | **US-120's settled-decision default for the kind switch** (`workspace-shell.md`) | **`US-120.AC-3`:** a settled **decision** does not participate in the alternation. **And 013 D8 settles the empty-record case**: with no `partner`/`turn` entry at all the default is ***my turn***, because a wrong *partner* default files the roleplayer's own paste as a partner block, which is born settled and **not re-openable** |
@@ -1458,8 +1569,8 @@ regression, and a plan treating one as unanswered is reading a stale copy.
 | **No `web_search` provider chosen** (`llm-and-streaming.md`) | **Google Custom Search behind a provider seam** (plan 028) — one protocol, one implementation, five results, a 10 s timeout, no caching, the key in a header. Credentials from the environment without the `RPHELPER_` prefix; an unconfigured instance simply does not offer the tool |
 | **How a disabled memo hit is marked in my-search** (`search-and-retrieval.md`) | **Dimmed and struck through, plus a gray "Disabled" badge** (029 D7) — the note wall's own idiom, so nothing new has to be learned. **Enabled and forced hits carry no marker at all** |
 | **Whether ARCHIVED sessions participate in the persona-edit fan-out** (`search-and-retrieval.md`) | **They do — no archive predicate** (024 U4). Skipping them would make a restored session's vector silently stale, and "re-embed on restore" would make restore a write needing an embedding model, letting a platform gap block a pure R6 operation. The price is a fan-out proportional to a character's **whole** history |
-| **Whether a per-session staleness marker earns a column** (`search-and-retrieval.md`) | **No marker and no column** (024 U5), and the recorded remedy is the whole-index rebuild. **The *consequence* was then reversed by `US-112.AC-3`**, which requires existing vectors to be **cleared** — the build leaves them stale, which is **defect D-04**. The recording decision stands; the behaviour does not satisfy the criterion |
-| **Whether non-ASCII case-insensitive matching is required** (`search-and-retrieval.md`, 029 D3) | **`US-147` says yes — in any script.** SQLite's `LIKE` folds case for ASCII only, so the build does not satisfy it. **Recorded as defect D-05, NOT carried as an open `_TBD:`** |
+| **Whether a per-session staleness marker earns a column** (`search-and-retrieval.md`) | **No marker and no column** (024 U5), and the recorded remedy is the whole-index rebuild. **The *consequence* was then reversed by `US-112.AC-3`**, which requires existing vectors to be **cleared** — **built by fast/005** (defect D-04 closed, `DEC-F005-2`): a degraded write clears the session's `session_vec` row. The recording decision stands |
+| **Whether non-ASCII case-insensitive matching is required** (`search-and-retrieval.md`, 029 D3) | **`US-147` says yes — in any script.** **Built by fast/006** (defect D-05 closed): all three name matches fold both sides through one Unicode case fold, case only, escaping unchanged (`DEC-F006-1` .. `-5`) |
 | **The two named divergences from `docs/product/`** — a stopped tool call, and a stopped translation's cache (`llm-and-streaming.md`) | **Both acceptance criteria were amended on 2026-10-06 and now state what the build does.** `US-133.AC-1`: a stopped tool call **ends** the exchange. `US-133.AC-2` + its `Constraint:`: not caching a stopped translation is **best-effort**. The section is retitled **"Stopping, and what a stop is not"** and is settled design — the engineering reasons are kept, and **no doc in this folder now records either as awaiting a product change** |
 | **UC-012's `user → character → session` inconsistency** (R4, and flagged here) | **Reconciled by the product round (challenge C42).** UC-012's exception flow no longer names a user level for the model, so the doc set no longer has to choose between it and UC-050/UC-047. Nothing about the prohibition changed — it never turned on which reading was right |
 | **No frame carried the id of the roleplayer's own committed row** (`llm-and-streaming.md`) | **The `accepted` frame**, emitted **once, before the first `token`, and only when the compose carried text**. It makes R10's ordering observable and arrives on the failure path too, so an in-place edit of a just-sent message can `PATCH` without waiting for a reload (US-115) |
@@ -1483,16 +1594,68 @@ fallback and the app document** (`deployment.md`) — the app answers at `/` and
 on its client routes **in dev and prod alike**. Prod: the image build copies
 `dist/app/index.html` to `dist/index.html` (built by `fast/001`). Dev: a
 serve-only Vite plugin rewrites navigation URLs to the same URL space as nginx
-(to be built by an upcoming fast feature); `root: src/` and the four inputs are
-unchanged. The old "host Vite does not serve `/`" reading is superseded — see
-`deployment.md`'s Decision history.
+(**built by `fast/009`** — `frontend/dev/entryRouting.ts`, `DEC-F009-1` ..
+`-4`); `root: src/` and the four inputs are unchanged. The old "host Vite does
+not serve `/`" reading is superseded — see `deployment.md`'s Decision history.
+
+**Closed at the 2026-11-09 finalization batch:**
+
+- **The two nginx seams** (`deployment.md`) — **no `location /app/`**
+  (`DEC-F001-2`), and slash-less `/bootstrap` / `/login` / `/admin` answer a
+  **relative 302** to the slash form, 302 not 301 (`DEC-F001-3`, `-4`). The dev
+  routing plugin answers the same paths the same way.
+- **nginx's own access log recording query strings** (`deployment.md`) —
+  **path-only format**, declared where it replaces the base image's inherited
+  default; no location declares its own; the base config is never edited;
+  `test_deployment_files.py` checks it (`DEC-F001-6`). The dev request-log
+  surfaces follow the same path-only rule, with their own two tests.
+- **"Prod topology — forward-looking, no image built yet"** (`deployment.md`) —
+  **built** (fast/001), and since fast/013 **deployed from a pre-built image**
+  through `build.sh` / `deploy.sh` (`DEC-F001-7`, `-8`, `DEC-F013-1` .. `-8`).
+- **The "SSE directives on the dev-compose nginx" deviation** (`deployment.md`
+  gap 4) — **superseded**: the dev compose runs no nginx, so there is one nginx
+  configuration.
+- **"`allowImportingTsExtensions` is set in neither tsconfig"**
+  (`frontend-structure.md`) — **corrected**: set in both, for the Node-side
+  `.ts` imports; it does not replace the case-collision rule (`DEC-F008-6`).
+- **The index rebuild (UC-016)** (`search-and-retrieval.md`, `admin-surfaces.md`)
+  — **built** (fast/002): one blocking, all-or-nothing request that always drops
+  and re-creates both vector tables, re-embeds everything, rebuilds the FTS
+  indexes and answers with the fixed list of rebuilt tables (`DEC-F002-1` ..
+  `-10`). The report-wording question is answered by that shape.
+- **The bootstrap restore (UC-002)** (`backend-structure.md`, `transfer.md`,
+  `frontend-structure.md`) — **built** (fast/003): one transaction creates the
+  schema and imports; no sign-in; the operator is sent to `/login`
+  (`DEC-F003-1` .. `-8`).
+- **Defects D-01, D-03, D-04 and D-05** — **closed** by fast/004, fast/005 (D-03,
+  D-04) and fast/006; see the defect table below.
+- **The unconfigured instance's login visit** (`frontend-structure.md`,
+  `backend-structure.md`) — the login entry probes `configured` and hands an
+  unconfigured instance to `/bootstrap/`; a cookie on a database with no account
+  answers 401, never 500 (fast/010, `DEC-F010-1` .. `-6`).
+- **The composer's controls and the composer rule of 2026-10-08**
+  (`workspace-shell.md`, `ui-conventions.md`) — **built** (fast/011): Send is an
+  icon-only control inside the text box (no longer a labelled button), Stop takes
+  its spot while streaming, Ctrl/Cmd+Enter sends, the start composer is full width,
+  and the vertical-resize / persisted-height rule is in the code
+  (`DEC-F011-1` .. `-4`).
+- **One note behaviour at every mount** (`workspace-shell.md`,
+  `ui-conventions.md`, `frontend-structure.md`) — header '+' only, drafts and
+  saved notes save on focus leave, no Save/Cancel, flags in the note's editor
+  toolbar through the shared editor's trailing toolbar group; supersedes plan
+  033's opt-in header-add mode (fast/012, `DEC-F012-1` .. `-4`).
+- **The translation flicker's pending state** (`ui-conventions.md`) — a loader
+  replaces the glyph while pending, label and accessibility unchanged, and the
+  entry's actions stay revealed meanwhile (fast/015, `DEC-F015-1` .. `-4`).
+- **The tone of the roleplayer's own chat text** (`ui-conventions.md`) — muted in
+  the zone and the Discussion group (fast/016, `DEC-F016-1` .. `-4`).
 
 **Revised (decision revision, 2026-10-08): the composer's text area.** "The
 composer grows with its content" is **superseded**: no auto-grow, a native
 vertical handle, default `rows` 3 (session) / 10 (character page start
-composer), dragged height persisted under `rphelper.composer-heights`. Code
-pending a follow-up fast feature — see `workspace-shell.md`'s "Geometry" and the
-reversal record's decision history for (C).
+composer), dragged height persisted under `rphelper.composer-heights`. **Built
+by fast/011 and its bug fix (2026-10-08)** — see `workspace-shell.md`'s
+"Geometry" and the reversal record's decision history for (C).
 
 **Revised (finalization of fast/014, 2026-11-05): R11's raw-`messages`
 invariant.** "Raw `messages` is touched by exactly two operations, settle and
@@ -1550,20 +1713,21 @@ it now reports are all left unused. Detail in `DEC-arch-llm-client-library-13`
 ## Defects — specified but unsatisfied, and NOT `_TBD:` items
 
 **A defect is not an open question.** The design question is answered and the
-requirement is settled; only the code is short. None of the five below may be
-filed as a `_TBD:`, and none may be written up as though the specified behaviour
-shipped.
+requirement is settled; only the code is short. Of the five below, **four are
+closed** (D-01, D-03, D-04, D-05) and their rows say what shipped; **D-02 is the
+one still open**. It may not be filed as a `_TBD:`, and may not be written up as
+though the specified behaviour shipped.
 
 **`docs/plans/defects.md` is the file of record.** It is the product round's
 artifact: cite it, never edit it.
 
 | Defect | Unsatisfied criterion | Recorded in |
 |---|---|---|
-| **D-01** | `US-117.AC-3` / UC-080 step 5 — the character page's opening message **draws no assistant reply**. The design is closed (yes, and the route stays JSON) and the trigger is missing; plan 018 deferred it and no later plan took it | `session-stream.md`, `workspace-shell.md` |
+| **D-01** — **closed** (fast/004) | `US-117.AC-3` / UC-080 step 5 — the character page's opening message now **draws an assistant reply**: the create route stays JSON, and the session screen issues one textless compose on arrival (`DEC-F004-1` .. `-5`) | `session-stream.md`, `workspace-shell.md` |
 | **D-02** | `US-115.AC-1`'s streaming half — **the live reply has no edit control**. The build's reason is real: an edit would race the server's own write of that row (019 D11). **An open alternative reading is recorded and NOT resolved** — that US-115.AC-1 is conditioned on a message *sitting in* the zone, which an unpersisted in-flight reply is not, in which case D-02 is a clarification rather than a defect | `session-stream.md`, `workspace-shell.md`, `frontend-structure.md` |
-| **D-03** | `US-112.AC-1` widened ("credentials the instance cannot use") — **the degraded embedding path does not catch `secret_ref_missing`**. The built catch set is `no_embedding_model` and `llm_unreachable` only, so an unset `$ENV_VAR` key makes a settle or a settled edit fail with a **500** and refuses the roleplayer's own text | `session-stream.md`, `backend-structure.md`, `search-and-retrieval.md` |
-| **D-04** | `US-112.AC-3` — **a failed degraded embed leaves existing vectors stale instead of clearing them.** "No marker, no column" stands as the recording decision; the product reversed the consequence. Any fix is bound by the owner-scoped-ids rule, because the derived tables carry no user column | `session-stream.md`, `backend-structure.md`, `search-and-retrieval.md` |
-| **D-05** | `US-147` — **my-search's `LIKE` folds case for ASCII letters only**, so a character, setup or session name in a non-Latin script matches only in the case typed. It matters more than it looks: `vision.md`'s premise is a roleplayer composing in a language they are not confident in. Any fix must preserve the escape handling — user input may never act as a wildcard | `search-and-retrieval.md` |
+| **D-03** — **closed** (fast/005) | `US-112.AC-1` widened ("credentials the instance cannot use") — the degraded embedding path's caught set is now **three**: `no_embedding_model`, `llm_unreachable` and `secret_ref_missing`, a named set rather than a base type (`DEC-F005-1`) | `session-stream.md`, `backend-structure.md`, `search-and-retrieval.md` |
+| **D-04** — **closed** (fast/005) | `US-112.AC-3` — a degraded write now **clears** the session's `session_vec` row, resolving its id owner-scoped first, as the derived-store rule requires (`DEC-F005-2`). "No marker, no column" stands | `session-stream.md`, `backend-structure.md`, `search-and-retrieval.md` |
+| **D-05** — **closed** (fast/006) | `US-147` — my-search's three name matches (characters, setups, session names) fold **both sides through one Unicode case fold**, case only, with the escape handling unchanged — user input still never acts as a wildcard (`DEC-F006-1` .. `-5`) | `search-and-retrieval.md` |
 
 **Separately, and not one of the five:** the **`users.created_at` /
 `updated_at` fixed-width timestamp deviation** (`data-model.md`). It predates
@@ -1582,17 +1746,11 @@ two columns as text against a fixed-width value.
   **unspecified at the product layer** — and it would need the persisted staleness
   signal 024 U5 declined. The absence is left visible
   (`workspace-shell.md`).
-- **The residual question behind the rebuild report's wording** — whether UC-016's
-  completion report may carry an aggregate over all users' material at all — binds
-  the **unbuilt `fast/002`** and is surfaced to the user rather than decided here.
-  The conservative reading is written in both places: completion, and at most
-  counts **not** derived from user content.
-- **The `ComposerCore` / Send reconciliation is an open one-file check.** 018
-  step 003 is recorded as rebuilding `Composer` on `ComposerCore`, which hard-
-  renders Send, while 019 step 004 requires Send **absent** while streaming with
-  Stop in its slot. Both shipped and **no outcome records how they were
-  reconciled**; the docs state both facts in a form consistent with either
-  reconciliation. **Not resolved here** — finalization does not harvest source.
+- ~~**The `ComposerCore` / Send reconciliation is an open one-file check.**~~
+  **Resolved** (fast/011's harvest, 2026-10-08): `ComposerCore` renders Send only
+  when its host passes no replacement for that slot, and the session composer
+  passes Stop as the replacement while streaming — so 018 step 003 and 019 step
+  004 hold together. Since fast/011 that slot sits inside the text box.
 - **The confirm step** on destructive admin actions is architectural judgement
   except where an AC now requires it — **clear embedding (US-015.AC-2)** and **a
   lossy Sync (US-018.AC-3/AC-4)**. The rest may be revisited by a later planner.

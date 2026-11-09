@@ -36,7 +36,8 @@ which leaves that one field out of the equality and keeps the other twelve in; t
 position and zone-absence — is unchanged. The flag's own behaviour is covered in
 `test_record_keeping_embedding.py`.
 
-Amended by fast feature 014 (`docs/plans/fast/014.message-delete/plan.md`, context.md P1 / P3):
+Amended by fast feature 014 (`fast/014.message-delete`,
+`docs/decisions/fast-014.message-delete.md`):
 `delete_message` now deletes a zone message, or a settled entry together with its buried group,
 and the translations of every deleted id. 012 DoD-13's "no delete path" guard is **narrowed** to
 permit deletes on `messages` and `translations` only (still no raw SQL `DELETE`, still no
@@ -1609,7 +1610,8 @@ def test_no_update_statement_assigns_kind_settled_at_or_related_to__S014_001_DoD
 
 
 # =========================================================================================
-# Fast feature 014 — message-delete (`docs/plans/fast/014.message-delete/plan.md`)
+# Fast feature 014 — message-delete (`fast/014.message-delete`,
+# `docs/decisions/fast-014.message-delete.md`)
 #
 # Expected values come from the plan's Interface intent and DoD-1 .. DoD-10 and from its
 # `context.md` (user decisions 2-3, P1 refusals, P3 order of work). Binding (status.md

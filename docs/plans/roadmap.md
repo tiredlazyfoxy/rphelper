@@ -20,7 +20,7 @@ scaffold; restoring from an export (UC-002); the vector-index rebuild
 |---|---|---|---|---|
 | `001.backend-foundation` | multi-step | M | — | — |
 | `002.frontend-foundation` | multi-step | M | — | — |
-| `fast/001.dev-and-container-harness` | fast | S | — | `001.backend-foundation`, `002.frontend-foundation` |
+| fast/001.dev-and-container-harness — delivered 2026-10-06 | fast | S | — | `001.backend-foundation`, `002.frontend-foundation` |
 | `003.first-run-bootstrap` | multi-step | M | FEAT-001 | `001.backend-foundation`, `002.frontend-foundation` |
 | `004.authentication-session` | multi-step | M | FEAT-002 | `003.first-run-bootstrap` |
 | `005.admin-shell-and-users` | multi-step | M | FEAT-003 | `004.authentication-session` |
@@ -86,7 +86,7 @@ administrator can rebuild the vector index.
 | `027.session-search-tool` | multi-step | M | FEAT-015 | `025.hybrid-search-port`, `021.compose-loop-and-tools`, `011.rp-sessions` |
 | `028.web-search-tool` | multi-step | M | FEAT-016 | `021.compose-loop-and-tools`, `017.session-configuration` |
 | `029.my-search` | multi-step | M | FEAT-017 | `025.hybrid-search-port`, `008.app-shell-frame` |
-| `fast/002.vector-index-rebuild` | fast | S | FEAT-005 | `024.embedding-lifecycle`, `007.schema-drift-and-remediation` |
+| fast/002.vector-index-rebuild — delivered 2026-10-07 | fast | S | FEAT-005 | `024.embedding-lifecycle`, `007.schema-drift-and-remediation` |
 
 ## Stage 005.portability
 **Goal:** the data moves, and the isolation guarantee is proven.
@@ -101,7 +101,7 @@ user's material.
 |---|---|---|---|---|
 | `030.export-granularities` | multi-step | M | FEAT-018 | `011.rp-sessions`, `015.memos`, `012.messages-and-settle`, `010.setups`, `009.characters` |
 | `031.import-and-id-remapping` | multi-step | M | FEAT-018 | `030.export-granularities` |
-| `fast/003.bootstrap-from-export` | fast | S | FEAT-001 | `031.import-and-id-remapping`, `003.first-run-bootstrap` |
+| fast/003.bootstrap-from-export — delivered 2026-10-07 | fast | S | FEAT-001 | `031.import-and-id-remapping`, `003.first-run-bootstrap` |
 | `032.privacy-isolation-audit` | multi-step | M | FEAT-019 | `026.memo-search-tool`, `027.session-search-tool`, `029.my-search`, `030.export-granularities`, `031.import-and-id-remapping`, `005.admin-shell-and-users` |
 
 ## Stage 006.repair
@@ -120,15 +120,17 @@ already exists.
 
 | Feature | Track | Size | Delivers | Depends on |
 |---|---|---|---|---|
-| `fast/005.degraded-embedding-path` | fast | S | FEAT-009 | `024.embedding-lifecycle`, `032.privacy-isolation-audit` |
-| `fast/004.character-page-first-reply` | fast | S | FEAT-008 | `018.character-page`, `021.compose-loop-and-tools`, `022.discussion-ui` |
-| `fast/006.unicode-name-matching` | fast | S | FEAT-017 | `029.my-search` |
+| fast/005.degraded-embedding-path — delivered 2026-10-07 | fast | S | FEAT-009 | `024.embedding-lifecycle`, `032.privacy-isolation-audit` |
+| fast/004.character-page-first-reply — delivered 2026-10-07 | fast | S | FEAT-008 | `018.character-page`, `021.compose-loop-and-tools`, `022.discussion-ui` |
+| fast/006.unicode-name-matching — delivered 2026-10-07 | fast | S | FEAT-017 | `029.my-search` |
 
 ## Build order
 
-`001` → `002` → `fast/001` → `003` → `004` → `005` → `006` → `007` → `008` →
+`001` → `002` → fast/001 → `003` → `004` → `005` → `006` → `007` → `008` →
 `009` → `010` → `011` → `012` → `013` → `014` → `015` → `016` → `017` →
 `018` → `019` → `020` → `021` → `022` → `023` → `024` → `025` → `026` →
-`027` → `028` → `029` → `fast/002` → `030` → `031` → `fast/003` → `032` →
-`fast/005` → `fast/004` → `fast/006`
+`027` → `028` → `029` → fast/002 → `030` → `031` → fast/003 → `032` →
+fast/005 → fast/004 → fast/006
+
+Entries without backticks (`fast/NNN`) are retired (archived under `.done/`); see `retired.md`.
 <!-- roadmap:end -->

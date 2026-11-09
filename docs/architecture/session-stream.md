@@ -276,15 +276,18 @@ partner block. When no `setup_id` is supplied the session is created with
 `setup_id` NULL — UC-080 names no setup, and R2 makes that the first-class case
 rather than a degraded one.
 
-**The opening message draws no assistant reply, and that is defect D-01.**
-The design question is **closed**: `US-117.AC-3` and UC-080 step 5 require the
-assistant to answer that message as it would any other discussion message, and
-the route **stays JSON** because the compose happens on the session once it
-exists (018 D2) — so the media type does not change and no second contract is
-needed. What is missing is the trigger. Plan 018 shipped the JSON, no-model-call
-route and deferred the reply; no later plan took it. See
-`docs/plans/defects.md` D-01 for what a fix must settle. Nothing in this doc
-should be read as describing a reply that exists.
+**The opening message is answered by the session screen, not by this route**
+(fast/004, which closed defect D-01). `US-117.AC-3` and UC-080 step 5 require the
+assistant to answer that message as it would any other discussion message. The
+route **stays JSON** and makes no model call (018 D2). When the session screen
+opens on arrival from the character page, it draws the reply with **one textless
+compose** — `POST /api/sessions/{id}/zone/compose` sent with body `{}`, the same
+textless form the retry uses — so nothing is inserted and no `accepted` frame is
+emitted; the reply is the ordinary live reply, with the ordinary stop. The media
+type of the create route does not change and no second streaming contract
+exists. The trigger is a one-shot marker the client consumes on arrival, so a
+reload or a later visit never re-fires it (`frontend-structure.md`,
+`workspace-shell.md`; `DEC-F004-1`..`DEC-F004-5`).
 
 ## Settle and re-open — one transaction each, one module
 
@@ -380,31 +383,25 @@ operation's instant, in the same transaction; a refused operation writes nothing
 Settle, re-open, an accepted `PATCH` and the delete of a settled entry are
 **record-keeping** writes, and US-112 is explicit that a platform-level embedding
 gap must never block the roleplayer's own record-keeping. So the `session_vec`
-refresh in step 6 is wrapped: `no_embedding_model` (including the
-dimension-mismatch form) and `llm_unreachable` are **caught**, the relational
-write commits, and the response carries `search_coverage_incomplete: true`
-(024 U3, D8). The asymmetry with memo writes, which fail the whole transaction,
-is deliberate and is stated in `backend-structure.md`'s "two transaction rules"
-and `search-and-retrieval.md`.
+refresh in step 6 is wrapped, and a named set of **three** errors is
+**caught**: `no_embedding_model` (including the dimension-mismatch form),
+`llm_unreachable`, and `secret_ref_missing` — an unset `$ENV_VAR` key on the
+designated server, the "credentials the instance cannot use" case of
+`US-112.AC-1`. On a catch the relational write commits, **the session's
+existing `session_vec` row is cleared** rather than left stale (`US-112.AC-3`),
+and the response carries `search_coverage_incomplete: true` (024 U3, D8;
+fast/005). Any other exception still propagates and rolls the whole write back,
+so a bug never reads as incomplete coverage. The asymmetry with memo writes,
+which fail the whole transaction, is deliberate and is stated in
+`backend-structure.md`'s "two transaction rules" and `search-and-retrieval.md`.
 
-Two defects live on this path, and both are recorded rather than designed
-around:
-
-- **`secret_ref_missing` is not caught — defect D-03.** The built catch set is
-  `no_embedding_model` and `llm_unreachable` only, so an unset `$ENV_VAR` key on
-  the designated server makes a settle or a settled edit fail with a **500** and
-  refuses the roleplayer's own text. `US-112.AC-1` was widened at the 2026-10-06
-  product finalization to cover "credentials the instance cannot use", so the
-  built behaviour does not satisfy it. See `docs/plans/defects.md` D-03.
-- **A failed degraded embed leaves any existing `session_vec` row stale —
-  defect D-04.** There is **no staleness marker and no staleness column**
-  (024 U5), and the recorded remedy is the whole-index rebuild (UC-016). The
-  design question of *whether to mark* is answered — no — but `US-112.AC-3`, new
-  at the same finalization, requires the material's existing vectors to be
-  **cleared** rather than left in place. The build leaves them. See
-  `docs/plans/defects.md` D-04, which also records the accepted consequence of
-  the fix: material that could not be embedded drops out of semantic search
-  entirely until the rebuild.
+**The two defects this path used to carry are closed** by fast/005
+(`DEC-F005-1`, `DEC-F005-2`): D-03 (`secret_ref_missing` was not caught and
+refused the roleplayer's text with a 500) and D-04 (a failed degraded embed left
+the existing vector in place). The accepted consequence of the clear: material
+that could not be embedded drops out of semantic search entirely until the
+whole-index rebuild (UC-016) re-embeds it. There is still **no staleness marker
+and no staleness column** (024 U5).
 
 ## The `(( ))` seam — one parser, server-side, at settle only
 

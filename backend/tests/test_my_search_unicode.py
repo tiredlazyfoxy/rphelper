@@ -1,6 +1,7 @@
 """fast/006.unicode-name-matching — `rp_casefold` on engine connections and Unicode my-search.
 
-Every expected value comes from the **spec**: `docs/plans/fast/006.unicode-name-matching/plan.md`
+Every expected value comes from the **spec**: `fast/006.unicode-name-matching`
+(`docs/decisions/fast-006.unicode-name-matching.md`)
 (Interface intent, DoD-1..16) and its `context.md` Decisions 1-4 — the fold is Python
 `str.casefold` on both sides of the comparison, NULL stays NULL, a non-text value comes back
 unchanged, no accent folding and no normalization, SQLAlchemy's `autoescape=True` (escape

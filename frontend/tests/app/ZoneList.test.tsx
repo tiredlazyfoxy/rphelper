@@ -14,7 +14,7 @@
 //     open with the typed text while the row is still served; a row gone from the re-read
 //     takes its item and editor with it.
 //
-// Amended by fast feature 014 (docs/plans/fast/014.message-delete/plan.md, context.md P7-P8):
+// Amended by fast feature 014 (fast/014.message-delete, docs/decisions/fast-014.message-delete.md):
 //   - user and assistant rows carry a "Delete message" button; tool rows and read-only
 //     (editable={false}) rows carry none; it is absent while the row's editor is open and
 //     disabled while the stream is busy; it opens a "Delete message?" dialog with a "Delete"

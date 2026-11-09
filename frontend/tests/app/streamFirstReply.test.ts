@@ -1,5 +1,6 @@
 // Fast feature 004 — character-page-first-reply: the store-level first-reply compose
-// (DoD-1..DoD-5) (docs/plans/fast/004.character-page-first-reply/plan.md).
+// (DoD-1..DoD-5) (fast/004.character-page-first-reply,
+// docs/decisions/fast-004.character-page-first-reply.md).
 //
 // Expected values come from the plan's Interface intent ("composeFirstReply") and Definition of
 // done, plus context.md D3 and D5:

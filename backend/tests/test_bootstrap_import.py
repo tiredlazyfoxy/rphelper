@@ -1,6 +1,7 @@
 """Tests for ``POST /api/bootstrap/import`` and ``restore_from_export`` — fast/003.
 
-Spec: ``docs/plans/fast/003.bootstrap-from-export/plan.md`` (Interface intent + Definition
+Spec: ``fast/003.bootstrap-from-export`` (``docs/decisions/fast-003.bootstrap-from-export.md``)
+(Interface intent + Definition
 of done) and ``context.md`` (Decisions 1-5, Accepted consequences). Bindings come from the
 ``## Skeleton`` record in that folder's ``status.md``:
 

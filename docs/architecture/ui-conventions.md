@@ -16,8 +16,8 @@ named exceptions, the MobX draft form convention, the confirm convention, the
 empty-state rule, the never-optimistic rule and the page-state convention.
 
 This file holds what is left, and it is a coherent subject: **icons, the shared
-`IconButton`, the accessibility floor, async feedback, and the inherited frontend
-facts** a reader needs to build a screen.
+`IconButton`, the accessibility floor, the tone of the roleplayer's own text, async
+feedback, and the inherited frontend facts** a reader needs to build a screen.
 
 This is a **contract**, not folklore. The conventions below were arrived at in the
 sibling project these are inherited from, or designed here against a stated
@@ -138,7 +138,7 @@ a row, and the overflow-menu rule exists to keep a *row* from collapsing.
 
 | Action | Icon | Feature |
 |---|---|---|
-| Send message in discussion | **labelled button**, not an icon | FEAT-010 |
+| Send message in discussion | `IconSend`, labelled "Send", `sizeVariant` `"main"` — **icon-only, inside the composer's text box at its bottom-right** (`workspace-shell.md`); Ctrl/Cmd+Enter is its primary path | FEAT-010 |
 | Stop generation | `IconPlayerStop` | FEAT-010, UC-085 |
 | Settle | **labelled primary button**, not an icon | FEAT-010 |
 | **Copy settled turn out** | `IconCopy`, labelled "Copy as plain text" — on `turn` entries **only** | FEAT-009 |
@@ -184,8 +184,8 @@ built; **the glyph `_TBD:`s this table used to carry are all closed.**
 | Open the note wall | `IconNotes`, labelled "Open notes"; present only while the wall is not visible | UC-072 |
 | Pin / unpin the wall | `IconPin`, labelled "Pin notes" / "Unpin notes"; the active state is the `IconButton`'s colour while pinned | UC-072, US-094 |
 | Dismiss the wall | `IconX`, labelled "Close notes" | UC-072 |
-| Note forced / not forced | `IconPin`, labelled "Force note" / "Stop forcing note"; state in the button's colour | UC-075, US-098, US-099 |
-| Note enabled / disabled | `IconCircleCheck` while enabled, `IconCircleOff` while disabled, labelled "Disable note" / "Enable note" | UC-075, US-100, US-101 |
+| Note forced / not forced | `IconPin`, labelled "Force note" / "Stop forcing note"; state in the button's colour; **in the note's editor toolbar**, at its right end | UC-075, US-098, US-099 |
+| Note enabled / disabled | `IconCircleCheck` while enabled, `IconCircleOff` while disabled, labelled "Disable note" / "Enable note"; **in the note's editor toolbar**, at its right end | UC-075, US-100, US-101 |
 | Collapse / expand a tool call | `IconTool` (decorative, beside the tool name) plus the rotated `IconChevronDown` toggle, labelled "Show tool call" / "Hide tool call" | US-114 |
 | Collapse / expand thinking | `IconBulb` beside "Thinking", plus the rotated `IconChevronDown` toggle, labelled "Show thinking" / "Hide thinking" | US-114 |
 | User menu — settings | `IconSettings` | UC-071, US-092 |
@@ -212,14 +212,24 @@ Notes on individual choices:
   (014 D7): UC-030, UC-082 and US-033 all speak of the roleplayer's *own* answer,
   and a partner block is text they did not write and have no reason to post back.
   `workspace-shell.md` holds the stripper and the clipboard fallback.
-- **Settle and Send are labelled buttons, not icons.** This **resolves** the
-  previous `_TBD:` that proposed `IconMessageCheck` for settle and noted a
-  label-bearing button might be right instead. Settle is the most consequential
-  action in the product (UC-035) and is the composer's primary button; Send is
-  secondary beside it. `IconMessageCheck` is not used anywhere.
-- **Regenerate is labelled rather than icon-only**, for the same reason Send and
-  Settle are (022 D14): it **starts a model call**, and the three controls that
-  spend a model call all carry words. The `IconRefresh` is a left section, not the
+- **Settle is a labelled button, not an icon.** This **resolves** the previous
+  `_TBD:` that proposed `IconMessageCheck` for settle and noted a label-bearing
+  button might be right instead. Settle is the most consequential action in the
+  product (UC-035) and is the composer's primary button, in the row beneath the
+  text box. `IconMessageCheck` is not used anywhere.
+  **Send used to be a labelled button too, and is not any more** (user decision,
+  fast/011): it is an icon-only `IconSend` inside the composer's text box, at its
+  bottom-right, and Stop takes the same spot while a generation streams. The user
+  asked for Send as an icon inside the chat box rather than a big button; the move
+  costs no clarity because the control sits inside the box it sends from and
+  Ctrl/Cmd+Enter is its primary path (`workspace-shell.md`).
+- **Regenerate is labelled rather than icon-only**, for the same reason Settle is
+  (022 D14): it **starts a model call**, and a control that spends a model call
+  carries words. **Send is the one named exception** (fast/011): it spends a model
+  call on *my turn* and is icon-only, because it sits inside the text box it sends
+  from and its primary path is the keyboard shortcut — the box says what the
+  control is for. Regenerate has no such host: it stands alone after the last zone
+  row and has to say what it does. The `IconRefresh` is a left section, not the
   control.
 - **`IconChevronLeft` is the decision of record for "Collapse tree"** (008 D10).
   Plan 008 shipped it as a provisional choice under the `_TBD:` this table used to
@@ -275,10 +285,14 @@ Notes on individual choices:
   row's overflow menu** for setups and sessions (plans 010, 011). The glyph is the
   same; whether it is a button or a menu item is the table rule above.
 - **`IconPlus` is a labelled button, not an icon-only control, wherever it creates
-  a child of the thing on screen** — "New setup", "Start session", "New note",
-  "Import session" (plans 010, 011, 016, 031). It is icon-only in the tree header
-  and the collapsed rail, where there is no room for words and the surrounding
-  context supplies the noun.
+  a child of the thing on screen** — "New setup", "Start session", "Import
+  session" (plans 010, 011, 031). It is icon-only in the tree header and the
+  collapsed rail, where there is no room for words and the surrounding context
+  supplies the noun, **and in a note group's header**: the '+' labelled "New note"
+  beside the group's title, at every mount (user decision, fast/012). It replaced
+  the labelled "New note" button that sat below the list; the group's title
+  already supplies the noun, and the header '+' is the one way to open a draft
+  (`workspace-shell.md`).
 - **The wall's pin and a note's "forced" flag are the same glyph, and the
   collision is accepted.** `IconPin` means "keep this panel open" on the wall's
   header and "put this note in the system prompt" on a note card. **They do
@@ -287,7 +301,7 @@ Notes on individual choices:
   the two are disambiguated by the things that actually carry meaning here: the
   **label** ("Pin notes" / "Unpin notes" versus "Force note" / "Stop forcing
   note", each the tooltip and the accessible name) and the **location** (one in a
-  panel header, one in a card's own controls). The alternative was a second glyph
+  panel header, one at the end of the note's editor toolbar). The alternative was a second glyph
   for a concept that is genuinely "pin this", chosen only to avoid a repetition
   the labels already resolve — which trades a real loss of meaning for a cosmetic
   gain. **The `_TBD:` that carried this question is closed by that decision**
@@ -308,6 +322,15 @@ Notes on individual choices:
   screen-reader user is told the same thing twice and in two vocabularies.
   `IconButton`'s props are not widened for it. **The `_TBD:` that asked how the
   flicked state is shown is closed.**
+  **The one exception is the pending state** (fast/015, DEC-F015-2): while a
+  translation is pending, a **spinning loader replaces the language glyph**, so a
+  sighted reader sees that work is in flight without hovering for the tooltip — a
+  translation can queue behind a long compose on the same model. Everything else
+  holds while pending (DEC-F015-3): the label is "Cancel translation", there is no
+  `aria-pressed`, the translated state's colour is unchanged, the control stays
+  enabled and pressable to cancel, and `IconButton` is still not widened — the
+  loader is passed in as its icon. It is still one control; only its glyph
+  changes, and only for the one state that is work in flight rather than a view.
 - **`IconTool` for a tool block** (022 D14) is **decorative**, beside the tool's
   name; the control is the rotated chevron. Recorded because a decorative icon
   next to an icon-only toggle is exactly the pair someone merges into one
@@ -331,6 +354,11 @@ Notes on individual choices:
   tabbing into an entry reveals them. No stylesheet selector exists for it, and
   none may be added — the two-stylesheet rule (`frontend-structure.md`) has
   nowhere to host one, and `tests/stylesheets.test.ts` pins that.
+  **An entry's group is also revealed while that entry's translation is
+  pending** (fast/015, DEC-F015-4), so the flicker's pending loader is seen
+  without hovering. Once the translation resolves, is cancelled or fails, the
+  group returns to the hover and focus rule; no other entry is affected. It is one
+  more condition on the one reveal mechanism, not a second visible element.
 - **A note's flag icons are always shown, and that is the convention** (user
   decision, 2026-10-06). This floor used to require hover-reveal for them; the
   requirement is removed rather than the code changed, because **always-visible
@@ -369,6 +397,30 @@ Notes on individual choices:
 - `_TBD: no wider accessibility target (WCAG level, screen-reader matrix) is
   stated in docs/product/. The floor above is what the icon and interaction
   contracts require, not a considered accessibility posture._
+
+---
+
+## The roleplayer's own text is muted in the chat
+
+In the current zone, and in a settled entry's read-only Discussion group, **the
+body of the roleplayer's own messages takes the theme's muted tone**; assistant
+and tool rows keep normal contrast (user decision, fast/016). The chat is an
+exchange between the roleplayer and the assistant, and what the roleplayer scans
+it for is the assistant's side — their own lines step back so the reply reads
+apart from them.
+
+- **The tone comes from the theme, as a component style prop**, so it follows the
+  light and dark colour schemes. **No stylesheet** — the two-stylesheet rule
+  (`frontend-structure.md`) has nowhere to put it, and colour is still decided in
+  one place.
+- **The Discussion group gets the same tone** because it renders its rows through
+  the same row component, and it is the same chat.
+- **Inline accents keep their own colours** inside a muted row: the `(( ))`
+  fragment chip and the out-of-character card decide their colour themselves.
+- **The settled record is not toned, and neither is the live reply.** The record
+  is the document the roleplayer posts back, and it stays at full contrast.
+
+The mechanism and its test hook are `DEC-F016-2`..`DEC-F016-4`.
 
 ---
 
@@ -596,3 +648,20 @@ Recorded here so a reader building a screen has the stack in one place:
   grid (UC-076, US-102, US-103), with the sensors and announcements shared through
   one module. See `workspace-shell.md` and `frontend-structure.md`. It is not
   available for anything else without a requirement that asks for it.
+
+---
+
+## Decision history
+
+- **2026-10-08 — Send becomes an icon-only control inside the composer's text
+  box** (fast/011, user decision); Settle stays labelled and Send is the named
+  exception to "a control that spends a model call carries words". Mechanism in
+  `DEC-F011-1`.
+- **2026-10-08 — a note group's header '+' is icon-only at every mount, and the
+  flag controls sit in the note's editor toolbar** (fast/012, user decision).
+  Detail in `DEC-F012-1`..`DEC-F012-4`.
+- **2026-11-05 — the translation flicker shows a loader while pending, and the
+  entry's actions group is revealed while pending** (fast/015, user decision).
+  Detail in `DEC-F015-1`..`DEC-F015-4`.
+- **2026-11-05 — the roleplayer's own chat text is muted** (fast/016, user
+  decision). Detail in `DEC-F016-1`..`DEC-F016-4`.

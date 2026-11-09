@@ -11,7 +11,8 @@ detail, **R5** owner scope, **R11** reads go through `settled_entries`). Binding
 002 — tests" in `status.md`. Nothing here was derived from the implementation.
 
 `024`'s **U5** second half ("a degraded write leaves the existing row as it is") is reversed by
-fast feature 005 (`docs/plans/fast/005.degraded-embedding-path/plan.md`, US-112.AC-3): a
+fast feature 005 (`fast/005.degraded-embedding-path`,
+`docs/decisions/fast-005.degraded-embedding-path.md`, US-112.AC-3): a
 degraded catch now **clears** the session's existing vector, through an owner-scoped id lookup,
 and the caught set is the named `DEGRADED_EMBEDDING_ERRORS` (`NoEmbeddingModelError`,
 `LlmUnreachableError`, `SecretRefError`). No test here asserts that a degraded catch keeps a
@@ -871,7 +872,8 @@ def test_the_module_binds_no_fastapi_symbol__S024_003_DoD12() -> None:
 
 # =========================================================================== F005
 # Fast feature 005 — degraded-embedding-path. Expected values come from
-# `docs/plans/fast/005.degraded-embedding-path/plan.md` (DoD-3, 4, 6, 7, 8, 9, 10, 11, 12, 14)
+# `fast/005.degraded-embedding-path` (`docs/decisions/fast-005.degraded-embedding-path.md`)
+# (DoD-3, 4, 6, 7, 8, 9, 10, 11, 12, 14)
 # and its `context.md`; bindings from that plan's `## Skeleton` record.
 
 
