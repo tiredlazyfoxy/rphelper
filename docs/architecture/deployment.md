@@ -180,8 +180,9 @@ way to reach the API without passing the directives below.
    resolved at build time — a consequence of the uv packaging decision
    (`overview.md`): the lock is what makes the image and a developer machine run
    the same tree. Forward-looking; no feature has built an image yet.
-   **The backend has a git dependency** — the `llm-client` library, pinned to a
-   tag of its GitHub repository (`llm-and-streaming.md`, 2026-11-08). The lock
+   **The backend has a git dependency** — the `llm-client` library, pinned to
+   its `v0.2.1` tag on GitHub (`llm-and-streaming.md`, 2026-11-08; 0.2.1 from
+   2026-11-09, `DEC-arch-llm-client-library-13`). The lock
    pins its revision, but `uv sync` still fetches it from the repository, so the
    stage that installs the backend **needs `git` and network access to
    github.com**. A build environment without either fails at dependency
@@ -897,6 +898,15 @@ path.
 ---
 
 ## Decision history
+
+### 2026-11-09 — the `llm-client` pin moves to `v0.2.1`
+
+Approved and built 2026-11-09 (feature 035 step 006). The only deployment
+consequence is the pinned tag: the build still needs `git` and github.com, the
+HTTP stack is unchanged, and the trace variables keep their meaning — RPHelper
+leaves the library's trace switch to the environment. The library's new
+streamed-only silence limit is not used, so nginx's `proxy_read_timeout` note
+above is unchanged. `DEC-arch-llm-client-library-13`, `-17`.
 
 ### 2026-11-08 — LLM calls move to the `llm-client` library
 

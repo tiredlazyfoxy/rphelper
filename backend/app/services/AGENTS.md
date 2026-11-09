@@ -7,9 +7,9 @@ The domain layer: every business rule, ownership check and transaction lives her
 ## Glossary
 
 **Subfolders:**
-- `llm/` — the LLM gateway over the `llm-client` library (`gateway.py`: `LlmGateway` with probe / embed / complete / compose), the neutral chat-message value type (`chat.py`) and SSE frame emission (`frames.py`) used by compose and translation.
+- `llm/` — the LLM gateway over the `llm-client` library (`gateway.py`: `LlmGateway` with probe / embed / complete / compose, the compose stream carrying text, tool runs and model-side rejections), the neutral chat-message value type (`chat.py`) and SSE frame emission (`frames.py`) used by compose and translation.
 - `search/` — hybrid search: the narrow port (`ports.py`), candidate filtering, the lexical (FTS5) and vector arms, fusion (`hybrid.py`), and the memo / session / my-search corpora built on it.
-- `tools/` — the assistant's tools: the three declarations, the dispatch seam (`seam.py`) and the `memo_search`, `session_search` and `web_search` adapters.
+- `tools/` — the assistant's tools: the three declarations, the dispatch seam (`seam.py`, which also writes a model-side rejection's failed tool row without dispatching) and the `memo_search`, `session_search` and `web_search` adapters.
 - `web_search/` — the web search provider port (`provider.py`) and its one Google Custom Search provider.
 
 **Files:**
@@ -17,7 +17,7 @@ The domain layer: every business rule, ownership check and transaction lives her
 - `auth.py` — authentication and the login-session lifecycle: authenticate, open, resolve, revoke.
 - `bootstrap.py` — first-run bootstrap: the "is configured" fact and the create-first-administrator operation.
 - `characters.py` — the roleplayer's characters: list, create, get, update, archive, restore.
-- `compose.py` — the compose source (the tool-calling loop the SSE harness drains) and `begin_compose`.
+- `compose.py` — the compose source (the tool-calling loop the SSE harness drains; a model-side rejection becomes `tool_start`, a failed tool row and `tool_fail`) and `begin_compose`.
 - `configuration.py` — session configuration: the two resolver chains, the one read and the use-time model check.
 - `context.py` — context assembly: what the assistant reads for one session, and in what order.
 - `embedding.py` — the embedding seam: the designated model as a ready client, the sync bridge, vector rows.

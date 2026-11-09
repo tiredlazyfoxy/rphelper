@@ -9,7 +9,7 @@ The backend pytest suite (parallel, no network; `-m live` opts into a real llama
 **Files:**
 - `__init__.py` — package marker.
 - `conftest.py` — shared pytest fixtures for the whole suite.
-- `llm_fakes.py` — shared LLM provider fakes: fake client, fake (kind-first) factory, a deterministic vector function, and fake library classes behind a real gateway (`gateway_factory`).
+- `llm_fakes.py` — shared LLM provider fakes: fake client, fake (kind-first) factory, a deterministic vector function, and fake library classes behind a real gateway (`gateway_factory`), and `library_status_error` (a library error carrying an HTTP `status`).
 - `privacy_audit_support.py` — the shared two-user "audit world" the privacy-audit modules sweep over.
 - `test_admin_db_export.py` — whole-database export route.
 - `test_admin_db_import.py` — whole-database import route.
@@ -29,7 +29,7 @@ The backend pytest suite (parallel, no network; `-m live` opts into a real llama
 - `test_characters_service.py` — the characters service.
 - `test_chat_wire.py` — tool-capable chat values and their OpenAI wire form.
 - `test_compose_route.py` — the compose route (`POST .../zone/compose`).
-- `test_compose_source.py` — the compose source in `services/compose.py`.
+- `test_compose_source.py` — the compose source in `services/compose.py`, including a rejection's `tool_start` / failed row / `tool_fail`.
 - `test_config.py` — the `Settings` model and its cached accessor.
 - `test_configuration_models.py` — configuration use-time errors and wire models.
 - `test_configuration_resolver.py` — configuration resolvers, the session configuration read and the model check.
@@ -53,7 +53,7 @@ The backend pytest suite (parallel, no network; `-m live` opts into a real llama
 - `test_llm_frames.py` — SSE frame values and encoder.
 - `test_llm_gateway_boundary.py` — import boundaries over `app/`: only `llm/gateway.py` imports the `llm` library, the old httpx client stays removed, and `httpx` is imported only by `web_search/`.
 - `test_llm_gateway_complete.py` — `LlmGateway.complete` and its failure mapping.
-- `test_llm_gateway_compose.py` — `LlmGateway.compose`: the tool loop, streamed text, tool runs and cancel-on-close.
+- `test_llm_gateway_compose.py` — `LlmGateway.compose`: the tool loop, streamed text, tool runs, model-side rejections (`ComposeRejected`, via a fake library with a tolerant `tool_errors="result"` mode) and cancel-on-close.
 - `test_llm_gateway_embed.py` — `LlmGateway.embed` and its failure mapping.
 - `test_llm_gateway_probe.py` — `LlmGateway.probe`, base-URL normalisation and the probe outcomes.
 - `test_llm_registry_enabled.py` — enabled-model reads in the LLM registry.
@@ -139,3 +139,9 @@ The backend pytest suite (parallel, no network; `-m live` opts into a real llama
 See also: docs/architecture/backend-structure.md
 
 <!-- agent-ready:end -->
+
+## Conventions
+
+- Live tests are opt-in: `pytest -m live`. The default run deselects `live` (`addopts` carries `-m 'not live'`) and needs no network.
+- `LLAMA_SWITCH_URL` points the live suite at a real llama-swap, given with or without the `/v1` suffix; without it the live tests skip (DEC-035-12).
+- `LLAMA_SWITCH_CHAT_MODEL` names the chat model for the live `complete`, `compose` and model-side-rejection checks; those checks skip without it.

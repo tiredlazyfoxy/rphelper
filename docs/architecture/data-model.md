@@ -758,10 +758,17 @@ plan 021**, which is the writer. As built (021 D7):
 - `tool_payload` is JSON:
   `{call_id, arguments, status: ok|failed, content | code}`. As built by plan 021
   `call_id` was the provider's own and `arguments` the provider's raw string;
-  **superseded 2026-11-08**: the client library exposes neither, so `call_id` is
-  minted by RPHelper per exchange and `arguments` is a re-serialisation of the
-  parsed arguments (`llm-and-streaming.md`, `DEC-arch-llm-client-library-5`). The
-  payload's keys are unchanged.
+  **superseded 2026-11-08**: `call_id` is minted by RPHelper per exchange and
+  `arguments` is a re-serialisation of the parsed arguments
+  (`llm-and-streaming.md`, `DEC-arch-llm-client-library-5`). The client library
+  then exposed neither to a tool; 0.2.1 reports the provider's call id on its
+  tool events, and RPHelper still mints its own (`DEC-arch-llm-client-library-17`).
+  **A call the library rejected as a model-side mistake** (2026-11-09) writes the
+  same failed row — status failed, code `tool_failed`, `text` the failed literal
+  — with `tool_name` the name the model sent (possibly empty) and `arguments` the
+  model's own argument text, since there are no parsed arguments to
+  re-serialise (`llm-and-streaming.md`'s "Model-side tool mistakes — the
+  observer", `DEC-arch-llm-client-library-15`). The payload's keys are unchanged.
 - **A call stopped mid-run writes no row at all** — a cancellation propagates and
   the exchange ends (`US-133.AC-1`).
 - The **wire** carries a *derived view* of the payload, never the payload:
@@ -1370,7 +1377,12 @@ rather than of the envelope:
   start date) computed by the client rather than stored. `partner_label` stays
   absent and `session_fts` stays uncreated. A rename moves `updated_at` only.
   Detail in `DEC-arch-session-names-1` and `DEC-arch-session-names-6`.
-- **2026-11-08 — `llm_servers.kind` is the dispatch key** (approved, not yet
-  built). Was: a presentation label, never a dispatch key. Now: it selects the
+- **2026-11-08 — `llm_servers.kind` is the dispatch key** (built 2026-11-09).
+  Was: a presentation label, never a dispatch key. Now: it selects the
   LLM gateway's Responses client class; the column itself is unchanged. Detail in
   `DEC-arch-llm-client-library-1`.
+- **2026-11-09 — model-side tool mistakes write a failed tool row** (approved
+  and built 2026-11-09 — feature 035 step 006). Was: with client library
+  0.2.0 such a call ended the exchange and wrote no tool row. Now: it writes the
+  ordinary failed row, its name and arguments as the model sent them; no column
+  or payload key changes. Detail in `DEC-arch-llm-client-library-15`.

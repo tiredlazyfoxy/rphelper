@@ -25,7 +25,7 @@ four batches landed.
 | `ui-conventions.md` | Icons + the shared `IconButton` + the full icon table, the accessibility floor, **async feedback** (no success toasts, the failure channel, the one bounded warning, the two sanctioned importers), the inherited frontend facts. **The CRUD conventions are no longer here** |
 | `forms-and-lists.md` | Tables and lists, **no sorting/filtering/pagination**, loading / error / empty states, **create and edit are always a `Modal`** and its three named exceptions, the MobX draft convention, **mutations are never optimistic** and its one exception (note reordering), the confirm convention and what is deliberately not confirmed, page state |
 | `admin-surfaces.md` | The `admin` entry in full: 3 routes + 404, shell (no user menu, no sign-out), the admin gate and why it deviates, the Users / LLM Servers / Database pages each with its as-built state, the drift report's granularity and statuses, Create/Sync postconditions, the surviving derived-tables gap, the whole-database export/import controls and their opacity |
-| `llm-and-streaming.md` | **The LLM gateway over `llm-client` 0.2.0** (`probe` / `embed` / `complete` / `compose`; `kind` selects the Responses client class; base-URL normalisation; errors and the privacy-breaking tracing switch; the one total-per-request timeout), use-time validation and `resolve_model_for_use`, the SSE frame protocol, **the four ways a stream ends**, the `<think>` convention, **"Stopping, and what a stop is not"** (UC-085), the tool loop (**owned by the library; RPHelper's per-tool wrapper; no iteration cap; the temporary 0.2.0 library limitation on model-side tool mistakes — the `tool_fail` rule stands**), `web_search`'s provider seam, **context assembly** and its exclusions, language handling, translation |
+| `llm-and-streaming.md` | **The LLM gateway over `llm-client` 0.2.1** (`probe` / `embed` / `complete` / `compose`; `kind` selects the Responses client class; base-URL normalisation; errors and the privacy-breaking tracing switch; the one total-per-request timeout), use-time validation and `resolve_model_for_use`, the SSE frame protocol, **the four ways a stream ends**, the `<think>` convention, **"Stopping, and what a stop is not"** (UC-085), the tool loop (**owned by the library; RPHelper's per-tool wrapper; no iteration cap; model-side tool mistakes reach the roleplayer as `tool_fail` through the library's tool-event observer**), `web_search`'s provider seam, **context assembly** and its exclusions, language handling, translation |
 | `search-and-retrieval.md` | Hybrid vec+FTS+RRF, the narrow port and its **three variants**, **the forbidden KNN form**, `memo_search`, `session_search` (**vector arm only**), my-search (three port variants + three `LIKE` matches, **the session group's name arm merged ahead of its vector hits**, and the accepted unnamed-by-date limitation), the persona-edit fan-out, the embedding lifecycle and its two write postures, rebuild |
 | `deployment.md` | Ports, TLS (none — **and the clipboard consequence**), the three dev launch paths (`start.ps1`, `start.sh`, `docker-compose.dev.yml`), prod topology, the single-generator guarantee, nginx directives (the five deliberate deviations, **the app document at `/` in prod and dev — one URL space, the dev routing plugin**, and the two open seams), compose, configuration conventions (incl. the two unprefixed search variables), **logging** (loguru, two sinks, the redaction rule, the access-log filter), operational notes |
 
@@ -99,13 +99,14 @@ Dev: `start.ps1 -app` and `start.ps1 -ui` in **separate terminals**.
   negatives are verifier-checked: **no `versions/`, no revision chain, no version
   table, no startup upgrade**. Only `MigrationContext` + `Operations` +
   `batch_alter_table` (recreate mode) are used.
-- **`llm-client` 0.2.0 is a RUNTIME dependency** (revision 2026-11-08, not yet
-  built) — a **git dependency** pinned to the `v0.2.0` tag of
+- **`llm-client` 0.2.1 is a RUNTIME dependency** (revision 2026-11-08, moved
+  to 0.2.1 on 2026-11-09; built 2026-11-09)
+  — a **git dependency** pinned to the `v0.2.1` tag of
   github.com/Iezious/PythonLLMClient, on `aiohttp`. **Every LLM call goes through
   it**, behind the one LLM gateway module, `services/llm/gateway.py` (its only
   importer). The image build
   needs `git` + network access to github.com (`deployment.md`).
-  `DEC-arch-llm-client-library-1`.
+  `DEC-arch-llm-client-library-1`, `-13`.
 - **`httpx` is a RUNTIME dependency for `web_search` ONLY** (plan 028's Google
   provider). It was plan 006's LLM client, superseded on 2026-11-08.
 - **Two async postures, and they must not be mixed** (`backend-structure.md`):
@@ -125,13 +126,15 @@ Dev: `start.ps1 -app` and `start.ps1 -ui` in **separate terminals**.
   to 600 s. nginx's `proxy_read_timeout 300s` is shorter and is kept: a compose
   round silent for over 300 s is cut by nginx first — judged extreme; 600 s is a
   ceiling, not an expected duration (`deployment.md`).
-  `DEC-arch-llm-client-library-2`.
+  `DEC-arch-llm-client-library-2`. **The library's streamed-only silence limit
+  (0.2.1) is not used** — the one total stands (`-17`).
 - **`LLM_TRACE` / `LLM_TRACE_FOLDER`** — read by the `llm-client` library, not by
   `Settings`. When set, the library writes full prompts, histories, tool
   arguments and results to files. **Privacy-breaking, off by default, an
   operator's debug switch for their own instance only — never set in a shared
   deployment**; it bypasses the redaction rule and the privacy audit
-  (`deployment.md`).
+  (`deployment.md`). **RPHelper never sets the library's trace switch; the
+  environment decides** (`-17`).
 - **Five logging fields** — `RPHELPER_LOG_CONSOLE_LEVEL` (`DEBUG`),
   `RPHELPER_LOG_FILE_LEVEL` (`WARNING`), `RPHELPER_LOG_FILE_PATH`
   (`data/logs/rphelper.log`), `RPHELPER_LOG_FILE_ROTATION` (`"10 MB"`),
@@ -235,9 +238,10 @@ backend/app/services/web_search/{provider,google}.py       the provider protocol
 backend/app/services/search/{ports,candidates,lexical,vector,hybrid}.py     the hybrid port
 backend/app/services/search/{memo_search,session_search,my_search}.py       its three callers
 backend/app/services/llm/gateway.py           the LLM gateway — the ONLY module that imports `llm` (llm-client);
-                                              probe / embed / complete / compose. Replaces the httpx client.py,
-                                              which the building plan removes (revision 2026-11-08, not yet built)
-backend/app/services/llm/{chat,frames}.py     STAY: ChatMessage + strip_think; the frame types, encoder and
+                                              probe / embed / complete / compose. Replaced the httpx client.py,
+                                              which is removed (revision 2026-11-08, built 2026-11-09)
+backend/app/services/llm/{chat,frames}.py     STAY: ChatMessage + strip_think + to_wire_message (the one source
+                                              of the library's history, DEC-035-4); the frame types, encoder and
                                               streaming harness
 backend/app/services/{transfer,transfer_import}.py         export only (read-only) / import + the replace
 backend/tests/                                pytest target
@@ -347,8 +351,10 @@ string     in TypeScript, end to end
   `done.message_id` are strings, and they name **different rows** (the
   roleplayer's committed message, and the assistant's). `call_id` is **not** an id
   in this sense — it is an opaque string pairing a call with its output,
-  **minted by RPHelper as `call_<n>` per exchange**, because the client library
-  never exposes the provider's own (2026-11-08, `DEC-arch-llm-client-library-5`).
+  **minted by RPHelper as `call_<n>` per exchange**, one counter for every call
+  in call order — model-side rejections included. Library 0.2.1 reports the
+  provider's own id on its tool events; **RPHelper does not use it**
+  (2026-11-08 / 2026-11-09, `DEC-arch-llm-client-library-5`, `-17`).
 - **The export envelope carries it too**, and by a **name rule** as well as by
   metadata: an integer column is stringified when it is part of the primary key,
   **or** carries a foreign key, **or** is named `id` / `*_id`. The name rule
@@ -399,7 +405,7 @@ the admin drift page applies) · **`loguru`** (two sinks: console `DEBUG` +
 rotating file `WARNING` at `data/logs/`; the **`InterceptHandler` is
 load-bearing**; **`diagnose=False` and `backtrace=False` on BOTH sinks**;
 **absolute redaction rule at every level** — `deployment.md`) ·
-**`llm-client` 0.2.0** (git dependency, `aiohttp`; every LLM call, Responses
+**`llm-client` 0.2.1** (git dependency, `aiohttp`; every LLM call, Responses
 protocol only, behind one gateway) · `httpx` (`web_search` only) · **Argon2id via `argon2-cffi`, library defaults** (passwords
 only) · **pysqlite with transactional DDL** (`begin()` covers `CREATE TABLE`) ·
 React 19 + TS + Vite multi-entry · Mantine 7
@@ -613,8 +619,9 @@ feature, not by path prefix**.
   nothing and answers 502 `llm_unreachable`**. Probe outcomes are **four** —
   `reachable` / `unreachable` / `auth_failed` / `model_list_empty`; ok =
   `reachable` only — unchanged by the 2026-11-08 move to the gateway, which
-  builds them on the library's model listing (a 401/403 is `auth_failed`;
-  `DEC-arch-llm-client-library-3`). **No "active" column.** Designation **measures** the dimension
+  builds them on the library's model listing (a 401/403 is `auth_failed`, read
+  from the status the library error carries since 0.2.1;
+  `DEC-arch-llm-client-library-3`, `-16`). **No "active" column.** Designation **measures** the dimension
   with one real embeddings call and is **independent of `is_enabled`**; the
   use-time validator needs **only the designation with its dimension** —
   `is_enabled` is the chat set only, and an embedding model need not (should not)
@@ -745,13 +752,18 @@ accepted | token | tool_start | tool_result | tool_fail | error | done
   `call_id`, emits `tool_start`, runs the unchanged seam dispatch, emits
   `tool_result` / `tool_fail`, and returns the content or the "tool failed" text
   as the tool output. Text pieces and tool events share **one ordered queue**.
-  **The rule stands: a model-side tool mistake** (unoffered, unknown or empty
-  tool name, non-object arguments, undeclared argument names) **is a `tool_fail`
-  and the exchange continues — build to that.** **Temporary library limitation
-  (0.2.0), not the design:** until a library release returns these as tool
-  results, they surface as a stream error and the partial text is kept by the
-  harness rule; when the release lands the gateway relies on it and the
-  limitation is closed (`llm-and-streaming.md`, `DEC-arch-llm-client-library-7`).
+  **A model-side tool mistake** (unoffered, unknown or empty tool name,
+  unreadable or non-object arguments, undeclared argument names) **is a
+  `tool_fail` and the exchange continues.** Library 0.2.1, in the tolerant
+  tool-error mode the gateway asks for **explicitly**, rejects the call to the
+  model and continues; the gateway's **tool-event observer** puts the rejection
+  into the same queue with a `call_id` from the same counter, and the compose
+  source emits `tool_start` + `tool_fail` and writes the failed tool row
+  **without dispatching**. `tool` is the name the model sent, verbatim. Reports
+  about calls that reached a wrapper are ignored — no double emission. The
+  temporary 0.2.0 limitation is **closed** (`llm-and-streaming.md` "Model-side
+  tool mistakes — the observer"; `DEC-arch-llm-client-library-14`, `-15`).
+  **Accepted:** a model repeating a mistake loops until the roleplayer stops it.
 - **Reasoning is sent back within one exchange** (between tool rounds, by the
   library) and **never** persisted as context or replayed into a later exchange.
 - **The harness writes the partial row on its OWN short-lived connection** from
@@ -1346,10 +1358,9 @@ be wrong. The doc named beside it owns the reasoning.
 | **A request path needing a long or multi-statement transaction around an awaited call** | the async/sync mix is extended rather than resolved → move the database work off the loop, or adopt an async driver | `backend-structure.md` |
 | **Google's Custom Search transition date, `2027-01-01`** — or the API ceasing to answer for this key | the one Google provider behind the seam → a new provider class plus the factory. **The first symptom is operational**: `web_search` starts failing as `tool_failed` while everything else works | `llm-and-streaming.md`, `deployment.md` |
 | **A llama-swap engine without Responses-endpoint support having to be served** | Responses-protocol clients only → a per-server protocol choice, which is a **new configuration field** | `llm-and-streaming.md` |
-| **An `llm-client` release that returns model-side tool mistakes (unoffered, unknown or empty name, non-object or undeclared arguments) as tool results** | not a flip of a decision — it **closes the temporary library limitation** (those cases surface as a stream error until then). The `tool_fail` rule never changed; the gateway relies on the release and the limitation entry is closed | `llm-and-streaming.md` |
 | **nginx cutting legitimately slow compose rounds (no frame for over 300 s)** | `proxy_read_timeout 300s` kept below the library's 600 s total | `deployment.md` |
-| **The library gaining a per-read (idle) timeout, AND probes against dead hosts becoming a real annoyance** | one total-per-request timeout at 600 s → a short idle bound beside a long total, as a second setting | `llm-and-streaming.md`, `backend-structure.md` |
-| **The library adding a status attribute to its error** | `auth_failed` derived by matching the status in the error message (`DEC-arch-llm-client-library-3`) | `docs/decisions/arch-llm-client-library.md` |
+| **Probes against dead hosts becoming a real annoyance** | one total-per-request timeout at 600 s → a short bound beside a long total, as a second setting. Library 0.2.1's silence limit covers streamed requests only, so it is not that bound (`DEC-arch-llm-client-library-17`) | `llm-and-streaming.md`, `backend-structure.md` |
+| **The library's tolerant tool-error default changing** | nothing — the gateway passes the tolerant mode explicitly so a default flip cannot end exchanges on model-side mistakes (`DEC-arch-llm-client-library-14`) | `docs/decisions/arch-llm-client-library.md` |
 | **Characters, setups or session names gaining an FTS or vector index** | the `LIKE` path outside the port → they become port variants (or a session-variant arm) and the `LIKE` path goes | `search-and-retrieval.md` |
 | **Finding a never-renamed session by its start date becoming a requirement** | the accepted limitation of the name arm → match the date form of `created_at` too, which needs a timezone the server does not have | `search-and-retrieval.md`, `data-model.md` |
 | **FEAT-015's promise needing lexical recall in real use** | `session_search`'s vector-only arm — **and it is no longer one switch**: it needs an index over session text first (`name` is a label, not that text) | `search-and-retrieval.md`, `overview.md` |
@@ -1507,9 +1518,9 @@ to 2; the importer also accepts version 1 through one named upgrade (`-7`,
 `transfer.md`). Matching `## Decision history` lines in `data-model.md`,
 `backend-structure.md`, `workspace-shell.md` and `search-and-retrieval.md`.
 
-**Revised (decision revision, 2026-11-08; approved, not yet built): every LLM
-call goes through `llm-client` 0.2.0.** The in-house `httpx` client is
-superseded by one LLM gateway (`probe` / `embed` / `complete` / `compose`);
+**Revised (decision revision, 2026-11-08; approved 2026-11-08, built
+2026-11-09): every LLM call goes through `llm-client` 0.2.0.** The in-house
+`httpx` client is superseded by one LLM gateway (`probe` / `embed` / `complete` / `compose`);
 `llm_servers.kind` becomes the **dispatch key** selecting the library's Responses
 client class (superseding "`kind` is a label, never a dispatch key"); the library
 owns the tool loop and RPHelper's wrapper mints `call_id`; reasoning is sent back
@@ -1519,9 +1530,22 @@ closed**: `llm_request_timeout_seconds` is the library's total per request, at
 600 s. The gateway module is `services/llm/gateway.py`. **No rule is weakened
 for tool mistakes**: model-side tool mistakes are still a `tool_fail`; library
 0.2.0 ending the exchange on them instead is a **temporary library limitation**,
-closed when the library release lands. Detail in `DEC-arch-llm-client-library-1` .. `-12`; matching
+closed when the library release lands (closed by the 2026-11-09 revision
+below). Detail in `DEC-arch-llm-client-library-1` .. `-12`; matching
 `## Decision history` lines in `llm-and-streaming.md`, `backend-structure.md`
 and `deployment.md`.
+
+**Revised (decision revision, 2026-11-09; approved and built 2026-11-09 —
+feature 035 step 006): `llm-client` 0.2.0 → 0.2.1, and the temporary library
+limitation is closed.** Model-side tool mistakes reach the roleplayer as `tool_start` +
+`tool_fail` with a failed tool row, through a tool-event observer the gateway
+hands the library, with the tolerant tool-error mode passed explicitly; the
+probe's and embed's auth split reads the status the library error carries; the
+library's streamed-only silence limit, its trace switch and the provider call id
+it now reports are all left unused. Detail in `DEC-arch-llm-client-library-13`
+.. `-17`; matching `## Decision history` lines in `llm-and-streaming.md`,
+`session-stream.md`, `backend-structure.md`, `overview.md`, `data-model.md` and
+`deployment.md`.
 
 ## Defects — specified but unsatisfied, and NOT `_TBD:` items
 

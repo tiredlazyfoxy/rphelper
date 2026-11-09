@@ -557,6 +557,20 @@ stop does.
 synchronous handler-side half. Its loop detail, the `<think>` convention and the
 frame protocol are `llm-and-streaming.md`'s. What belongs here:
 
+- **It drains the gateway's ordered stream and assembles nothing itself.** The
+  gateway's `compose()` yields one ordered stream of text pieces and tool
+  events, and the compose source turns that stream into frames. It assembles no
+  rounds, no tool-call fragments and no thinking markers — the library and the
+  gateway do (`llm-and-streaming.md`'s "How one exchange runs").
+- **It owns the per-call tool rules.** For each call the gateway hands it, the
+  compose source emits the start, runs the seam's dispatch (below), emits the
+  result or the failure, and returns the content — or the fixed failed text — as
+  the tool's output. For a model-side rejection the gateway reports, it emits
+  the start, writes the failed tool row through the seam's tool-row write, logs
+  the rejection and emits the failure, without dispatching (`DEC-035-17`,
+  `DEC-035-18`). The gateway knows how the library calls a tool; the compose
+  source keeps every RPHelper rule about one. Closing the compose source closes
+  the gateway's stream (`DEC-035-6`, `DEC-035-7`).
 - **One assistant row per exchange**, holding all streamed token text across all
   tool rounds, `<think>` tags included (021 D11). A current-zone assistant row
   may therefore contain persisted reasoning; settle strips it (above).
@@ -600,11 +614,14 @@ derived from the authenticated session.
 A failure — the tool not offered, an unknown name, non-object arguments, or
 `run` raising — produces a `tool_fail` frame carrying `tool_failed` plus the
 fixed model-facing message, and the loop continues (R9: a failed tool does not
-end the discussion). That is the rule; client library 0.2.0 cannot yet honour
-it for the first three cases, which until a library release lands end the
-exchange as a stream error instead — a temporary limitation, not the design
-(`llm-and-streaming.md`'s "Temporary library limitation"). A **cancellation** propagates and writes **no** tool row, so
-a stop during `run` ends the exchange — which is what `US-133.AC-1` now states.
+end the discussion). With the client library owning the loop, the first three
+cases — and an undeclared argument name — are rejected by the library before
+dispatch is reached; the compose source emits their `tool_start` / `tool_fail`
+pair and writes their failed tool row itself, through the same tool-row write,
+without entering dispatch (`llm-and-streaming.md`'s "Model-side tool mistakes —
+the observer"). The frames and the row are the same either way. A
+**cancellation** propagates and writes **no** tool row, so a stop during `run`
+ends the exchange — which is what `US-133.AC-1` now states.
 `tool_failed` is a **502** (021 D13) — a dependency's failure, like
 `llm_unreachable` — and in plan 021 it was never an HTTP response, only the
 frame's code; `backend-structure.md`'s per-code status record is where that lives.
@@ -641,3 +658,15 @@ group is opened.
 `services/messages.py` owns the read (`list_discussion`), so the reader goes
 through a named selectable and raw `messages` stays untouched outside settle,
 re-open and single-message delete (R11).
+
+---
+
+## Decision history
+
+- **2026-11-09 — model-side tool mistakes reach the roleplayer as `tool_fail`
+  (approved and built 2026-11-09 — feature 035 step 006).** Was: with client
+  library 0.2.0 a tool that was not offered, an unknown name or non-object
+  arguments ended the exchange as a stream error — a temporary limitation, the
+  rule unchanged. Now: library 0.2.1 rejects them as tool results and the compose
+  source emits the `tool_start` / `tool_fail` pair and the failed tool row without
+  entering dispatch ("The tool seam and dispatch"). `DEC-arch-llm-client-library-15`.

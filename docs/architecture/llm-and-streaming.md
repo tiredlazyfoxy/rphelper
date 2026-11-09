@@ -17,10 +17,12 @@ must never go into it.
 **Realizes:** FEAT-004, UC-010, UC-011, UC-012, UC-013
 
 **Every LLM call RPHelper makes goes through the shared client library
-`llm-client` 0.2.0, and RPHelper has no HTTP code of its own for LLM
+`llm-client` 0.2.1, and RPHelper has no HTTP code of its own for LLM
 providers.** The library (github.com/Iezious/PythonLLMClient) is a runtime
-dependency pinned to its `v0.2.0` tag and runs on `aiohttp`. The pin form and
-the alternatives weighed are `DEC-arch-llm-client-library-1`.
+dependency pinned to its `v0.2.1` tag and runs on `aiohttp`. The pin form and
+the alternatives weighed are `DEC-arch-llm-client-library-1`; the move from
+0.2.0 to 0.2.1 is `DEC-arch-llm-client-library-13` (approved and built
+2026-11-09 — feature 035 step 006).
 
 We chose a shared library over RPHelper's own client for two reasons. It is
 **one maintained client shared with other projects**, so a provider quirk is
@@ -41,9 +43,12 @@ section governs it.
 Both the chat client and the embedding client are built on the library, **behind
 one RPHelper module, `services/llm/gateway.py`: the LLM gateway.** It is the only
 module that imports the library (`llm`); every other part of the backend calls
-the gateway. It replaces `services/llm/client.py`, which the building plan
-removes; `chat.py` (`strip_think`) and `frames.py` (frames and the streaming
-harness) stay in `services/llm/` beside it.
+the gateway. It replaced `services/llm/client.py`, which is removed; `chat.py`
+(`strip_think`, and the chat-message-to-wire mapping the gateway builds the
+library's history from) and `frames.py` (frames and the streaming harness) stay
+in `services/llm/` beside it. **The gateway is built** (2026-11-09): all four
+operations below, the library client class selected by `kind` (next section),
+and every model call RPHelper makes going through the library.
 Its contract to the rest of the backend is four operations:
 
 ```
@@ -74,7 +79,9 @@ compose(model, messages, tools)-> async stream of events     # text pieces + too
   loop" below).
 
 How a library outcome becomes one of the four probe values, or an embed failure
-reason, is `DEC-arch-llm-client-library-3`.
+reason, is `DEC-arch-llm-client-library-3`, refined by
+`DEC-arch-llm-client-library-16` (the HTTP status the library error now carries
+is read, not its message).
 
 **A library client is built per call, never held, and closed inside the call.**
 The gateway builds one library client per operation, **inside the coroutine that
@@ -138,6 +145,17 @@ a healthy host.
   (`deployment.md`'s redaction rule). The HTTP stack underneath the library logs
   URLs and bodies like any HTTP client, so its logger tree is silenced beside
   `httpx`'s, by the same rule (`DEC-arch-llm-client-library-10`).
+- **A failure is classified from the library error's structured fields, never
+  from its message text.** The library error carries the HTTP status of a
+  non-2xx answer and a failure kind from a closed set; the gateway reads those.
+  The one deliberate exception, and why the kind is not enough there, is
+  `DEC-arch-llm-client-library-16`. Messages stay what they are and are never
+  forwarded.
+- **The tool observer forwards no provider text.** What reaches a frame or a
+  persisted row from a model-side tool mistake is RPHelper's own values — the
+  minted call id, the name and arguments the model sent, RPHelper's fixed failure
+  code — never a provider body or a library message ("Model-side tool mistakes —
+  the observer" below).
 - **Library tracing is an operator debug switch, and it is privacy-breaking.**
   When the two library tracing variables are set in the environment
   (`deployment.md`'s configuration conventions), the library writes full
@@ -146,7 +164,10 @@ a healthy host.
   an operator debugging **on their own instance only**. It **bypasses the logging
   redaction rule and the privacy audit**, so it must never be set in a shared
   deployment. Named here so that a trace file containing roleplay text is read
-  as an operator's deliberate act, not as a leak in the code.
+  as an operator's deliberate act, not as a leak in the code. **RPHelper never
+  sets the library's trace switch itself; the environment decides** — library
+  0.2.1 makes the switch three-state with "unset" meaning exactly that, so
+  nothing changes (`DEC-arch-llm-client-library-17`).
 
 ### The timeout — one setting, total time per request
 
@@ -165,11 +186,14 @@ timeout fires; the total is a ceiling, not an expected duration, and the user
 judges that case extreme. The note and its flip condition sit beside the nginx
 setting in `deployment.md`.
 
-**This closes the streaming-read-timeout `_TBD:` this section carried.** There is
-no per-read timeout to split out, because the library offers only a total.
-**Flip condition:** the library gains a per-read (idle) timeout, **and** probes
-against dead hosts become a real annoyance — then a short idle bound beside a
-long total becomes worth a second setting.
+**This closes the streaming-read-timeout `_TBD:` this section carried.** When it
+was decided the library offered only a total. **Library 0.2.1 adds an optional
+silence limit on streamed requests, and RPHelper does not use it** — the one
+total stands (`DEC-arch-llm-client-library-17`): it applies only to streamed
+requests, so it would not shorten the probe or embedding wait that the flip
+condition is about. **Flip condition:** probes against dead hosts become a real
+annoyance — then a short bound beside a long total becomes worth a second
+setting, and the library's streamed-only silence limit is not that bound.
 
 ### The model registry and use-time validation
 
@@ -315,10 +339,16 @@ full**.
 - **`call_id` is not an id in this sense.** It is an opaque string that pairs
   one tool call with its output, and that is its whole job: not a snowflake, not
   minted by `app/ids.py`, and no ordering may be read into it. **RPHelper mints
-  it, once per call, within the exchange**, because the client library never
-  exposes the provider's own call identifier (the tool-calling loop below; the
-  form is `DEC-arch-llm-client-library-5`). Named so the two kinds of identifier
-  are not confused in either direction.
+  it, once per call, within the exchange, in the order calls reach RPHelper** —
+  a call RPHelper's tool runs and a call the library rejected as a model-side
+  mistake draw from the same counter. When this was decided the client library
+  never exposed the provider's own call identifier to a tool. Library 0.2.1
+  exposes it on its tool events, where a provider gives one, and **RPHelper
+  keeps minting its own anyway**: a provider may give none, and one id form for
+  every call keeps pairing and replay independent of the provider (the
+  tool-calling loop below; the form is `DEC-arch-llm-client-library-5`, kept by
+  `DEC-arch-llm-client-library-17`). Named so the two kinds of identifier are not
+  confused in either direction.
 - **Frames are constructed in one place, `services/llm/frames.py`**
   (`backend-structure.md`), so the string conversion has one site rather than one
   per emit call. **As built** (019 D2) that module holds **seven immutable frame
@@ -688,6 +718,10 @@ where every RPHelper rule about a tool call lives. The loop:
                                                    5. return the content, or
                                                       the "tool failed" text
                                            ◄──────────────┘
+                          model-side tool mistake (library rejects the call,
+                          no wrapper runs) ──► RPHelper observer
+                                                   mint call_id; rejection ─► queue ──► tool_start + tool_fail
+                                                                                        frames, failed tool row
                           the library sends the output back and continues
  ...until the model produces a final answer ──► the source writes the row ──► done frame
 ```
@@ -701,9 +735,10 @@ Rules:
   single most commonly mis-implemented rule in this document, and it is tested by
   making a tool fail and asserting the exchange still produces an answer. The
   rule covers model-side mistakes too — a tool that was not offered, an unknown
-  or empty name, non-object arguments, undeclared argument names — each is a
-  `tool_fail` and the exchange continues. Library 0.2.0 cannot honour those yet;
-  that is a **temporary library limitation, below**, not a change to the rule.
+  or empty name, arguments that are not a readable object, undeclared argument
+  names — each is a `tool_fail` and the exchange continues. Those calls never
+  reach RPHelper's tool; how they still become frames is "Model-side tool
+  mistakes — the observer", below.
 - **Tool availability is an intersection, not a single switch** (021 D5, U3).
   A tool is offered iff **its resolved switch is on** *and* **an implementation is
   registered under that name** — and `web_search` carries a third condition of its
@@ -772,6 +807,13 @@ Rules:
   destructive. A cap is a loop guard and was never context compaction, which
   remains a separate non-goal (`overview.md`).
 
+  **Accepted exposure: a model that keeps making the same tool mistake loops
+  until the roleplayer stops it.** Because a model-side mistake is a tool result
+  and the exchange continues, a model that repeats it is answered with the same
+  failure each round and nothing else ends the exchange. That is the runaway case
+  this rule already names, and the stop bounds it the same way; the roleplayer
+  sees it as a repeating run of failed tool blocks.
+
 ### How one exchange runs (revises 021 D11)
 
 The library assembles each round — joining a call's streamed name and
@@ -785,14 +827,26 @@ does. What RPHelper owns is the shape of the exchange around it:
   things happened in: a `tool_start` must never overtake the text the model
   streamed before the call.
 - **Each offered tool is handed to the library as a wrapper**, and the wrapper
-  does five things in this order: (1) **mints the call's `call_id`**, because
-  the library never exposes the provider's; (2) emits `tool_start`; (3) runs the
+  does five things in this order: (1) **mints the call's `call_id`** — RPHelper's
+  own, even though library 0.2.1 exposes the provider's on its tool events
+  (`DEC-arch-llm-client-library-17`); (2) emits `tool_start`; (3) runs the
   existing tool seam's **dispatch**, which keeps the scoped read, the persisted
   tool row and the logging exactly as they were (`session-stream.md`); (4) emits
   `tool_result` or `tool_fail`; (5) returns the result content — or the "tool
   failed" text — to the library as the tool's output. How the wrapper presents
   itself to the library and why it never raises are
   `DEC-arch-llm-client-library-6` and `-7`.
+- **The gateway also hands the library a tool-event observer**, and asks the
+  library explicitly to return a model-side tool mistake to the model as a tool
+  result rather than end the exchange (`DEC-arch-llm-client-library-14`). The
+  library reports every tool call to the observer, in call order, inline on the
+  loop's own task. **The observer acts on exactly one kind of report: a call the
+  library rejected as a model-side mistake before RPHelper's tool could run.** For
+  that call it puts one model-side rejection into the **same ordered queue**,
+  carrying a `call_id` minted from the same per-exchange counter as the wrapper's.
+  Every report about a call that reached a wrapper is ignored, because the
+  wrapper already emitted that call's frames — so no call is reported twice.
+  ("Model-side tool mistakes — the observer", below.)
 - **The SSE frame protocol, the frame shapes, the persisted tool rows, the one
   assistant row per exchange and context replay are all unchanged.**
 - **One assistant row per exchange**, holding all streamed token text across every
@@ -804,6 +858,9 @@ does. What RPHelper owns is the shape of the exchange around it:
   gateway hands it history in which an assistant message carries a tool call and
   a `tool` message carries its output — the replay shape above — and the library
   converts that pair into the Responses protocol's call and call-output items.
+  That history is built by the existing chat-message-to-wire mapping, **kept as
+  the one source of the library's message history**, replayed tool pairs
+  included; the gateway has no second mapping of its own (`DEC-035-4`).
 - **Reasoning is sent back to the model within one exchange, between tool
   rounds.** The library carries each round's reasoning to the later rounds of
   the same call, which is one of the two reasons the Responses protocol was
@@ -817,32 +874,65 @@ does. What RPHelper owns is the shape of the exchange around it:
 - **Closing the compose source cancels the library task**, which closes the
   provider request — the upstream half of the stop (the stop section above).
 
-### Temporary library limitation — model-side tool mistakes (0.2.0)
+### Model-side tool mistakes — the observer
 
 **The rule is unchanged and is the design: a model-side tool mistake is a
-`tool_fail`, and the exchange continues.** That covers a tool that was not
-offered, an unknown or empty tool name, arguments that are not an object, and
-argument names the tool does not declare. **A planner builds to the rule, not to
-the limitation below.**
+`tool_fail`, and the exchange continues.** A model-side mistake is a call the
+library rejects before RPHelper's tool could run: a tool that was not offered,
+an unknown or empty tool name, arguments that are not a readable object, and
+argument names the tool does not declare.
 
-**What library 0.2.0 does instead, temporarily.** The library rejects those cases
-before any wrapper runs and ends the exchange, so RPHelper cannot yet turn
-them into tool results:
+**Library 0.2.0 ended the exchange on these; library 0.2.1 does not.** Under the
+tolerant tool-error mode, which RPHelper asks for explicitly, the library hands
+the model a fixed message for the rejected call and continues the loop. Because
+the call never reaches a wrapper, no wrapper emits its frames — so RPHelper
+learns of it through the library's **tool-event observer** (`How one exchange
+runs`, above). This closes the temporary library limitation this section used
+to carry; the rule did not change when it opened, and does not change now
+(`DEC-arch-llm-client-library-15`).
 
-- **Until the library release lands**, these cases surface as a **stream error**
-  (`llm_unreachable`), and the partial text is kept by the harness rule —
-  whatever streamed is persisted whenever no `done` passed through — so nothing
-  the model produced is lost, but the exchange does not continue.
-- **The library is to be updated to return these cases as tool results.** The
-  asks are recorded outside this repository, in
-  `/home/tahorg/projects/llm-client-handover-rphelper-asks.md`, item 1. No
-  release version is fixed yet.
-- **When that release lands**, the gateway relies on it: the cases reach the
-  model as tool results, the wrapper's `tool_fail` path covers them like any
-  other failure, and this limitation entry is closed. No architecture rule
-  changes when it closes, because none changed when it opened.
+What a model-side rejection produces, and why each part is what it is:
 
-The mechanism-level record is `DEC-arch-llm-client-library-7`.
+- **Frames: `tool_start`, then `tool_fail`, both from the compose source,
+  without dispatching.** The observer puts the rejection into the ordered queue,
+  and the compose source turns it into the same two frames a failed wrapper call
+  produces. `tool_fail` carries `tool_failed`, is not terminal, and the exchange
+  continues — the frame table above. There is no tool to dispatch to, so the
+  seam is not entered.
+- **`tool` carries the name the model sent, exactly** — including a name that
+  was not offered or is not registered, and an empty name stays empty. It is a
+  report of what the model asked for, not a lookup.
+- **`call_id` is minted from the same per-exchange counter as the wrappers'**,
+  at the point the rejection reaches the observer, so call ids follow the order
+  calls happened in (the ids-in-frames rule above). The provider's own id, which
+  the library reports, is not used.
+- **The persisted tool row is the same row a failed call writes**: one
+  `role='tool'` current-zone row, status failed, code `tool_failed`, text the
+  fixed failed literal (`data-model.md`, the tool columns). Its arguments are the
+  model's own argument text as the library reports it — there are no parsed
+  arguments to re-serialise. The row is written by the compose source through
+  the tool-row write the seam uses, because dispatch is not run. A stop before the
+  row is written writes none, exactly as for a stopped tool.
+- **Replay treats the row like any failed tool row** ("Tool rows are replayed,
+  not skipped", below): the recorded call, then a `tool` message carrying the
+  fixed failed literal. Within the exchange the model saw the library's own
+  fixed message for the mistake; on replay it sees RPHelper's failed literal,
+  which is what every failed row replays as. A row whose payload cannot be read
+  back into a call/result pair is skipped by the existing rule.
+- **What the model is told inside the exchange is the library's fixed text,
+  and what leaves RPHelper is RPHelper's.** The observer forwards nothing the
+  provider or the library wrote except the model's own name and arguments, which
+  RPHelper already persists for every call.
+- **A report about a call that reached a wrapper is ignored.** The wrapper
+  emitted that call's frames already, so acting on the report would emit the
+  call twice. The wrapper never raises, so the library never reports a tool's
+  own failure; if it ever did, it is treated as the wrapper's own failure path
+  and not as a second call.
+- **A model that repeats the mistake loops until the roleplayer stops it** —
+  the accepted exposure under "There is no iteration cap", above.
+
+The mechanism-level records are `DEC-arch-llm-client-library-14` (the explicit
+tolerant mode) and `-15` (the observer and the rejection item).
 
 ### `web_search` — the provider seam and Google
 
@@ -1352,9 +1442,9 @@ for a request that cannot provide it.
 ## Decision history
 
 All of the 2026-11-08 lines are one architecture revision — every LLM call moves
-to the `llm-client` 0.2.0 library — approved by the user and **not yet
-implemented**; until the plan that builds it lands, the code is the superseded
-side of each line.
+to the `llm-client` 0.2.0 library — approved by the user on 2026-11-08 and
+**built on 2026-11-09**; the code is the "Now" side of each line. The build's
+own mechanisms are `DEC-035-1` .. `-20`.
 
 - **2026-11-08 — the in-house `httpx` client is superseded by the LLM gateway
   over `llm-client` 0.2.0.** Was: one OpenAI-compatible `httpx.AsyncClient`
@@ -1390,3 +1480,26 @@ side of each line.
   per-phase question open (021 D10). Now: the library's total per request — per
   tool round when streaming — at a raised default.
   `DEC-arch-llm-client-library-2`.
+
+The 2026-11-09 lines are one further revision — the library moves from 0.2.0 to
+0.2.1 — approved 2026-11-09 and **built on 2026-11-09** (feature 035, step 006);
+the code is the "Now" side of each line.
+
+- **2026-11-09 — `llm-client` 0.2.1.** Was: pinned to `v0.2.0`. Now: pinned to
+  `v0.2.1`; constructors, exports, the Responses classes and the HTTP stack are
+  unchanged. `DEC-arch-llm-client-library-13`.
+- **2026-11-09 — model-side tool mistakes are `tool_fail` frames; the temporary
+  library limitation is closed.** Was: library 0.2.0 ended the exchange on them,
+  surfacing a stream error. Now: the gateway asks for the tolerant tool-error
+  mode explicitly and hands the library a tool-event observer; a rejected call
+  becomes `tool_start` + `tool_fail` and a failed tool row, and the exchange
+  continues. Section "Model-side tool mistakes — the observer" replaces
+  "Temporary library limitation". `DEC-arch-llm-client-library-14`, `-15`.
+- **2026-11-09 — failures are classified from the library error's structured
+  fields.** Was: the probe's and embed's auth split read the status out of the
+  error message. Now: it reads the status the error carries.
+  `DEC-arch-llm-client-library-16`.
+- **2026-11-09 — the library's new options are declined.** Its streamed-only
+  silence limit is not used (the one total stands); its trace switch is left to
+  the environment; the provider call id it now reports is not used and RPHelper
+  keeps minting `call_id`. `DEC-arch-llm-client-library-17`.

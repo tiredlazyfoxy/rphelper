@@ -137,19 +137,20 @@ backend/
         my_search.py             # the two LIKE corpora, hydration, run_my_search
                                  #   (plan 029)
       llm/
-        gateway.py               # THE LLM GATEWAY (revision 2026-11-08, not yet
-                                 #   built): the ONLY module that imports the
-                                 #   llm-client library (`llm`); probe, embed,
-                                 #   complete, compose, and the probe-outcome value
-                                 #   set (llm-and-streaming.md). The httpx
-                                 #   client.py it replaces is removed by the
-                                 #   building plan
+        gateway.py               # THE LLM GATEWAY over llm-client 0.2.1
+                                 #   (revision 2026-11-08, built 2026-11-09): the
+                                 #   ONLY module that imports the llm-client
+                                 #   library (`llm`); probe, embed, complete,
+                                 #   compose, the library client class chosen by
+                                 #   the server's kind, and the probe-outcome
+                                 #   value set (llm-and-streaming.md). The httpx
+                                 #   client.py it replaced is removed
         chat.py                  # STAYS. ChatMessage (four roles), ToolCall, the
                                  #   <think> literals and strip_think (plans 020,
-                                 #   021). Its to_wire_message emitted the
-                                 #   chat-completions wire form for client.py;
-                                 #   the gateway now hands history to the library,
-                                 #   so that helper's fate is the building plan's.
+                                 #   021), and to_wire_message — KEPT as the one
+                                 #   source of the message history the gateway
+                                 #   hands the library, replayed tool pairs
+                                 #   included (DEC-035-4).
                                  #   Deliberately
                                  #   NEUTRAL: the chat-message value type and the
                                  #   role literal live here, not in context.py,
@@ -1193,8 +1194,8 @@ The named errors the design requires:
 | `llm_server_not_found` | An admin LLM route addresses a server id that does not exist | nothing | FEAT-004, UC-010..UC-013 |
 | `unknown_table` | A drift-page apply route names a table the registry does not declare | the table name | FEAT-005, UC-015 |
 | `schema_apply_failed` | A `Create` or a `Sync` could not be applied — a driver error, a failed cast, or a `PRAGMA foreign_key_check` violation | the table name and the operation (`create` \| `sync`); **never the driver's message** (below) | FEAT-005, UC-015, US-018.AC-6, US-018.AC-7 |
-| `llm_unreachable` | Provider call fails or times out | only RPHelper's own reason values — `{"reason": …}` where one applies (an embedding failure's `auth_failed`, `unreachable` or `no_usable_vector`), otherwise nothing; **never provider text** — no provider message, no response body, no request body (`llm-and-streaming.md`'s errors rule) | FEAT-010, UC-032 |
-| `tool_failed` | A tool invocation fails — the tool is not offered, the name is unknown, the arguments are not an object, or `run` raises. **Since plan 028 the web-search provider and its adapter raise it directly too**, for every provider failure. **Not surfaced as a stream error** (R9): it becomes a `tool_fail` frame and the loop continues. (Client library 0.2.0 cannot yet honour this for the first three cases — a temporary library limitation, not the design: `llm-and-streaming.md`'s "Temporary library limitation") | the tool name — for web search exactly `{"tool": "web_search"}`, and **never chained to the transport exception** (below) | FEAT-014, FEAT-015, FEAT-016, UC-051, UC-053 |
+| `llm_unreachable` | Provider call fails or times out | only RPHelper's own reason values — `{"reason": …}` where one applies (an embedding failure's `auth_failed`, `unreachable` or `no_usable_vector`; a completion's or compose's `auth_failed` or `unreachable`), otherwise nothing; **never provider text** — no provider message, no response body, no request body (`llm-and-streaming.md`'s errors rule) | FEAT-010, UC-032 |
+| `tool_failed` | A tool invocation fails — the tool is not offered, the name is unknown, the arguments are not an object, or `run` raises. **Since plan 028 the web-search provider and its adapter raise it directly too**, for every provider failure. **Not surfaced as a stream error** (R9): it becomes a `tool_fail` frame and the loop continues. The first three cases, and an undeclared argument name, are rejected by the client library before dispatch; the compose source emits the same frame and the same failed tool row for them (`llm-and-streaming.md`'s "Model-side tool mistakes — the observer") | the tool name — as the model sent it, an empty name staying empty — for web search exactly `{"tool": "web_search"}`, and **never chained to the transport exception** (below) | FEAT-014, FEAT-015, FEAT-016, UC-051, UC-053 |
 | `translation_failed` | UC-039's exception flow; nothing is cached | the message id, as a string | FEAT-011 |
 | `zone_empty` | Settle is attempted with nothing in the current zone — **or with a zone holding only `role='tool'` rows** (R11); also the textless retry compose when no non-tool zone row exists | nothing | FEAT-010, UC-083 |
 | `zone_not_empty` | Re-open is attempted while the session's current zone is not empty (R11, US-128) | nothing | FEAT-010, UC-037 |
@@ -1954,7 +1955,7 @@ endorses:
   holds. Every session payload carries `name`. Detail and the rejected dedicated
   sub-route in `DEC-arch-session-names-2`.
 - **2026-11-08 — the `httpx` LLM client is superseded by the LLM gateway over
-  `llm-client` 0.2.0** (approved, not yet built). Was: `services/llm/client.py`,
+  `llm-client` 0.2.0** (built 2026-11-09). Was: `services/llm/client.py`,
   an `httpx.AsyncClient`, the first outbound-HTTP and async code. Now: one gateway
   module, `services/llm/gateway.py`, the only importer of the library; the async/sync
   postures and the embed bridge are unchanged; `httpx` stays for `web_search`
@@ -1963,3 +1964,11 @@ endorses:
   default 30, applied per `httpx` phase including each read. Now: the library's
   total per request (per tool round when streaming), default raised to the
   library's. `DEC-arch-llm-client-library-2`.
+- **2026-11-09 — `llm-client` 0.2.1; `tool_failed` covers model-side tool
+  mistakes in practice** (approved and built 2026-11-09 — feature 035 step
+  006). Was: library 0.2.0, on which the not-offered / unknown-name / non-object
+  cases of `tool_failed` ended the exchange as a stream error. Now: the library
+  rejects them as tool results and the compose source emits `tool_fail` and the
+  failed tool row; the gateway classifies a library failure from the status the
+  error carries rather than its message. `DEC-arch-llm-client-library-13`,
+  `-15`, `-16`.

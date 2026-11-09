@@ -26,11 +26,19 @@ edited independently of the files (`AGENTS.md`).
 | DEC-035-5 | Library typing gaps are absorbed inside `gateway.py` only | accepted | 035.llm-client-gateway | — |
 | DEC-035-6 | The chat-client protocol: `complete`, `compose`, and the tool bundle | accepted | 035.llm-client-gateway | — |
 | DEC-035-7 | One unbounded queue, an end marker, and cancel-and-await on close | accepted | 035.llm-client-gateway | — |
-| DEC-035-8 | How each operation maps library failures | accepted | 035.llm-client-gateway | — |
+| DEC-035-8 | How each operation maps library failures | accepted; superseded in part by DEC-035-20 (auth test), DEC-035-17 and DEC-arch-llm-client-library-15 (temporary-limitation cases), DEC-035-16 (exception set) | 035.llm-client-gateway | — |
 | DEC-035-9 | Probe builds its library client with an empty model name | accepted | 035.llm-client-gateway | — |
 | DEC-035-10 | `compose` uses the tool loop even when no tool is offered | accepted | 035.llm-client-gateway | — |
 | DEC-035-11 | Base-URL normalisation rule | accepted | 035.llm-client-gateway | — |
 | DEC-035-12 | Live tests port to the gateway, `kind` `llamaswap` | accepted | 035.llm-client-gateway | — |
+| DEC-035-13 | Two unlisted probe-type importers move to the gateway in step 002 | accepted | 035.llm-client-gateway | — |
+| DEC-035-14 | Five unlisted test modules follow step 002's interface | accepted | 035.llm-client-gateway | — |
+| DEC-035-15 | Step 001 DoD-14's client-module identity check is retired with client.py | accepted | 035.llm-client-gateway | — |
+| DEC-035-16 | Every exception out of the library, and a malformed tool declaration, surfaces as `llm_unreachable` / `unreachable` | accepted | 035.llm-client-gateway | — |
+| DEC-035-17 | A model-side rejection reaches the compose source as its own stream value, `ComposeRejected` | accepted | 035.llm-client-gateway | — |
+| DEC-035-18 | A model-side rejection is logged with the tool name and the kind only | accepted | 035.llm-client-gateway | — |
+| DEC-035-19 | Explicit tool signatures stay under 0.2.1 | accepted | 035.llm-client-gateway | — |
+| DEC-035-20 | The status-based auth split covers all four operations | accepted | 035.llm-client-gateway | — |
 | DEC-F014-1 | Build single-message delete now; the docs follow at finalization | accepted | fast/014.message-delete | — |
 | DEC-F014-2 | Settled entries and current-zone messages are both deletable | accepted | fast/014.message-delete | — |
 | DEC-F014-3 | A settled head takes its buried group with it, in the same transaction | accepted | fast/014.message-delete | — |
@@ -58,12 +66,17 @@ edited independently of the files (`AGENTS.md`).
 | DEC-arch-llm-client-library-4 | The tool-loop cap is `max_loops=sys.maxsize` | accepted | arch-llm-client-library | architecture revision |
 | DEC-arch-llm-client-library-5 | Minted call ids, and the persisted `arguments` | accepted | arch-llm-client-library | architecture revision |
 | DEC-arch-llm-client-library-6 | Each wrapper carries an explicit signature from its declaration | accepted | arch-llm-client-library | architecture revision |
-| DEC-arch-llm-client-library-7 | The wrapper never raises a tool's exception into the library | accepted | arch-llm-client-library | architecture revision |
-| DEC-arch-llm-client-library-8 | How a compose exchange ends | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-7 | The wrapper never raises a tool's exception into the library | accepted; temporary-limitation clause superseded by DEC-arch-llm-client-library-15 | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-8 | How a compose exchange ends | accepted; temporary-limitation clause superseded by DEC-arch-llm-client-library-15 | arch-llm-client-library | architecture revision |
 | DEC-arch-llm-client-library-9 | An OpenAI server with no credential | accepted | arch-llm-client-library | architecture revision |
 | DEC-arch-llm-client-library-10 | Logging: the `aiohttp` logger tree is silenced | accepted | arch-llm-client-library | architecture revision |
 | DEC-arch-llm-client-library-11 | Testing: fakes at the gateway/factory level | accepted | arch-llm-client-library | architecture revision |
 | DEC-arch-llm-client-library-12 | No reasoning options are sent by default | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-13 | Pin `llm-client` `v0.2.1` | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-14 | `compose` passes `tool_errors="result"` explicitly | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-15 | Model-side tool mistakes become tool frames through the observer | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-16 | `auth_failed` is read from `LLMError.status` | accepted | arch-llm-client-library | architecture revision |
+| DEC-arch-llm-client-library-17 | 0.2.1 options left unused: `read_timeout`, the trace switch, the provider call id | accepted | arch-llm-client-library | architecture revision |
 | DEC-arch-session-names-1 | Name storage: a nullable column, the default label computed by the client | accepted | arch-session-names | — |
 | DEC-arch-session-names-2 | Route shape: a general `PATCH` that accepts `name` only | accepted | arch-session-names | — |
 | DEC-arch-session-names-3 | Last-use display: local `YYYY-MM-DD HH:MM`, fixed width | accepted | arch-session-names | — |
