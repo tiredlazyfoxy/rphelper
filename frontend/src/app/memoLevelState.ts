@@ -9,6 +9,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 import { embeddingFailureSentence } from "../shared/embeddingFailure";
 import type { Memo, MemoPatch, MemoScope } from "./memosApi";
 import { createMemo, deleteMemo, fetchMemos, reorderMemos, updateMemo } from "./memosApi";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status: gates the loading and failure renders, not "notes are empty". */
 export type MemoLevelStatus = "idle" | "loading" | "ready" | "failed";
@@ -54,10 +55,6 @@ export class MemoLevelState {
 const SAVE_FAILED = "Could not save the note.";
 const DELETE_FAILED = "Could not delete the note.";
 const CHANGE_FAILED = "Could not change the note.";
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
 
 /** A copy of the record without `key` (replacing the field keeps the write observable). */
 function without<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -112,7 +109,7 @@ export async function loadMemoLevel(state: MemoLevelState, signal?: AbortSignal)
   try {
     memos = await fetchMemos(scope, scopeId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

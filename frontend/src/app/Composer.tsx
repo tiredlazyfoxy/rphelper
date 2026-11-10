@@ -95,6 +95,9 @@ export const Composer = observer(function Composer(
         void sendComposer(state, signal);
       }}
       sendBlockedReason={blockedReason}
+      // The stream's own wrapper owns the 720px column and 18px gutter (workspace-shell.md
+      // "Geometry"); a second cap here would double the side padding.
+      fullWidth
       minRows={3}
       heightField="chat"
       storage={storage}

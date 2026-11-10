@@ -275,7 +275,7 @@ def edit_message(
     settings: Annotated[Settings, Depends(get_settings)],
     client_factory: Annotated[LlmClientFactory, Depends(get_llm_client_factory)],
 ) -> MessageResponse:
-    """Replace a zone message's text via `edit_message_text(..., body.text)`.
+    """Replace a zone or settled record message's text via `edit_message_text(..., body.text)`.
 
     024 D9: the shared client factory and `settings.llm_request_timeout_seconds` are forwarded;
     the service uses them only when the edited row is a record row (D5).

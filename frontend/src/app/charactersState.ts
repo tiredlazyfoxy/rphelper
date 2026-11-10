@@ -5,6 +5,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 
 import type { Character } from "./charactersApi";
 import { fetchCharacters, isArchived } from "./charactersApi";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status: gates the loading and failure renders, not "rows are empty". */
 export type CharactersLoadStatus = "idle" | "loading" | "ready" | "failed";
@@ -18,10 +19,6 @@ export class CharactersState {
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
   }
-}
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
 }
 
 /** Whether this row belongs in the list: working, or archived while Show-archived is on. */
@@ -46,7 +43,7 @@ export async function loadCharacters(state: CharactersState, signal?: AbortSigna
   try {
     characters = await fetchCharacters(includeArchived, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

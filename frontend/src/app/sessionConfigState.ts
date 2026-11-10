@@ -14,6 +14,7 @@ import {
   fetchSessionConfiguration,
   updateSessionConfiguration,
 } from "./configurationApi";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status of one of the two independent reads. */
 export type SessionConfigStatus = "idle" | "loading" | "ready" | "failed";
@@ -47,10 +48,6 @@ const REASON_NO_MODEL_ENABLED = "Cannot send: no model is enabled on this instan
 const REASON_NOT_CHOSEN = "Cannot send: choose a model for this session.";
 const REASON_NOT_ENABLED = "Cannot send: this session's model is not enabled. Choose another model.";
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /** Reads the session configuration into the state under its own status; never rejects. */
 async function loadConfiguration(state: SessionConfigState, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -64,7 +61,7 @@ async function loadConfiguration(state: SessionConfigState, signal?: AbortSignal
   try {
     configuration = await fetchSessionConfiguration(state.sessionId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {
@@ -95,7 +92,7 @@ async function loadModels(state: SessionConfigState, signal?: AbortSignal): Prom
   try {
     models = await fetchEnabledModels(signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

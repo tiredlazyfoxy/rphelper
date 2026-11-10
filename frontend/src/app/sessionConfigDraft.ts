@@ -9,6 +9,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import { updateSessionConfiguration } from "./configurationApi";
 import type { SessionConfiguration, SessionConfigurationPatch, Setting } from "./configurationApi";
+import { isAbortError } from "../shared/abort";
 
 /** A text setting's choice: inherit the level below, or set a session override. */
 export type TextSource = "inherit" | "set";
@@ -58,10 +59,6 @@ function toolOverride(choice: ToolChoice): boolean | null {
     return null;
   }
   return choice === "on";
-}
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
 }
 
 export class SessionConfigDraft {
@@ -195,7 +192,7 @@ export async function submitSessionConfig(
   try {
     saved = await updateSessionConfiguration(draft.sessionId, patch, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

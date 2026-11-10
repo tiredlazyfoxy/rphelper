@@ -5,6 +5,7 @@
 // navigation is reported through `onStarted`, so this module imports no router and no React.
 import { makeAutoObservable, runInAction } from "mobx";
 
+import { isAbortError } from "../shared/abort";
 import { notifyFailure } from "../shared/notifyFailure";
 import { startSessionWithMessage } from "./sessionsApi";
 import type { Session } from "./sessionsApi";
@@ -71,7 +72,7 @@ export async function loadComposerSetups(
   try {
     fetched = await fetchSetups(state.characterId, false, signal);
   } catch (error) {
-    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     // Previous choices and selection kept; sending with "No setup" still works (R2).

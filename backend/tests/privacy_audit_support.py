@@ -82,7 +82,7 @@ SESSION_SEARCH_NAME: Final[str] = "session_search"
 WEB_SEARCH_NAME: Final[str] = "web_search"
 
 #: The four dependency callables ``install_fake_model_seam`` replaces, in this order.
-#: Missing any one lets the real ``LlmClient`` run (orchestrator decision 7).
+#: Missing any one lets the real ``LlmGateway`` run (orchestrator decision 7).
 FAKE_SEAM_OVERRIDE_KEYS: Final[tuple[Callable[..., Any], ...]] = (
     get_llm_client_factory,
     get_chat_client_factory,

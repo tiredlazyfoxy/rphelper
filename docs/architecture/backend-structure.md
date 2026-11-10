@@ -230,9 +230,14 @@ Guarantees:
   construction. One generator instance per process, held on application state —
   which is the code-level half of `data-model.md`'s "exactly one generator
   process per node id" deployment guarantee.
-- **A backwards clock refuses to issue and raises.** Waiting out the drift and
-  carrying on both mint duplicates. It surfaces as an operational fault (a 500),
-  not as a domain failure the SPA is expected to render.
+- **A backwards clock step within a bounded tolerance continues from the last
+  issued millisecond; beyond it the generator refuses and raises.** Within the
+  tolerance ids are issued from the last millisecond, never from the earlier
+  reading, so they stay strictly increasing and unique; small steps are what a
+  slewed host clock produces in ordinary operation, and refusing them fails
+  requests the caller cannot act on. A step beyond the tolerance surfaces as an
+  operational fault (a 500), not as a domain failure the SPA is expected to
+  render (`data-model.md` § Identifiers; the value is `DEC-001-9`).
 - **The backwards-clock exception is NOT a `DomainError` subclass**, and the
   non-relationship is deliberate (decided in plan 001). It is an operational
   fault — a 500 — and a `DomainError` is by definition something the SPA is told
@@ -243,8 +248,8 @@ Guarantees:
   More than 4096 ids in one millisecond waits out the millisecond and continues.
   The two rejected alternatives each fail worse: wrapping the sequence mints a
   duplicate, and raising turns an ordinary write burst into an error the caller
-  cannot act on. The wait re-reads the clock, so a backwards step observed during
-  it still raises.
+  cannot act on. The wait re-reads the clock, so a backwards step beyond the
+  tolerance observed during it still raises.
 - **Time is read through an injectable clock** (decided in plan 001) — the
   generator is constructed with a milliseconds clock that defaults to the system
   clock. That is the only seam by which the backwards-clock refusal and the
@@ -2044,3 +2049,7 @@ diagnostic on its own (`transfer.md`).
   failed tool row; the gateway classifies a library failure from the status the
   error carries rather than its message. `DEC-arch-llm-client-library-13`,
   `-15`, `-16`.
+- **2026-11-10 — the id generator absorbs a small backwards clock step.** Was:
+  any backwards reading refused and raised. Now: a step within a bounded
+  tolerance continues from the last issued millisecond; only a step beyond it
+  raises, still outside the `DomainError` hierarchy. `DEC-001-9`.

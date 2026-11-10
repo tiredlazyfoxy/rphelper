@@ -3,6 +3,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import { apiPost } from "../shared/api";
 import { ApiError, CLIENT_TRANSPORT_FAILED } from "../shared/apiError";
+import { isAbortError } from "../shared/abort";
 
 /** The client-validated fields — the keys of the client-error map. */
 export type CreateAdminField = "username" | "password" | "confirmation";
@@ -60,10 +61,6 @@ const ALREADY_CONFIGURED = "already_configured";
 const GENERIC_FAILURE = "The administrator could not be created.";
 const TRANSPORT_FAILURE = "The server could not be reached. Check that it is running and try again.";
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /**
  * Maps a failure onto the server-error map by code or status, never by parsing prose.
  * The route defines no field-shaped code (003 context.md D15/D16), so every failure lands
@@ -108,7 +105,7 @@ export async function submitCreateAdmin(
   try {
     await apiPost<unknown>("/api/bootstrap/create", { username, password }, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return "failed";
     }
     if (error instanceof ApiError && error.code === ALREADY_CONFIGURED) {

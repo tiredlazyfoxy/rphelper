@@ -433,9 +433,9 @@ class NothingToReopenError(DomainError):
 
 
 class MessageNotEditableError(DomainError):
-    """An edit named a message the caller owns that is buried or (until `014`) settled.
+    """An edit or delete named a message the caller owns that is buried or a `role='tool'` row.
 
-    Raised by `app.services.messages` (feature `012`, `context.md` D2, D13). 409. `detail`
+    Raised by `app.services.messages` (`edit_message_text`, `delete_message`). 409. `detail`
     carries nothing.
     """
 

@@ -72,9 +72,16 @@ Rules, each of which a plan must hold:
 - **The epoch is a constant and can never change.** It is the whole 41-bit budget;
   moving it re-bases every future id against a different origin and invalidates
   the ordering of every row already stored.
-- **A clock going backwards refuses to issue and raises.** Silently waiting out
-  the drift or carrying on both mint duplicates. A backwards clock step is an
-  operational fault and is surfaced as one.
+- **A small backwards clock step is absorbed; a large one refuses to issue and
+  raises.** A backwards step within a bounded tolerance continues from the last
+  issued millisecond — the earlier reading is never stamped into an id — so ids
+  stay strictly increasing and unique. Beyond the tolerance the generator refuses
+  and raises: a large backwards step is an operational fault and is surfaced as
+  one. Small steps are absorbed because hosts whose wall clock is slewed step it
+  back by tens of milliseconds in ordinary operation, and refusing those fails
+  requests the caller cannot act on; the tolerance is bounded because absorbing a
+  large step would stall issuing until wall time caught up. The tolerance's value,
+  its flip condition and the rejected alternatives are `DEC-001-9`.
 - **Exactly one generator process per node id.** Today that is guaranteed by the
   deployment — one container, one uvicorn (`deployment.md`). Recorded as a
   **deployment guarantee**, not as an accident of the current topology.
@@ -1394,3 +1401,7 @@ rather than of the envelope:
   0.2.0 such a call ended the exchange and wrote no tool row. Now: it writes the
   ordinary failed row, its name and arguments as the model sent them; no column
   or payload key changes. Detail in `DEC-arch-llm-client-library-15`.
+- **2026-11-10 — a small backwards clock step no longer refuses.** Was: any
+  backwards clock reading refused to issue and raised. Now: a step within a
+  bounded tolerance continues from the last issued millisecond, and only a step
+  beyond it refuses and raises. Detail in `DEC-001-9`.

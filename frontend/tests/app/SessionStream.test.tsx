@@ -444,3 +444,53 @@ describe("end to end on stubs: a pasted partner block files itself (US-030.AC-1,
     expect(notifyFailureSpy).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bug fix (workspace-shell.md "Geometry"): the composer shares the stream's 720px column and
+// its single 18px side gutter — the stream's wrapper owns that geometry, so no second capped,
+// padded box sits between it and the "Composer" textarea.
+
+/** Every ancestor of `node` strictly inside document.body. */
+function ancestors(node: HTMLElement): HTMLElement[] {
+  const found: HTMLElement[] = [];
+  for (let el = node.parentElement; el !== null && el !== document.body; el = el.parentElement) {
+    found.push(el);
+  }
+  return found;
+}
+
+const CAP_720 = /(^|[^\d.])(720px|45rem)/;
+
+/** Whether the element carries a 720px max-width (inline style, as Mantine emits `maw`). */
+function carries720MaxWidth(el: HTMLElement): boolean {
+  const raw = el.getAttribute("style") ?? "";
+  const declared = [...raw.matchAll(/(?:^|;)\s*max-width\s*:\s*([^;]+)/g)].map((match) => match[1] ?? "");
+  const candidates = [...declared, el.style.maxWidth, el.style.getPropertyValue("--maw")];
+  return candidates.some((value) => CAP_720.test(value));
+}
+
+/** Whether the element sets an inline side padding (as Mantine emits `px`). */
+function carriesSidePadding(el: HTMLElement): boolean {
+  const raw = el.getAttribute("style") ?? "";
+  return /(?:^|;)\s*padding-(?:inline|left|right)\s*:/.test(raw);
+}
+
+describe("the composer shares the stream's one column and gutter (workspace-shell.md Geometry)", () => {
+  it("exactly one ancestor of the Composer caps it at 720px and exactly one pads its sides", async () => {
+    stubFetch((method, pathname) => {
+      if (method === "GET" && pathname === ENTRIES_PATH) return jsonResponse({ entries: [] }, 200);
+      if (method === "GET" && pathname === ZONE_PATH) return jsonResponse({ messages: [] }, 200);
+      return undefined;
+    });
+    renderStream();
+    await flush();
+
+    const chain = ancestors(composer());
+    const capped = chain.filter(carries720MaxWidth);
+    const padded = chain.filter(carriesSidePadding);
+
+    expect(capped).toHaveLength(1);
+    expect(padded).toEqual(capped);
+    expect(capped[0]?.contains(recordList())).toBe(true);
+  });
+});

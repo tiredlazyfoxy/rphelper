@@ -12,6 +12,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 import { isApiError } from "../shared/apiError";
 import type { Session } from "./sessionsApi";
 import { fetchSession } from "./sessionsApi";
+import { isAbortError } from "../shared/abort";
 
 /**
  * Explicit load status for the screen: gates the loader, the 404 text and the failure
@@ -37,11 +38,6 @@ export class SessionScreenState {
  * Module-private on purpose: the screen's rendered text comes from the spec, not from here.
  */
 const SESSION_NOT_FOUND = "session_not_found";
-
-/** An aborted `fetch` rejects with a plain `Error` named "AbortError", never an `ApiError`. */
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
 
 /**
  * Effect: fetch `state.sessionId` into the screen. Sets `"loading"` first (so a Retry from
@@ -69,7 +65,7 @@ export async function loadSessionScreen(
   try {
     session = await fetchSession(sessionId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     // The 404 is its own terminal branch: retrying an id that is not ours cannot start

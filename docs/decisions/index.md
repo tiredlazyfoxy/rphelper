@@ -10,9 +10,10 @@ edited independently of the files (`AGENTS.md`).
 | DEC-001-3 | What a secret-pointer failure carries, and what the handler logs | accepted | 001.backend-foundation | 001.instance |
 | DEC-001-4 | The handler is registered with the decorator form | accepted | 001.backend-foundation | 001.instance |
 | DEC-001-5 | Any failure out of the extension loader becomes `ExtensionLoadError` | accepted | 001.backend-foundation | 001.instance |
-| DEC-001-6 | The generator is built once, refuses an out-of-range node id, and reads an injected clock | accepted | 001.backend-foundation | 001.instance |
+| DEC-001-6 | The generator is built once, refuses an out-of-range node id, and reads an injected clock | accepted; superseded in part by DEC-001-9 | 001.backend-foundation | 001.instance |
 | DEC-001-7 | The health response field is `schema_` with the wire alias `schema` | accepted | 001.backend-foundation | 001.instance |
 | DEC-001-8 | The app factory takes no parameters, and its collaborators are patchable names | accepted | 001.backend-foundation | 001.instance |
+| DEC-001-9 | A backwards clock reading up to 1000 ms is treated as the last issued millisecond | accepted | 001.backend-foundation | 001.instance |
 | DEC-002-1 | Stores and drafts are pure data; effects are free functions | accepted | 002.frontend-foundation | 001.instance |
 | DEC-002-2 | The client decodes once; each draft maps its own fields | accepted | 002.frontend-foundation | 001.instance |
 | DEC-002-3 | The remaining foundation decisions are held by the architecture | accepted | 002.frontend-foundation | 001.instance |

@@ -11,6 +11,7 @@ import {
   documentNavigation,
 } from "../shared/api";
 import { type ReadableTextFile, postExportFile } from "../shared/importFile";
+import { isAbortError } from "../shared/abort";
 
 /** The backend's closed three-value table status — never widened to `string`. */
 export type TableStatus = "in_sync" | "missing" | "drifted";
@@ -154,10 +155,6 @@ const NO_DIFFERENCE = "—";
 const BYTES_PER_KB = 1024;
 const BYTES_PER_MB = 1024 * 1024;
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 function failureMessageOf(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -196,7 +193,7 @@ export async function loadDriftReport(state: DatabasePageState, signal?: AbortSi
   try {
     body = await apiGet<DriftReportResponse | undefined>(DRIFT_REPORT_PATH, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error, "The drift report could not be loaded.");
@@ -293,7 +290,7 @@ async function applyDriftOperation(
   try {
     await apiPost<unknown>(applyPathOf(tableName, operation), undefined, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error, fallback);
@@ -387,7 +384,7 @@ export async function exportDatabase(state: DatabasePageState, signal?: AbortSig
   try {
     result = await apiDownload(DATABASE_EXPORT_PATH, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error, "The export could not be downloaded.");
@@ -477,7 +474,7 @@ export async function importDatabase(state: DatabasePageState, signal?: AbortSig
     // The 204 resolves with no body; nothing is read from the resolved value (US-078).
     await postExportFile(DATABASE_IMPORT_PATH, file, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error, "The database could not be replaced.");
@@ -520,7 +517,7 @@ export async function rebuildIndex(state: DatabasePageState, signal?: AbortSigna
     // The body is the fixed list of rebuilt table names; nothing is read from it.
     await apiPost<unknown>(DATABASE_REBUILD_PATH, undefined, signal);
   } catch (error) {
-    const aborted = signal?.aborted === true || isAbortRejection(error);
+    const aborted = signal?.aborted === true || isAbortError(error);
     const message = aborted ? null : failureMessageOf(error, "The index could not be rebuilt.");
     runInAction(() => {
       state.rebuildStatus = "idle";

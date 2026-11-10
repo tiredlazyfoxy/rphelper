@@ -17,6 +17,7 @@ import {
 } from "./charactersApi";
 import type { CharactersState } from "./charactersState";
 import { applyCharacter } from "./charactersState";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status for the screen: gates the loading, 404 and failure renders. */
 export type CharacterScreenStatus = "loading" | "ready" | "not-found" | "failed";
@@ -58,10 +59,6 @@ const CREATE_FAILED = "Could not create the character.";
 const SAVE_FAILED = "Could not save the character.";
 const ARCHIVE_FAILED = "Could not archive the character.";
 const RESTORE_FAILED = "Could not restore the character.";
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
 
 /** Pure: true when the screen is in new mode (no character id). */
 export function isNewCharacter(state: CharacterScreenState): boolean {
@@ -253,7 +250,7 @@ export async function loadCharacter(
   try {
     character = await fetchCharacter(characterId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const notFound = isApiError(error) && error.code === CHARACTER_NOT_FOUND;
@@ -310,7 +307,7 @@ export async function submitCreate(
       return;
     }
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {
@@ -384,7 +381,7 @@ async function submitAction(
       return;
     }
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

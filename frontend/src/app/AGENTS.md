@@ -74,7 +74,7 @@ The `app` Vite entry — the roleplayer's workspace: the shell and tree, charact
 - `sessionLabel.ts` — the session display-label module: `sessionLabel` (the stored name, else the local start date), `formatLocalDate`, `formatLocalDateTime`.
 - `sessionRenameState.ts` — in-place session rename state, one per host (tree, session header): `SessionRenameState` plus `beginRename` / `cancelRename` / `commitRename`.
 - `sessionScreenState.ts` — the session screen's state and load.
-- `sessionsApi.ts` — the sessions wire surface (list, read, start, `renameSession`, archive / restore).
+- `sessionsApi.ts` — the sessions wire surface (list, read, `startSessionWithMessage`, `renameSession`, archive / restore).
 - `sessionsSectionState.ts` — the Sessions section's state and effects, including `syncSectionSessions`, which brings rows up to date from the workspace sessions store.
 - `sessionsState.ts` — the one workspace sessions list for the tree, ordered by last use (`applySession` upserts a session into it).
 - `settingsState.ts` — the settings languages form state.

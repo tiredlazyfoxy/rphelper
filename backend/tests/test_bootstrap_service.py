@@ -875,7 +875,7 @@ def test_ttl_is_a_required_plain_parameter__S004_004_DoD8() -> None:
 # =====================================================================================
 # Feature 024, step 001 — the creation also ensures the **full-text** half, in the same
 # transaction, and creates no vector table (there is no designated model at bootstrap).
-# Expected values: ``024.embedding-lifecycle/001.search-tables.md`` DoD-8 and the feature
+# Expected values: ``docs/decisions/024.embedding-lifecycle.md`` (step 001 DoD-8) and the feature
 # ``context.md`` D2. Bindings: ``## Skeleton`` → "Step 001 — frozen interface" (the four
 # table-name constants). Only this one test is added here; every test above is unchanged.
 # =====================================================================================

@@ -22,6 +22,7 @@ import {
   reopenLastEntry,
   settleZone,
 } from "./streamApi";
+import { isAbortError } from "../shared/abort";
 
 /** The kind switch's two positions. */
 export type StreamKind = "partner" | "turn";
@@ -88,10 +89,6 @@ export type LiveToolCall = {
   status: LiveToolStatus;
   summary: string | null;
 };
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
 
 /** True when the two lists hold the same id strings in the same order. */
 function sameIdSequence(a: readonly Message[], b: readonly Message[]): boolean {
@@ -215,7 +212,7 @@ export async function loadStream(state: StreamState, signal?: AbortSignal): Prom
       fetchZone(sessionId, signal),
     ]);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {
@@ -293,7 +290,7 @@ async function rereadEntries(state: StreamState, signal?: AbortSignal): Promise<
     }
     applyEntries(state, entries);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return false;
     }
     notifyFailure(error);
@@ -312,7 +309,7 @@ async function rereadZone(state: StreamState, signal?: AbortSignal): Promise<boo
       state.zone = zone;
     });
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return false;
     }
     notifyFailure(error);
@@ -355,7 +352,7 @@ export async function sendComposer(state: StreamState, signal?: AbortSignal): Pr
   try {
     filed = await filePartnerEntry(sessionId, text, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     notifyFailure(error);
@@ -399,7 +396,7 @@ export async function filePastedPartner(
   try {
     filed = await filePartnerEntry(state.sessionId, text, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     notifyFailure(error);
@@ -446,7 +443,7 @@ export async function settleComposer(state: StreamState, signal?: AbortSignal): 
     try {
       await appendZoneMessage(sessionId, text, signal);
     } catch (error) {
-      if (signal?.aborted || isAbortRejection(error)) {
+      if (signal?.aborted || isAbortError(error)) {
         return;
       }
       notifyFailure(error);
@@ -468,7 +465,7 @@ export async function settleComposer(state: StreamState, signal?: AbortSignal): 
   try {
     settled = await settleZone(sessionId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     notifyFailure(error);
@@ -667,7 +664,7 @@ async function runCompose(
       if (signal?.aborted) {
         return;
       }
-      if (!isAbortRejection(error)) {
+      if (!isAbortError(error)) {
         notifyFailure(error);
       }
       runInAction(() => {
@@ -731,7 +728,7 @@ export async function reopenLast(state: StreamState, signal?: AbortSignal): Prom
   try {
     reopened = await reopenLastEntry(state.sessionId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     notifyFailure(error);
@@ -782,7 +779,7 @@ export async function editZoneMessage(
   try {
     updated = await editMessage(messageId, text, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return false;
     }
     notifyFailure(error);
@@ -829,7 +826,7 @@ export async function editEntry(
   try {
     updated = await editMessage(messageId, text, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return false;
     }
     notifyFailure(error);
@@ -879,7 +876,7 @@ export async function deleteEntry(
   try {
     result = await deleteMessage(messageId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return false;
     }
     // The server may have deleted (or refused) something else than the held list shows, so
@@ -919,7 +916,7 @@ export async function deleteZoneMessage(
   try {
     await deleteMessage(messageId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return false;
     }
     notifyFailure(error);

@@ -4,7 +4,8 @@ Feature `029`, step `001` (FEAT-017; UC-058; US-074, US-076). The roleplayer's o
 reaches five kinds. Three of them (session, entry, memo) go through feature `025`'s hybrid
 port; the two built here do **not**. `characters` and `setups` have no FTS table and no vector
 table, they are small, and `context.md` U2 decides they are matched by an escaped,
-case-insensitive substring `LIKE` outside the port instead — a recorded deviation from "every
+case-insensitive substring `LIKE` outside the port instead (both sides Unicode-casefolded, the
+column via the registered `rp_casefold` SQL function, fast/006) — a recorded deviation from "every
 surface goes through one port", not an oversight.
 
 This step is the bottom layer and nothing else:

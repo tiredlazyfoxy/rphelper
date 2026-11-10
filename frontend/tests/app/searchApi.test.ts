@@ -1,6 +1,6 @@
 // Feature 029, step 004 (DoD-1..8) — the my-search API client (this file: DoD-1, DoD-2).
 //
-// Expected behaviour comes from `029.my-search/004.search-api-and-state.md`'s Interface
+// Expected behaviour comes from `docs/decisions/029.my-search.md` (step 004) Interface
 // intent and Definition of done, plus `context.md`'s "Wire contract — GET /api/search?q=<text>"
 // (five groups, ids as decimal strings), D1 (one route, param `q`) and U1 (an embedding
 // failure fails the whole search with the envelope unchanged). `fetch` is stubbed per file and

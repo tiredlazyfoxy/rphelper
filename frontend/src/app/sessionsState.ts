@@ -9,6 +9,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 
 import type { Session } from "./sessionsApi";
 import { fetchSessions, isSessionArchived } from "./sessionsApi";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status: gates the loading and failure renders, not "rows are empty". */
 export type SessionsLoadStatus = "idle" | "loading" | "ready" | "failed";
@@ -20,10 +21,6 @@ export class SessionsState {
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
   }
-}
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
 }
 
 /**
@@ -43,7 +40,7 @@ export async function loadSessions(state: SessionsState, signal?: AbortSignal): 
     // The workspace list is working-only (D5): the flag is never set from here.
     sessions = await fetchSessions(false, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

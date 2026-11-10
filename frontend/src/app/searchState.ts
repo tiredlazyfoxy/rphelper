@@ -15,6 +15,7 @@ import type {
   SetupHit,
 } from "./searchApi";
 import { fetchMySearch } from "./searchApi";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status: gates the loading, empty and failure renders, not "groups are empty". */
 export type SearchLoadStatus = "idle" | "loading" | "ready" | "failed";
@@ -35,10 +36,6 @@ export class SearchState {
   constructor() {
     makeAutoObservable(this, {}, { autoBind: true });
   }
-}
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
 }
 
 /** Whether this query text is blank — empty or whitespace only. A blank query is never sent (D1). */
@@ -82,7 +79,7 @@ export async function loadSearch(
   try {
     results = await fetchMySearch(query, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     // U1: the envelope's own message is what the page shows inline.

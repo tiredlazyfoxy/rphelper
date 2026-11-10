@@ -363,7 +363,7 @@ and the withdrawal *simplifies* import rather than costing it anything, because
 there is no longer a collision case to detect.
 
 The mechanism — bit layout, the fixed epoch, the node-id rule, the
-backwards-clock refusal — is in `data-model.md`'s Identifiers section and is not
+backwards-clock tolerance and refusal — is in `data-model.md`'s Identifiers section and is not
 restated here.
 
 The cost is one rule that has to hold at every boundary: **an id is an `int` in

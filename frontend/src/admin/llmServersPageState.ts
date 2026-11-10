@@ -3,6 +3,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import type { MantineColor } from "@mantine/core";
 import { apiDelete, apiGet, apiPost } from "../shared/api";
+import { isAbortError } from "../shared/abort";
 
 /** The two registration kinds the backend accepts. */
 export type LlmServerKind = "llamaswap" | "openai";
@@ -66,10 +67,6 @@ function serverPath(id: string): string {
   return `${LIST_PATH}/${encodeURIComponent(id)}`;
 }
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 function failureMessageOf(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -96,7 +93,7 @@ export async function loadLlmServers(state: LlmServersPageState, signal?: AbortS
   try {
     body = await apiGet<LlmServerListResponse | undefined>(LIST_PATH, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error, "The LLM server list could not be loaded.");
@@ -133,7 +130,7 @@ export async function deleteLlmServer(
   try {
     await apiDelete<unknown>(serverPath(id), signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error, "The LLM server could not be deleted.");
@@ -165,7 +162,7 @@ export async function testLlmServerConnection(
   try {
     await apiPost<ConnectionTestResponse | undefined>(`${serverPath(id)}/test`, undefined, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error, "The connection test could not be run.");

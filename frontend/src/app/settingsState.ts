@@ -6,6 +6,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 
 import type { UserSettings, UserSettingsPatch } from "./configurationApi";
 import { fetchUserSettings, updateUserSettings } from "./configurationApi";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status of the languages form. */
 export type SettingsStatus = "idle" | "loading" | "ready" | "failed";
@@ -32,10 +33,6 @@ export class SettingsState {
 
 /** The fixed save-failure sentence (the UI strings table). */
 const SAVE_FAILED = "Could not save your settings.";
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
 
 /** An editor text as the wire value: trimmed, blank as null. */
 function wireValue(text: string): string | null {
@@ -78,7 +75,7 @@ export async function loadSettings(state: SettingsState, signal?: AbortSignal): 
   try {
     settings = await fetchUserSettings(signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

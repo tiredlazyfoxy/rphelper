@@ -8,6 +8,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 import { fetchMemoChain } from "./memosApi";
 import type { MemoChainLevel } from "./memosApi";
 import { MemoLevelState, populateMemoLevel } from "./memoLevelState";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status: gates the loading and failure renders. */
 export type MemoChainStatus = "idle" | "loading" | "ready" | "failed";
@@ -25,11 +26,6 @@ export class MemoChainState {
   }
 }
 
-/** Whether a rejection is the fetch layer's own abort, not a load failure. */
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /** Effect: loads the chain into `state`. Never rejects; writes nothing once aborted. */
 export async function loadMemoChain(state: MemoChainState, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -44,7 +40,7 @@ export async function loadMemoChain(state: MemoChainState, signal?: AbortSignal)
   try {
     levels = await fetchMemoChain(sessionId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     // Failure keeps whatever levels the state already holds.

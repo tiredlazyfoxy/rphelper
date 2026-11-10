@@ -1317,6 +1317,36 @@ def test_a_broken_payload_is_refused_and_stores_nothing__S031_002_DoD8(
     assert _row_counts(engine) == before, "a refusal stores nothing"
 
 
+# --- DEC-031-7: a duplicate primary key inside one payload table --------------------
+
+
+@pytest.mark.parametrize(
+    "table_name",
+    [
+        schema.characters.name,
+        schema.setups.name,
+        schema.sessions.name,
+        schema.messages.name,
+        schema.memos.name,
+    ],
+)
+def test_a_duplicate_primary_key_in_a_user_import_is_refused_and_stores_nothing__DEC_031_7(
+    engine: Engine, table_name: str
+) -> None:
+    """DEC-031-7 — two payload rows of one table sharing a primary key are
+    `malformed_payload` (DEC-031-5's reason for everything about the payload), refused
+    before any write: the row counts of every `metadata` table are unchanged."""
+    envelope = _user_envelope(engine)
+    rows = _payload(envelope)[table_name]
+    assert rows, f"the seeded user export carries {table_name} rows"
+    rows.append(copy.deepcopy(rows[0]))
+    before = _row_counts(engine)
+
+    _assert_refusal(REASON_MALFORMED_PAYLOAD, lambda: _import(engine, USER_C, envelope))
+
+    assert _row_counts(engine) == before, "a refusal stores nothing"
+
+
 # --- DoD-9: R5, the caller's user_id and nobody else's -------------------------------
 
 

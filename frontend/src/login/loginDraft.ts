@@ -3,6 +3,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import { apiPost } from "../shared/api";
 import { ApiError, CLIENT_TRANSPORT_FAILED } from "../shared/apiError";
+import { isAbortError } from "../shared/abort";
 
 /** The client-validated fields — the keys of the client-error map. */
 export type LoginField = "username" | "password";
@@ -61,10 +62,6 @@ const REFUSAL_MESSAGE = "Sign-in failed. Check the credentials you entered and t
 const TRANSPORT_FAILURE = "The server could not be reached. Check that it is running and try again.";
 const GENERIC_FAILURE = "Signing in did not work because of a server problem. Try again.";
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /**
  * Maps a failure onto the server-error map by code or status, never by parsing prose.
  * Every failure lands on `general`; no per-field message is ever written (D1). Messages are
@@ -108,7 +105,7 @@ export async function submitLogin(
   try {
     await apiPost<unknown>("/api/auth/login", { username, password }, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return "failed";
     }
     const serverErrors = serverErrorsFor(error, [username, password]);

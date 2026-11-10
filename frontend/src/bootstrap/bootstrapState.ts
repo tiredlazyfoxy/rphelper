@@ -3,6 +3,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import { apiGet } from "../shared/api";
 import { isNotReady } from "../shared/notReady";
+import { isAbortError } from "../shared/abort";
 
 /** The five states the bootstrap entry renders. */
 export type BootstrapPhase = "probing" | "offer" | "refusal" | "not-ready" | "failed";
@@ -29,10 +30,6 @@ export function bootstrapPhase(state: BootstrapState): BootstrapPhase {
   return state.phase;
 }
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 function failureMessageOf(error: unknown): string {
   if (error instanceof Error && error.message.length > 0) {
     return error.message;
@@ -53,7 +50,7 @@ export async function probeHealth(state: BootstrapState, signal?: AbortSignal): 
   try {
     body = await apiGet<HealthConfiguredResponse | undefined>("/api/health", signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const notReady = isNotReady(error);

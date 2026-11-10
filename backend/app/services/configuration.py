@@ -3,7 +3,8 @@
 Feature `017`, steps `003` and `004` (skeleton; `004` adds the configuration writes).
 Interface only; bodies are filled by the coder.
 
-`resolve_model_for_use` has no call site until `021` wires compose (D2).
+`resolve_model_for_use` is called by `app.services.compose` and `app.services.translation`
+(D2's use-time check, before any model call).
 """
 
 from collections.abc import Iterator
@@ -242,7 +243,8 @@ def resolve_model_for_use(
     session_id: int,
 ) -> EnabledChatModel:
     """D2's use-time check; returns the session's captured model only when it is enabled now."""
-    # No call site until `021` wires compose (D2). Reads only; never writes, never falls back.
+    # Called by compose and translation before any model call (D2). Reads only; never writes,
+    # never falls back.
     with _reading(connection):
         row = connection.execute(
             select(sessions.c.model_server_id, sessions.c.model_name).where(

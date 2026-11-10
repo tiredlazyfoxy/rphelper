@@ -3,6 +3,7 @@
 // plus free functions over it (context.md D11 / D16).
 import { makeAutoObservable, runInAction } from "mobx";
 import { apiGet } from "../shared/api";
+import { isAbortError } from "../shared/abort";
 
 /** The explicit probe lifecycle; a `Loader` is gated on `"loading"`, never on an empty list. */
 export type ModelProbeStatus = "idle" | "loading" | "ready" | "failed";
@@ -52,7 +53,7 @@ export async function loadAvailableModels(
       signal,
     );
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error);
@@ -77,10 +78,6 @@ export async function loadAvailableModels(
 
 const SERVERS_PATH = "/api/admin/llm-servers";
 const PROBE_FAILURE = "The server's models could not be listed.";
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
 
 function failureMessageOf(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {

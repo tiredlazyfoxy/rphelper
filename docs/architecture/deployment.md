@@ -411,7 +411,7 @@ What it forbids, stated concretely because the change looks routine:
   and remaps the payload's references (`data-model.md`). The setting survives as
   scheme hygiene, not as an import prerequisite.
 
-The bit layout, the fixed epoch and the backwards-clock refusal are
+The bit layout, the fixed epoch and the backwards-clock tolerance and refusal are
 `data-model.md`'s Identifiers section and are not restated here.
 
 The corollary for SQLite is the same shape and already holds: one writer, one

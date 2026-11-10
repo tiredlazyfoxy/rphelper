@@ -98,7 +98,9 @@ class SearchHit:
     memo_scope: MemoScope | None = None
     """A memo hit's level, as the scope literal alone — no name join (U3). `None` otherwise."""
     memo_scope_id: int | None = None
-    """A memo hit's level target id, `None` for the `"user"` level and for non-memo hits (U3)."""
+    """A memo hit's stored `scope_id`, passed through raw (DEC-025-3): the owner's user id for the
+    `"user"` level. `None` for non-memo hits. My-search hydration reduces `"user"` to `None` (DEC-029-9).
+    """
     session_id: int | None = None
     """An entry hit's owning session id. `None` for memo and session hits (D3)."""
 

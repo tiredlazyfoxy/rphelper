@@ -16,7 +16,7 @@ const LLM_UNREACHABLE_CODE = "llm_unreachable";
 
 /**
  * What the UI says when nothing was stored because no embedding model is configured.
- * Verbatim from `024/008.context.md`; callers and tests use this constant, never a retyped
+ * Verbatim from `docs/decisions/024.embedding-lifecycle.md` (step 008); callers and tests use this constant, never a retyped
  * copy of the prose.
  */
 export const NO_EMBEDDING_MODEL_SENTENCE =
@@ -24,7 +24,7 @@ export const NO_EMBEDDING_MODEL_SENTENCE =
 
 /**
  * What the UI says when nothing was stored because the embedding server was unreachable.
- * Verbatim from `024/008.context.md`.
+ * Verbatim from `docs/decisions/024.embedding-lifecycle.md` (step 008).
  */
 export const LLM_UNREACHABLE_SENTENCE =
   "Not saved: the embedding server could not be reached. Try again in a moment.";
