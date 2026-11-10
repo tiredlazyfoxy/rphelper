@@ -2,6 +2,7 @@
 // Loads and mutations are the free functions below.
 import { makeAutoObservable, runInAction } from "mobx";
 import { apiGet, apiPost } from "../shared/api";
+import { isAbortError } from "../shared/abort";
 
 /** The backend ladder's stored values — never the Python enum member names. */
 export type AdminUserRole = "roleplayer" | "admin";
@@ -33,10 +34,6 @@ export class UsersPageState {
   }
 }
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 function failureMessageOf(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -63,7 +60,7 @@ export async function loadUsers(state: UsersPageState, signal?: AbortSignal): Pr
   try {
     body = await apiGet<AdminUserListResponse | undefined>("/api/admin/users", signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error, "The account list could not be loaded.");
@@ -97,7 +94,7 @@ async function mutateThenReload(
   try {
     await apiPost<unknown>(path, undefined, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error, fallback);

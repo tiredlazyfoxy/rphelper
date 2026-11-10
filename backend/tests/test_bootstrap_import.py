@@ -1,6 +1,7 @@
 """Tests for ``POST /api/bootstrap/import`` and ``restore_from_export`` — fast/003.
 
-Spec: ``docs/plans/fast/003.bootstrap-from-export/plan.md`` (Interface intent + Definition
+Spec: ``fast/003.bootstrap-from-export`` (``docs/decisions/fast-003.bootstrap-from-export.md``)
+(Interface intent + Definition
 of done) and ``context.md`` (Decisions 1-5, Accepted consequences). Bindings come from the
 ``## Skeleton`` record in that folder's ``status.md``:
 
@@ -571,7 +572,7 @@ def test_restore_logs_carry_no_username_or_password__DoD11(
 
 # === 034/001 DoD-6 / DoD-7 / DoD-8 ========================================================
 # Feature 034, step 001 — session names through bootstrap-from-export. Expected values come
-# from `docs/plans/034.session-names/001.session-name-column.md` DoD-6 / DoD-7 / DoD-8 and
+# from `docs/decisions/034.session-names.md` DoD-6 / DoD-7 / DoD-8 and
 # DEC-034-7: a version-1 database file (session rows without `name`) bootstraps with every
 # `name` NULL; a current file keeps a stored name; a version-1 session row carrying `name`
 # is refused and nothing is configured.

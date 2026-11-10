@@ -4,7 +4,8 @@ Feature `029`, step `001` (FEAT-017; UC-058; US-074, US-076). The roleplayer's o
 reaches five kinds. Three of them (session, entry, memo) go through feature `025`'s hybrid
 port; the two built here do **not**. `characters` and `setups` have no FTS table and no vector
 table, they are small, and `context.md` U2 decides they are matched by an escaped,
-case-insensitive substring `LIKE` outside the port instead — a recorded deviation from "every
+case-insensitive substring `LIKE` outside the port instead (both sides Unicode-casefolded, the
+column via the registered `rp_casefold` SQL function, fast/006) — a recorded deviation from "every
 surface goes through one port", not an oversight.
 
 This step is the bottom layer and nothing else:
@@ -52,7 +53,7 @@ from app.db.engine import CASEFOLD_FUNCTION_NAME
 from app.db.schema import characters, memos, sessions, settled_entries, setups
 from app.models.memos import MemoScope
 from app.services.embedding import DEFAULT_EMBED_TIMEOUT_SECONDS
-from app.services.llm.client import LlmClient
+from app.services.llm.gateway import LlmGateway
 from app.services.llm_registry import LlmClientFactory
 from app.services.search.hybrid import search
 from app.services.search.ports import EntrySearchScope, MemoSearchScope, SearchHit, SessionSearchScope
@@ -620,7 +621,7 @@ def run_my_search(
     user_id: int,
     query_text: str,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> MySearchResults:
     """One whole my-search: five groups for `query_text`, or the failure that stopped it (D1, D5, U1).

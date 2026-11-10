@@ -1,7 +1,7 @@
 """The reusable memo-chain clause — feature 026, step 001 (DoD-1, DoD-2, DoD-3).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/026.memo-search-tool/001.chain-clause-and-memo-search.md` (Interface intent and
+`docs/decisions/026.memo-search-tool.md` (Interface intent and
 Definition of done), `001.context.md` (the touch-site notes and the seeding notes) and the
 feature `context.md` — **D2** (the chain has one home: the OR-disjunction of
 `(scope = <level> AND scope_id = <level id>)` over the levels that exist, the setup term

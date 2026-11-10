@@ -1,6 +1,6 @@
 """Tests for `app/services/session_index.py` — feature 024, step 003 (DoD-1..12).
 
-Every expected value comes from `docs/plans/024.embedding-lifecycle/003.session-index.md`
+Every expected value comes from `docs/decisions/024.embedding-lifecycle.md`
 (its Interface intent and Definition of done — **DoD-1 pins the composed string verbatim**),
 from `003.context.md` (the test shape, the refresh order, the degraded catch) and from the
 feature `context.md` (**D5** archived sessions included, **D6** the exact composition and the
@@ -11,7 +11,8 @@ detail, **R5** owner scope, **R11** reads go through `settled_entries`). Binding
 002 — tests" in `status.md`. Nothing here was derived from the implementation.
 
 `024`'s **U5** second half ("a degraded write leaves the existing row as it is") is reversed by
-fast feature 005 (`docs/plans/fast/005.degraded-embedding-path/plan.md`, US-112.AC-3): a
+fast feature 005 (`fast/005.degraded-embedding-path`,
+`docs/decisions/fast-005.degraded-embedding-path.md`, US-112.AC-3): a
 degraded catch now **clears** the session's existing vector, through an owner-scoped id lookup,
 and the caught set is the named `DEGRADED_EMBEDDING_ERRORS` (`NoEmbeddingModelError`,
 `LlmUnreachableError`, `SecretRefError`). No test here asserts that a degraded catch keeps a
@@ -871,14 +872,15 @@ def test_the_module_binds_no_fastapi_symbol__S024_003_DoD12() -> None:
 
 # =========================================================================== F005
 # Fast feature 005 — degraded-embedding-path. Expected values come from
-# `docs/plans/fast/005.degraded-embedding-path/plan.md` (DoD-3, 4, 6, 7, 8, 9, 10, 11, 12, 14)
+# `fast/005.degraded-embedding-path` (`docs/decisions/fast-005.degraded-embedding-path.md`)
+# (DoD-3, 4, 6, 7, 8, 9, 10, 11, 12, 14)
 # and its `context.md`; bindings from that plan's `## Skeleton` record.
 
 
 class _ExplodingFactory(FakeClientFactory):
     """A client factory whose construction raises `RuntimeError` — a bug, not an outage."""
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeEmbeddingClient:
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeEmbeddingClient:
         self.calls.append((base_url, api_key, timeout_seconds))
         raise RuntimeError("a bug in the embedding code")
 

@@ -25,6 +25,16 @@ every row already stored.
 an operational fault — a 500 — not as a domain failure the SPA is expected to render;
 giving it a `code` would promise the SPA a renderer it does not have. Do not tidy it
 into the error hierarchy.
+
+A *small* backwards step does not raise. A wall clock that NTP slews or steps (seen as
+~70 ms steps under a WSL host's clock sync, and possible on any production host) reads
+earlier than the last issued millisecond for a moment; refusing every such read turned
+an ordinary clock correction into random 500s. A read up to `BACKWARDS_TOLERANCE_MS`
+behind is treated as the last issued millisecond itself: the sequence continues within
+it and, on exhaustion, the generator waits (re-reading the clock) until the clock passes
+it. Ids stay strictly increasing and unique because they are issued from the last
+millisecond, never from the earlier reading. Only a step beyond the tolerance raises
+`BackwardsClockError`.
 """
 
 import threading
@@ -42,9 +52,13 @@ NODE_ID_BITS: int = 10
 #: Width of the per-millisecond sequence field, in bits.
 SEQUENCE_BITS: int = 12
 
+#: How far behind the last issued millisecond a clock read may be and still mint (by
+#: continuing from that millisecond). A step further back raises `BackwardsClockError`.
+BACKWARDS_TOLERANCE_MS: int = 1000
+
 
 class BackwardsClockError(Exception):
-    """The clock read earlier than the last millisecond an id was issued for.
+    """The clock read more than `BACKWARDS_TOLERANCE_MS` before the last issued millisecond.
 
     A plain `Exception` on purpose — an operational fault, not a `DomainError`.
     """
@@ -63,8 +77,8 @@ class SnowflakeGenerator:
     thread pool and two inserts can land in the same millisecond.
 
     The clock is a constructor argument — a callable returning the current time in
-    milliseconds — so sequence exhaustion and a backwards step are testable without
-    touching real time.
+    milliseconds — so sequence exhaustion and a backwards step (tolerated or refused)
+    are testable without touching real time.
     """
 
     node_id: int
@@ -87,30 +101,24 @@ class SnowflakeGenerator:
     def next_id(self) -> int:
         """Return the next id.
 
-        Blocks into the next millisecond when the sequence exhausts within one; raises
-        `BackwardsClockError` when the clock reads earlier than the last issued
-        millisecond.
+        Blocks into the next millisecond when the sequence exhausts within one. A clock
+        read at most `BACKWARDS_TOLERANCE_MS` behind the last issued millisecond (a
+        slewed or stepped wall clock) is treated as that millisecond, so the id is
+        issued from it and ids stay strictly increasing; a read further behind raises
+        `BackwardsClockError`.
         """
         max_sequence = (1 << SEQUENCE_BITS) - 1
         with self._lock:
-            now_ms = self._clock()
-            if now_ms < self._last_ms:
-                raise BackwardsClockError(
-                    f"clock moved backwards: read {now_ms} ms, last issued at {self._last_ms} ms"
-                )
+            now_ms = self._read_clock()
             if now_ms == self._last_ms:
                 if self._sequence >= max_sequence:
                     # Sequence exhausted within this millisecond. Wrapping would mint a
                     # duplicate and raising would fail a burst the caller cannot act on,
-                    # so wait out the remainder of the millisecond — re-reading the
-                    # injected clock, never real elapsed time.
+                    # so wait until the clock passes the last issued millisecond —
+                    # re-reading the injected clock, never real elapsed time.
                     while now_ms <= self._last_ms:
                         time.sleep(0)
-                        now_ms = self._clock()
-                        if now_ms < self._last_ms:
-                            raise BackwardsClockError(
-                                f"clock moved backwards: read {now_ms} ms, last issued at {self._last_ms} ms"
-                            )
+                        now_ms = self._read_clock()
                     self._sequence = 0
                 else:
                     self._sequence += 1
@@ -123,6 +131,22 @@ class SnowflakeGenerator:
                 | (self.node_id << SEQUENCE_BITS)
                 | self._sequence
             )
+
+    def _read_clock(self) -> int:
+        """Read the clock, clamping a tolerated backwards step up to the last issued ms.
+
+        Caller holds the lock. Raises `BackwardsClockError` for a step beyond
+        `BACKWARDS_TOLERANCE_MS`.
+        """
+        now_ms = self._clock()
+        if now_ms < self._last_ms:
+            if self._last_ms - now_ms > BACKWARDS_TOLERANCE_MS:
+                raise BackwardsClockError(
+                    f"clock moved backwards: read {now_ms} ms, last issued at {self._last_ms} ms"
+                    f" (beyond the {BACKWARDS_TOLERANCE_MS} ms tolerance)"
+                )
+            return self._last_ms
+        return now_ms
 
 
 def build_id_generator(settings: Settings) -> SnowflakeGenerator:

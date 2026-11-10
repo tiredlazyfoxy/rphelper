@@ -1,7 +1,7 @@
 """Tests for feature 032 step 001 — logging and engine redaction hardening.
 
 Every expected value in this module comes from
-``docs/plans/032.privacy-isolation-audit/001.logging-redaction-hardening.md``'s
+``docs/decisions/032.privacy-isolation-audit.md``'s
 Definition of done (DoD-1 .. DoD-7). DoD-8 is ``[manual/live]`` (a real uvicorn run)
 and carries no test. Each item cites **US-084.AC-1**: operator-facing logs are an
 administrative surface, so no log record at any level may carry user text
@@ -50,6 +50,8 @@ ACCESS_LOGGER_NAME = "uvicorn.access"
 SQL_LOGGER_NAME = "sqlalchemy.engine"
 
 # Every logger whose state these tests mutate, directly or through configure_logging.
+# Feature 035 step 001 DoD-2 (DEC-arch-llm-client-library-10): configure_logging now
+# silences the ``aiohttp`` logger tree beside ``httpx``, so its state is restored as well.
 TOUCHED_LOGGERS: tuple[str, ...] = (
     "",
     "uvicorn",
@@ -58,6 +60,7 @@ TOUCHED_LOGGERS: tuple[str, ...] = (
     "sqlalchemy",
     "sqlalchemy.engine",
     "httpx",
+    "aiohttp",
 )
 
 # The non-target parts of an access record, which the redaction must leave untouched.

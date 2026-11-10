@@ -1,6 +1,6 @@
 """Tests for `app/services/transfer.py` — feature 030, step 001 (DoD-1..11).
 
-Every expected value comes from `docs/plans/030.export-granularities/001.transfer-core.md`
+Every expected value comes from `docs/decisions/030.export-granularities.md`
 (its Interface intent and Definition of done), from `001.context.md`, from the feature
 `context.md` (§"The envelope", §"Row serialization rules", §"Granularity boundaries") and
 from the rows this file seeds itself. Nothing is read from the implementation.
@@ -902,7 +902,7 @@ def test_export_filename_embeds_no_row_content__S030_001_DoD11() -> None:
 # =====================================================================================
 # Feature 034, step 001 — `SCHEMA_VERSION` 2 and `sessions.name` in the export.
 #
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# Expected values come from `docs/decisions/034.session-names.md`
 # DoD-5 and `transfer.md` § "Session names travel" (the column-agnostic export picks the
 # column up; a NULL name travels as null). Test names end `__S034_001_DoD<n>`.
 # =====================================================================================

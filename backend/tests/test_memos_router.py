@@ -1,6 +1,6 @@
 """Tests for the memos router: ``/api/memos...`` and ``/api/sessions/{session_id}/memo-chain``.
 
-Every expected value comes from ``docs/plans/015.memos/004.memos-router.md`` (Interface
+Every expected value comes from ``docs/decisions/015.memos.md`` (Interface
 intent + Definition of done), ``004.context.md`` and the feature ``context.md`` (the **Wire
 contract** — the five routes, the nine-key ``Memo`` object, the request rules, the failure
 codes — plus D2, D4, D6, D8, D9, D12, D15, R2, R3, R5). Bindings come from ``## Skeleton``
@@ -8,7 +8,7 @@ in ``status.md`` (steps 001..004): the five full literal paths and their status 
 
 Covers step 004 DoD-1 .. DoD-15. DoD-16 is ``[manual/live]`` and carries no test.
 
-Feature 016 step 001 (``docs/plans/016.note-wall/001.reorder-backend.md``) adds
+Feature 016 step 001 (``docs/decisions/016.note-wall.md``) adds
 ``PUT /api/memos/order`` (D6) and amends the allocation (D5, newest first); its tests are
 suffixed ``__S016_001_DoD<n>`` (DoD-10 .. DoD-14 here), and amended 015 tests carry that
 suffix appended to their 015 name.
@@ -19,7 +19,7 @@ through ``dependency_overrides[get_settings]``. Each signed-in caller has its ow
 created and archived through their own routes; disabled / forced states are reached through
 ``PATCH /api/memos/{id}``. ``conftest.py`` is untouched: every fixture below is file-local.
 
-Feature 024 step 004 (``docs/plans/024.embedding-lifecycle/004.memo-write-paths.md``, DoD-10,
+Feature 024 step 004 (``docs/decisions/024.embedding-lifecycle.md``, DoD-10,
 ``context.md`` "Regression fallout") makes ``POST /api/memos`` and a body-changing
 ``PATCH /api/memos/{id}`` require a designated embedding model (D5, strict per D8). That is a
 **precondition**, not a changed expectation: ``_seed`` now also seeds the designation (one

@@ -1,7 +1,8 @@
 // fast/003 — bootstrap-from-export, the frontend half (DoD-13..DoD-19). DoD-20 is the verifier's
 // suite gate (no new test); DoD-21 is [manual/live].
 //
-// Expected behaviour comes from `docs/plans/fast/003.bootstrap-from-export/plan.md` (Interface
+// Expected behaviour comes from `fast/003.bootstrap-from-export`
+// (`docs/decisions/fast-003.bootstrap-from-export.md`) (Interface
 // intent "Frontend" + Definition of done) and `context.md` (Decisions 3 and 4). Bindings come from
 // the frozen `## Skeleton` record in that folder's `status.md`:
 // - `src/bootstrap/restoreExport.ts` exports `RestoreExportState` (observable `file`,

@@ -1,7 +1,7 @@
 """`services/tools/session_search.py` — feature 027, step 003 (DoD-1..14).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/027.session-search-tool/003.session-search-tool-adapter.md` (Interface intent and
+`docs/decisions/027.session-search-tool.md` (Interface intent and
 Definition of done), `003.context.md` (the seam pointers, the one worker-thread call and the
 seeding notes) and the feature `context.md` — **D3** (the block format: the header
 `### Session <YYYY-MM-DD> · setup: <name>` or `### Session <YYYY-MM-DD> · no setup`, then `\\n`,

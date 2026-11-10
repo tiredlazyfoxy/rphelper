@@ -65,7 +65,8 @@ because a reader counting them will otherwise assume one decision:
   **null on a non-tool row**. **This supersedes plan 021's "tool columns are not
   on the wire"** (021 D7): plan 022 needed them to render a tool block, and the
   derivation lives in `services/messages.py` (022 D3). `tool_payload`, the
-  provider's `call_id` and the raw tool content never leave the backend — the
+  `call_id` (minted by RPHelper per exchange, `llm-and-streaming.md`) and the raw
+  tool content never leave the backend — the
   wire carries a *view* of the payload, not the payload.
 - **The coverage flag**, `search_coverage_incomplete: bool` (plan 024), **false
   for zone rows and plain appends**. It is the degraded-embedding signal ("The
@@ -238,6 +239,15 @@ The `Session` keys were eight until `name` joined them (2026-11-05,
 no name, and the default label is the client's to compute.
 A whitespace-only `opening_message` is a **422** and nothing is created.
 
+**What the character page sends** (plan 033). The page's composer always sends
+`opening_message`, and sends `setup_id` alongside it **only when the roleplayer
+chose a setup** in the composer; with no choice the key is left out. The route's
+contract did not change for this — `setup_id` was always an optional key. The
+message-less form of the body (omitted, `{}`, or a `setup_id` alone) is still
+accepted, but **has no frontend caller** since plan 033 retired the inline start
+control; it is kept because removing an accepted body form is a contract change
+with nothing to gain.
+
 **US-117.AC-1 makes creating the session and seeding its zone a single outcome**,
 so they are a single `with connection.begin():` in `services/sessions.py`, in
 this order (018 D3, 017 D1):
@@ -271,19 +281,22 @@ zone** and is never settled: UC-080's "opening message of that turn's discussion
 *is* a zone row, inserted through the same transaction-neutral zone-insert helper
 the stream's append uses (018 D3), so R11's "settle is the only door into the
 record" is untouched and this route is not a second exception beside the pasted
-partner block. When no `setup_id` is supplied the session is created with
-`setup_id` NULL — UC-080 names no setup, and R2 makes that the first-class case
-rather than a degraded one.
+partner block. When no setup is chosen the session is created with `setup_id`
+NULL — the setup choice is optional and defaults to none, and R2 makes that the
+first-class case rather than a degraded one.
 
-**The opening message draws no assistant reply, and that is defect D-01.**
-The design question is **closed**: `US-117.AC-3` and UC-080 step 5 require the
-assistant to answer that message as it would any other discussion message, and
-the route **stays JSON** because the compose happens on the session once it
-exists (018 D2) — so the media type does not change and no second contract is
-needed. What is missing is the trigger. Plan 018 shipped the JSON, no-model-call
-route and deferred the reply; no later plan took it. See
-`docs/plans/defects.md` D-01 for what a fix must settle. Nothing in this doc
-should be read as describing a reply that exists.
+**The opening message is answered by the session screen, not by this route**
+(fast/004, which closed defect D-01). `US-117.AC-3` and UC-080 step 5 require the
+assistant to answer that message as it would any other discussion message. The
+route **stays JSON** and makes no model call (018 D2). When the session screen
+opens on arrival from the character page, it draws the reply with **one textless
+compose** — `POST /api/sessions/{id}/zone/compose` sent with body `{}`, the same
+textless form the retry uses — so nothing is inserted and no `accepted` frame is
+emitted; the reply is the ordinary live reply, with the ordinary stop. The media
+type of the create route does not change and no second streaming contract
+exists. The trigger is a one-shot marker the client consumes on arrival, so a
+reload or a later visit never re-fires it (`frontend-structure.md`,
+`workspace-shell.md`; `DEC-F004-1`..`DEC-F004-5`).
 
 ## Settle and re-open — one transaction each, one module
 
@@ -379,31 +392,25 @@ operation's instant, in the same transaction; a refused operation writes nothing
 Settle, re-open, an accepted `PATCH` and the delete of a settled entry are
 **record-keeping** writes, and US-112 is explicit that a platform-level embedding
 gap must never block the roleplayer's own record-keeping. So the `session_vec`
-refresh in step 6 is wrapped: `no_embedding_model` (including the
-dimension-mismatch form) and `llm_unreachable` are **caught**, the relational
-write commits, and the response carries `search_coverage_incomplete: true`
-(024 U3, D8). The asymmetry with memo writes, which fail the whole transaction,
-is deliberate and is stated in `backend-structure.md`'s "two transaction rules"
-and `search-and-retrieval.md`.
+refresh in step 6 is wrapped, and a named set of **three** errors is
+**caught**: `no_embedding_model` (including the dimension-mismatch form),
+`llm_unreachable`, and `secret_ref_missing` — an unset `$ENV_VAR` key on the
+designated server, the "credentials the instance cannot use" case of
+`US-112.AC-1`. On a catch the relational write commits, **the session's
+existing `session_vec` row is cleared** rather than left stale (`US-112.AC-3`),
+and the response carries `search_coverage_incomplete: true` (024 U3, D8;
+fast/005). Any other exception still propagates and rolls the whole write back,
+so a bug never reads as incomplete coverage. The asymmetry with memo writes,
+which fail the whole transaction, is deliberate and is stated in
+`backend-structure.md`'s "two transaction rules" and `search-and-retrieval.md`.
 
-Two defects live on this path, and both are recorded rather than designed
-around:
-
-- **`secret_ref_missing` is not caught — defect D-03.** The built catch set is
-  `no_embedding_model` and `llm_unreachable` only, so an unset `$ENV_VAR` key on
-  the designated server makes a settle or a settled edit fail with a **500** and
-  refuses the roleplayer's own text. `US-112.AC-1` was widened at the 2026-10-06
-  product finalization to cover "credentials the instance cannot use", so the
-  built behaviour does not satisfy it. See `docs/plans/defects.md` D-03.
-- **A failed degraded embed leaves any existing `session_vec` row stale —
-  defect D-04.** There is **no staleness marker and no staleness column**
-  (024 U5), and the recorded remedy is the whole-index rebuild (UC-016). The
-  design question of *whether to mark* is answered — no — but `US-112.AC-3`, new
-  at the same finalization, requires the material's existing vectors to be
-  **cleared** rather than left in place. The build leaves them. See
-  `docs/plans/defects.md` D-04, which also records the accepted consequence of
-  the fix: material that could not be embedded drops out of semantic search
-  entirely until the rebuild.
+**The two defects this path used to carry are closed** by fast/005
+(`DEC-F005-1`, `DEC-F005-2`): D-03 (`secret_ref_missing` was not caught and
+refused the roleplayer's text with a 500) and D-04 (a failed degraded embed left
+the existing vector in place). The accepted consequence of the clear: material
+that could not be embedded drops out of semantic search entirely until the
+whole-index rebuild (UC-016) re-embeds it. There is still **no staleness marker
+and no staleness column** (024 U5).
 
 ## The `(( ))` seam — one parser, server-side, at settle only
 
@@ -436,6 +443,13 @@ match (012 D8, user decision on the classifier):
   strip to nothing necessarily starts with `((` and ends with `))` once trimmed,
   so it is a decision instead; an unbalanced `((` or a stray parenthesis survives
   stripping unchanged.
+- **Nested or tripled parentheses are deliberately unsupported** (plan 012).
+  The shortest-span rule does not balance brackets, so a turn such as
+  `x (((y))) z` files as `x) z`: the span taken starts at the first `((` and ends
+  at the first `))`, and the parenthesis left over survives. This is accepted,
+  not a defect to fix: the convention rests on double parentheses never occurring
+  in the roleplayer's own prose (US-130's `Constraint:`), and a balancing parser
+  would be a second, different rule the client's preview would then have to match.
 
 The invariant this doc owns: **stored text is never re-parsed.** `PATCH
 /api/messages/{message_id}` takes the new text literally and does **not** call
@@ -525,8 +539,10 @@ Four route-level ordering rules:
 Disconnect detection is **one `finally` keyed on "no terminal frame emitted"**,
 covering cancellation, generator close and an `is_disconnected()` poll before
 each write. The persist is synchronous; the source is then closed with a
-shielded, error-suppressed `aclose()`, which unwinds the upstream `httpx`
-request (019 D6).
+shielded, error-suppressed `aclose()` (019 D6). Closing the compose source
+cancels the task running the client library's tool loop, and that cancellation
+closes the library's in-flight `aiohttp` request (`llm-and-streaming.md`'s stop
+section).
 
 ### The stop is a client disconnect and nothing else
 
@@ -554,6 +570,20 @@ stop does.
 synchronous handler-side half. Its loop detail, the `<think>` convention and the
 frame protocol are `llm-and-streaming.md`'s. What belongs here:
 
+- **It drains the gateway's ordered stream and assembles nothing itself.** The
+  gateway's `compose()` yields one ordered stream of text pieces and tool
+  events, and the compose source turns that stream into frames. It assembles no
+  rounds, no tool-call fragments and no thinking markers — the library and the
+  gateway do (`llm-and-streaming.md`'s "How one exchange runs").
+- **It owns the per-call tool rules.** For each call the gateway hands it, the
+  compose source emits the start, runs the seam's dispatch (below), emits the
+  result or the failure, and returns the content — or the fixed failed text — as
+  the tool's output. For a model-side rejection the gateway reports, it emits
+  the start, writes the failed tool row through the seam's tool-row write, logs
+  the rejection and emits the failure, without dispatching (`DEC-035-17`,
+  `DEC-035-18`). The gateway knows how the library calls a tool; the compose
+  source keeps every RPHelper rule about one. Closing the compose source closes
+  the gateway's stream (`DEC-035-6`, `DEC-035-7`).
 - **One assistant row per exchange**, holding all streamed token text across all
   tool rounds, `<think>` tags included (021 D11). A current-zone assistant row
   may therefore contain persisted reasoning; settle strips it (above).
@@ -597,8 +627,14 @@ derived from the authenticated session.
 A failure — the tool not offered, an unknown name, non-object arguments, or
 `run` raising — produces a `tool_fail` frame carrying `tool_failed` plus the
 fixed model-facing message, and the loop continues (R9: a failed tool does not
-end the discussion). A **cancellation** propagates and writes **no** tool row, so
-a stop during `run` ends the exchange — which is what `US-133.AC-1` now states.
+end the discussion). With the client library owning the loop, the first three
+cases — and an undeclared argument name — are rejected by the library before
+dispatch is reached; the compose source emits their `tool_start` / `tool_fail`
+pair and writes their failed tool row itself, through the same tool-row write,
+without entering dispatch (`llm-and-streaming.md`'s "Model-side tool mistakes —
+the observer"). The frames and the row are the same either way. A
+**cancellation** propagates and writes **no** tool row, so a stop during `run`
+ends the exchange — which is what `US-133.AC-1` now states.
 `tool_failed` is a **502** (021 D13) — a dependency's failure, like
 `llm_unreachable` — and in plan 021 it was never an HTTP response, only the
 frame's code; `backend-structure.md`'s per-code status record is where that lives.
@@ -635,3 +671,15 @@ group is opened.
 `services/messages.py` owns the read (`list_discussion`), so the reader goes
 through a named selectable and raw `messages` stays untouched outside settle,
 re-open and single-message delete (R11).
+
+---
+
+## Decision history
+
+- **2026-11-09 — model-side tool mistakes reach the roleplayer as `tool_fail`
+  (approved and built 2026-11-09 — feature 035 step 006).** Was: with client
+  library 0.2.0 a tool that was not offered, an unknown name or non-object
+  arguments ended the exchange as a stream error — a temporary limitation, the
+  rule unchanged. Now: library 0.2.1 rejects them as tool results and the compose
+  source emits the `tool_start` / `tool_fail` pair and the failed tool row without
+  entering dispatch ("The tool seam and dispatch"). `DEC-arch-llm-client-library-15`.

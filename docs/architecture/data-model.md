@@ -31,9 +31,9 @@ Decided at the finalization of plans 001..007 (user decision H2), resolving plan
 **Known deviation, not yet fixed:** `users.created_at` and `users.updated_at`, as
 written by plan 003's first-administrator insert, use the plain `isoformat()`
 form, which **drops the microseconds when they are zero** — so they do not share
-the fixed width. Owned by a **`/bug-fixer` pass against plan 003**. Until it
-lands, nothing may compare those two columns as text against a fixed-width
-value.
+the fixed width. It is **recorded as defect D-06 in `docs/plans/defects.md`**,
+which owns it until a fix lands. Until then, nothing may compare those two
+columns as text against a fixed-width value.
 
 ## Identifiers — snowflake ids, minted before the INSERT
 
@@ -72,9 +72,16 @@ Rules, each of which a plan must hold:
 - **The epoch is a constant and can never change.** It is the whole 41-bit budget;
   moving it re-bases every future id against a different origin and invalidates
   the ordering of every row already stored.
-- **A clock going backwards refuses to issue and raises.** Silently waiting out
-  the drift or carrying on both mint duplicates. A backwards clock step is an
-  operational fault and is surfaced as one.
+- **A small backwards clock step is absorbed; a large one refuses to issue and
+  raises.** A backwards step within a bounded tolerance continues from the last
+  issued millisecond — the earlier reading is never stamped into an id — so ids
+  stay strictly increasing and unique. Beyond the tolerance the generator refuses
+  and raises: a large backwards step is an operational fault and is surfaced as
+  one. Small steps are absorbed because hosts whose wall clock is slewed step it
+  back by tens of milliseconds in ordinary operation, and refusing those fails
+  requests the caller cannot act on; the tolerance is bounded because absorbing a
+  large step would stall issuing until wall time caught up. The tolerance's value,
+  its flip condition and the rejected alternatives are `DEC-001-9`.
 - **Exactly one generator process per node id.** Today that is guaranteed by the
   deployment — one container, one uvicorn (`deployment.md`). Recorded as a
   **deployment guarantee**, not as an accident of the current topology.
@@ -315,7 +322,7 @@ surface (`Create`), not FEAT-002's problem.
 |---|---|
 | `id` | PK |
 | `name` | admin-facing label |
-| `kind` | `'llamaswap'` \| `'openai'` |
+| `kind` | `'llamaswap'` \| `'openai'`; **the dispatch key** that selects the LLM gateway's client class (since 2026-11-08, `llm-and-streaming.md`) |
 | `base_url` | OpenAI-compatible endpoint root |
 | `api_key_ref` | **secret pointer**, not a secret — see below |
 | `last_test_at`, `last_test_ok`, `last_test_error` | result of UC-011; registration is unaffected either way |
@@ -330,9 +337,11 @@ export (FEAT-018/UC-061) does not exfiltrate credentials, and a drift report
 **As built by FEAT-004 (plan 006):**
 
 - **`kind` is plain text with no `CHECK`.** The two-member constraint lives at the
-  pydantic boundary. A database `CHECK` would make a third provider a schema
-  change, which contradicts "a label, not a dispatch key"
-  (`llm-and-streaming.md`).
+  pydantic boundary. Plan 006's reason — a database `CHECK` would contradict
+  "a label, not a dispatch key" — is **superseded** (2026-11-08): `kind` is now
+  the dispatch key that selects the LLM gateway's Responses client class
+  (`llm-and-streaming.md`'s "One protocol; `kind` selects the library class").
+  The no-`CHECK` column shape is unchanged.
 - **`last_test_error` stores the typed probe outcome value itself** — never a
   provider message and never prose (`admin-surfaces.md`'s result taxonomy).
 - There is **no `active` column**, and the LLM Servers page carries no active
@@ -378,8 +387,7 @@ index or view from `models` to `sessions` exists, and none may be added.
   live `vec0` table. There is **no cross-flag cascade** between the two flags. We
   chose this because an embedding model is not a chat model and must never appear
   in the chat selector; requiring enablement forced the admin to pollute the chat
-  model list. _Code pending: the validator still checks `is_enabled`; a bug fix
-  against plan 006 step 004 will align it._
+  model list. The validator is built this way.
 - **`embedding_dim` is measured, not read from metadata**: designating embeds one
   short fixed string against the chosen model and records the returned vector's
   length (`admin-surfaces.md`, US-015.AC-3/AC-4).
@@ -534,8 +542,9 @@ requirement sets it.
 `YYYY-MM-DD` in the roleplayer's own timezone. We chose to compute it rather than
 store it because the server cannot know the roleplayer's timezone: a date written
 at creation would have to be supplied by the client on every creation path (the
-start control, the character page's first message, and an emptied rename), and an
-import would land UTC-derived dates that read one day off near midnight. NULL
+character page's composer, which starts a session with its first message, and an
+emptied rename), and an import would land UTC-derived dates that read one day off
+near midnight. NULL
 therefore has one meaning — "never renamed" — and emptying a name returns the
 row to it. The cost, accepted knowingly, is that the default is display-only: it
 is not text the server can search (`search-and-retrieval.md`). Detail and the
@@ -743,8 +752,8 @@ this table.
 
 The twelve columns exactly as listed. **`role` and `kind` are plain text with no
 database CHECK** — their value sets are constrained at the pydantic boundary, the
-same choice `llm_servers.kind` makes and for the same reason: a fourth role or a
-fourth kind must not be a schema change. The **one** named CHECK is the state
+same column shape `llm_servers.kind` has: a fourth role or a fourth kind must not
+be a schema change. The **one** named CHECK is the state
 constraint above, `related_to IS NULL OR settled_at IS NULL`. No foreign key
 carries `ON DELETE`. An existing instance picks the table up through **Create**.
 
@@ -754,13 +763,25 @@ plan 021**, which is the writer. As built (021 D7):
 - **One `role='tool'` current-zone row per completed call.**
 - `text` is the tool's **summary**, or the literal `The tool failed.`
 - `tool_payload` is JSON:
-  `{call_id, arguments (the raw string), status: ok|failed, content | code}`.
+  `{call_id, arguments, status: ok|failed, content | code}`. As built by plan 021
+  `call_id` was the provider's own and `arguments` the provider's raw string;
+  **superseded 2026-11-08**: `call_id` is minted by RPHelper per exchange and
+  `arguments` is a re-serialisation of the parsed arguments
+  (`llm-and-streaming.md`, `DEC-arch-llm-client-library-5`). The client library
+  then exposed neither to a tool; 0.2.1 reports the provider's call id on its
+  tool events, and RPHelper still mints its own (`DEC-arch-llm-client-library-17`).
+  **A call the library rejected as a model-side mistake** (2026-11-09) writes the
+  same failed row — status failed, code `tool_failed`, `text` the failed literal
+  — with `tool_name` the name the model sent (possibly empty) and `arguments` the
+  model's own argument text, since there are no parsed arguments to
+  re-serialise (`llm-and-streaming.md`'s "Model-side tool mistakes — the
+  observer", `DEC-arch-llm-client-library-15`). The payload's keys are unchanged.
 - **A call stopped mid-run writes no row at all** — a cancellation propagates and
   the exchange ends (`US-133.AC-1`).
 - The **wire** carries a *derived view* of the payload, never the payload:
   `tool_name`, `tool_status` and `tool_args` on `MessageResponse`, derived in
-  `services/messages.py` (022 D3). `tool_payload` itself, the provider's
-  `call_id` and the raw tool content stay server-side.
+  `services/messages.py` (022 D3). `tool_payload` itself, the `call_id` and the
+  raw tool content stay server-side.
 
 **A current-zone assistant row may contain `<think>` … `</think>` blocks** —
 persisted reasoning, stored exactly as it streamed (021 D4). They are stripped
@@ -1032,7 +1053,7 @@ archiving is not a delete.
 ### The as-built archive semantics, one rule for all three entities
 
 Set by plan 009 for characters and matched by plans 010 and 011 (009 D9, 010 D5,
-010 D9, 011 D2, 011 D13). R6 fixes *what* archiving means; these are the
+010 D9, 011 D3, 011 D13). R6 fixes *what* archiving means; these are the
 postures it leaves open, and they are recorded so the three entities do not
 diverge:
 
@@ -1043,7 +1064,7 @@ diverge:
 - **A no-op writes nothing**, including no `updated_at` bump. Archiving something
   already archived is not a change.
 - **A real state change bumps `updated_at` and never `last_used_at`** — archiving
-  is not use (011 D2).
+  is not use (011 D3/D13).
 - **Editing an archived object is allowed** and leaves `archived_at` unchanged.
   R6 says a restored object comes back fully usable; refusing edits meanwhile
   would make archiving a soft freeze, which it is not.
@@ -1233,9 +1254,14 @@ around 2^60.
 had left the question to FEAT-017's plan, and plan 029 answered it: both are
 matched by a SQLite **`LIKE` substring** over their own columns — `name` plus
 `sheet` for a character, `name` plus `description` for a setup — because the two
-tables are small enough that an index is not worth its sync cost. The as-built
-limitation that comes with `LIKE`, and **defect D-05** against `US-147`, are
-recorded **once**, in `search-and-retrieval.md`, which owns the query layer.
+tables are small enough that an index is not worth its sync cost. **As built, the
+match is case-insensitive in every script** (fast/006, closing defect D-05
+against `US-147`): both sides of every name match — characters, setups and
+session names alike — go through one registered SQLite case-fold function,
+`rp_casefold`, so no stored folded column and no schema change was needed. It
+folds case only: no accent folding and no normalization. The query layer is
+recorded **once**, in `search-and-retrieval.md`; the mechanism is
+`DEC-F006-1`..`DEC-F006-5`.
 
 ## Schema drift and rebuild
 
@@ -1303,8 +1329,11 @@ expensive and an expensive one look routine.
 - **A Sync rebuild preserves every surviving column's data**; only columns the
   registry no longer declares lose theirs, and a rebuild that cannot complete
   rolls back completely (`admin-surfaces.md`, `backend-structure.md`).
-- **Only the structural half shipped.** UC-016's rebuild is
-  `fast/002.vector-index-rebuild`'s.
+- **Plan 007 shipped the structural half only; the content half is built too.**
+  UC-016's rebuild was built by `fast/002.vector-index-rebuild`: one
+  administrator request that re-derives all four derived tables in one
+  transaction (`admin-surfaces.md`, `search-and-retrieval.md`;
+  `DEC-F002-1`..`DEC-F002-10`).
 - **`db/schema.py` was not edited by FEAT-005's feature**: the registry gained no
   table and no column. This is what "the registry stays the truth" looks like in
   practice.
@@ -1350,8 +1379,8 @@ rather than of the envelope:
   Reason: an embedding model is not a chat model, so requiring enablement forced
   it into the chat selector, and it produced an index rebuild refusing with
   `no_embedding_model` while a model was designated with dimension 1024. FEAT-004
-  (US-015, UC-013) never required enablement, so no product change. _Code pending
-  a bug fix against plan 006 step 004._
+  (US-015, UC-013) never required enablement, so no product change. The code
+  matches.
 - **2026-11-05 — messages can be deleted.** Until fast/014 no path removed a
   message row except the whole-database replace. A single-message delete now
   removes one current-zone row, or one settled row with its buried group, and
@@ -1363,3 +1392,16 @@ rather than of the envelope:
   start date) computed by the client rather than stored. `partner_label` stays
   absent and `session_fts` stays uncreated. A rename moves `updated_at` only.
   Detail in `DEC-arch-session-names-1` and `DEC-arch-session-names-6`.
+- **2026-11-08 — `llm_servers.kind` is the dispatch key** (built 2026-11-09).
+  Was: a presentation label, never a dispatch key. Now: it selects the
+  LLM gateway's Responses client class; the column itself is unchanged. Detail in
+  `DEC-arch-llm-client-library-1`.
+- **2026-11-09 — model-side tool mistakes write a failed tool row** (approved
+  and built 2026-11-09 — feature 035 step 006). Was: with client library
+  0.2.0 such a call ended the exchange and wrote no tool row. Now: it writes the
+  ordinary failed row, its name and arguments as the model sent them; no column
+  or payload key changes. Detail in `DEC-arch-llm-client-library-15`.
+- **2026-11-10 — a small backwards clock step no longer refuses.** Was: any
+  backwards clock reading refused to issue and raised. Now: a step within a
+  bounded tolerance continues from the last issued millisecond, and only a step
+  beyond it refuses and raises. Detail in `DEC-001-9`.

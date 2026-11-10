@@ -38,9 +38,9 @@ from sqlalchemy import Connection, Row, Select, Update, select
 from app.db.schema import characters
 from app.errors import CharacterNotFoundError
 from app.ids import SnowflakeGenerator
+from app.services.llm.gateway import LlmGateway
 from app.services.session_index import (
     DEFAULT_EMBED_TIMEOUT_SECONDS,
-    LlmClient,
     LlmClientFactory,
     refresh_session_vectors,
     session_ids_for_character,
@@ -130,7 +130,7 @@ def update_character(
     name: str | None = None,
     sheet: str | None = None,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> Character:
     """Write the supplied fields of the owner's character and bump `updated_at`.

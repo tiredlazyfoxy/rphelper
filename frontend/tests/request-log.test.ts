@@ -1,5 +1,6 @@
 // Fast feature 008 — Vite dev-server request log (DoD-1..DoD-13).
-// Expected values come from docs/plans/fast/008.vite-dev-request-log/plan.md and context.md.
+// Expected values come from fast/008.vite-dev-request-log
+// (docs/decisions/fast-008.vite-dev-request-log.md) and context.md.
 // DoD-10 also requires tests/build-config.test.ts and tests/proxy-log.test.ts to pass unedited;
 // those files are run as-is by the suite and are not touched here.
 import { EventEmitter } from "node:events";

@@ -5,6 +5,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 import { apiDelete, apiPost } from "../shared/api";
 import { ApiError, CLIENT_TRANSPORT_FAILED } from "../shared/apiError";
 import { type LlmServerRow, type LlmServersPageState, loadLlmServers } from "./llmServersPageState";
+import { isAbortError } from "../shared/abort";
 
 /** Keys of the server-error map: only the general catch-all. */
 export type EmbeddingServerErrorKey = "general";
@@ -59,10 +60,6 @@ function embeddingPath(serverId: string): string {
   return `${SERVERS_PATH}/${encodeURIComponent(serverId)}/embedding-model`;
 }
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /** Maps a failure onto the general key by status or code only; never by parsing prose. */
 function serverErrorsFor(error: unknown): EmbeddingServerErrors {
   if (error instanceof ApiError) {
@@ -109,7 +106,7 @@ export async function submitEmbeddingDesignation(
   try {
     await apiPost<DesignateEmbeddingResponse | undefined>(embeddingPath(serverId), body, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const serverErrors = serverErrorsFor(error);
@@ -145,7 +142,7 @@ export async function clearEmbeddingDesignation(
   try {
     await apiDelete<unknown>(embeddingPath(serverId), signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message =

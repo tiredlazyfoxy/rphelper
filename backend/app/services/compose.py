@@ -1,47 +1,43 @@
-"""The compose source — the tool-calling loop 019's harness drains — and `begin_compose`.
+"""The compose source — the exchange 019's harness drains — and `begin_compose`.
 
-Feature `021`, step `005` (D3, D4, D11, D15). `compose_stream` optionally yields `accepted`,
-then on its own short-lived connection (closed before any provider call) resolves the model at
-use time, assembles context, reads the configuration and the tool scope and opens the chat
-client; then runs rounds of `chat_stream` with no cap — content and `<think>`-wrapped reasoning
-become `token` frames, tool calls are dispatched through the seam — until a round with no calls,
-whose exchange text is written as one assistant row before `done`. It never catches an error to
-write a row (019 D4: the harness owns the partial write) and never touches a caller's connection.
+Feature `021`, step `005` (D3, D4, D11, D15); moved onto the LLM gateway by feature `035`,
+step `004` (DEC-035-6, DEC-035-7). `compose_stream` optionally yields `accepted`, then on its
+own short-lived connection (closed before any provider call) resolves the model at use time,
+assembles context, reads the configuration and the tool scope and opens the chat client; then
+drains the client's `compose` — each text piece becomes a `token` frame verbatim (`<think>`
+included), each tool call runs through this module's private runner over the tool seam, and
+each model-side rejection (step `006`, DEC-035-17) becomes `tool_start` + failed tool row +
+`tool_fail` without dispatching — and writes the exchange text as one assistant row before
+`done`. Rounds, tool-call fragments and `<think>` markers are the library's business, not this
+module's (DEC-arch-llm-client-library-8). It never catches an error to write a row (019 D4: the
+harness owns the partial write) and never touches a caller's connection.
 
 `begin_compose` (step `006`, D1/D2) is the handler-side half: it commits the roleplayer's text
 on the handler's connection, or — textless — checks the zone holds something to retry.
 """
 
-from collections.abc import AsyncGenerator, Mapping
-from dataclasses import dataclass, field
+from collections.abc import AsyncGenerator, Callable, Mapping
+from contextlib import aclosing
 
+from loguru import logger
 from sqlalchemy import Connection, Engine
 
-from app.errors import ZoneEmptyError
+from app.errors import ToolFailedError, ZoneEmptyError
 from app.ids import SnowflakeGenerator
 from app.services.configuration import get_session_configuration, resolve_model_for_use
 from app.services.context import assemble_context
-from app.services.llm.chat import THINK_CLOSE, THINK_OPEN, ChatMessage, ToolCall
-from app.services.llm.frames import AcceptedFrame, DoneFrame, Frame, TokenFrame
+from app.services.llm.chat import ChatMessage, ToolCall
+from app.services.llm.frames import AcceptedFrame, DoneFrame, Frame, TokenFrame, ToolFailFrame
+from app.services.llm.gateway import ComposeRejected, ComposeText, ComposeTools
 from app.services.llm_registry import ChatClientFactory, open_chat_client
 from app.services.messages import append_assistant_message, append_message, list_zone
 from app.services.tools import (
     ToolRegistry,
     build_tool_scope,
-    dispatch,
     offered_tools,
-    tool_start_frame,
 )
 from app.services.tools.definitions import ToolDeclaration
-
-
-@dataclass
-class _PendingCall:
-    """One tool call being accumulated from its fragments, by index (D11)."""
-
-    call_id: str | None = None
-    name: str | None = None
-    arguments: list[str] = field(default_factory=list)
+from app.services.tools.seam import TOOL_FAILED_CONTENT, dispatch, tool_start_frame, write_failed_tool_row
 
 
 def _declared_name(declaration: ToolDeclaration) -> str | None:
@@ -85,7 +81,26 @@ async def compose_stream(
     client_factory: ChatClientFactory,
     registry: ToolRegistry,
 ) -> AsyncGenerator[Frame, None]:
-    """The compose exchange as frame values: `accepted`? → tokens / tool frames → `done` (D11)."""
+    """The compose exchange as frame values: `accepted`? → tokens / tool frames → `done` (D11).
+
+    Setup (model resolution, context, configuration, offered tools, tool scope, client) runs on
+    one short-lived connection closed before any provider call (D3). The exchange then drains
+    the client's `compose` (DEC-035-6) inside `contextlib.aclosing`, with the offered
+    declarations in the fixed `memo_search`, `session_search`, `web_search` order and a private
+    runner that owns every RPHelper rule about a tool call: each `ComposeText` becomes one
+    `token` frame (verbatim, `<think>` included) and is accumulated; each runner-emitted frame
+    (`tool_start`, `tool_result` / `tool_fail`) passes through; each `ComposeRejected` yields
+    the call's `tool_start`, writes its failed tool row through the seam's
+    `write_failed_tool_row`, logs a warning with the tool name and kind only (DEC-035-18) and
+    yields its `tool_fail` (`tool_failed`) — `dispatch` is never called for it, and the exchange
+    continues (DEC-035-17). On success the joined token text is written as one assistant row
+    on a fresh connection, then `done` carries its id.
+
+    Raises:
+        DomainError: model-resolution refusals and `secret_ref_missing` from setup; an
+            `LlmUnreachableError` from the stream. The harness turns these into `error`
+            frames and owns the partial write (019 D4); nothing here catches to write a row.
+    """
     if accepted_id is not None:
         yield AcceptedFrame(message_id=accepted_id)
 
@@ -104,71 +119,59 @@ async def compose_stream(
         *assembled.messages,
     ]
     exchange_parts: list[str] = []
-    calls_seen = 0
 
-    # No round cap, no round counter (FEAT-010, D11).
-    while True:
-        round_content: list[str] = []
-        pending: dict[int, _PendingCall] = {}
-        in_think = False
-        stream = client.chat_stream(enabled_model.model_name, list(conversation), list(tools))
+    async def run_tool(call: ToolCall, emit: Callable[[Frame], None]) -> str:
+        """Run one tool call for the gateway: the compose half of the tool wrapper (DEC-035-6).
+
+        Emits `tool_start`, awaits the seam's `dispatch` (which persists the tool row and logs),
+        emits its `tool_result` / `tool_fail` frame and returns the tool message's content —
+        the text the library hands back to the model as the tool result.
+
+        Any `Exception` — including one from `dispatch` itself — emits a `tool_fail`
+        (`tool_failed`) frame for this call and returns the seam's fixed failed text, so the
+        exchange always continues (DEC-arch-llm-client-library-7). A cancellation is a
+        `BaseException` and propagates: closing the compose source mid-tool ends the exchange
+        and writes no tool row (US-132.AC-1).
+        """
+        emit(tool_start_frame(call))
         try:
-            async for delta in stream:
-                if delta.reasoning is not None:
-                    if not in_think:
-                        in_think = True
-                        exchange_parts.append(THINK_OPEN)
-                        yield TokenFrame(text=THINK_OPEN)
-                    exchange_parts.append(delta.reasoning)
-                    yield TokenFrame(text=delta.reasoning)
-                if delta.content is not None:
-                    if in_think:
-                        in_think = False
-                        exchange_parts.append(THINK_CLOSE)
-                        yield TokenFrame(text=THINK_CLOSE)
-                    round_content.append(delta.content)
-                    exchange_parts.append(delta.content)
-                    yield TokenFrame(text=delta.content)
-                for fragment in delta.tool_calls:
-                    partial = pending.setdefault(fragment.index, _PendingCall())
-                    if partial.call_id is None and fragment.call_id is not None:
-                        partial.call_id = fragment.call_id
-                    if partial.name is None and fragment.name is not None:
-                        partial.name = fragment.name
-                    if fragment.arguments is not None:
-                        partial.arguments.append(fragment.arguments)
-        finally:
-            # Closing guarantee: a stop (`aclose` of this source) closes the provider stream now.
-            aclose = getattr(stream, "aclose", None)
-            if aclose is not None:
-                await aclose()
-
-        if in_think:
-            exchange_parts.append(THINK_CLOSE)
-            yield TokenFrame(text=THINK_CLOSE)
-
-        if not pending:
-            break
-
-        calls: list[ToolCall] = []
-        for index in sorted(pending):
-            accumulated = pending[index]
-            calls_seen += 1
-            calls.append(
-                ToolCall(
-                    call_id=accumulated.call_id if accumulated.call_id is not None else f"call_{calls_seen}",
-                    name=accumulated.name if accumulated.name is not None else "",
-                    arguments="".join(accumulated.arguments),
-                )
-            )
-        conversation.append(
-            ChatMessage(role="assistant", content="".join(round_content), tool_calls=tuple(calls))
-        )
-        for call in calls:
-            yield tool_start_frame(call)
             result = await dispatch(call, scope, offered_names, registry, engine, generator)
-            yield result.frame
-            conversation.append(result.message)
+        except Exception as error:
+            # Only the exception type is logged — never its message, which may carry provider
+            # or tool text (DEC-035-8); same shape as the seam's own failure line.
+            logger.warning(
+                "tool runner failed tool={} call={} exception={}", call.name, call.call_id, type(error).__name__
+            )
+            # The same frame and model-facing text `dispatch` produces for a failed call.
+            emit(ToolFailFrame(tool=call.name, call_id=call.call_id, code=ToolFailedError.code))
+            return TOOL_FAILED_CONTENT
+        emit(result.frame)
+        return result.message.content
+
+    compose_tools: ComposeTools[Frame] = ComposeTools(declarations=tools, runner=run_tool)
+    # `aclosing` is what stops model work in flight: the harness closes this generator with a
+    # shielded `aclose()`, which only reaches the gateway's stream — and through it cancels the
+    # library task and any running tool — when that stream is iterated inside `aclosing`
+    # (DEC-035-7). Without it the inner stream would be left to the GC.
+    async with aclosing(client.compose(enabled_model.model_name, conversation, compose_tools)) as stream:
+        async for item in stream:
+            if isinstance(item, ComposeText):
+                exchange_parts.append(item.text)
+                yield TokenFrame(text=item.text)
+            elif isinstance(item, ComposeRejected):
+                # A model-side rejection (DEC-035-17): the library never ran a tool, so there
+                # is nothing to dispatch. Same start → write → fail order as a failed dispatch:
+                # the row is written only after the `tool_start` yield returns, so a close at
+                # that yield writes no row (US-132.AC-1, DoD-11).
+                call = item.call
+                yield tool_start_frame(call)
+                write_failed_tool_row(engine, generator, scope, call)
+                # DEC-035-18: the tool name and the kind only, at the seam's failed-dispatch
+                # level — never the arguments (roleplay-derived text) nor any library text.
+                logger.warning("tool rejected tool={} kind={}", call.name, item.kind.value)
+                yield ToolFailFrame(tool=call.name, call_id=call.call_id, code=ToolFailedError.code)
+            else:
+                yield item
 
     # Success only: the one assistant row, on a fresh short-lived connection, before `done` (019 D4).
     with engine.connect() as connection:

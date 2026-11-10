@@ -7,10 +7,10 @@
 - **Preconditions:** Character exists.
 - **Main flow:**
   1. Roleplayer opens a character.
-  2. Roleplayer starts a new session, with or without a setup (UC-021).
-  3. Instance creates the session and opens it, empty of entries.
+  2. Roleplayer writes the opening message, with or without choosing a setup (UC-021, UC-080).
+  3. Instance creates the session and opens it, with its first turn being drafted from the opening message.
 - **Postconditions:** Session exists, ordered into the roleplayer's session list by last use (UC-026).
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 3, round 7.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 0, round 3, round 7; steps 2-3 amended 2026-11-09 (finalize batch-2026-11-09b; 033.character-page-tabs removed the message-less start).
 
 ### UC-024 — Resume a session
 - **Actor:** ACT-002
@@ -53,12 +53,13 @@
 - **Preconditions:** Character exists (FEAT-006).
 - **Main flow:**
   1. Roleplayer opens a character's page.
+  1a. Roleplayer optionally chooses a setup (default none).
   2. Roleplayer writes a message in the composer there.
   3. Instance creates a new session under the character.
   4. Instance opens a first turn in drafting, and the written message becomes the opening message of that turn's discussion (FEAT-010).
   5. Assistant answers the message immediately, exactly as it would any other discussion message.
-- **Postconditions:** Session exists with its first turn already being drafted; the partner's block, if any, is pasted afterward as a separate entry. The composer offers neither the kind switch nor a setup choice — the kind is already a turn, and FEAT-007 forbids forcing a setup choice, so the session starts with none.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 15; 2026-09-28, gap-closure round.
+- **Postconditions:** Session exists with its first turn already being drafted; the partner's block, if any, is pasted afterward as a separate entry. The composer offers no kind switch; the session starts with the setup the roleplayer chose, or none.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 15; 2026-09-28, gap-closure round; postconditions amended 2026-11-09 (finalize batch-2026-11-09b; shipped by 033.character-page-tabs).
 
 ### UC-089 — Rename a session
 - **Actor:** ACT-002

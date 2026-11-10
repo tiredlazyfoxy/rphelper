@@ -1,7 +1,7 @@
 """`services/search/session_search.py` — feature 027, step 001 (DoD-1..13).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/027.session-search-tool/001.session-search-service.md` (Interface intent and
+`docs/decisions/027.session-search-tool.md` (Interface intent and
 Definition of done), `001.context.md` (the port binding and the test-seeding notes) and the
 feature `context.md` — **D1** (the extra predicate is
 `character_id = :character_id AND id != :current_session_id AND archived_at IS NULL`, with no

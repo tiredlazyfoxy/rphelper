@@ -171,7 +171,7 @@ parent item, and honours an `exact` flag for the root item (otherwise `/` matche
 everything). Deliberately **not** react-router's `end` prop: a pure function of
 two plain arguments is unit-testable with no router, no DOM and no render, which
 is precisely what the pipeline's test-coder can write against from the spec alone
-(`docs/plans/CLAUDE.md`). Every `/`-prefix matcher gets the `/database` vs
+(`docs/plans/AGENTS.md`). Every `/`-prefix matcher gets the `/database` vs
 `/database-backups` case wrong the first time; the point of extracting it is that
 the wrong answer is a failing test rather than a mis-highlighted link nobody
 files.
@@ -225,14 +225,19 @@ The **pure/impure split is kept**, now asynchronous:
 
 ```
 resolveAdminAccess(currentUser: CurrentUser | null) -> AdminAccessDecision   // pure
-enforceAdminAccess(): Promise<AdminAccessDecision>                            // impure
+classifyAdminAccessError(error) -> "not-ready" | "failed"                    // pure
+enforceAdminAccess(signal?) -> Promise<AdminAccessResult>                     // impure
 ```
 
 `resolveAdminAccess` is a total function over the fetched identity and returns a
-decision; `enforceAdminAccess` performs the fetch and navigates on deny. The
-split survives the change to async for the same reason it existed: the decision
-table is testable without a network, a router or a DOM, and the navigation is a
-one-line effect with nothing to get wrong.
+decision; `enforceAdminAccess` performs the fetch (cancellable), navigates on
+deny and returns an **access result** to the entry rather than nothing. A fetch
+that fails without yielding an identity is sorted by a second pure function into
+one of two classes — **not ready** or **failed** — so the entry handles each class
+by name instead of inspecting the error itself. The split survives the change to
+async for the same reason it existed: the decision table and the error
+classification are testable without a network, a router or a DOM, and the
+navigation is a one-line effect with nothing to get wrong.
 
 The same three deny cases, mapped onto cookie-session semantics:
 
@@ -321,8 +326,9 @@ FEAT-003 (plan 005) because this column was specified with no backing column. It
 is nullable and renders as an **em dash** when the account has never logged in.
 
 **Create modal.** Fields: username, password, password confirmation, role
-select. Client validation: username required, password at or above a minimum
-length, confirmation must match. Server errors are mapped **by status**, never by
+select. Client validation: username required, password non-empty — **there is no
+minimum length beyond non-empty**, matching the server — and the confirmation must
+match. Server errors are mapped **by status**, never by
 parsing a message, which keeps the UI from breaking when the backend's prose
 changes. **As built (plan 005) the mapping is half-built, deliberately:**
 
@@ -391,9 +397,15 @@ it is forbidden.
 US-015.AC-2, US-015.AC-3, US-015.AC-4
 
 A table of registered servers. Columns: **name**, **backend type** (badge),
-**base URL**, **has API key**, **enabled-model count**, a **last-test badge**, and
-the trailing action column. Row overflow menu: Edit, Select Models, Set
-Embedding, Clear Embedding (conditional), Delete, **Test connection**.
+**base URL**, **has API key**, **enabled-model count**, **embedding model**, a
+**last-test badge**, and the trailing action column. Row overflow menu: Edit,
+Select Models, Set Embedding, Clear Embedding (conditional), Delete, **Test
+connection**.
+
+**The embedding model column** shows, for the server holding the designation, the
+designated model's name together with its measured dimension ("N dimensions"),
+and an **em dash** on every other row. Like the enabled-model count it describes
+the registry, not anything user-owned.
 
 **There is no "active" column and no active switch** (plan 006, user decision).
 This page used to list both; `data-model.md`'s `llm_servers` declares no such
@@ -466,9 +478,10 @@ model, measures the returned vector's length and writes it to
 `models.embedding_dim`. A failed or non-embedding response **blocks the
 designation** with a typed error, and nothing is saved — the previous designation,
 if any, stands (US-015.AC-3, US-015.AC-4). The dimension is not discoverable
-from a models listing on either provider kind, which is why `LlmClient.embed`
-exists in FEAT-004 rather than only in FEAT-017's feature, and the modal's copy
-says so.
+from a models listing on either provider kind, which is why an embed operation
+existed in FEAT-004 rather than only in FEAT-017's feature, and the modal's copy
+says so. Since the 2026-11-08 revision the measuring call goes through the LLM
+gateway's `embed` (`llm-and-streaming.md`).
 
 **Clear Embedding is confirmed** (US-015.AC-2). It is offered in the **row menu,
 conditionally**, and no duplicate page-header action is built. Clearing is not a
@@ -486,8 +499,9 @@ decision 5 in `overview.md`. BookWriter tests a connection by reusing the
 model-listing probe; RPHelper does not, because FEAT-004's purpose line treats
 testing a connection as **its own capability** (UC-011), and overloading
 model-listing conflates two concerns: "can I reach this server and authenticate"
-and "what can it run". The **backend probe primitive is reused** — there is one
-piece of code that talks to an OpenAI-compatible server — but it is exposed as
+and "what can it run". The **backend probe primitive is reused** — the LLM
+gateway's `probe`, the one place that talks to a provider server
+(`llm-and-streaming.md`) — but it is exposed as
 its **own route with its own typed result**, and surfaced in the UI as a badge or
 alert **without opening the models list**. The result is recorded on
 `llm_servers.last_test_at` / `last_test_ok` / `last_test_error`
@@ -528,9 +542,12 @@ narrowed the set to the product's two.
 - **`llm_servers.last_test_error` stores the typed outcome value itself** — never
   a provider message and never prose. The **last-test badge** on the page renders
   from it.
-- **The closed value set is declared once**, in `services/llm/client.py`, and
-  reused by the registry, the router model and the frontend row type — so three
-  layers do not each re-decide it.
+- **The closed value set is declared once** in `services/llm/` and reused by the
+  registry, the router model and the frontend row type — so three layers do not
+  each re-decide it. As built by plan 006 it sat in `client.py`; that module is
+  removed by the plan that builds the 2026-11-08 gateway revision
+  (`llm-and-streaming.md`), and the declaration moves with the probe to
+  `gateway.py`. The four values and the single declaration are unchanged.
 
 **Cross-references that belong on this page, because this is where the mistakes
 get made:**
@@ -569,18 +586,16 @@ constrained by it.
 | the drift report, per-row **Create** and **Sync** | delivered (plan 007) |
 | **Export** — the whole-database export | **delivered** (plan 030) |
 | **Import** — the whole-database replace | **delivered** (plan 031) |
-| **Rebuild index** (UC-016 / US-019) | **not built** — `fast/002.vector-index-rebuild` |
+| **Rebuild index** (UC-016 / US-019) | **delivered** (`fast/002.vector-index-rebuild`) |
 
 Plan 007 shipped the report and its row actions and **nothing else**, with **no
 disabled placeholder** for the other three — a control that explains nothing is
-worse than an absent one. Two of the three have since arrived.
+worse than an absent one. All three have since arrived.
 
-**Rebuild index is still absent.** It was deferred to `fast/002` because there
-were no vectors to rebuild until stage 004 created the `vec0` tables; they exist
-now (plan 024), so the remaining dependency is the plan itself. (Plan 006's
-`context.md` calls UC-016 "feature `007`'s"; that cross-reference is stale —
-`007`'s `brief.md` defers it to `fast/002`.) The page-level actions table further
-down is the design `fast/002` builds to.
+**Rebuild index arrived last** (`fast/002.vector-index-rebuild`). It waited for
+the `vec0` tables, which did not exist until stage 004 created them (plan 024).
+The page-level actions table further down is the design it was built to; the
+rebuild's mechanism is `search-and-retrieval.md`'s "Index rebuild" and DEC-F002.
 
 **Three statuses, fixed: in sync, missing, drifted.** Declared once in
 `db/drift.py` and reused by the router model and the frontend row type. The
@@ -636,9 +651,9 @@ the triggers but does **not** back-fill an already-existing FTS table — so bet
 the Sync and the next full rebuild, that lexical index is **stale for every row
 written in between**, and the page that caused it says nothing about it.
 
-- **The repair is `fast/002.vector-index-rebuild` rebuilding both FTS tables**,
-  which makes **rebuild-after-Sync an operational step** rather than an optional
-  tidy-up.
+- **The repair is Rebuild index, which rebuilds both FTS tables and re-issues
+  their triggers** (`fast/002.vector-index-rebuild`, DEC-F002-8). That makes
+  **rebuild-after-Sync an operational step** rather than an optional tidy-up.
 - **Why the tables are outside `metadata` in the first place:** a `vec0` table's
   dimension is measured when an administrator designates an embedding model, so no
   `Table` literal can declare it (`data-model.md`). That is a reason, not an
@@ -651,14 +666,14 @@ written in between**, and the page that caused it says nothing about it.
 ### The page's full design — page-level actions, Create/Sync, scope
 
 **The page-level actions sit in one group beside the Database title** (plan 030),
-and Import and Rebuild index join that same group rather than each finding its own
-corner:
+and Import and Rebuild index sit in that same group rather than each finding its
+own corner:
 
 | Action | Behaviour | State | Realizes |
 |---|---|---|---|
 | Export | download the whole-database export | delivered, plan 030 | FEAT-018, UC-061 |
 | Import | file picker → confirm → upload → redirect to `/login` | delivered, plan 031 | FEAT-018, UC-002, UC-061 |
-| Rebuild index | re-embed everything; reports completion | **not built** — `fast/002` | FEAT-005, UC-016 |
+| Rebuild index | confirm → re-embed everything and rebuild both lexical indexes; reports completion | delivered, `fast/002.vector-index-rebuild` | FEAT-005, UC-016 |
 
 **Import is a four-step sequence, not a picker-and-upload** (plan 031):
 
@@ -676,6 +691,16 @@ action in the product — `ui-conventions.md` owns the wording rules — and the
 realizes column carries **UC-061 alongside UC-002**, because this is the restore
 half of the whole-database granularity and not only bootstrap's import.
 
+**The bootstrap screen's "Restore from an export" is the same flow without the
+confirm** (`fast/003.bootstrap-from-export`, DEC-F003-4): file picker → upload →
+hand-off to `/login`, with failures in an inline red `Alert`. It runs the same
+whole-database import, in one transaction with the schema's creation
+(`transfer.md`, `backend-structure.md`'s bootstrap route surface). The confirm is
+dropped there on purpose: the instance is empty, so there is nothing for "Replace
+the whole database?" to warn about. It also signs nobody in — the operator logs in
+with the export's own credentials (DEC-F003-2) — which is why both flows end at
+`/login`.
+
 **Failures render in their own inline red `Alert`**, separate from the drift
 report's error, and **never as a notification** — including `database_not_empty`,
 which is the common one (the instance already holds content, `US-077.AC-3`).
@@ -683,21 +708,23 @@ Separate from the report's error because the two are unrelated operations on one
 page, and one shared error slot would have a Sync failure overwritten by an import
 failure.
 
-**`fast/002`'s response is expected to carry no count, and that is a requirement
-on that plan rather than an as-built fact** (plan 032's audit question;
-`fast/002` is unbuilt). UC-016 asks for completion to be reported, and R5 forbids
-an administrative surface from showing **a count derived from user content** — and
-a rebuild's "N rows indexed" is derived from every user's content, so it discloses
+**The rebuild's response carries no count** (`fast/002.vector-index-rebuild`,
+DEC-F002-3). It is the fixed list of the **four derived table names** it rebuilt —
+the same four on every instance — and never a memo, session or row count, and
+nothing per user. UC-016 asks for completion to be reported, and R5 forbids an
+administrative surface from showing **a count derived from user content** — and a
+rebuild's "N rows indexed" is derived from every user's content, so it discloses
 that other users have material and roughly how much. What "counts and completion
 only" permits is therefore narrower than it sounds: completion, and at most counts
 that are **not** derived from user content. A rebuilt-table count would qualify; a
-row, memo or session count would not.
+row, memo or session count would not. The as-built response is narrower still: it
+names the tables and counts nothing.
 
 **Rebuild is always available, with no precondition beyond authentication.**
 UC-016's postcondition says so in those words, and it is the remedy for **any**
 embedding problem — including a changed embedding designation (UC-013), whose
 stale vectors nothing else indicates or repairs (`search-and-retrieval.md`). The
-button is therefore:
+button is therefore (DEC-F002-4):
 
 - **never gated on drift state** — a drifted or in-sync report does not enable or
   disable it, and the two are independent operations on this page
@@ -706,13 +733,21 @@ button is therefore:
   this row — "fails when no embedding provider is designated" — read as a
   precondition and is corrected. **Availability and outcome are different
   things**: the action is always offered, and with no designation it **runs and
-  fails** with `no_embedding_model` (R4, `search-and-retrieval.md`'s rebuild step
-  1), which is a reported failure the administrator can act on rather than a
+  fails** with `no_embedding_model` (409; R4, `search-and-retrieval.md`'s rebuild
+  step 1), which is a reported failure the administrator can act on rather than a
   disabled control that explains nothing.
+
+**Its failures render in the rebuild's own inline red `Alert`** — separate from
+the drift report's and the import's, for the same reason as the import's above,
+and never as a notification. `no_embedding_model` is the common one, and its
+message names the missing step. The request is **one blocking call that returns
+on completion**, with no progress stream; the button and its confirm stay in their
+loading state until it answers (DEC-F002-1). A failed rebuild changes nothing: it
+is all-or-nothing, and the previous index stands (DEC-F002-2).
 
 Its report is **completion and nothing derived from user content** — no per-user
 breakdown, no sample, no progress line naming a character, and no row count
-(UC-066, R5; the expectation above). Rebuild is expensive and
+(UC-066, R5; the response above). Rebuild is expensive and
 touches every user's content, so it takes the **confirm step** below.
 
 **Rebuild-after-restore is a normal operational step, not a repair** (plan 031).
@@ -720,10 +755,13 @@ A whole-database import **drops** `memo_vec` and `session_vec` inside its
 transaction and **embeds nothing**, so immediately after a restore the vector
 tables are **absent** and the restored material has no vectors. They are
 re-created at the then-designated model's dimension by the next qualifying write
-(ensure-on-write, `data-model.md`), and the restored material comes back into
-coverage only when the rebuild runs. So an administrator who restores an export
-and wants semantic search should expect to press this button — and until
-`fast/002` exists, there is no button to press. The confirm
+(ensure-on-write, `data-model.md`), but the restored material comes back into
+coverage only when the rebuild runs. **The rebuild repairs every derived table in
+one press**: it drops and re-creates both vector tables at the designated model's
+dimension whether or not they exist, refills them, and rebuilds both lexical
+indexes (DEC-F002-5, DEC-F002-8). So an administrator who restores an export —
+here or at bootstrap — and wants semantic search should expect to press this
+button once. The confirm
 is a **designed addition required by no acceptance criterion**
 (`ui-conventions.md`) and it **may stay** — a confirm is not a precondition: it
 does not gate availability, it asks about an expensive action the administrator
@@ -879,8 +917,8 @@ short list, so a reader of this doc knows what shape to expect:
   connection and clearing the embedding designation (FEAT-004), a **lossy** Sync
   (FEAT-005, conditional on data loss), **the whole-database replace**
   (FEAT-018, plan 031 — the red confirm above), and rebuilding the vector index
-  (FEAT-005, not yet realized). Re-enable, saving an enabled-model set, `Create`
-  and the **export** are deliberately **not** confirmed — an export destroys
-  nothing.
+  (FEAT-005, `fast/002.vector-index-rebuild`). Re-enable, saving an enabled-model
+  set, `Create` and the **export** are deliberately **not** confirmed — an export
+  destroys nothing.
 - **Page state** — one `makeAutoObservable` class with **no methods**, driven by
   free functions from a page-level `useEffect` with an `AbortController`.

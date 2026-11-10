@@ -1,7 +1,7 @@
 """Tests for `import_database` — feature 031, step 004 (whole-database replace).
 
-Every expected value comes from the spec — `docs/plans/031.import-and-id-remapping/
-004.database-replace.md` (Interface intent + Definition of done), `004.context.md`
+Every expected value comes from the spec — `docs/decisions/031.import-and-id-remapping.md`
+(Interface intent + Definition of done), `004.context.md`
 (§"Facts this step reads", §"Fixtures guidance"), the feature `context.md`
 (§"Database import", §"The failure contract", §"Test conventions") — and from the rows
 this file seeds itself. Nothing here was derived from the implementation.
@@ -1159,6 +1159,36 @@ def test_a_refused_row_rolls_the_whole_replace_back__S031_004_DoD6(
     assert _ids(target_engine, schema.auth_sessions) == [TGT_AUTH_SESSION]
 
 
+# === DEC-031-7 ========================================================================
+
+
+@pytest.mark.parametrize(
+    "table_name",
+    [schema.characters.name, schema.messages.name, schema.memos.name],
+)
+def test_a_duplicate_primary_key_in_a_database_import_is_refused_and_changes_nothing__DEC_031_7(
+    source_engine: Engine, target_engine: Engine, table_name: str
+) -> None:
+    """DEC-031-7 — two payload rows of one table sharing a primary key are
+    `malformed_payload` (DEC-031-5), and the whole replace rolls back: every table,
+    including the importing admin and their `auth_sessions` row, is unchanged."""
+    before = _snapshot(target_engine)
+    assert before[schema.users.name] and before[schema.auth_sessions.name]
+
+    body = _envelope(source_engine)
+    rows = body["payload"][table_name]
+    assert rows, f"the source seeds {table_name} rows"
+    rows.append(copy.deepcopy(rows[0]))
+
+    with pytest.raises(ExportInvalidError) as refusal:
+        _run_import(target_engine, body)
+
+    assert refusal.value.reason == REASON_MALFORMED_PAYLOAD
+    assert refusal.value.detail == {"reason": REASON_MALFORMED_PAYLOAD}
+    assert _snapshot(target_engine) == before
+    assert _ids(target_engine, schema.auth_sessions) == [TGT_AUTH_SESSION]
+
+
 # === DoD-7 ============================================================================
 
 
@@ -1366,7 +1396,7 @@ def test_a_new_dimension_is_accepted_after_the_replace__S031_004_DoD12(
 # ======================================================================================
 # Feature 034, step 001 — session names through the database replace.
 #
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# Expected values come from `docs/decisions/034.session-names.md`
 # DoD-6 (a renamed session keeps its name through the database replace, US-150.AC-5),
 # DoD-7 (a version-1 database file whose session rows lack `name` imports with every `name`
 # NULL), DoD-8 / DoD-9 / DoD-10 (everything else is still refused, and a refusal changes

@@ -1,6 +1,6 @@
 """The neutral chat-message value type — what the assembler returns and the client consumes.
 
-Feature `020`, step `001`. A sibling of `client.py` so feature `021`'s client can import the
+Feature `020`, step `001`. A sibling of `gateway.py` so the gateway can import the
 type without importing the assembler. Imports nothing from any `app.services.` module (D9).
 """
 

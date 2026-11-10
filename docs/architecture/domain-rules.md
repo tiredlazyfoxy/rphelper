@@ -163,15 +163,17 @@ Consequences:
   unobservable and would silently give the no-setup case a fourth scope to carry
   through export (FEAT-018) and drift reporting (FEAT-005).
 
-**As built, and tested as a negative** (plans 010, 011):
+**As built, and tested as a negative** (plans 010, 011, 033):
 
 - **Nothing creates a setup except an explicit create.** Creating a character
   writes **no** setup row (010).
 - **A session starts with `setup_id` NULL** unless one of the caller's **working**
-  setups under that character is chosen (011). The start control defaults to "No
-  setup", and it starts a session perfectly well with an **empty or failed** setup
-  list — a list that could not load must not become a precondition. Nothing
-  creates a setup or a sentinel at session start.
+  setups under that character is chosen. The choice now sits **in the character
+  page's composer** (plan 033; it was the inline start control of plan 011, since
+  retired): it is optional and defaults to no setup, and the composer starts a
+  session perfectly well with an **empty or failed** setup list — a list that
+  could not load must not become a precondition. Nothing creates a setup or a
+  sentinel at session start.
 - An **archived** setup is not offered to a new session (`setup_archived`,
   UC-021), while an existing session whose setup was archived keeps showing its
   label (R6 does not cascade).
@@ -525,7 +527,8 @@ reading. Three mechanisms make it checkable instead:
 - **A route-classification guard.** Every API route must be classified `public` /
   `self` / `registry` / `owner` / `admin`, and **an unclassified route fails the
   build** (`backend/tests/test_privacy_audit_routes.py`). The enumeration it
-  checks against is `docs/plans/032.privacy-isolation-audit/context.md`.
+  checks against lives in the test suite itself — `ENUMERATED_ROUTES` in
+  `backend/tests/privacy_audit_support.py` — not in a plan folder.
   `backend-structure.md` records it as the build-time contract it is.
 - **The admin-invariance test.** Admin responses are **identical before and after
   roleplayer content exists**. That is the positive form of "no count derived from
@@ -579,8 +582,8 @@ its own select rather than reusing a getter (`transfer.md`).
   list; it does not make a URL stop working.
 - **Archive and restore are idempotent, and a no-op writes nothing** — the
   postures are recorded with their reasons in `data-model.md`.
-- **Archive never moves `last_used_at`** (011 D2). Putting a session away is not
-  using it.
+- **Archive never moves `last_used_at`** (011 D3/D13). Putting a session away is
+  not using it.
 - **Archiving a setup that sessions reference is always silent and always
   succeeds** (010 D3): no warning, no refusal, **no reference count**. Archive
   does not cascade, so referencing sessions keep their `setup_id` and keep

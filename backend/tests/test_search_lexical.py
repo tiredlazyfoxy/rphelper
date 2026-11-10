@@ -1,7 +1,7 @@
 """Tests for the candidate sets and the lexical arm — feature 025, step 002 (DoD-1..11).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/025.hybrid-search-port/002.candidates-and-lexical-arm.md` (Interface intent and
+`docs/decisions/025.hybrid-search-port.md` (Interface intent and
 Definition of done), `002.context.md` (the lexical query shape, the fixed snippet parameters,
 the test shape) and the feature `context.md` — **U1** (the three variants, their base relations
 and the caller's extra predicate), **U2** (an absent FTS table yields no hits and is not an

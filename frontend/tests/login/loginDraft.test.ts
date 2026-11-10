@@ -1,5 +1,5 @@
 // Feature 004, step 005 — the login draft, its pure validators and its effectful submit
-// (docs/plans/004.authentication-session/005.login-entry.md).
+// (docs/decisions/004.authentication-session.md).
 // Covers DoD-1, DoD-2, DoD-4, DoD-5, DoD-6, DoD-7, DoD-8, DoD-9, DoD-10, DoD-11, DoD-12,
 // DoD-13 at the draft level; LoginPage.test.tsx covers the rendered half.
 //

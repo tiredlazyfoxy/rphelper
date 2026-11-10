@@ -4,7 +4,7 @@ Covered routes: ``POST /api/import`` and ``POST /api/characters/{character_id}/i
 added to 030's ``routers/transfer.py`` so that they inherit its router-level ``require_user``
 guard.
 
-Every expected value comes from ``docs/plans/031.import-and-id-remapping/005.import-routes.md``
+Every expected value comes from ``docs/decisions/031.import-and-id-remapping.md``
 (its Interface intent and DoD-1 .. DoD-7, DoD-11), from ``005.context.md`` (why the bodies are
 raw JSON objects, and the rule that **every envelope a router test posts is fetched from one of
 030's ``GET`` export routes in the same test** — these tests never hand-build a valid envelope)
@@ -625,7 +625,7 @@ def test_the_three_export_routes_still_answer_200__S031_005_DoD11(
 
 # ====================================================================== 034/001 DoD-6/7/8/9
 # Feature 034, step 001 — session names through the roleplayer import routes, end to end.
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md` DoD-6
+# Expected values come from `docs/decisions/034.session-names.md` DoD-6
 # (US-150.AC-5: a renamed session exported and re-imported keeps its name), DoD-7 (a
 # version-1 file imports with `name` NULL), DoD-8 / DoD-9 and DEC-034-7. Every envelope comes
 # from 030's own GET routes; the name is written straight into `sessions.name` in setup and

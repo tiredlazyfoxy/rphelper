@@ -1,5 +1,5 @@
 // Feature 019, step 003 — the SSE consumer and the shared failure decode
-// (docs/plans/019.streaming-transport-and-stop/003.sse-consumer.md), DoD-1..DoD-12.
+// (docs/decisions/019.streaming-transport-and-stop.md), DoD-1..DoD-12.
 //
 // Expected values come from the step's Interface intent and Definition of done and from
 // `context.md` D9/D10 and `003.context.md` "Parsing a frame". `fetch` is stubbed per test

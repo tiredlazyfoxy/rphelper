@@ -1,6 +1,6 @@
 """Tests for `app/services/messages.py` — feature 012, step 002.
 
-Every expected value comes from `docs/plans/012.messages-and-settle/002.messages-service.md`
+Every expected value comes from `docs/decisions/012.messages-and-settle.md`
 (its Interface intent and Definition of done), from `002.context.md` (the statement table,
 "Classifying the edit target", "Instants", "Test seeding") and from the feature
 `context.md` (the four states, **D1**, **D2**, **D3**, **D7**, **D11**, **D14**, **D16**,
@@ -17,13 +17,13 @@ where a precise state is needed. One connection per service call. **No fixture i
 Timestamps are asserted by their fixed-width shape and by equality / non-decrease, never
 by exact value; ordering is asserted by integer id, never by `created_at`.
 
-Amended by feature 014, step 001 (`docs/plans/014.entry-editing-and-copy-out/
-001.settled-edit-backend.md`, D1 / D2): a settled row of any kind is now editable through
+Amended by feature 014, step 001 (`docs/decisions/014.entry-editing-and-copy-out.md`, DEC-014-1 / DEC-014-2): a settled
+row of any kind is now editable through
 `edit_message_text`; only a buried row stays `MessageNotEditableError`. 012 DoD-9's two
 settled-refusal cases are removed and every refusal loop is narrowed to the buried row. The
 014 cases carry the suffix `__S014_001_DoD<n>`.
 
-Amended by feature 024, step 005 (`docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md`,
+Amended by feature 024, step 005 (`docs/decisions/024.embedding-lifecycle.md`,
 DoD-9): DoD-13's import guard below is **narrowed** to permit `app.services.session_index`, the
 module `file_partner_entry` and `edit_message_text` reach their degraded `session_vec` refresh
 through. That is an approved deviation, cited at `_PERMITTED_SERVICE_IMPORT`. With no model
@@ -36,7 +36,8 @@ which leaves that one field out of the equality and keeps the other twelve in; t
 position and zone-absence — is unchanged. The flag's own behaviour is covered in
 `test_record_keeping_embedding.py`.
 
-Amended by fast feature 014 (`docs/plans/fast/014.message-delete/plan.md`, context.md P1 / P3):
+Amended by fast feature 014 (`fast/014.message-delete`,
+`docs/decisions/fast-014.message-delete.md`):
 `delete_message` now deletes a zone message, or a settled entry together with its buried group,
 and the translations of every deleted id. 012 DoD-13's "no delete path" guard is **narrowed** to
 permit deletes on `messages` and `translations` only (still no raw SQL `DELETE`, still no
@@ -1048,8 +1049,8 @@ _DELETE_SQL_KEYWORD = re.compile(r"\bDELETE\b")
 _FORBIDDEN_IMPORT_ROOT = "app.services"
 
 #: Feature 023, step 001 (D11, US-111.AC-1) narrowed 012's "no delete path" guard, by the
-#: user's decision of 2026-10-04 recorded under step 001's `## Tests` in
-#: `docs/plans/023.partner-translation/status.md`: `edit_message_text` discards the edited
+#: user's decision of 2026-10-04 recorded as DEC-023-11 in
+#: `docs/decisions/023.partner-translation.md`: `edit_message_text` discards the edited
 #: message's cached translations inside its own transaction, so exactly one table may be
 #: deleted from, and `messages` is still not it.
 _PERMITTED_DELETE_TABLE = "translations"
@@ -1060,12 +1061,17 @@ _PERMITTED_DELETE_TABLE = "translations"
 #: `app.services.session_index`, which also re-exports `LlmClient`, `LlmClientFactory` and
 #: `DEFAULT_EMBED_TIMEOUT_SECONDS`. **Approved deviation** — the user's principle of
 #: 2026-10-04, applied to this fourth guard of the same kind by the orchestrator and recorded
-#: under `## Ultra phase` conflict (4) and step 005's `## Tests` in
-#: `docs/plans/024.embedding-lifecycle/status.md`. Exactly this one named module is permitted
+#: as DEC-024-18 in
+#: `docs/decisions/024.embedding-lifecycle.md`. Exactly this one named module is permitted
 #: (an exact match, not a prefix): every other `app.services` module, `from app.services
 #: import session_index`, and every relative import stay offenders, and the `fastapi` and
 #: `parens` halves of the guard are untouched.
 _PERMITTED_SERVICE_IMPORT = "app.services.session_index"
+
+#: Feature 035 step 002 — **approved deviation** DEC-035-14 (user, 2026-11-09): `messages.py`
+#: imports the production factory `LlmGateway` directly from the gateway module (DEC-035-1,
+#: feature 035 step 002's context), so that one module is permitted too (exact match); everything else still offends.
+_PERMITTED_GATEWAY_IMPORT = "app.services.llm.gateway"
 
 
 def _module_tree() -> ast.Module:
@@ -1209,8 +1215,9 @@ def test_the_module_deletes_only_messages_and_translations__S012_002_DoD13__F014
 
 def _is_forbidden_service_import(module: str) -> bool:
     """A service import this module may not make: anything under `app.services` except the one
-    module 024 step 005 permits (an exact match, so no submodule of it slips through either)."""
-    if module == _PERMITTED_SERVICE_IMPORT:
+    module 024 step 005 permits and the gateway module DEC-035-14 permits (exact matches, so no
+    submodule of either slips through)."""
+    if module in (_PERMITTED_SERVICE_IMPORT, _PERMITTED_GATEWAY_IMPORT):
         return False
     return module == _FORBIDDEN_IMPORT_ROOT or module.startswith(_FORBIDDEN_IMPORT_ROOT + ".")
 
@@ -1277,8 +1284,8 @@ def test_the_module_never_assigns_related_to__S012_002_DoD13() -> None:
 # =========================================================================================
 # Feature 014, step 001 — settled rows become editable (D1, D2)
 #
-# Expected values come from `docs/plans/014.entry-editing-and-copy-out/
-# 001.settled-edit-backend.md` (Interface intent + DoD), `001.context.md` ("The
+# Expected values come from `docs/decisions/014.entry-editing-and-copy-out.md`
+# (Interface intent + DoD), `001.context.md` ("The
 # classification, after this step", "Test seeding") and the feature `context.md` (D1, D2,
 # R5, R6, R12). Binding: `edit_message_text(connection, user_id, message_id, text) ->
 # StreamMessage`, unchanged (status.md `## Skeleton`, Step 001).
@@ -1603,7 +1610,8 @@ def test_no_update_statement_assigns_kind_settled_at_or_related_to__S014_001_DoD
 
 
 # =========================================================================================
-# Fast feature 014 — message-delete (`docs/plans/fast/014.message-delete/plan.md`)
+# Fast feature 014 — message-delete (`fast/014.message-delete`,
+# `docs/decisions/fast-014.message-delete.md`)
 #
 # Expected values come from the plan's Interface intent and DoD-1 .. DoD-10 and from its
 # `context.md` (user decisions 2-3, P1 refusals, P3 order of work). Binding (status.md

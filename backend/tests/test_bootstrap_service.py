@@ -1,6 +1,6 @@
 """Tests for ``app.services.bootstrap`` — the configured fact and the one-transaction creation.
 
-Every expected value comes from ``docs/plans/003.first-run-bootstrap/002.bootstrap-service-and-error.md``
+Every expected value comes from ``docs/decisions/003.first-run-bootstrap.md``
 (Interface intent + Definition of done), ``002.context.md`` and the feature ``context.md``
 (D3 what ``configured`` reads, D4 one definition, D8 create-all inside the transaction,
 D15 what the insert writes). Bindings come from ``## Skeleton`` in ``status.md``.
@@ -9,7 +9,7 @@ Covers step 002 DoD-2, DoD-3, DoD-4, DoD-5, DoD-6, DoD-7, DoD-8, DoD-10 and DoD-
 DoD-1 lives in ``test_errors.py``, DoD-9 in ``test_health.py``, DoD-15/16 in
 ``test_db_engine.py``; DoD-12..14 and DoD-17 are ``[manual/live]``.
 
-Feature 004 step 004 (``docs/plans/004.authentication-session/004.bootstrap-signs-in.md``)
+Feature 004 step 004 (``docs/decisions/004.authentication-session.md``)
 widens the operation: it also opens a session in the same transaction, takes the session
 TTL in hours, and returns a token and an expiry. Every existing call gains the TTL; the new
 tests carry the ``__S004_004_DoD<n>`` suffix (DoD-3, DoD-5, DoD-6, DoD-7, DoD-8). 003/002
@@ -875,7 +875,7 @@ def test_ttl_is_a_required_plain_parameter__S004_004_DoD8() -> None:
 # =====================================================================================
 # Feature 024, step 001 — the creation also ensures the **full-text** half, in the same
 # transaction, and creates no vector table (there is no designated model at bootstrap).
-# Expected values: ``024.embedding-lifecycle/001.search-tables.md`` DoD-8 and the feature
+# Expected values: ``docs/decisions/024.embedding-lifecycle.md`` (step 001 DoD-8) and the feature
 # ``context.md`` D2. Bindings: ``## Skeleton`` → "Step 001 — frozen interface" (the four
 # table-name constants). Only this one test is added here; every test above is unchanged.
 # =====================================================================================

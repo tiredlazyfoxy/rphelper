@@ -187,6 +187,37 @@ def _write_row(
         )
 
 
+def _failed_payload(call: ToolCall) -> str:
+    """The compact JSON payload of a failed call's tool row: call id, raw arguments, `failed`, code."""
+    return _compact(
+        {
+            "call_id": call.call_id,
+            "arguments": call.arguments,
+            "status": "failed",
+            "code": ToolFailedError.code,
+        }
+    )
+
+
+def write_failed_tool_row(engine: Engine, generator: SnowflakeGenerator, scope: ToolScope, call: ToolCall) -> None:
+    """Persist the failed tool row for `call` — exactly the row a failed `dispatch` writes.
+
+    Feature `035`, step `006` (DEC-035-17): the compose source writes a model-side rejection's
+    row through this, without dispatching. The row is `role='tool'` with text
+    `TOOL_FAILED_ROW_TEXT`, `tool_name` `call.name` verbatim, and the payload
+    `{"call_id", "arguments" (verbatim `call.arguments`), "status": "failed", "code": "tool_failed"}`.
+    It is written on a short-lived connection of its own; a write failure is logged by tool
+    name and exception type and swallowed (D7), so this never raises an `Exception`.
+
+    Args:
+        engine: The engine the short-lived write connection is opened on.
+        generator: Mints the row id.
+        scope: The caller's tool scope; supplies the user and session ids.
+        call: The rejected or failed call; its id, name and raw arguments are recorded.
+    """
+    _write_row(engine, generator, scope, call, TOOL_FAILED_ROW_TEXT, _failed_payload(call))
+
+
 async def dispatch(
     call: ToolCall,
     scope: ToolScope,
@@ -215,14 +246,7 @@ async def dispatch(
         )
         content = TOOL_FAILED_CONTENT
         row_text = TOOL_FAILED_ROW_TEXT
-        payload = _compact(
-            {
-                "call_id": call.call_id,
-                "arguments": call.arguments,
-                "status": "failed",
-                "code": ToolFailedError.code,
-            }
-        )
+        payload = _failed_payload(call)
     else:
         frame = ToolResultFrame(tool=call.name, call_id=call.call_id, summary=outcome.summary)
         content = outcome.content

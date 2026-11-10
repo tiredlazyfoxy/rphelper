@@ -3,6 +3,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import { apiPost, documentNavigation } from "../shared/api";
 import { readExportFile } from "../shared/importFile";
+import { isAbortError } from "../shared/abort";
 
 /** The navigation seam the submit hands off through; `documentNavigation` from `shared/api`. */
 export type RestoreNavigation = {
@@ -25,10 +26,6 @@ export class RestoreExportState {
 const RESTORE_PATH = "/api/bootstrap/import";
 const LOGIN_PATH = "/login";
 const GENERIC_FAILURE = "The database could not be restored.";
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
 
 /** Pure: the message stored for a failed restore (an unreadable file or any API error). */
 export function failureMessageOf(error: unknown): string {
@@ -71,7 +68,7 @@ export async function submitRestoreExport(
     const parsed = await readExportFile(file);
     await apiPost<unknown>(RESTORE_PATH, parsed, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const message = failureMessageOf(error);

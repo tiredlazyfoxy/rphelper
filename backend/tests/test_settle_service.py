@@ -1,6 +1,6 @@
 """Tests for `app/services/settle.py` — feature 012, step 003 (DoD-7..23).
 
-Every expected value comes from `docs/plans/012.messages-and-settle/003.parser-and-settle.md`
+Every expected value comes from `docs/decisions/012.messages-and-settle.md`
 (its Interface intent and Definition of done), from `003.context.md` ("The parser, as
 spec", the settle / re-open statement sequences, "Test seeding") and from the feature
 `context.md` (the four states, **D3**, **D8**, **D10**, **D11**, **D16**, R5, R6, R11,
@@ -17,7 +17,7 @@ narrowed by session and owner, and individual rows through the raw table (test-s
 Timestamps are asserted by their fixed-width shape and by equality / non-decrease, never
 by exact value; ordering is asserted by integer id.
 
-Amended by feature 024, step 005 (`docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md`,
+Amended by feature 024, step 005 (`docs/decisions/024.embedding-lifecycle.md`,
 DoD-9): DoD-23's import guard below is **narrowed** to permit `app.services.session_index`,
 the module settle and re-open now reach their degraded `session_vec` refresh through. That is
 an approved deviation, cited at the guard. No behavioural assertion in this file changed: the
@@ -938,11 +938,16 @@ _ALLOWED_CHAT_NAMES = {"strip_think"}
 #: re-open refresh the session's `session_vec` through `app.services.session_index`, which
 #: also re-exports `LlmClient`, `LlmClientFactory` and `DEFAULT_EMBED_TIMEOUT_SECONDS`. That
 #: makes it the one further permitted `app.services` module here — an **approved deviation**
-#: (the user's decision of 2026-10-04, recorded under `## Ultra phase` conflict (1) and under
-#: step 005's `## Tests` in `docs/plans/024.embedding-lifecycle/status.md`). The guard is
+#: (the user's decision of 2026-10-04, recorded as DEC-024-18 in
+#: `docs/decisions/024.embedding-lifecycle.md`). The guard is
 #: narrowed, not weakened: exactly this one named module is permitted, and every other
 #: `app.services` module — and every relative import — stays an offender.
 _ALLOWED_INDEX_MODULE = f"{_APP_SERVICES}.session_index"
+
+#: Feature 035 step 002 — **approved deviation** DEC-035-14 (user, 2026-11-09): settle imports the
+#: production factory `LlmGateway` directly from the gateway module (DEC-035-1, feature 035 step 002's context),
+#: so that one module is permitted too; every other `app.services` module still offends.
+_ALLOWED_GATEWAY_MODULE = f"{_APP_SERVICES}.llm.gateway"
 
 
 def test_settle_imports_parens_and_no_other_service__S012_003_DoD23__S021_001_DoD10() -> None:
@@ -961,6 +966,8 @@ def test_settle_imports_parens_and_no_other_service__S012_003_DoD23__S021_001_Do
                 )
             elif node.level == 0 and module == _ALLOWED_INDEX_MODULE:
                 pass  # 024 005: permitted outright — the degraded refresh and the D9 defaults.
+            elif node.level == 0 and module == _ALLOWED_GATEWAY_MODULE:
+                pass  # 035 002, DEC-035-14: the production factory `LlmGateway`.
             elif node.level > 0:
                 if module == "" and names == ["parens"]:
                     imports_parens = True

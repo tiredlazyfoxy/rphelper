@@ -1,7 +1,7 @@
 /**
  * Feature 032 step 006 — the `admin` frontend entry's half of the privacy audit.
  *
- * Step file: `docs/plans/032.privacy-isolation-audit/006.admin-surfaces-and-reverse-lookup.md`.
+ * Step file: `docs/decisions/032.privacy-isolation-audit.md`.
  * This file covers **DoD-8** and **DoD-9**; DoD-1..DoD-7 are backend clauses and live in
  * `backend/tests/test_privacy_audit_admin.py`. DoD-10 is `[manual/live]` and has no test.
  *

@@ -18,6 +18,7 @@ import {
   fetchEnabledModels,
   updateCharacterConfiguration,
 } from "./configurationApi";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status of one of the two independent reads. */
 export type CharacterConfigStatus = "idle" | "loading" | "ready" | "failed";
@@ -83,10 +84,6 @@ const TOOL_DEFAULT_LINE = "On (default)";
 const TOOL_ON_LINE = "On (set on this character)";
 const TOOL_OFF_LINE = "Off (set on this character)";
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /** Equal when `server_id` and `model_name` are both equal as strings. */
 function sameModel(a: ModelRef, b: ModelRef): boolean {
   return String(a.server_id) === String(b.server_id) && String(a.model_name) === String(b.model_name);
@@ -110,7 +107,7 @@ async function loadConfiguration(state: CharacterConfigState, signal?: AbortSign
   try {
     configuration = await fetchCharacterConfiguration(state.characterId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {
@@ -142,7 +139,7 @@ async function loadModels(state: CharacterConfigState, signal?: AbortSignal): Pr
   try {
     models = await fetchEnabledModels(signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

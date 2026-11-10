@@ -47,10 +47,11 @@
 
 ### US-152 — My search finds a session by its name and shows the name on session results
 - **Actor:** ACT-002 · **Feature:** FEAT-017 · **Exercises:** UC-058, UC-059
-- **Status:** proposed
+- **Status:** delivered
 - **Story:** As a roleplayer, I want to find a session by its name, so that I can reach the storyline I named without remembering its contents.
 - **Acceptance criteria:**
   - **US-152.AC-1** — Given a session whose name contains the searched text, when the roleplayer searches, then that session is among the results.
   - **US-152.AC-2** — Given a result points at a session, when the roleplayer reads it, then it is labelled by the session's name.
-- **Source:** `[confirmed: user]` interview 2026-11-05, session names; challenge C60.
+- **Constraint:** AC-1 covers a name the roleplayer gave the session, not the default start-date name.
+- **Source:** `[confirmed: user]` interview 2026-11-05, session names; challenge C60; Constraint added 2026-11-09 (finalize batch-2026-11-09b, 034.session-names).
 <!-- product-spec:end -->

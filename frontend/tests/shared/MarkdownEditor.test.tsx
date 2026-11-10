@@ -270,7 +270,8 @@ describe("readOnly hides the toolbar and locks the surface", () => {
 
 // ---------------------------------------------------------------------------
 // Fast feature 012 — the optional toolbar-actions slot (012 DoD-1, DoD-2).
-// Expected behaviour comes from docs/plans/fast/012.notes-autosave-toolbar-flags/plan.md
+// Expected behaviour comes from fast/012.notes-autosave-toolbar-flags
+// (docs/decisions/fast-012.notes-autosave-toolbar-flags.md)
 // (Interface intent "MarkdownEditor (shared)"): content passed as toolbar actions renders
 // inside the editor's toolbar as one extra controls group after the four existing groups; when
 // omitted the toolbar is exactly as before; when readOnly no toolbar renders and neither does

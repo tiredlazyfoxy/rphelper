@@ -3,7 +3,8 @@
 // (DoD-17..DoD-20). The store half lives in `databasePageRebuild.test.ts` (DoD-15, DoD-16).
 // DoD-21 is [manual/live] and carries no test.
 //
-// Expected behaviour comes from `docs/plans/fast/002.vector-index-rebuild/plan.md` (Interface
+// Expected behaviour comes from `fast/002.vector-index-rebuild`
+// (`docs/decisions/fast-002.vector-index-rebuild.md`) (Interface
 // intent "Database page", DoD-17..DoD-20) and `context.md` (the button joins the page-level
 // action group beside Export and Import; always available — never gated on drift state; the
 // confirm's consequence names the expense: re-embeds every memo and session, real time and real

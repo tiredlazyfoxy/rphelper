@@ -1,6 +1,6 @@
 """Tests for `app/services/sessions.py` — feature 011, step 002.
 
-Every expected value comes from `docs/plans/011.rp-sessions/002.sessions-service.md` (its
+Every expected value comes from `docs/decisions/011.rp-sessions.md` (its
 Definition of done and Interface intent), from `002.context.md` (the scope-predicate table,
 the test-seeding note, "Returning the value after a write") and from the feature
 `context.md`'s **D2** (an archived character is allowed; the setup must be the caller's
@@ -1018,7 +1018,7 @@ def test_the_service_module_never_mentions_a_model_reference__S011_002_DoD16() -
 # =========================================================================================
 # Feature 018, step 002 — create a session and seed its zone in one transaction.
 #
-# Expected values come from `docs/plans/018.character-page/002.create-and-seed-route.md`
+# Expected values come from `docs/decisions/018.character-page.md`
 # (Interface intent, DoD-1..5 and DoD-10), `002.context.md` ("Id-minting order": session id
 # first, message id second) and the feature `context.md` (D3 — one transaction, one insert,
 # `last_used_at` stays the creation instant; the Wire contract's current-zone row; R2, R4,
@@ -1356,7 +1356,7 @@ def test_the_service_imports_only_the_zone_helper_and_message_type_and_no_fastap
 # =========================================================================================
 # Feature 034, step 001 — `RpSession` carries the session's stored `name`.
 #
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# Expected values come from `docs/decisions/034.session-names.md`
 # (Interface intent: every service read that returns a session — list, character list, get,
 # archive, restore, start, start-seeded — fills `name`; the joined setup name stays
 # distinguishable; DoD-2, DoD-3, DoD-4) and DEC-034-6 / DEC-arch-session-names-1 (NULL =
@@ -1491,7 +1491,7 @@ def test_a_stored_name_belongs_to_its_session_only__S034_001_DoD4(
 # =========================================================================================
 # Feature 034, step 002 — `rename_session`.
 #
-# Expected values come from `docs/plans/034.session-names/002.rename-route.md` (Interface
+# Expected values come from `docs/decisions/034.session-names.md` (Interface
 # intent for `rename_session`: one transaction, the owned session required with archived
 # sessions allowed, the normalised name and a fresh `updated_at` written, `last_used_at`
 # never written, the re-read `RpSession` returned, `session_not_found` for a missing or

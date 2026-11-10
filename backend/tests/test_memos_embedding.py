@@ -1,6 +1,6 @@
 """Tests for the memo write paths' embedding lifecycle — feature 024, step 004 (DoD-1..9).
 
-Every expected value comes from `docs/plans/024.embedding-lifecycle/004.memo-write-paths.md`
+Every expected value comes from `docs/decisions/024.embedding-lifecycle.md`
 (its Interface intent and Definition of done — **DoD-1 pins the body verbatim**), from
 `004.context.md` (the test shape, the transaction ordering, "body changed" compared against
 the row as stored) and from the feature `context.md`: **D5** (the trigger table — flag-only

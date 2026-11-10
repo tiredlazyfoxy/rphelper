@@ -51,7 +51,7 @@ from sqlalchemy import BigInteger, Connection, LargeBinary, Select, column, func
 from app.db.search_tables import MEMO_VEC_TABLE, SESSION_VEC_TABLE, vector_table_dimension
 from app.errors import NoEmbeddingModelError
 from app.services.embedding import DEFAULT_EMBED_TIMEOUT_SECONDS, embed_texts, open_embedding_model
-from app.services.llm.client import LlmClient
+from app.services.llm.gateway import LlmGateway
 from app.services.llm_registry import LlmClientFactory
 from app.services.search.ports import ARM_DEPTH
 
@@ -86,7 +86,7 @@ def vector_ranking(
     query_text: str,
     *,
     depth: int = ARM_DEPTH,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> list[int]:
     """Rank the candidate set by distance to the embedded query, nearest first, at most `depth` long.

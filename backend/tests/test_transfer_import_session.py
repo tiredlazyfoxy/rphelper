@@ -1,7 +1,7 @@
 """Tests for `import_session` — feature 031, step 003 (session import into a chosen character).
 
-Every expected value comes from the spec — `docs/plans/031.import-and-id-remapping/
-003.session-import.md` (Interface intent + Definition of done), `003.context.md`
+Every expected value comes from the spec — `docs/decisions/031.import-and-id-remapping.md`
+(Interface intent + Definition of done), `003.context.md`
 (user decision U1, §"Order of checks", §"Memo policy"), the feature `context.md`
 (§"Remap rules for the three roleplayer granularities", §"The failure contract",
 §"Test conventions") and the `## Skeleton` record's step-003 policy table (ruling 23) —
@@ -1210,7 +1210,7 @@ def test_imported_record_text_is_searchable_and_no_vector_row_appears__S031_003_
 # =====================================================================================
 # Feature 034, step 001 — session names through the session import.
 #
-# Expected values come from `docs/plans/034.session-names/001.session-name-column.md`
+# Expected values come from `docs/decisions/034.session-names.md`
 # DoD-6 (a renamed session exported and re-imported keeps its name, US-150.AC-5), DoD-7 (a
 # version-1 file whose session row lacks `name` imports with `name` NULL), DoD-8 / DoD-9 (the
 # column-set rule still refuses everything else), DEC-034-7 and `transfer.md` § "Accepted

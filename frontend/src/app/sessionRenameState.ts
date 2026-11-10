@@ -11,6 +11,7 @@ import type { Session } from "./sessionsApi";
 import { renameSession } from "./sessionsApi";
 import type { SessionsState } from "./sessionsState";
 import { applySession } from "./sessionsState";
+import { isAbortError } from "../shared/abort";
 
 /** The fixed inline failure sentence (DEC-034-11); never a notification. */
 const RENAME_FAILED = "Could not rename the session.";
@@ -87,11 +88,6 @@ function normaliseDraft(draft: string): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-/** Whether a rejection is the fetch's own abort, as opposed to a request failure. */
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /**
  * Effect: commits the draft. The draft is normalised — trimmed, blank becomes `null`. When
  * the normalised value equals `originalName` the editor closes with no request. Otherwise
@@ -149,7 +145,7 @@ export async function commitRename(
       closeEditor(state);
     });
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       aborted = true;
       return;
     }

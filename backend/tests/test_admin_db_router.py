@@ -30,7 +30,8 @@ and ``POST .../export`` remains rejected, because 031 owns Import and ``fast/002
 Rebuild and neither may appear early. No behavioural assertion about the three original
 routes changed.
 
-Amended by fast feature 002 (``docs/plans/fast/002.vector-index-rebuild/plan.md``, DoD-22,
+Amended by fast feature 002 (``fast/002.vector-index-rebuild``,
+``docs/decisions/fast-002.vector-index-rebuild.md``, DoD-22,
 amendment 2026-10-07). That feature adds ``POST /api/admin/database/rebuild`` to this router,
 deliberately overturning the earlier "no rebuild surface" rule. Every amendment is cited
 inline with ``F002_DoD22``: ``EXPECTED_OPERATIONS`` gains the operation, the no-path-parameter

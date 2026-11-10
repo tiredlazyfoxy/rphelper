@@ -1,6 +1,6 @@
 """Feature 032 step 002 — the audit world and the route-classification guard (DoD-1..DoD-6).
 
-Spec: `docs/plans/032.privacy-isolation-audit/002.audit-world-and-route-guard.md`
+Spec: `docs/decisions/032.privacy-isolation-audit.md`
 (Definition of done — six `[test]` items, no `[manual/live]` item), `002.context.md`
 (coverage list, sentinel fields, guard mechanics) and the feature `context.md` (the 74-row
 enumeration table, the class table, the shared vocabulary, the test conventions).
@@ -13,7 +13,7 @@ record supplied only *how to call* the shared world, which lives in
 `tests/privacy_audit_support.py` and is this step's other deliverable.
 
 Feature 034 extends the map: step 002 (DoD-11, DoD-12) adds the session rename row and the
-`sessions.name` carrier; step 003 (DoD-11, `docs/plans/034.session-names/003.my-search-names.md`)
+`sessions.name` carrier; step 003 (DoD-11, `docs/decisions/034.session-names.md`)
 lists `/api/search` as a further reader of `sessions.name`.
 
 This is an **audit step** (`context.md` "The audit-step convention"): these cases assert

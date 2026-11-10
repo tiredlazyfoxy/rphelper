@@ -1,5 +1,6 @@
 // Fast feature 009 — Vite dev-server root routing (DoD-1..DoD-16).
-// Expected values come from docs/plans/fast/009.vite-dev-root-routing/plan.md and context.md.
+// Expected values come from fast/009.vite-dev-root-routing
+// (docs/decisions/fast-009.vite-dev-root-routing.md) and context.md.
 // Bindings come from the `## Skeleton` record in that plan's status.md.
 // DoD-17 is covered by the existing build-config / entries / request-log / proxy-log tests,
 // which run unedited; nothing here touches them.

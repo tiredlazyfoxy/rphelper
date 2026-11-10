@@ -3,7 +3,8 @@
 Covered route: ``POST /api/admin/database/rebuild`` on the admin database router (router-level
 ``require_admin``), which calls ``app.services.index_rebuild.rebuild_index`` once.
 
-Every expected value comes from ``docs/plans/fast/002.vector-index-rebuild/plan.md`` (Interface
+Every expected value comes from ``fast/002.vector-index-rebuild``
+(``docs/decisions/fast-002.vector-index-rebuild.md``) (Interface
 intent + Definition of done DoD-1 .. DoD-14) and ``context.md`` (the record-row predicate
 ``settled_at IS NOT NULL AND related_to IS NULL``; memo text is the raw body; session text is
 ``compose_session_text`` with the owning user; one all-or-nothing transaction; the response is the

@@ -1,5 +1,6 @@
 // Fast feature 007 — Vite dev-proxy request log (DoD-1..DoD-10).
-// Expected values come from docs/plans/fast/007.vite-proxy-request-log/plan.md and context.md.
+// Expected values come from fast/007.vite-proxy-request-log
+// (docs/decisions/fast-007.vite-proxy-request-log.md) and context.md.
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { attachProxyLogging, formatErrorLine, formatSuccessLine, redactPath } from "../dev/proxyLog";

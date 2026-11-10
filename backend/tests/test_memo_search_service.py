@@ -1,7 +1,7 @@
 """`services/search/memo_search.py` — feature 026, step 001 (DoD-4..13).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/026.memo-search-tool/001.chain-clause-and-memo-search.md` (Interface intent and
+`docs/decisions/026.memo-search-tool.md` (Interface intent and
 Definition of done), `001.context.md` (the port-binding and seeding notes) and the feature
 `context.md` — **D1** (the result cap is `8`, no paging), **D2** (the extra predicate is
 `is_enabled AND NOT is_forced AND <chain clause>`, `is_enabled` first), **D5** (port errors

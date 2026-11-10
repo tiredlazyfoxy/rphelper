@@ -12,6 +12,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 import { embeddingFailureSentence } from "../shared/embeddingFailure";
 import type { Setup } from "./setupsApi";
 import { createSetup, updateSetup } from "./setupsApi";
+import { isAbortError } from "../shared/abort";
 
 /** Whether a submit is in flight. */
 export type SetupSubmitStatus = "idle" | "submitting";
@@ -39,10 +40,6 @@ export class SetupDraft {
 /** The two fixed submit sentences (D12): one per action, never composed from an error. */
 const CREATE_FAILED = "Could not create the setup.";
 const SAVE_FAILED = "Could not save the setup.";
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
 
 /** Pure: true when the draft edits an existing setup (`original` is non-null). */
 export function isEditing(draft: SetupDraft): boolean {
@@ -114,7 +111,7 @@ export async function submitSetup(
       return;
     }
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     // 024 step 008 (D8): a changed description is embedded (024 D5), so either submit may be

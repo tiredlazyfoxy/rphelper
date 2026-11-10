@@ -167,10 +167,11 @@ def import_whole_database(
     this route names nowhere, like the other four. It takes no path parameter and no query
     parameter — the body is all it reads.
 
-    `body` is the raw JSON object (`031/005.context.md`): the payload is column-agnostic, so no
-    static model can describe it, and `app.services.transfer_import` validates it before writing
-    anything. A body that is not a JSON object answers **422** from FastAPI before this handler
-    runs; an object that is not a recognised envelope answers **400** from the service.
+    `body` is the raw JSON object (`docs/decisions/031.import-and-id-remapping.md`): the payload is
+    column-agnostic, so no static model can describe it, and `app.services.transfer_import`
+    validates it before writing anything. A body that is not a JSON object answers **422** from
+    FastAPI before this handler runs; an object that is not a recognised envelope answers **400**
+    from the service.
 
     Answers **204** with no body. It then clears the session cookie on the injected `Response`
     through `clear_session_cookie(response, settings)` — `app/dependencies.py`'s writer, the same

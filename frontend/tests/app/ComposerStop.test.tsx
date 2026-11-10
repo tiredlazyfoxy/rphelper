@@ -1,5 +1,5 @@
 // Feature 019, step 004 — Stop in Send's slot
-// (docs/plans/019.streaming-transport-and-stop/004.streaming-state-and-stop-slot.md), DoD-7..DoD-9;
+// (docs/decisions/019.streaming-transport-and-stop.md), DoD-7..DoD-9;
 // DoD-10 (glyph, size, tooltip in a browser) is manual/live.
 //
 // Expected behaviour comes from the step's Interface intent and Definition of done, context.md

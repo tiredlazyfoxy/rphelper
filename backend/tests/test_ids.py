@@ -24,6 +24,7 @@ import pytest
 from app.config import Settings
 from app.errors import DomainError
 from app.ids import (
+    BACKWARDS_TOLERANCE_MS,
     EPOCH_MS,
     NODE_ID_BITS,
     SEQUENCE_BITS,
@@ -258,14 +259,76 @@ def test_exhausting_the_sequence_still_yields_unique_increasing_ids__DoD5() -> N
 
 
 def test_backwards_clock_makes_minting_raise__DoD6() -> None:
-    """DoD-6: a clock earlier than the last millisecond issued refuses to mint."""
+    """DoD-6: a clock further behind the last issued millisecond than the tolerance refuses."""
     clock = FixedClock(EPOCH_MS + 5_000)
     generator = SnowflakeGenerator(node_id=4, clock=clock)
     generator.next_id()
 
-    clock.now = EPOCH_MS + 4_990
+    clock.now = EPOCH_MS + 5_000 - BACKWARDS_TOLERANCE_MS - 1
     with pytest.raises(BackwardsClockError):
         generator.next_id()
+
+
+def test_backwards_step_at_the_tolerance_boundary_still_mints() -> None:
+    """A step of exactly the tolerance is tolerated; ids continue from the last ms."""
+    clock = FixedClock(EPOCH_MS + 5_000)
+    generator = SnowflakeGenerator(node_id=4, clock=clock)
+    first = generator.next_id()
+
+    clock.now = EPOCH_MS + 5_000 - BACKWARDS_TOLERANCE_MS
+    second = generator.next_id()
+    assert second > first
+    assert decode(second)[0] == 5_000
+
+
+def test_small_backwards_step_keeps_ids_increasing_without_raising() -> None:
+    """A ~70 ms step back (a slewed wall clock) mints from the last issued millisecond."""
+    clock = FixedClock(EPOCH_MS + 5_000)
+    generator = SnowflakeGenerator(node_id=4, clock=clock)
+    ids = [generator.next_id()]
+
+    clock.now = EPOCH_MS + 4_930
+    ids.extend(generator.next_id() for _ in range(3))
+    assert strictly_increases(ids)
+    assert len(set(ids)) == len(ids)
+    assert timestamps_of(ids) == [5_000] * 4
+    assert [decode(snowflake)[2] for snowflake in ids] == [0, 1, 2, 3]
+
+    # Once the clock passes the last issued millisecond, ids resume from the clock.
+    clock.now = EPOCH_MS + 5_001
+    later = generator.next_id()
+    assert later > ids[-1]
+    assert decode(later) == (5_001, 4, 0)
+
+
+class BehindThenForwardClock:
+    """Reads ``behind`` for ``behind_reads`` reads, then ``forward`` thereafter."""
+
+    def __init__(self, behind: int, behind_reads: int, forward: int) -> None:
+        self.behind = behind
+        self.behind_reads = behind_reads
+        self.forward = forward
+        self.reads = 0
+
+    def __call__(self) -> int:
+        self.reads += 1
+        return self.behind if self.reads <= self.behind_reads else self.forward
+
+
+def test_small_backwards_step_with_sequence_exhaustion_waits_for_the_clock() -> None:
+    """Exhausting the sequence while the clock is behind waits until it passes last ms."""
+    fixed = FixedClock(EPOCH_MS + 5_000)
+    generator = SnowflakeGenerator(node_id=4, clock=fixed)
+    ids = [generator.next_id() for _ in range(SEQUENCE_CAPACITY)]
+    assert decode(ids[-1]) == (5_000, 4, SEQUENCE_MASK)
+
+    # Swap in a clock that stays 70 ms behind for several reads, then moves past.
+    lagging = BehindThenForwardClock(behind=EPOCH_MS + 4_930, behind_reads=10, forward=EPOCH_MS + 5_002)
+    generator._clock = lagging
+    next_one = generator.next_id()
+    assert lagging.reads == 11  # kept re-reading while behind, returned once past
+    assert next_one > ids[-1]
+    assert decode(next_one) == (5_002, 4, 0)
 
 
 def test_backwards_clock_error_is_not_a_domain_error_subclass__DoD6() -> None:

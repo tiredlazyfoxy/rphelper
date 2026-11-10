@@ -33,7 +33,7 @@ class GoogleCustomSearchProvider:
 
     `api_key` and `engine_id` are used exactly as given — trimming and the "configured"
     decision belong to the factory in `app/services/tools/web_search.py` (D3). `transport`
-    is the test seam: `None` means the real network, as in `app.services.llm.client`.
+    is the test seam: `None` means the real network.
     """
 
     def __init__(
@@ -71,7 +71,7 @@ class GoogleCustomSearchProvider:
                     headers={"X-goog-api-key": self._api_key},
                 )
         # `TimeoutException` is itself an `HTTPError`, named for the mapping it shares with
-        # every other transport failure (`001.context.md`, mirroring `app.services.llm.client`).
+        # every other transport failure (`001.context.md`).
         except (httpx.TimeoutException, httpx.HTTPError, httpx.InvalidURL):
             raise _failed() from None
 

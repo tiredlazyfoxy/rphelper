@@ -2,7 +2,7 @@
 
 Status is derived from folder contents, never stored here: `brief.md` only =
 roadmapped, `status.md` present = planned, `status.md` rows all `done` with
-verifier `PASS` = delivered. See `docs/plans/CLAUDE.md`.
+verifier `PASS` = delivered. See `docs/plans/AGENTS.md`.
 
 <!-- roadmap:start -->
 ## Stage 001.instance
@@ -18,14 +18,14 @@ scaffold; restoring from an export (UC-002); the vector-index rebuild
 
 | Feature | Track | Size | Delivers | Depends on |
 |---|---|---|---|---|
-| `001.backend-foundation` | multi-step | M | — | — |
-| `002.frontend-foundation` | multi-step | M | — | — |
-| `fast/001.dev-and-container-harness` | fast | S | — | `001.backend-foundation`, `002.frontend-foundation` |
-| `003.first-run-bootstrap` | multi-step | M | FEAT-001 | `001.backend-foundation`, `002.frontend-foundation` |
-| `004.authentication-session` | multi-step | M | FEAT-002 | `003.first-run-bootstrap` |
-| `005.admin-shell-and-users` | multi-step | M | FEAT-003 | `004.authentication-session` |
-| `006.llm-server-connections` | multi-step | M | FEAT-004 | `005.admin-shell-and-users` |
-| `007.schema-drift-and-remediation` | multi-step | M | FEAT-005 | `005.admin-shell-and-users` |
+| 001.backend-foundation — delivered 2026-09-28 | multi-step | M | — | — |
+| 002.frontend-foundation — delivered 2026-09-29 | multi-step | M | — | — |
+| fast/001.dev-and-container-harness — delivered 2026-10-06 | fast | S | — | 001.backend-foundation, 002.frontend-foundation |
+| 003.first-run-bootstrap — delivered 2026-09-29 | multi-step | M | FEAT-001 | 001.backend-foundation, 002.frontend-foundation |
+| 004.authentication-session — delivered 2026-09-29 | multi-step | M | FEAT-002 | 003.first-run-bootstrap |
+| 005.admin-shell-and-users — delivered 2026-09-29 | multi-step | M | FEAT-003 | 004.authentication-session |
+| 006.llm-server-connections — delivered 2026-09-30 | multi-step | M | FEAT-004 | 005.admin-shell-and-users |
+| 007.schema-drift-and-remediation — delivered 2026-09-30 | multi-step | M | FEAT-005 | 005.admin-shell-and-users |
 
 ## Stage 002.record
 **Goal:** a whole roleplay can be recorded by hand, with no assistant.
@@ -39,15 +39,15 @@ configuration chain; the character page.
 
 | Feature | Track | Size | Delivers | Depends on |
 |---|---|---|---|---|
-| `008.app-shell-frame` | multi-step | M | FEAT-020 | `004.authentication-session`, `002.frontend-foundation` |
-| `009.characters` | multi-step | M | FEAT-006 | `008.app-shell-frame` |
-| `010.setups` | multi-step | M | FEAT-007 | `009.characters` |
-| `011.rp-sessions` | multi-step | M | FEAT-008, FEAT-007, FEAT-020 | `009.characters`, `010.setups` |
-| `012.messages-and-settle` | multi-step | M | FEAT-009, FEAT-010 | `011.rp-sessions` |
-| `013.stream-and-zone-ui` | multi-step | M | FEAT-009, FEAT-010 | `012.messages-and-settle`, `008.app-shell-frame` |
-| `014.entry-editing-and-copy-out` | multi-step | M | FEAT-009 | `013.stream-and-zone-ui` |
-| `015.memos` | multi-step | M | FEAT-012 | `009.characters`, `010.setups`, `011.rp-sessions` |
-| `016.note-wall` | multi-step | M | FEAT-012, FEAT-020 | `015.memos`, `008.app-shell-frame`, `013.stream-and-zone-ui` |
+| 008.app-shell-frame — delivered 2026-10-01 | multi-step | M | FEAT-020 | 004.authentication-session, 002.frontend-foundation |
+| 009.characters — delivered 2026-10-02 | multi-step | M | FEAT-006 | 008.app-shell-frame |
+| 010.setups — delivered 2026-10-02 | multi-step | M | FEAT-007 | 009.characters |
+| 011.rp-sessions — delivered 2026-10-02 | multi-step | M | FEAT-008, FEAT-007, FEAT-020 | 009.characters, 010.setups |
+| 012.messages-and-settle — delivered 2026-10-02 | multi-step | M | FEAT-009, FEAT-010 | 011.rp-sessions |
+| 013.stream-and-zone-ui — delivered 2026-10-02 | multi-step | M | FEAT-009, FEAT-010 | 012.messages-and-settle, 008.app-shell-frame |
+| 014.entry-editing-and-copy-out — delivered 2026-10-02 | multi-step | M | FEAT-009 | 013.stream-and-zone-ui |
+| 015.memos — delivered 2026-10-03 | multi-step | M | FEAT-012 | 009.characters, 010.setups, 011.rp-sessions |
+| 016.note-wall — delivered 2026-10-03 | multi-step | M | FEAT-012, FEAT-020 | 015.memos, 008.app-shell-frame, 013.stream-and-zone-ui |
 
 ## Stage 003.assistant
 **Goal:** the assistant composes the roleplayer's own reply.
@@ -61,13 +61,13 @@ unpopulated); any semantic or lexical search; export/import.
 
 | Feature | Track | Size | Delivers | Depends on |
 |---|---|---|---|---|
-| `017.session-configuration` | multi-step | M | FEAT-013, FEAT-020 | `011.rp-sessions`, `006.llm-server-connections`, `009.characters` |
-| `018.character-page` | multi-step | M | FEAT-020, FEAT-008 | `017.session-configuration`, `016.note-wall`, `013.stream-and-zone-ui` |
-| `019.streaming-transport-and-stop` | multi-step | M | FEAT-010 | `006.llm-server-connections`, `013.stream-and-zone-ui` |
-| `020.context-assembly` | multi-step | M | FEAT-010, FEAT-012 | `015.memos`, `017.session-configuration`, `012.messages-and-settle` |
-| `021.compose-loop-and-tools` | multi-step | M | FEAT-010 | `019.streaming-transport-and-stop`, `020.context-assembly` |
-| `022.discussion-ui` | multi-step | M | FEAT-010 | `021.compose-loop-and-tools`, `013.stream-and-zone-ui` |
-| `023.partner-translation` | multi-step | M | FEAT-011, FEAT-009 | `019.streaming-transport-and-stop`, `014.entry-editing-and-copy-out`, `017.session-configuration` |
+| 017.session-configuration — delivered 2026-10-03 | multi-step | M | FEAT-013, FEAT-020 | 011.rp-sessions, 006.llm-server-connections, 009.characters |
+| 018.character-page — delivered 2026-10-03 | multi-step | M | FEAT-020, FEAT-008 | 017.session-configuration, 016.note-wall, 013.stream-and-zone-ui |
+| 019.streaming-transport-and-stop — delivered 2026-10-04 | multi-step | M | FEAT-010 | 006.llm-server-connections, 013.stream-and-zone-ui |
+| 020.context-assembly — delivered 2026-10-04 | multi-step | M | FEAT-010, FEAT-012 | 015.memos, 017.session-configuration, 012.messages-and-settle |
+| 021.compose-loop-and-tools — delivered 2026-10-04 | multi-step | M | FEAT-010 | 019.streaming-transport-and-stop, 020.context-assembly |
+| 022.discussion-ui — delivered 2026-10-04 | multi-step | M | FEAT-010 | 021.compose-loop-and-tools, 013.stream-and-zone-ui |
+| 023.partner-translation — delivered 2026-10-04 | multi-step | M | FEAT-011, FEAT-009 | 019.streaming-transport-and-stop, 014.entry-editing-and-copy-out, 017.session-configuration |
 
 ## Stage 004.retrieval
 **Goal:** nothing has to be re-explained.
@@ -80,13 +80,13 @@ administrator can rebuild the vector index.
 
 | Feature | Track | Size | Delivers | Depends on |
 |---|---|---|---|---|
-| `024.embedding-lifecycle` | multi-step | M | FEAT-009 | `012.messages-and-settle`, `015.memos`, `006.llm-server-connections`, `014.entry-editing-and-copy-out` |
-| `025.hybrid-search-port` | multi-step | M | — | `024.embedding-lifecycle` |
-| `026.memo-search-tool` | multi-step | M | FEAT-014, FEAT-012 | `025.hybrid-search-port`, `021.compose-loop-and-tools`, `015.memos` |
-| `027.session-search-tool` | multi-step | M | FEAT-015 | `025.hybrid-search-port`, `021.compose-loop-and-tools`, `011.rp-sessions` |
-| `028.web-search-tool` | multi-step | M | FEAT-016 | `021.compose-loop-and-tools`, `017.session-configuration` |
-| `029.my-search` | multi-step | M | FEAT-017 | `025.hybrid-search-port`, `008.app-shell-frame` |
-| `fast/002.vector-index-rebuild` | fast | S | FEAT-005 | `024.embedding-lifecycle`, `007.schema-drift-and-remediation` |
+| 024.embedding-lifecycle — delivered 2026-10-04 | multi-step | M | FEAT-009 | 012.messages-and-settle, 015.memos, 006.llm-server-connections, 014.entry-editing-and-copy-out |
+| 025.hybrid-search-port — delivered 2026-10-04 | multi-step | M | — | 024.embedding-lifecycle |
+| 026.memo-search-tool — delivered 2026-10-05 | multi-step | M | FEAT-014, FEAT-012 | 025.hybrid-search-port, 021.compose-loop-and-tools, 015.memos |
+| 027.session-search-tool — delivered 2026-10-05 | multi-step | M | FEAT-015 | 025.hybrid-search-port, 021.compose-loop-and-tools, 011.rp-sessions |
+| 028.web-search-tool — delivered 2026-10-05 | multi-step | M | FEAT-016 | 021.compose-loop-and-tools, 017.session-configuration |
+| 029.my-search — delivered 2026-10-05 | multi-step | M | FEAT-017 | 025.hybrid-search-port, 008.app-shell-frame |
+| fast/002.vector-index-rebuild — delivered 2026-10-07 | fast | S | FEAT-005 | 024.embedding-lifecycle, 007.schema-drift-and-remediation |
 
 ## Stage 005.portability
 **Goal:** the data moves, and the isolation guarantee is proven.
@@ -99,10 +99,10 @@ user's material.
 
 | Feature | Track | Size | Delivers | Depends on |
 |---|---|---|---|---|
-| `030.export-granularities` | multi-step | M | FEAT-018 | `011.rp-sessions`, `015.memos`, `012.messages-and-settle`, `010.setups`, `009.characters` |
-| `031.import-and-id-remapping` | multi-step | M | FEAT-018 | `030.export-granularities` |
-| `fast/003.bootstrap-from-export` | fast | S | FEAT-001 | `031.import-and-id-remapping`, `003.first-run-bootstrap` |
-| `032.privacy-isolation-audit` | multi-step | M | FEAT-019 | `026.memo-search-tool`, `027.session-search-tool`, `029.my-search`, `030.export-granularities`, `031.import-and-id-remapping`, `005.admin-shell-and-users` |
+| 030.export-granularities — delivered 2026-10-05 | multi-step | M | FEAT-018 | 011.rp-sessions, 015.memos, 012.messages-and-settle, 010.setups, 009.characters |
+| 031.import-and-id-remapping — delivered 2026-10-05 | multi-step | M | FEAT-018 | 030.export-granularities |
+| fast/003.bootstrap-from-export — delivered 2026-10-07 | fast | S | FEAT-001 | 031.import-and-id-remapping, 003.first-run-bootstrap |
+| 032.privacy-isolation-audit — delivered 2026-10-06 | multi-step | M | FEAT-019 | 026.memo-search-tool, 027.session-search-tool, 029.my-search, 030.export-granularities, 031.import-and-id-remapping, 005.admin-shell-and-users |
 
 ## Stage 006.repair
 **Goal:** v1 does what its specification says it does.
@@ -112,23 +112,25 @@ US-112.AC-3 and US-147 are satisfied; satisfying them closes the defects
 **Not in it:** D-02 (US-115.AC-1's streaming half), ruled an AC amendment and
 not a defect — US-115.AC-1 is conditioned on a message sitting in the current
 zone, and an in-flight reply has no persisted row yet; that is `/product-spec`
-work with no code, and `019` D11's write race stays closed.
-`fast/001.dev-and-container-harness`, `fast/002.vector-index-rebuild` and
-`fast/003.bootstrap-from-export`, already roadmapped in their own stages and
+work with no code, and DEC-019-11's write race stays closed.
+fast/001.dev-and-container-harness, fast/002.vector-index-rebuild and
+fast/003.bootstrap-from-export, already roadmapped in their own stages and
 not re-staged. Any new capability — every feature here closes a criterion that
 already exists.
 
 | Feature | Track | Size | Delivers | Depends on |
 |---|---|---|---|---|
-| `fast/005.degraded-embedding-path` | fast | S | FEAT-009 | `024.embedding-lifecycle`, `032.privacy-isolation-audit` |
-| `fast/004.character-page-first-reply` | fast | S | FEAT-008 | `018.character-page`, `021.compose-loop-and-tools`, `022.discussion-ui` |
-| `fast/006.unicode-name-matching` | fast | S | FEAT-017 | `029.my-search` |
+| fast/005.degraded-embedding-path — delivered 2026-10-07 | fast | S | FEAT-009 | 024.embedding-lifecycle, 032.privacy-isolation-audit |
+| fast/004.character-page-first-reply — delivered 2026-10-07 | fast | S | FEAT-008 | 018.character-page, 021.compose-loop-and-tools, 022.discussion-ui |
+| fast/006.unicode-name-matching — delivered 2026-10-07 | fast | S | FEAT-017 | 029.my-search |
 
 ## Build order
 
-`001` → `002` → `fast/001` → `003` → `004` → `005` → `006` → `007` → `008` →
-`009` → `010` → `011` → `012` → `013` → `014` → `015` → `016` → `017` →
-`018` → `019` → `020` → `021` → `022` → `023` → `024` → `025` → `026` →
-`027` → `028` → `029` → `fast/002` → `030` → `031` → `fast/003` → `032` →
-`fast/005` → `fast/004` → `fast/006`
+001 → 002 → fast/001 → 003 → 004 → 005 → 006 → 007 → 008 →
+009 → 010 → 011 → 012 → 013 → 014 → 015 → 016 → 017 →
+018 → 019 → 020 → 021 → 022 → 023 → 024 → 025 → 026 →
+027 → 028 → 029 → fast/002 → 030 → 031 → fast/003 → 032 →
+fast/005 → fast/004 → fast/006
+
+Entries without backticks are retired (archived under `.done/`); see `retired.md`.
 <!-- roadmap:end -->

@@ -22,6 +22,7 @@ import {
 } from "./sessionsApi";
 import type { SessionsState } from "./sessionsState";
 import { applySession } from "./sessionsState";
+import { isAbortError } from "../shared/abort";
 
 /**
  * Explicit load status of the session listing: gates the loading and failure renders, not
@@ -51,10 +52,6 @@ export class SessionsSectionState {
 const ARCHIVE_FAILED = "Could not archive the session.";
 const RESTORE_FAILED = "Could not restore the session.";
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /** Whether this row belongs in the list: working, or archived while Show-archived is on. */
 function isVisible(session: Session, showArchived: boolean): boolean {
   return !isSessionArchived(session) || showArchived;
@@ -83,7 +80,7 @@ export async function loadSectionSessions(
   try {
     sessions = await fetchCharacterSessions(characterId, includeArchived, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {
@@ -165,7 +162,7 @@ async function runRowAction(
   try {
     session = await action(sessionId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

@@ -1,6 +1,5 @@
 // Feature 019, step 005 — bug-fix repro: a failed send whose text was already stored must not
-// leave the draft for a duplicate re-send (docs/plans/019.streaming-transport-and-stop/
-// 005.compose-effect.md, narrowed by DEC-019-BF1 in outcome.md `## Decisions`).
+// leave the draft for a duplicate re-send (docs/decisions/019.streaming-transport-and-stop.md, narrowed by DEC-019-BF1 in outcome.md `## Decisions`).
 //
 // Reproduces: "in the chat, when I'm doing retry it duplicates my last message" — a text-bearing
 // compose committed the user row, then failed without the client handling an `accepted` frame, so

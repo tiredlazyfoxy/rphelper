@@ -1,6 +1,6 @@
 // Feature 029, step 004 (DoD-1..8) — the results page's state (this file: DoD-3..DoD-8).
 //
-// Expected behaviour comes from `029.my-search/004.search-api-and-state.md`'s Interface intent
+// Expected behaviour comes from `docs/decisions/029.my-search.md` (step 004) Interface intent
 // and Definition of done, the "Targets" table in `004.context.md`, and `context.md`'s U4
 // (navigation and the `/search?q=` URL), D1 (a blank `q` shows no results and makes no
 // request), D8 (the landing params `entry` and `notes=open`), U1 (a failure is the envelope's

@@ -78,7 +78,8 @@ will not find it there.
 .app.nav-collapsed    { --navw: 48px; }
 .app-nav              { grid-column: 1; }
 .app-main             { grid-column: 2; }    /* explicit — see below */
-.app.nav-overlay-open .app-nav { position: absolute; /* lifted above .app-main */ }
+.app.nav-overlay-open .app-nav { position: fixed; top: 0; bottom: 0; left: 0;
+                                 width: 252px; z-index: 100; /* lifted above .app-main */ }
 @media (width < 820px) { /* the narrow rules — see below */ }
 ```
 
@@ -131,7 +132,9 @@ tree becomes an off-canvas overlay":
 - The left track is **always 48px**: the rail is the only tree at that width.
 - The rail's expand **lifts the same nav column out of the track** as an overlay
   above the centre, through the class `nav-overlay-open` on `.app`. It is the same
-  component at a third presentation, not a fourth component.
+  component at a third presentation, not a fourth component. The overlay is
+  positioned against the **viewport**, not against the grid, at the expanded
+  column's own width and stacked above the centre.
 - **The overlay's open state is not persisted**, and `navCollapsed` is **neither
   read nor written** at that width. The stored preference describes a two-column
   layout that does not exist here, so touching it would mean a roleplayer's wide
@@ -152,7 +155,7 @@ tree becomes an off-canvas overlay":
 | Wall, floating | `min(320px, 84vw)` | 320px reads a note body at 12px without wrapping every line; the `84vw` cap keeps a sliver of stream visible on a narrow screen so the overlay reads as an overlay |
 | Wall, pinned | `320px` | no `vw` term — pinned, it is a grid column and the grid already bounds it |
 | Stream column | `max-width: 720px`, centred, `padding-inline: 18px` | a measure for prose, not for the viewport; the stream is read, not scanned |
-| Composer | same 720px / 18px as the stream | the composer is the stream's last item visually and must share its left edge |
+| Composer | session screen: same 720px / 18px as the stream; character page's start composer: **fills its container** — no 720px cap, no 18px padding | on the session screen the composer is the stream's last item visually and must share its left edge; on the character page there is no stream whose edge it must share, and the user wanted the full width there (user decision, fast/011) |
 | Composer text area | starts at `rows` **3** in the session composer, **10** in the character page's start composer; **native vertical handle** (`resize: vertical`); **no auto-grow**; scrolls internally; a dragged height is persisted per place | the roleplayer sizes the writing area themselves and it stays that size; 10 lines where a session is started, because the user wanted the larger area there especially (2026-10-08 decision, below) |
 | Responsive threshold | `820px` | below it the tree becomes a 48px rail with a lifted overlay, and a pinned wall reverts to floating |
 
@@ -193,11 +196,18 @@ Both edit the same label in place and write through
 `PATCH /api/sessions/{session_id}` (`backend-structure.md`). Committing empty text
 sends `null`, which returns the session to its default label. The rename is **not
 optimistic** — the label changes when the server answers, per
-`forms-and-lists.md`'s never-optimistic rule — and on success the session lists
-are re-read; the row does not move, because a rename never touches
-`last_used_at`. It is one more in-place edit beside the entry, message and note
-editors, not a `Modal`. The interaction's specifics (inline, which keys commit
-and cancel, blur) are `DEC-arch-session-names-4`.
+`forms-and-lists.md`'s never-optimistic rule. **On success the returned session is
+applied** to the held session lists and to the open session's header, rather than
+the lists being re-read, because the response already carries the row; the
+character page's Sessions list, when it is mounted beside the tree, adopts the
+newer row from the workspace list (`forms-and-lists.md`'s narrowed re-load). The
+row does not move, because a rename never touches `last_used_at`. **A failure is
+shown inline under the editor**, which stays open with the typed text, rather than
+as a transient notification — the editor is the failure's in-page place
+(`ui-conventions.md`'s async-feedback rule). It is one more in-place edit beside
+the entry, message and note editors, not a `Modal`. The interaction's specifics
+(inline, which keys commit and cancel, blur) are `DEC-arch-session-names-4`, as
+refined by plan 034 (`docs/decisions/034.session-names.md`).
 
 **The composer's text area is user-resizable, vertically, and does not grow with
 its content** (user decision, 2026-10-08). The rule is the same in both places the
@@ -212,9 +222,10 @@ composer appears, differing only in the default and the persistence field:
 | Persisted height | `rphelper.composer-heights`, field `chat` | same key, field `start` |
 
 Both are rendered through the shared presentational `ComposerCore` (018 D4, below),
-so the default line count and the persistence field are a **parameter of
-`ComposerCore`**, supplied by each host. The exact prop shape is left to the plan
-that builds it. The height is written **on drag end**, not per pixel of the drag;
+so the default line count, the persistence field and the full-width choice are
+**parameters of `ComposerCore`**, supplied by each host (as built by
+fast/011 and its bug fix; the prop shape is a code matter). The height is written
+**on drag end**, not per pixel of the drag;
 the record and its rules are under "Layout persistence" below. The handle is a
 property of the Mantine `Textarea` (its own props / style props), **not** a rule in
 `shell.css`, which holds layout only and is pinned by `tests/stylesheets.test.ts`.
@@ -234,10 +245,31 @@ and no other layout geometry reads it. The reversal record at the end of this do
 carries the history, including the earlier "grows with its content" rule this
 replaces, so nobody re-adds `autosize` by citing it.
 
-**As built, the code still follows the old rule.** Plans 013/006 (D9) and 018/003
-were built to "grows with its content" — `autosize`, a 42px minimum, no handle. The
-rule above is the design of record; the code change is delivered by a follow-up
-fast feature, and until it lands the composer in the code is the old one.
+**As built** (fast/011, 2026-10-08, with its bug fix the same day). Plans 013/006
+(D9) and 018/003 had built "grows with its content" — `autosize`, a 42px minimum,
+no handle; fast/011 replaced that with the rule above, and the composer in the code
+is the one described here. How the in-box controls are kept from covering the
+native handle, and when the height is saved, are `DEC-F011-2` and `DEC-F011-3`.
+
+**Send, Stop and the keyboard** (user decision, fast/011). The composer's own
+controls sit in two places:
+
+- **Inside the text box, at its bottom-right:** Send — an icon-only control
+  labelled "Send" (`ui-conventions.md`'s icon table) — or, while a generation
+  streams, Stop in the same spot (the stop control below).
+- **In the row beneath the box:** the send-blocked reason, Settle and the
+  empty-zone discard. On the character page the Setup select sits under the box
+  instead (below).
+
+**Ctrl+Enter, and Cmd+Enter on macOS, in the composer's text box sends** — exactly
+when Send is shown and enabled, so never while Stop shows, never while a
+send-blocked reason holds, and never during IME composition (the Enter that
+confirms a composed character is not a send). **Plain Enter and Shift+Enter insert
+a newline.** The rule is the same in both hosts, because both are `ComposerCore`.
+**The stream's edit boxes have no shortcut**: they are blur-commit editors of
+existing text, and a send shortcut there would have nothing to send. The shortcut
+is Send's primary path, which is why Send itself can be a small icon in the box it
+sends from (`ui-conventions.md`).
 
 `820px` rather than a Mantine breakpoint token: the number is the point at which
 252 + 720 + 320 stops fitting, which is a property of these three constants and not
@@ -261,7 +293,7 @@ has no argument against it. Inline style objects cannot express these rules at
 all: the grid template, the `--navw` custom property with its collapsed value,
 and the `820px` threshold are a class toggle and a media query, not per-element
 style. CSS Modules, Tailwind and styled-components are forbidden by the root
-`CLAUDE.md` and `overview.md`. A second named file is the only option left that
+`AGENTS.md` and `overview.md`. A second named file is the only option left that
 keeps the styling authority visible in one place.
 
 **What `shell.css` holds, as built, and what it must never hold.** The boundary is
@@ -348,9 +380,8 @@ navigation that brought the roleplayer here, not stored state.
 ## Layout persistence
 
 **Three** localStorage records, under three keys, in three pure modules. The third,
-`rphelper.composer-heights`, is the 2026-10-08 decision and is **not yet built**
-(see the composer rule under "Geometry"); the module name is the suggested one and
-the plan that builds it may settle it.
+`rphelper.composer-heights`, is the 2026-10-08 decision, built by fast/011's bug
+fix (see the composer rule under "Geometry").
 
 ```ts
 // src/app/workspaceLayout.ts  →  key "rphelper.workspace-layout"
@@ -362,7 +393,7 @@ type WorkspaceLayout = {
 // src/app/treeCollapse.ts     →  key "rphelper.tree-collapsed"
 //   a JSON array of collapsed character ids (strings)
 
-// src/app/composerHeights.ts  →  key "rphelper.composer-heights"   (suggested)
+// src/app/composerHeights.ts  →  key "rphelper.composer-heights"
 type ComposerHeights = {
   chat: number | null;   // session composer, pixel height; null = default rows 3
   start: number | null;  // character page start composer; null = default rows 10
@@ -443,11 +474,12 @@ true is worth naming: **the storage is passed in as a parameter** — a minimal
 `getItem` / `setItem` interface, or `null` — rather than reached for as a global
 (008 D8). So the modules touch no `document`, no `window` and no React, and every
 fallback path above is unit-testable with no DOM, which is what the pipeline's
-test-coder needs (`docs/plans/CLAUDE.md`). `App` owns the real storage and threads
+test-coder needs (`docs/plans/AGENTS.md`). `App` owns the real storage and threads
 it to the two readers: `WorkspaceShell` and, through `SessionRoute`,
 `SessionScreen` (016 D2). The composer heights add the two composer hosts as
-readers; how the storage reaches them is the building plan's call, under the same
-rule — a parameter, never a global.
+readers, under the same rule — a parameter, never a global: `App` threads the same
+storage on through the session screen to the session composer, and through the
+character page to the start composer (fast/011's bug fix).
 
 ---
 
@@ -480,7 +512,9 @@ context menu and no separate action column: the actions sit in the entry's own
 header. **Edit, copy, the translation flicker, re-open and delete are one revealed
 group**, and the reveal is `ui-conventions.md`'s — Mantine's `useHover` +
 `useFocusWithin` + a touch query, applied as opacity so the controls stay in the
-DOM and the tab order. The stream is a column of documents, not a table, so
+DOM and the tab order. **The group is also revealed while that entry's
+translation is pending** (fast/015, DEC-F015-4), so the flicker's pending glyph is
+seen without hovering. The stream is a column of documents, not a table, so
 `forms-and-lists.md`'s table-row overflow-menu rule does not reach here — that
 rule exists to keep a *row* from collapsing under four icon buttons.
 
@@ -534,11 +568,12 @@ serialising the rendered DOM.
 set: CommonMark **as rendered, without plugins** — GFM constructs are left as
 typed, because nothing renders them either; syntax removed; **words and line
 breaks kept**; unordered bullets become `• `; ordered numbers kept. The
-authoritative rule list lives in plan 014's `002.context.md` and has not been
-lifted into this doc, because it is a table of constructs rather than a design
-decision. **One consequence is visible to the roleplayer and is required:**
-`US-124.AC-2` strips asterisk-marked action markers along with the markdown, so
-`*smiles*` arrives as `smiles`. That is the criterion, not a side effect.
+authoritative rule list lives in `docs/decisions/014.entry-editing-and-copy-out.md`
+and has not been lifted into this doc, because it is a table of constructs rather
+than a design decision. **One consequence is visible to the roleplayer and is
+required:** `US-124.AC-2` strips asterisk-marked action markers along with the
+markdown, so `*smiles*` arrives as `smiles`. That is the criterion, not a side
+effect.
 `app/copyOut.ts` is the one clipboard writer, and on a **non-secure origin** —
 which is every LAN address today — `navigator.clipboard` does not exist, so it
 falls back to `execCommand("copy")` (014 D9, `deployment.md`'s TLS note). A
@@ -842,10 +877,13 @@ state. Stated here because a Settle greyed out until an assistant row exists is
 the obvious implementation and is exactly the trap US-134/US-135 were written to
 close.
 
-**Settle and Send are labelled buttons, not icons.** Settle is the most
-consequential action in the product and is the primary button; Send is secondary.
+**Settle is a labelled button, not an icon.** Settle is the most consequential
+action in the product and is the primary button, in the row beneath the composer.
 This resolved the open `_TBD:` that proposed `IconMessageCheck`
-(`ui-conventions.md`).
+(`ui-conventions.md`). **Send is no longer labelled** (user decision, fast/011):
+it is an icon-only control inside the text box, and Ctrl/Cmd+Enter is its primary
+path ("Geometry" above; `ui-conventions.md` records it as the named exception to
+"controls that spend a model call carry words").
 
 ### The enormous-paste warning sits on the composer, and only there
 
@@ -938,7 +976,8 @@ while streaming (019 D13). Reasoning, since both arrangements are defensible:
   (`llm-and-streaming.md`).
 
 **Settle is unaffected and stays exactly where it is.** It remains the primary
-labelled button beside the Send/Stop slot, enabled or not on its own rules above
+labelled button in the row beneath the box whose bottom-right corner holds the
+Send/Stop slot (fast/011), enabled or not on its own rules above
 — a generation in flight does not disable it, because the zone may already hold a
 message worth settling.
 
@@ -1047,7 +1086,10 @@ that (R3, US-101). **Both are always visible** (`ui-conventions.md`'s
 accessibility floor, where the deliberate difference from the stream's revealed
 actions is recorded). A disabled note renders struck through and dimmed but keeps
 its forced marker visible, so the state that will be restored on re-enable is
-readable before re-enabling.
+readable before re-enabling. **The two flag controls sit at the right end of the
+note's markdown editor toolbar** (user decision, fast/012) — the shared editor's
+optional trailing toolbar group (`frontend-structure.md`) — while the reach line
+and any failure text stay under the editor.
 
 Each note carries a one-line statement of its current reach — forced, searchable
 or disabled — because the two icons say what is *set* and the roleplayer needs to
@@ -1092,6 +1134,25 @@ stream entry, for the same reason. As built (015):
   two halves are one rule seen from either end.
 - A note is created **enabled and not forced** (R3, US-053), directly in its level.
 
+**One note behaviour at every mount** — the wall's levels, the character page's
+notes and Settings' "Your notes" (user decision, fast/012). The shared group has no
+per-mount mode:
+
+- **The header '+' beside the group title is the only way to open a draft.** It
+  is icon-only, labelled "New note", offered once the level has loaded and
+  disabled while a draft is open. There is no labelled "New note" button anywhere.
+- **The draft is the first item of the list** and **saves when focus leaves it**:
+  blank text drops it with no request, anything else is one create. Saved notes
+  save on focus leaving them, and blank text deletes them with no confirm (above).
+- **There are no Save and Cancel buttons** on a draft or on a saved note.
+- **A flag click toggles only the flag; it does not save the body.** The toolbar
+  holding the flags is inside the note's focus-leave boundary, so moving focus
+  from the text to a flag is not "leaving the note"; the body saves when focus
+  later leaves the note (`DEC-F012-1`).
+
+This supersedes the character page's opt-in "header-add" mode with explicit
+Save/Cancel that plan 033 introduced (its D6) — `DEC-F012-2`.
+
 ### `@dnd-kit` is finally used
 
 Note reordering within a level (UC-076, US-102) is the project's **first and only**
@@ -1118,7 +1179,7 @@ nothing requiring it; US-102 is that requirement.
 - **A card is not draggable** while its editor has focus, while that level's
   reorder is in flight, or as the unsaved new note.
 - **Reorder is opt-in on the shared group** (`reorderable`), which is how the
-  character page's notes grid shares the same components without reordering until
+  character page's notes share the same components without reordering until
   018 turned it on.
 - **A reorder failure renders inline, per level** — "Could not reorder the
   notes." — and the order reverts. This is the product's one sanctioned optimistic
@@ -1155,37 +1216,61 @@ page** (018 D10): the shell grid is `nav | main`, and the wall exists only insid
 the session screen (US-095) — so a page that is not a session simply has no third
 column to suppress.
 
-**The body's order, as built** (018 D12):
+**The body is a page header above five tabs** (plan 033, user decision). This
+replaces the single-scroll order of 018 D10.
 
 ```
-header
-  → name + persona  (+ Archive / Restore, + Export)
-  → notes grid
-  → setups
-  → configuration
-  → sessions
-  → composer
+header  — saved name, "Archived" badge, icon-only Archive / Restore and Export
+tabs
+  Sessions       (default) — "New session" composer → divider → sessions list
+  Main info                — name + persona
+  Configuration            — the resolved-configuration section, moved as-is
+  Notes                    — the character's notes, as a list
+  Setups                   — the setups list, with inline create
 ```
+
+- **Sessions is the tab selected whenever the page opens** (user decision).
+- **The active tab is component-local view state** — not in the URL and not
+  persisted — for the same reason a modal's open flag is (`forms-and-lists.md`):
+  it means nothing outside the page. The consequence is that every link to
+  `/characters/<id>`, my-search hits included, lands on Sessions
+  (`frontend-structure.md`).
+- **Every tab's section stays mounted and loads once when the page opens**;
+  an inactive tab is hidden, not unmounted. This keeps what the single-scroll page
+  did — each section loading once per page open — so switching tabs issues no
+  request.
+- **The header holds the page's object-level actions**: Archive / Restore and
+  Export, icon-only through the shared `IconButton` (`ui-conventions.md`), with
+  Export disabled while it is in flight. They are absent on the draft page
+  (below).
+- **The persona editor on Main info is taller than the shared editor's default**
+  (user decision), through the shared editor's optional minimum height rather than
+  a second editor (`frontend-structure.md`'s "One editor wrapper"). Name and
+  persona still save on focus loss.
 
 **This is the same components in a different arrangement, not a second design.**
-The note card, the in-place edit and the reorder behave identically in both
-places; only the container differs. Stated because the obvious implementation
+The note card, the in-place edit and the reorder behave identically on the wall
+and here; only the container differs. Stated because the obvious implementation
 forks a second note component for the character page and the two then drift.
 
-**The notes grid is the shared group with an opt-in grid layout** (018 D8) — the
-same `MemoLevelGroup` the wall uses, with a rect sorting strategy when
-reorderable, inside the character section's **own** `DndContext`. The sensors and
-the position-only announcements are shared through one module,
-`app/memoDnd.ts`, so two drag contexts keep **one** keyboard path. **No second
-card component and no second group component exists**, which is what makes "same
+**The notes are the shared group in its list layout** (018 D8; plan 033 moved the
+page from the group's opt-in grid layout to the list) — the same `MemoLevelGroup`
+the wall uses, reorderable, inside the character section's **own** `DndContext`.
+The sensors and the position-only announcements are shared through one module,
+`app/memoDnd.ts`, so two drag contexts keep **one** keyboard path. Its header '+'
+and its draft follow the one note behaviour above (fast/012). **No second card
+component and no second group component exists**, which is what makes "same
 components, different arrangement" a checkable claim rather than an intention.
 
 ### Setups, configuration and sessions
 
-- **Setups** (plan 010, rebuilt by 018 into the page's setups block): "New setup"
-  as a labelled `IconPlus` button, a "Show archived setups" switch, a table of
-  setups with a per-row overflow menu (Edit / Archive / Restore), create and edit
-  in a modal, and the neutral empty line "No setups yet."
+- **Setups** (plan 010, rebuilt by 018 into the page's setups block, re-shaped by
+  033): an icon-only '+' labelled "New setup" in the section header beside the
+  "Show archived setups" switch; the '+' opens an **inline create form at the top
+  of the list** — name and description, with Save and Cancel icon buttons and a
+  failure rendered inside the form, the named exception in `forms-and-lists.md`;
+  a table of setups with a per-row overflow menu (Edit / Archive / Restore), with
+  **edit** in a modal; and the neutral empty line "No setups yet."
   (`forms-and-lists.md`).
 - **Configuration** (018 D9, realizing UC-048 / US-059's UI, which 017 left
   without a caller): the model as a `Select` whose unset option reads **"First
@@ -1195,12 +1280,17 @@ components, different arrangement" a checkable claim rather than an intention.
   inheritance chain legible at the level you are editing. **No language fields** —
   `US-061.AC-3` puts the two languages on the user and session levels only,
   skipping the character. Failures render in place.
-- **Sessions** (plan 011): a "Show archived sessions" switch, a table of sessions
-  with a per-row Archive / Restore / Export menu, the neutral empty line "No
-  sessions yet.", an **"Import session"** button (plan 031), and the inline start
-  control below. Each row is labelled by the one session label rule ("Geometry"
-  above) — the same label the tree and the session header show. Rename is not
-  offered here; it lives on the tree row and the session header.
+- **Sessions** (plan 011, re-shaped by 033): the tab reads, top to bottom, the
+  **"New session" composer** (below), a visible divider, then the list. The
+  list's header carries the "Show archived sessions" switch and an icon-only
+  **"Import session"** control (plan 031), disabled while an import is in flight.
+  The list is a table of sessions with a per-row Archive / Restore / Export menu
+  and the neutral empty line "No sessions yet." **There is no start control in the
+  list** — a session starts only by writing (below). Each row is labelled by the
+  one session label rule ("Geometry" above) — the same label the tree and the
+  session header show. Rename is not offered here; it lives on the tree row and
+  the session header, and a rename made there reaches this list by the narrowed
+  re-load (`forms-and-lists.md`).
 
 **The archive toggle is section-local everywhere, and nothing persists it**
 (018 D11, closing a question 009, 010 and 011 each answered a part of). The tree
@@ -1214,49 +1304,43 @@ three sections, three toggles, none persisted, and no part left open. Not
 persisted because showing archived material is a lookup, not a preference — a
 roleplayer who wanted it permanently would be asking for archive not to exist.
 
-### Starting a session — the named exception to the modal rule
+### Starting a session — by writing, and only by writing
 
 **Realizes:** UC-021, UC-023, US-026
 
-Two ways in, and they are two because they answer two different questions.
+**There is one way in: writing the first message in the page's composer**
+(plan 033, user decision). The Sessions section's **inline start control** — a
+Setup select beside a "Start session" button that created a session with no
+message (011 D1) — **is retired**, and with it its named exception to the modal
+rule (`forms-and-lists.md` records the retirement). The one choice that control
+existed for, the setup, moved into the composer (below), so what was given up is
+only a session started without a first message.
 
-**With a setup: the Sessions section's inline start control** (011 D1, user
-decision) — a **Setup select** defaulting to "No setup", beside a **"Start
-session"** button. One POST, no message, then a push navigation to
-`/sessions/<id>`.
-
-**This is a named exception to "create and edit are always a `Modal`"**
-(`forms-and-lists.md` carries it with the other two). A one-choice inline control
-is **not a form**: there is one optional select and one button, and a modal around
-that is a dialog whose entire content is a dropdown. The earlier sentence in this
-doc — that the modal rule "continues to govern every create … including character,
-setup and session creation" — **is corrected**: it governs **setup** creation,
-while character creation is the draft-page exception and session creation is this
-one. Both halves are stated, so the two docs cannot disagree.
-
-The control starts a session perfectly well with an **empty or failed** setup list
-(R2): a list that could not load must not become a precondition, and the failure
-line beside it is non-blocking. An **archived** setup is not offered
-(`setup_archived`, UC-021), while an existing session whose setup was later
-archived keeps showing its label — R6 does not cascade.
+The composer's setup choice starts a session perfectly well with an **empty or
+failed** setup list (R2): a list that could not load must not become a
+precondition, and its failure line is non-blocking. An **archived** setup is not
+offered (`setup_archived`, UC-021), while an existing session whose setup was
+later archived keeps showing its label — R6 does not cascade.
 
 ### The composer, and starting a session by writing
 
-The body ends with a **composer**, and writing a message in it is the other way a
-roleplay begins: the instance creates a new session under the character with the
-written message already in its current zone (UC-080, US-117.AC-1, US-117.AC-2).
-There is no separate "create session" step to press first — that is the whole
-point of the affordance.
+The Sessions tab opens with a **composer** under the heading **"New session"**,
+and writing a message in it is how a roleplay begins: the instance creates a new
+session under the character with the written message already in its current zone
+(UC-080, US-117.AC-1, US-117.AC-2). There is no separate "create session" step to
+press first — that is the whole point of the affordance.
 
 **It is the same composer as the stream's, not a second one**, and that is now
 true at the file level (018 D4): **`ComposerCore`** holds the text area, the
-geometry above, the labelled Send, the enormous-paste warning and the
-send-blocked reason, and the stream's `Composer` and the page's
-`CharacterComposer` are its **two hosts**, adding only their own controls through
-slots. **The one geometry difference between the hosts is a parameter, not a
-fork**: each host passes its default line count (3 for the stream, 10 here) and its
-persisted-height field (`chat` / `start`) to `ComposerCore` (2026-10-08 decision,
-"Geometry" above). Stated this way because the obvious implementation writes a second composer
+geometry above, the in-box Send, the Ctrl/Cmd+Enter shortcut, the
+enormous-paste warning and the send-blocked reason, and the stream's `Composer`
+and the page's `CharacterComposer` are its **two hosts**, adding only their own
+controls through slots. **The geometry differences between the hosts are
+parameters, not a fork**: each host passes its default line count (3 for the
+stream, 10 here), its persisted-height field (`chat` / `start`) and — on this page
+only — the full-width choice to `ComposerCore` (2026-10-08 decision and fast/011,
+"Geometry" above). Here the Setup select sits under the text box, with Send inside
+the box above it. Stated this way because the obvious implementation writes a second composer
 for this page and the two then drift on the first change to either — the same
 failure the note cards above are protected from.
 
@@ -1268,24 +1352,44 @@ that follows. Once the session exists the roleplayer is in the workspace on it, 
 this composer is used at most once per session it creates. It is an entry point,
 not a second place to write.
 
-**The page composer carries neither the kind switch nor a setup choice**
-(`US-117.AC-4`; 018 D1 — closing the `_TBD:` that stood here). The reasons are
-UC-080's own: there is no partner block yet for the switch's alternating default
-to read, and UC-080 names no setup — so the session it creates has **`setup_id`
-NULL**, which R2 makes a first-class case rather than a degraded one. The
-roleplayer who wants a setup uses the Sessions section's start control above,
-which exists for exactly that choice.
+**The page composer carries an optional setup choice, and no kind switch**
+(plan 033, user decision — reversing the "neither" of 018 D1, which closed the
+`_TBD:` that stood here). **No kind switch**, for UC-080's own reason: there is no
+partner block yet for the switch's alternating default to read. **The setup
+choice** defaults to **"No setup"** and offers working setups only — never an
+archived one — and it is refreshed when its list is opened, so a setup just
+created on the Setups tab is offered without reloading the page. The chosen setup
+travels **with the opening message in the one create request**
+(`session-stream.md`), so the session is created with it, or with `setup_id` NULL
+when none is chosen — which R2 makes a first-class case rather than a degraded
+one. Plan 033 shipped this as a user-accepted conflict with `US-117.AC-4` and
+UC-080's postcondition, which its finalization amended to match.
 
-**The opening message draws no assistant reply, and that is
-`docs/plans/defects.md` D-01.** `US-117.AC-3` and UC-080 step 5 require the
-assistant to answer that first message as it would any other discussion message.
-As built, the route creates the session and writes the message as a current-zone
-row and **nothing answers it**; the roleplayer must send again on the session
-screen to get a candidate. The design question is **closed** — yes, it should
-draw a reply, and the create route stays JSON because the compose happens on the
-session once it exists (018 D2). What is missing is the code: 018 deferred the
-reply to a later plan and no later plan took it. Recorded as a defect, not as work
-owed by a shipped plan.
+**The opening message draws the assistant's reply, with no second send**
+(`US-117.AC-3`, UC-080 step 5; `fast/004.character-page-first-reply`, which closed
+defect D-01). The create route stays JSON and calls no model (018 D2); once the
+navigation lands on the new session, the **session screen** draws the reply with
+one textless compose — the same exchange Regenerate issues — so it renders as the
+ordinary live reply, Stop reaches it, and a failure goes through `notifyFailure`
+(`session-stream.md`; DEC-F004-1, DEC-F004-3). **A send from the character page
+gets exactly one reply.** The trigger is a one-shot intent carried by that
+navigation and consumed on arrival, never a reading of the zone
+(`frontend-structure.md`; DEC-F004-2): reopening any session whose zone ends with
+an unanswered message — a legitimate resting state after a stop or a refused
+send — draws nothing.
+
+**A reload or a navigation away while that first reply streams behaves like
+Stop** (DEC-F004-4): the partial text persists as an ordinary zone row, nothing
+re-fires on return because the intent was already consumed, and Regenerate is the
+way to redraw.
+
+**The page composer deliberately takes no send-blocked reason** (DEC-F004-5) — a
+deliberate asymmetry between the two hosts of `ComposerCore`, so it is not
+"fixed" into symmetry. Creating the session calls no model and needs none, and
+the character page holds no models list to compute a reason from. With no usable
+model the session is still created with the message as a zone row (R10, US-143),
+and the refused reply surfaces on the session screen — through `notifyFailure`
+and, once its configuration loads, through the session composer's own reason.
 
 ### The draft page
 
@@ -1298,9 +1402,9 @@ nothing is persisted until there is content, so there is no form to submit.
 because "persists nothing until something is entered" does not by itself say
 *when* something counts as entered:
 
-- A **"Draft" badge and a marker line**; **Name + Persona only** — no notes, no
-  setups, no configuration, no sessions, no composer, because none of them can
-  hang off a row that does not exist.
+- A **"Draft" badge and a marker line**; **Name + Persona only** — no tabs, no
+  notes, no setups, no configuration, no sessions, no composer, because none of
+  them can hang off a row that does not exist.
 - **The character is created when the Name field loses focus holding non-blank
   text**, and the persona is sent with it. Blur on a non-blank name is the
   earliest moment the roleplayer has demonstrably decided on an identity for the
@@ -1314,8 +1418,9 @@ because "persists nothing until something is entered" does not by itself say
 - There is **no Create button**. Plan 009 shipped one as an interim and 018
   removed it, which is what `/characters/new` was always specified to be.
 
-**Export sits beside Archive / Restore** (plan 030) — a `variant="default"` button
-with `IconDownload`, rendered under the same condition as those two and therefore
+**Export sits in the page header beside Archive / Restore** (plan 030; icon-only
+since plan 033) — an `IconButton` with `IconDownload`, disabled while the export
+is in flight, rendered under the same condition as those two and therefore
 **absent on the draft page**: there is nothing to export until the row exists.
 
 ---
@@ -1496,8 +1601,7 @@ one rather than (B)'s. The native handle no longer collides with anything, becau
   wanted a larger, adjustable writing area — especially when starting a session —
   and chose a dragged, persisted height over auto-grow, since the two cannot
   coexist. The "grows with its content" rule is **no longer the design**; do not
-  re-add `autosize` by citing it. The code change is delivered by a follow-up fast
-  feature.
+  re-add `autosize` by citing it. Built by fast/011 and its bug fix (2026-10-08).
 
 **What was genuinely lost.** (A)'s custom-property channel gave a pointer-move
 zero component re-renders, and `frontend-structure.md` cited it as the concrete
@@ -1524,9 +1628,32 @@ number driving layout geometry outside the composer's own text area.
 
 ## Decision history
 
+- **2026-11-06 — a session rename applies the returned row and fails inline**
+  (plan 034). On success the returned session is applied to the held lists and
+  the open header instead of the lists being re-read, and the character page's
+  Sessions list follows the workspace list; a failure renders under the editor,
+  which keeps the typed text, instead of a notification. Refines
+  `DEC-arch-session-names-4`; detail in `DEC-034-11` and `DEC-034-13`.
 - **2026-11-05 — the tree row shows a session's label, not its start time.**
   Supersedes the start-time row (011 D4): line 1 is the session's `name` or,
   when never renamed, its local start date; line 2 is the local last-use time
   beside the setup label. One label rule everywhere a session is named; rename
   from the tree row and the session header. Detail in `DEC-arch-session-names-1`,
   `DEC-arch-session-names-3` and `DEC-arch-session-names-4`.
+- **2026-10-08 — the character page is tabbed; the inline start control is
+  retired; the page composer offers an optional setup** (plan 033, user
+  decision). Header above five tabs with Sessions the default; a session starts
+  only by writing, with the setup chosen in the composer; setup create is inline.
+  Reverses 018 D10's single scroll, 018 D1's "neither" and 011 D1's start control.
+  Detail in `docs/decisions/033.character-page-tabs.md`.
+- **2026-10-08 — Send moves into the composer's text box; Ctrl/Cmd+Enter sends;
+  the start composer is full width** (fast/011, user decision). Send is icon-only
+  at the box's bottom-right, Stop takes the same spot while streaming, and the
+  blocked reason, Settle and Discard sit in the row beneath. The vertical-resize,
+  no-auto-grow and persisted-height rule of the same date is built. Mechanism in
+  `DEC-F011-1`..`DEC-F011-4`.
+- **2026-10-08 — one note behaviour at every mount** (fast/012, user decision).
+  Header '+' is the only way to open a draft; drafts and saved notes save on
+  focus leave; no Save/Cancel; flag controls in the note's editor toolbar.
+  Supersedes plan 033's opt-in header-add mode (D6). Detail in `DEC-F012-1`..
+  `DEC-F012-4`.

@@ -1,7 +1,7 @@
 """`GET /api/search` — feature 029, step 003 (DoD-1..9).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/029.my-search/003.search-route.md` (Interface intent and Definition of done),
+`docs/decisions/029.my-search.md` (Interface intent and Definition of done),
 `003.context.md` (the router pattern, the error codes and the test notes) and the feature
 `context.md` — **D1** (one route, five fixed groups, a blank `q` answers five empty lists and
 opens no model), **U1** (an embedding failure fails the whole request, envelope unchanged),
@@ -53,7 +53,7 @@ How the expectations are derived
 Each test name ends `__S029_003_DoD<n>` with the DoD item it covers. DoD-10 is `[manual/live]`
 (the registration position and the docstrings) and carries no test here.
 
-Feature 034, step 003 (`docs/plans/034.session-names/003.my-search-names.md`, DEC-034-8) adds
+Feature 034, step 003 (`docs/decisions/034.session-names.md`, DEC-034-8) adds
 the session hit's `name` and the entry hit's `session_name` to the contract above — each the
 stored session name, or null when never renamed — and a name arm that finds sessions by their
 stored name. The block at the end of this module covers its DoD-1, DoD-3..DoD-5 and DoD-7..DoD-9

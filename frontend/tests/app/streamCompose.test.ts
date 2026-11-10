@@ -1,5 +1,5 @@
 // Feature 019, step 005 — the compose effect and Settle-mid-stream
-// (docs/plans/019.streaming-transport-and-stop/005.compose-effect.md), DoD-1..DoD-11.
+// (docs/decisions/019.streaming-transport-and-stop.md), DoD-1..DoD-11.
 //
 // Expected values come from the step's Interface intent and Definition of done, context.md
 // D11-D16, D18 and 005.context.md ("Ordering of re-reads", "Test notes"):

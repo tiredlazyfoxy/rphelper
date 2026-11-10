@@ -1,6 +1,6 @@
 """Tests for the two search credentials on ``Settings`` (feature 028, step 001).
 
-Covers DoD-1 .. DoD-4 of ``docs/plans/028.web-search-tool/001.search-settings-and-google-provider.md``.
+Covers DoD-1 .. DoD-4 of ``docs/decisions/028.web-search-tool.md``.
 Every expected value comes from that step file, from feature 028's ``context.md`` (D2, D12)
 and from ``001.context.md`` ("The settings fields", "The conftest amendment").
 

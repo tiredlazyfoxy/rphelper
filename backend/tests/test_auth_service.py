@@ -1,6 +1,6 @@
 """Tests for ``app.services.auth`` — the uniform refusal and the session lifecycle.
 
-Every expected value comes from ``docs/plans/004.authentication-session/001.auth-sessions-and-service.md``
+Every expected value comes from ``docs/decisions/004.authentication-session.md``
 (Interface intent + Definition of done), ``001.context.md`` and the feature ``context.md``
 (D1 the uniform refusal, D4 absolute expiry, D5 token and digest, D7 what resolution
 requires, D9 idempotent revocation, D13 no normalization). Bindings come from
@@ -681,7 +681,7 @@ def test_entry_points_take_plain_arguments_and_no_request__DoD12(
 
 
 # ======================================================================================
-# Feature 005, step 001 (`docs/plans/005.admin-shell-and-users/001.last-login-and-session-revoke.md`)
+# Feature 005, step 001 (`docs/decisions/005.admin-shell-and-users.md`)
 # — the `users.last_login_at` stamp in the open-session operation, and the bulk
 # revoke-every-session-for-one-user helper. Expected values come from that step's DoD-3..12,
 # `001.context.md` and feature `context.md` D2 / D4. Bindings come from `## Skeleton` →

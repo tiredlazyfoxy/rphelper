@@ -94,40 +94,6 @@ export async function fetchSession(sessionId: string, signal?: AbortSignal): Pro
 }
 
 /**
- * `POST /api/characters/<characterId>/sessions` with the JSON body `{ setup_id: <id or null> }`
- * — always sent, so the request states "no setup" rather than implying it. Resolves to the
- * created session's nine `Session` keys only: the route's `opening_message: null` never
- * reaches a store (018 D5).
- */
-export async function startSession(
-  characterId: string,
-  setupId: string | null,
-  signal?: AbortSignal,
-): Promise<Session> {
-  const started = await apiPost<StartedSession>(
-    characterSessionsPath(characterId),
-    { setup_id: setupId },
-    signal,
-  );
-  return toSession(started);
-}
-
-/** The nine `Session` keys of a started session, named explicitly; drops `opening_message`. */
-function toSession(started: Session): Session {
-  return {
-    id: started.id,
-    character_id: started.character_id,
-    setup_id: started.setup_id,
-    setup_name: started.setup_name,
-    name: started.name,
-    archived_at: started.archived_at,
-    last_used_at: started.last_used_at,
-    created_at: started.created_at,
-    updated_at: started.updated_at,
-  };
-}
-
-/**
  * `POST /api/characters/<characterId>/sessions` (018 D5, 033 D8): create-and-seed. With no
  * setup id (null, the default) the JSON body is exactly `{ opening_message: <text verbatim> }`;
  * with one it is `{ opening_message, setup_id }`. Resolves to the served `StartedSession`

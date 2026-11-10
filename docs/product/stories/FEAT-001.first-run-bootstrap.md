@@ -32,7 +32,7 @@
   - **US-148.AC-1** — Given no database exists, when someone opens the instance's main address, then they are shown the bootstrap offer, not a sign-in form.
   - **US-148.AC-2** — Given no database exists, when someone opens the sign-in address or the administration address, then they are shown the bootstrap offer.
   - **US-148.AC-3** — Given no database exists and the browser still holds a sign-in from a previous database, when someone opens any of those addresses, then they are shown the bootstrap offer, not a sign-in form or an endless waiting state.
-  - **US-148.AC-4** — Given the instance is configured, when someone opens those addresses, then no bootstrap offer is shown and they behave as before (UC-003).
+  - **US-148.AC-4** — Given the instance is configured, when someone opens those addresses, then no bootstrap offer is shown.
 - **Note:** Out of scope: a database lost while someone is mid-use. Main-app deep links other than the root are not specified.
-- **Source:** `[confirmed: user]` interview 2026-10-07, challenge C54.
+- **Source:** `[confirmed: user]` interview 2026-10-07, challenge C54; AC-4 amended `[confirmed: user]` interview 2026-11-09, finalize batch-2026-11-09 (dropped "and they behave as before (UC-003)": no plan tested it).
 <!-- product-spec:end -->

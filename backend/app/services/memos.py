@@ -39,13 +39,13 @@ from app.ids import SnowflakeGenerator
 from app.models.memos import MemoScope
 from app.services.embedding import (
     DEFAULT_EMBED_TIMEOUT_SECONDS,
-    LlmClient,
     LlmClientFactory,
     delete_vector,
     embed_texts,
     open_embedding_model,
     write_vector,
 )
+from app.services.llm.gateway import LlmGateway
 
 
 @dataclass(frozen=True)
@@ -91,7 +91,7 @@ def create_memo(
     scope_id: int | None,
     body: str,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> Memo:
     """Insert one enabled, not-forced memo at the caller's addressed level and return it.
@@ -175,7 +175,7 @@ def update_memo(
     is_enabled: bool | None = None,
     is_forced: bool | None = None,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> Memo:
     """Write only the supplied columns (plus `updated_at` if any) and return the row after.

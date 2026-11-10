@@ -1,6 +1,6 @@
 """Tests for the assembler in `app/services/context.py` — feature 020, step 002.
 
-Every expected value comes from `docs/plans/020.context-assembly/002.assemble-context.md`
+Every expected value comes from `docs/decisions/020.context-assembly.md`
 (Definition of done), the feature `context.md` ("The prompt format", the Kind tags table,
 D1..D12) and `002.context.md`. No renderer or mapper of step 001 is called to compute an
 expectation. Bindings come from `status.md` `## Skeleton` -> Step 002:

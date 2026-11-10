@@ -1,7 +1,7 @@
 # Defects — delivered behaviour that does not satisfy its criterion
 
-Raised by `/product-spec`'s finalization of features 008..032 (2026-10-06) and
-recorded here because each one is work for `docs/plans/`, not a change to
+Raised by `/product-spec`'s finalization of features 008..032 (2026-10-06) — D-06
+and D-07 by the finalization of 2026-11-09 — and recorded here because each one is work for `docs/plans/`, not a change to
 `docs/product/`. Every entry names the criterion it violates, what the build
 does instead, where the decision was taken, and the vehicle that should repair
 it.
@@ -17,6 +17,8 @@ owning `status.md` records the repair, and the `**Remaining:**` line in
 | D-03 | US-112.AC-1 (widened) | FEAT-009 | `024.embedding-lifecycle` | `/bug-fixer` |
 | D-04 | US-112.AC-3 | FEAT-009 | `024.embedding-lifecycle` | `/bug-fixer` |
 | D-05 | US-147 | FEAT-017 | `029.my-search` | `/bug-fixer` |
+| D-06 | timestamp form (`data-model.md`) | FEAT-003 | `003.first-run-bootstrap` | `/bug-fixer` |
+| D-07 | DEC-027-5 (excerpt body) | FEAT-015 | `027.session-search-tool` | `/bug-fixer` |
 
 ---
 
@@ -34,15 +36,15 @@ must send again on the session screen to get a candidate.
 **Where it was decided, and how it was lost.** `018` deliberately deferred the
 reply rather than dropping it:
 
-- `docs/plans/018.character-page/context.md:45` — "**US-117.AC-3 / UC-080 step 5**
+- 018.character-page (docs/decisions/018.character-page.md), DEC-018-2 — "**US-117.AC-3 / UC-080 step 5**
   (the assistant answers the opening message) — `021`, …"
-- `docs/plans/018.character-page/context.md:298` — "US-117.AC-3 is deferred to
+- 018.character-page (docs/decisions/018.character-page.md), DEC-018-2 — "US-117.AC-3 is deferred to
   `021`, which composes on the session once it exists."
-- `docs/plans/018.character-page/outcome.md:61` — "**`021`** owes
+- 018.character-page (docs/decisions/018.character-page.md) — "**`021`** owes
   **US-117.AC-3** (UC-080 step 5)".
 
 **`021` never took it.** Its `## Product ids` section
-(`docs/plans/021.compose-loop-and-tools/context.md`) delivers FEAT-010 via UC-034,
+(021.compose-loop-and-tools (docs/decisions/021.compose-loop-and-tools.md)) delivers FEAT-010 via UC-034,
 US-037 and US-044 only. Neither `021` nor any later plan cites US-117 or UC-080.
 The criterion fell through the handoff.
 
@@ -50,13 +52,13 @@ The criterion fell through the handoff.
 to repair — the behaviour was never built. `/bug-fixer` adds no new scope by
 contract. This needs a small plan of its own.
 
-**What the fix must settle.** `018` D2 kept the create route JSON precisely so its
+**What the fix must settle.** DEC-018-2 kept the create route JSON precisely so its
 media type would not change. Either the reply is triggered after creation (the
 session screen starts a compose when it opens on a just-seeded zone), or the create
 route becomes a streaming response — the first keeps `018`'s contract intact and is
-what `018/outcome.md:61` anticipated. `021`'s `composeZone` already exists to call.
+what 018.character-page (docs/decisions/018.character-page.md) anticipated. `021`'s `composeZone` already exists to call.
 Also decide whether the page composer takes `sendBlockedReason` (US-107) once
-sending there triggers a model call; `018` D4 left the prop ready.
+sending there triggers a model call; DEC-018-4 left the prop ready.
 
 ---
 
@@ -68,19 +70,19 @@ place.* Confirmed at finalization as standing unamended for this half.
 
 **What the build does.** While streaming, `022` renders a **live reply** beneath
 the zone rows with **no edit control**
-(`docs/plans/022.discussion-ui/context.md:327`, D6, from user decision U4). Once
-the stream ends, `019` D14's zone re-read replaces it with the persisted row, and
+(022.discussion-ui (docs/decisions/022.discussion-ui.md), DEC-022-6, from user decision U4). Once
+the stream ends, DEC-019-14's zone re-read replaces it with the persisted row, and
 **that row is editable like any other zone message**.
 
-**The hazard the fix must solve.** D6 gives a real reason, not an oversight: an
+**The hazard the fix must solve.** DEC-022-6 gives a real reason, not an oversight: an
 edit racing the server's own write of that row would either be lost or clobber it
-(`019` D11). A fix that simply exposes the editor re-introduces that race. Any
+(DEC-019-11). A fix that simply exposes the editor re-introduces that race. Any
 repair has to decide what happens to an in-flight edit when the persisted row
 arrives.
 
 **A reading that would close this without code.** US-115.AC-1 is conditioned on a
 message *sitting in* the current zone. An in-flight reply has no persisted row yet,
-which is exactly the argument `022/outcome.md` made. If that reading is accepted,
+which is exactly the argument 022.discussion-ui (docs/decisions/022.discussion-ui.md) made. If that reading is accepted,
 D-02 is not a defect but an amendment — and the criterion needs one clarifying
 clause rather than a fix. Recorded so the choice is deliberate.
 
@@ -95,13 +97,13 @@ still save, and the roleplayer is told search coverage is incomplete, never refu
 
 **What the build does.** The degraded path catches exactly two errors —
 `NoEmbeddingModelError` (409) and `LlmUnreachableError` (502)
-(`docs/plans/024.embedding-lifecycle/context.md:295`, D8, user decision U3).
+(024.embedding-lifecycle (docs/decisions/024.embedding-lifecycle.md), DEC-024-8, user decision U3).
 "Any other exception propagates as before." So if the designated server's
 `$ENV_VAR` API key is unset, `secret_ref_missing` escapes: a settle or a settled
 edit fails with a 500 and the roleplayer's own text is refused — the one thing
 US-112 exists to prevent.
 
-**Flagged by the plan itself.** `docs/plans/024.embedding-lifecycle/outcome.md`,
+**Flagged by the plan itself.** 024.embedding-lifecycle (docs/decisions/024.embedding-lifecycle.md),
 "Flags for other owners": "If the designated server's `$ENV_VAR` key is unset, a
 settle or settled edit therefore fails with 500 instead of saving degraded.
 US-112's spirit ('a platform gap never blocks my own record-keeping') arguably
@@ -121,7 +123,7 @@ are cleared rather than left in place.*
 
 **What the build does.** The opposite, by an explicit earlier decision:
 
-> `docs/plans/024.embedding-lifecycle/context.md:49-52` — "How a failed degraded
+> 024.embedding-lifecycle (docs/decisions/024.embedding-lifecycle.md), DEC-024-13 — "How a failed degraded
 > embed is recorded so the rebuild can find it. It is **not recorded** (user
 > decision U5). A degraded write leaves any existing `session_vec` row **as it is,
 > which makes it stale**, and writes nothing else. There is no staleness column."
@@ -129,9 +131,9 @@ are cleared rather than left in place.*
 So after a degraded edit, semantic search can still return that session on the
 strength of text it no longer contains.
 
-**This reverses decision U5.** The finalization decision was *"save and clear the
+**This reverses decision DEC-024-13 (024 U5).** The finalization decision was *"save and clear the
 vectors in this case"* — absent from search is preferred to present under
-superseded text. `024`'s U5 is superseded, not misapplied; the plan did what it was
+superseded text. DEC-024-13 is superseded, not misapplied; the plan did what it was
 told at the time.
 
 **Accepted consequence of the fix.** Material that could not be embedded drops out
@@ -157,7 +159,7 @@ a different case, then it is matched.*
 **What the build does.** Character and setup matching is a SQLite `LIKE`
 substring, and SQLite's `LIKE` folds case for **ASCII letters only**:
 
-> `docs/plans/029.my-search/context.md:184-191` (D3) — "Case-insensitivity is
+> 029.my-search (docs/decisions/029.my-search.md), DEC-029-7 — "Case-insensitivity is
 > SQLite `LIKE`'s: **ASCII letters only**. A non-ASCII name matches only in the
 > case typed. Recorded as a known limitation in `outcome.md`, not fixed here."
 
@@ -168,6 +170,43 @@ the case typed" is a real failure of UC-058 for the product's own core user.
 
 **What the fix must settle.** The two hit kinds affected are `character`
 (`characters.name`, `characters.sheet`) and `setup` (`setups.name`,
-`setups.description`) — `029/context.md:135-136`. Entries and memos go through the
-FTS/vector arms and are not affected. The escape-character handling in D3 must
+`setups.description`) — 029.my-search (docs/decisions/029.my-search.md). Entries and memos go through the
+FTS/vector arms and are not affected. The escape-character handling in DEC-029-7 must
 survive the fix: user input can never be allowed to act as a wildcard.
+
+---
+
+## D-06 — `users` timestamps drop zero microseconds
+
+**Criterion.** The stored-timestamp form in `docs/architecture/data-model.md` —
+UTC ISO-8601 text at microsecond precision with an explicit `+00:00`, fixed width,
+because these columns are compared as text. `quick-reference.md` states the same.
+
+**What the build does.** `users.created_at` and `users.updated_at`, as written by
+`003`'s first-administrator insert, use plain `isoformat()`, which drops the
+microseconds when they are zero — so those values do not share the fixed width.
+Both architecture docs name it as a known deviation, not yet fixed.
+
+**Status.** Open; no plan has taken it. Until it is fixed, nothing may compare
+those two columns as text against a fixed-width value.
+
+**What the fix must do.** Write both columns in the fixed-width form every other
+timestamp uses.
+
+---
+
+## D-07 — A whitespace-only settled row renders a whitespace excerpt body
+
+**Criterion.** DEC-027-5 — 027.session-search-tool
+(docs/decisions/027.session-search-tool.md). The session-search excerpt is meant
+to follow the joining 024 uses (DEC-027-3), and 024 drops whitespace-only parts
+with `strip()`.
+
+**What the build does.** `027` skips only `""`. A whitespace-only settled row is
+joined as stored, so a session whose only settled rows are whitespace renders a
+whitespace body instead of `(no settled entries)`.
+
+**Status.** Open — accepted at the time as a divergence, not a re-code; a
+strip-based rule is the better reading.
+
+**What the fix must do.** Skip parts that are empty after `strip()`, matching 024.

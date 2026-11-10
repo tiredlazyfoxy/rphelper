@@ -52,3 +52,6 @@ docs/.cache/
 # Deploy artifacts
 /data/
 *.7z
+
+# archived plan folders (agent-ignored, kept locally only)
+docs/plans/.done/

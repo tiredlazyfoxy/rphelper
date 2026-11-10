@@ -1,6 +1,6 @@
 """Tests for `strip_think` in `app/services/llm/chat.py` — feature 021, step 001 (DoD-9).
 
-Every expected value comes from `docs/plans/021.compose-loop-and-tools/context.md` **D4**
+Every expected value comes from `docs/decisions/021.compose-loop-and-tools.md` **DEC-021-4**
 (the strip rule and its worked-examples table) and the "Literals" table (`<think>` /
 `</think>`). Bindings come from `status.md` `## Skeleton`, Step 001:
 `strip_think(text: str) -> str`, `THINK_OPEN`, `THINK_CLOSE`.

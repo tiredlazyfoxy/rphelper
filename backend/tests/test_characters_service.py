@@ -1,6 +1,6 @@
 """Tests for `app/services/characters.py` — feature 009, step 002.
 
-Every expected value comes from `docs/plans/009.characters/002.characters-service.md`
+Every expected value comes from `docs/decisions/009.characters.md`
 (its Definition of done), from the feature context's D7 / D9 / D10 and from the
 owner-scope (R5) and no-delete (R6) constraints. Each test name ends `__DoD<n>` with the
 DoD item it covers.

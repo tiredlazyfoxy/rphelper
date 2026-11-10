@@ -528,7 +528,8 @@ describe("015 009's behaviour kept in the list (US-050.AC-1, D8)", () => {
 // Fast feature 012 (supersedes 033 step 002's Save / Cancel draft) — the Notes section's
 // header '+', the inline draft that saves when focus leaves it, no Save / Cancel buttons, and
 // the saved notes' flags passed to the editor as its toolbar actions. Expected behaviour comes
-// from docs/plans/fast/012.notes-autosave-toolbar-flags/plan.md (Interface intent, DoD-3..DoD-8,
+// from fast/012.notes-autosave-toolbar-flags
+// (docs/decisions/fast-012.notes-autosave-toolbar-flags.md) (Interface intent, DoD-3..DoD-8,
 // DoD-10, DoD-13) and its context.md. 033 step 002's DoD-2 (header '+') and DoD-10 (keyboard
 // reorder) still hold and are kept below, re-tagged.
 // - "Focus in its editor": the MarkdownEditor stub passes `autoFocus` to its textarea (React

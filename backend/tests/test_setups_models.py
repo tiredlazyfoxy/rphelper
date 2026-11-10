@@ -1,6 +1,6 @@
 """Feature 010, step 001 — `SetupNotFoundError` and `app/models/setups.py`.
 
-Expected values come from `docs/plans/010.setups/001.table-error-models.md` (DoD-5..7) and
+Expected values come from `docs/decisions/010.setups.md` (DoD-5..7) and
 feature 010's `context.md`: the **Wire contract** (`Setup` on the wire — seven keys, never
 `user_id`) and **D8** (one 404 `setup_not_found` with an empty `detail`; `name` stripped then
 required non-empty; `description` verbatim; unknown body keys ignored) plus **D5** (a setup

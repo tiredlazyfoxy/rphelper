@@ -16,12 +16,20 @@ Mechanics (same as ``test_llm_registry_servers.py``):
 - every operation is called on a *fresh* connection with no transaction open, and every
   post-condition is read on another fresh connection;
 - the outbound client is faked through the frozen ``client_factory=`` seam — a callable taking
-  ``(base_url, resolved_api_key, timeout_seconds)`` positionally and returning an object with
-  async ``probe()`` / ``embed()``; a few DoD-10/12 tests use the real step-002 client over
-  ``httpx.MockTransport`` instead; no network;
+  ``(kind, base_url, resolved_api_key, timeout_seconds)`` positionally (feature 035,
+  DEC-035-1) and returning an object with async ``probe()`` / ``embed()``; a few DoD-10/12
+  tests put the real ``LlmGateway`` in the path over fake library clients
+  (``llm_fakes.LibraryEmbedRecorder`` through ``library_clients``, DEC-035-3) instead; no
+  network;
 - async operations run under ``asyncio.run``.
 
 Tests are suffixed ``__S006_004_DoD<n>``. DoD-22 and DoD-23 are ``[manual/live]``.
+
+Feature 035 step 002:
+``FakeFactory.calls`` entries are ``(kind, base_url, api_key, timeout_seconds)``; the probe
+types come from ``app.services.llm.gateway``; the old real-client-over-``httpx`` tests now
+drive the gateway over fake library clients raising the real ``llm.LLMError``. Its tests are
+suffixed ``__S035_002_DoD<n>``.
 """
 
 import ast
@@ -29,12 +37,12 @@ import asyncio
 import inspect
 import json
 import re
-from collections.abc import Callable, Coroutine, Iterator, Sequence
+from collections.abc import Coroutine, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
+from llm import LLMError
 from sqlalchemy import Engine, Table, event, func, select, text
 from sqlalchemy.exc import DBAPIError
 
@@ -48,7 +56,7 @@ from app.errors import (
     NoEmbeddingModelError,
     SecretRefError,
 )
-from app.services.llm.client import EMBED_NO_VECTOR_REASON, LlmClient, ProbeOutcome, ProbeResult
+from app.services.llm.gateway import EMBED_NO_VECTOR_REASON, ProbeOutcome, ProbeResult
 from app.services.llm_registry import (
     EMBEDDING_PROBE_TEXT,
     DesignatedEmbeddingModel,
@@ -64,6 +72,7 @@ from app.services.llm_registry import (
     validate_chat_model,
     validate_embedding_model,
 )
+from tests.llm_fakes import LibraryEmbedRecorder, gateway_factory
 
 BASE_URL = "http://llm.test:8080"
 OTHER_BASE_URL = "http://other.test:9090/v1"
@@ -125,7 +134,10 @@ class FakeClient:
 
 
 class FakeFactory:
-    """A client factory recording every positional call it receives."""
+    """A client factory recording every positional call it receives.
+
+    Each ``calls`` entry is ``(kind, base_url, api_key, timeout_seconds)`` (DEC-035-1).
+    """
 
     def __init__(self, vectors: list[list[float]] | None = None, error: Exception | None = None) -> None:
         self.vectors = vectors
@@ -133,8 +145,8 @@ class FakeFactory:
         self.calls: list[tuple[Any, ...]] = []
         self.clients: list[FakeClient] = []
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeClient:
-        self.calls.append((base_url, api_key, timeout_seconds))
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeClient:
+        self.calls.append((kind, base_url, api_key, timeout_seconds))
         client = FakeClient(self.vectors, self.error)
         self.clients.append(client)
         return client
@@ -160,13 +172,9 @@ def failing_factory(reason: str) -> FakeFactory:
     return FakeFactory(error=LlmUnreachableError("embeddings call failed", {"reason": reason}))
 
 
-def mock_transport_factory(handler: Callable[[httpx.Request], httpx.Response]) -> Callable[..., LlmClient]:
-    """A factory building the real step-002 client over a mock transport."""
-
-    def factory(base_url: str, api_key: str | None, timeout_seconds: float) -> LlmClient:
-        return LlmClient(base_url, api_key, timeout_seconds, transport=httpx.MockTransport(handler))
-
-    return factory
+def library_failure(error: BaseException) -> LibraryEmbedRecorder:
+    """Fake library clients whose ``embed_batch`` raises ``error`` (put under the real gateway)."""
+    return LibraryEmbedRecorder(error=error)
 
 
 def _servers() -> Table:
@@ -664,8 +672,8 @@ def test_designating_makes_one_embeddings_call_and_records_the_measured_dimensio
     result = _designate(engine, CountingIdGenerator(890_001), 801, "nomic-embed", db_settings, factory)
 
     assert len(factory.calls) == 1
-    assert factory.calls[0][0] == OTHER_BASE_URL
-    assert factory.calls[0][2] == db_settings.llm_request_timeout_seconds
+    assert factory.calls[0][1] == OTHER_BASE_URL
+    assert factory.calls[0][3] == db_settings.llm_request_timeout_seconds
     assert len(factory.embed_calls) == 1
     assert factory.embed_calls[0][0] == "nomic-embed"
     assert factory.probe_calls == 0
@@ -729,7 +737,7 @@ def test_designation_hands_the_resolved_credential_to_the_factory__S006_004_DoD8
     handed = db_settings.model_copy(update={"llm_request_timeout_seconds": 6.5})
     factory = dim_factory(3)
     _designate(engine, CountingIdGenerator(930_001), 805, "embedder", handed, factory)
-    assert factory.calls == [(BASE_URL, RESOLVED_KEY, 6.5)]
+    assert factory.calls == [("llamaswap", BASE_URL, RESOLVED_KEY, 6.5)]
 
 
 # ============================================================================ DoD-9
@@ -870,57 +878,55 @@ def test_a_response_with_no_usable_vector_raises_and_writes_nothing__S006_004_Do
     assert _snapshot(engine) == before
 
 
-def _embeddings_ok(dim: int) -> Callable[[httpx.Request], httpx.Response]:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"object": "list", "data": [{"index": 0, "embedding": [0.5] * dim}]})
-
-    return handler
-
-
-def _raise_connect(request: httpx.Request) -> httpx.Response:
-    raise httpx.ConnectError("connection refused", request=request)
-
-
-def _raise_timeout(request: httpx.Request) -> httpx.Response:
-    raise httpx.ReadTimeout("timed out", request=request)
-
-
-def _answer_401(request: httpx.Request) -> httpx.Response:
-    return httpx.Response(401, json={"error": {"message": "bad key"}})
-
-
-def _answer_no_vector(request: httpx.Request) -> httpx.Response:
-    return httpx.Response(200, json={"object": "list", "data": []})
+#: Library failures in the shapes ``llm-client`` raises (feature 035's context, "Library
+#: facts"), with the reason ``embed`` maps each to (035 DoD-2). Since 035 step 006 the auth case
+#: carries the HTTP status as ``LLMError.status``, the only thing ``auth_failed`` is read from
+#: (DEC-035-20, 035 step 006 DoD-2).
+_REQUEST_FAILED = "Request to http://llm.test:8080/v1/embeddings failed"
+_LIBRARY_FAILURES: list[tuple[str, BaseException, str]] = [
+    ("transport", LLMError(f"{_REQUEST_FAILED}: connection failure"), "unreachable"),
+    ("timeout", LLMError(f"{_REQUEST_FAILED}: timeout"), "unreachable"),
+    ("auth", LLMError(f"{_REQUEST_FAILED} with status 401", "bad key", status=401), "auth_failed"),
+    (
+        "2xx-no-vector",
+        LLMError("Invalid response from llama-swap API when embedding: no data"),
+        EMBED_NO_VECTOR_REASON,
+    ),
+]
 
 
 @pytest.mark.parametrize(
-    "handler",
-    [_raise_connect, _raise_timeout, _answer_401, _answer_no_vector],
-    ids=["transport", "timeout", "auth", "2xx-no-vector"],
+    ("error", "reason"),
+    [(error, reason) for _id, error, reason in _LIBRARY_FAILURES],
+    ids=[case_id for case_id, _error, _reason in _LIBRARY_FAILURES],
 )
 def test_real_client_failures_block_the_designation__S006_004_DoD10(
-    engine: Engine, db_settings: Settings, handler: Callable[[httpx.Request], httpx.Response]
+    engine: Engine, db_settings: Settings, error: BaseException, reason: str
 ) -> None:
-    """DoD-10 — transport, timeout, auth, or a 2xx with no usable vector, through the real
-    step-002 client: `llm_unreachable` is raised and nothing is written."""
+    """DoD-10 / 035 DoD-2, DoD-7 — transport, timeout, auth, or a reply with no usable vector, through
+    the real gateway over fake library clients: `llm_unreachable` with that reason, nothing written."""
     _new(engine, 1005)
     _insert_model(engine, model_id=10051, server_id=1005, name="old-embed", enabled=True, designated=True, dim=32)
     _insert_model(engine, model_id=10052, server_id=1005, name="candidate", enabled=False)
     before = _snapshot(engine)
-    with pytest.raises(LlmUnreachableError):
+    with pytest.raises(LlmUnreachableError) as caught:
         _designate(engine, CountingIdGenerator(996_001), 1005, "candidate", db_settings,
-                   mock_transport_factory(handler))
+                   gateway_factory(library_failure(error)))
+    assert caught.value.detail == {"reason": reason}
     assert _snapshot(engine) == before
 
 
 def test_real_client_success_records_the_measured_dimension__S006_004_DoD10(
     engine: Engine, db_settings: Settings
 ) -> None:
-    """DoD-10 (control) / DoD-8 — the same real client over a healthy transport designates."""
+    """DoD-10 (control) / DoD-8 / 035 DoD-7 — the real gateway over healthy library clients designates
+    with the measured dimension."""
     _new(engine, 1006)
+    recorder = LibraryEmbedRecorder(vectors=[[0.5] * 5])
     result = _designate(engine, CountingIdGenerator(997_001), 1006, "candidate", db_settings,
-                        mock_transport_factory(_embeddings_ok(5)))
+                        gateway_factory(recorder))
     assert (result.embedding_model_name, result.embedding_dim) == ("candidate", 5)
+    assert [construction["kind"] for construction in recorder.constructions] == ["llamaswap"]
 
 
 # ============================================================================ DoD-11
@@ -1024,18 +1030,13 @@ def test_the_probe_text_is_the_same_for_every_designation__S006_004_DoD12(
 def test_the_wire_request_carries_only_the_probe_text__S006_004_DoD12(
     engine: Engine, db_settings: Settings
 ) -> None:
-    """DoD-12 — through the real client, the embeddings request's input is exactly the constant."""
+    """DoD-12 / 035 DoD-1 — through the real gateway, the one library client is built for the
+    designated model and ``embed_batch`` receives exactly the constant."""
     _new(engine, 1204)
-    bodies: list[dict[str, Any]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        bodies.append(json.loads(request.content))
-        return httpx.Response(200, json={"object": "list", "data": [{"index": 0, "embedding": [0.1, 0.2, 0.3]}]})
-
-    _designate(engine, CountingIdGenerator(999_401), 1204, "embedder", db_settings, mock_transport_factory(handler))
-    assert len(bodies) == 1
-    assert bodies[0]["model"] == "embedder"
-    assert bodies[0]["input"] == [EMBEDDING_PROBE_TEXT]
+    recorder = LibraryEmbedRecorder(vectors=[[0.1, 0.2, 0.3]])
+    _designate(engine, CountingIdGenerator(999_401), 1204, "embedder", db_settings, gateway_factory(recorder))
+    assert [construction["model"] for construction in recorder.constructions] == ["embedder"]
+    assert recorder.embed_batch_calls == [[EMBEDDING_PROBE_TEXT]]
 
 
 # ============================================================================ DoD-13
@@ -1501,7 +1502,8 @@ def test_module_never_branches_on_kind__S006_004_DoD21() -> None:
 def test_both_kinds_designate_and_validate_identically__S006_004_DoD21(
     engine: Engine, db_settings: Settings
 ) -> None:
-    """DoD-21 — two registrations differing only in kind build identical clients and behave alike."""
+    """DoD-21 (narrowed by 035 DoD-7) — two registrations differing only in kind hand the factory the
+    same arguments except their own ``kind``, and behave alike."""
     _new(engine, 2101, name="same", kind="llamaswap")
     _new(engine, 2102, name="same", kind="openai")
     factory = dim_factory(11)
@@ -1510,7 +1512,8 @@ def test_both_kinds_designate_and_validate_identically__S006_004_DoD21(
     _set(engine, generator, 2102, ["m"])
     first = _designate(engine, generator, 2101, "m", db_settings, factory)
     second = _designate(engine, generator, 2102, "m", db_settings, factory)
-    assert factory.calls[0] == factory.calls[1]
+    assert [call[0] for call in factory.calls] == ["llamaswap", "openai"]
+    assert factory.calls[0][1:] == factory.calls[1][1:]
     assert factory.embed_calls[0] == factory.embed_calls[1]
     assert (first.embedding_model_name, first.embedding_dim) == (second.embedding_model_name, second.embedding_dim)
     assert _validate_chat(engine, 2101, "m").model_name == _validate_chat(engine, 2102, "m").model_name
@@ -1585,3 +1588,64 @@ def test_step_004_signatures_take_a_connection_first__S006_004_DoD21() -> None:
     assert inspect.iscoroutinefunction(designate_embedding_model)
     for function in (set_enabled_models, clear_embedding_designation, validate_chat_model, validate_embedding_model):
         assert not inspect.iscoroutinefunction(function), function.__name__
+
+
+# ==================================================================== 035 step 002
+
+
+@pytest.mark.parametrize("kind", ["llamaswap", "openai"])
+def test_designation_calls_the_factory_with_kind_first__S035_002_DoD7(
+    engine: Engine, db_settings: Settings, key_present: None, kind: str
+) -> None:
+    """035 DoD-7 — ``designate_embedding_model`` calls the factory ``(kind, base_url, key, timeout)``
+    with the server's kind first, and records the measured dimension as before."""
+    _new(engine, 3501, kind=kind, base_url=OTHER_BASE_URL, api_key_ref=POINTER)
+    handed = db_settings.model_copy(update={"llm_request_timeout_seconds": 3.25})
+    factory = dim_factory(13)
+    result = _designate(engine, CountingIdGenerator(1_350_001), 3501, "embedder", handed, factory)
+    assert factory.calls == [(kind, OTHER_BASE_URL, RESOLVED_KEY, 3.25)]
+    assert factory.embed_calls == [("embedder", [EMBEDDING_PROBE_TEXT])]
+    assert result.embedding_dim == 13
+    row = _row(engine, 3501, "embedder")
+    assert row is not None
+    assert (row["is_embedding_designated"], row["embedding_dim"]) == (True, 13)
+
+
+def test_designation_reads_the_current_kind_after_an_update__S035_002_DoD7(
+    engine: Engine, db_settings: Settings
+) -> None:
+    """035 DoD-7 — the ``kind`` handed to the factory is the server's stored kind at designation time."""
+    _new(engine, 3502, kind="openai")
+    with engine.connect() as connection:
+        registry_module.update_server(connection, 3502, kind="llamaswap")
+    factory = dim_factory(2)
+    _designate(engine, CountingIdGenerator(1_350_101), 3502, "embedder", db_settings, factory)
+    assert [call[0] for call in factory.calls] == ["llamaswap"]
+
+
+def test_designation_through_the_gateway_measures_the_dimension__S035_002_DoD7(
+    engine: Engine, db_settings: Settings, key_present: None
+) -> None:
+    """035 DoD-7 — with the real gateway as the factory (fake library clients), the kind selects the
+    library class and the stored dimension is the returned vector's length."""
+    _new(engine, 3503, kind="openai", api_key_ref=POINTER)
+    recorder = LibraryEmbedRecorder(vectors=[[0.25] * 9])
+    result = _designate(engine, CountingIdGenerator(1_350_201), 3503, "embedder", db_settings,
+                        gateway_factory(recorder))
+    assert result.embedding_dim == 9
+    assert [(c["kind"], c["model"]) for c in recorder.constructions] == [("openai", "embedder")]
+
+
+def test_designation_missing_variable_raises_before_the_factory__S035_002_DoD9(
+    engine: Engine, db_settings: Settings, key_present: None
+) -> None:
+    """035 DoD-9 — an ``api_key_ref`` naming an absent variable raises ``secret_ref_missing``; the
+    factory is never called and nothing is written."""
+    _new(engine, 3504, kind="openai", api_key_ref=MISSING_POINTER)
+    before = _snapshot(engine)
+    factory = dim_factory(4)
+    with pytest.raises(SecretRefError) as caught:
+        _designate(engine, CountingIdGenerator(1_350_301), 3504, "embedder", db_settings, factory)
+    assert caught.value.code == "secret_ref_missing"
+    assert factory.calls == []
+    assert _snapshot(engine) == before

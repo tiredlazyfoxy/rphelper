@@ -1,6 +1,6 @@
 """Tests for `app/services/transfer.py` — feature 030, step 002 (DoD-1..14).
 
-Every expected value comes from `docs/plans/030.export-granularities/002.owned-selections.md`
+Every expected value comes from `docs/decisions/030.export-granularities.md`
 (its Interface intent and Definition of done), from `002.context.md` (the three memo
 predicates, the root-row lookup and why `role` / `is_enabled` leave the user export), from
 the feature `context.md` (§"Granularity boundaries", §"Row serialization rules",
@@ -866,8 +866,8 @@ def test_id_columns_are_decimal_strings_in_the_session_export__S030_002_DoD14(
 
 # =====================================================================================
 # Feature 034, step 001 — `schema_version` 2 and `sessions.name` at every owner-scoped
-# granularity. Expected values come from `docs/plans/034.session-names/
-# 001.session-name-column.md` DoD-5 and `transfer.md` § "Session names travel" (the stored
+# granularity. Expected values come from `docs/decisions/034.session-names.md`
+# DoD-5 and `transfer.md` § "Session names travel" (the stored
 # value, or null for a never-renamed session). The name is written straight into
 # `sessions.name` in test setup. Test names end `__S034_001_DoD<n>`.
 # =====================================================================================

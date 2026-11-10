@@ -22,8 +22,10 @@ class Settings(BaseSettings):
     session_cookie_name: str = Field(default="rphelper_session", validation_alias="RPHELPER_SESSION_COOKIE_NAME")
     session_ttl_hours: int = Field(default=720, validation_alias="RPHELPER_SESSION_TTL_HOURS")
 
-    # outbound LLM calls — one timeout, in seconds, for every call feature 006 makes (D13)
-    llm_request_timeout_seconds: float = Field(default=30.0, validation_alias="RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS")
+    # outbound LLM calls — one timeout, in seconds, for every call the LLM gateway makes (D13).
+    # 600 s matches the `llm-client` library's own default: a long compose on a local model
+    # outlasts the old 30 s (DEC-arch-llm-client-library-2).
+    llm_request_timeout_seconds: float = Field(default=600.0, validation_alias="RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS")
 
     # logging — sinks and their thresholds (deployment.md owns the posture)
     log_console_level: str  = Field(default="DEBUG",   validation_alias="RPHELPER_LOG_CONSOLE_LEVEL")

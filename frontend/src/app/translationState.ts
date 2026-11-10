@@ -8,6 +8,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 import { notifyFailure } from "../shared/notifyFailure";
 
 import { translateMessage } from "./translationApi";
+import { isAbortError } from "../shared/abort";
 
 /** A row's display status: the original, a request in flight, or the translation (D13). */
 export type TranslationView =
@@ -31,11 +32,6 @@ export class TranslationState {
   constructor() {
     makeAutoObservable(this, { controllers: false }, { autoBind: true });
   }
-}
-
-/** True when a rejection is an abort rather than a failure (the shared idiom). */
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
 }
 
 /**
@@ -127,7 +123,7 @@ export async function flickTranslation(state: TranslationState, messageId: strin
     // An abort writes nothing beyond the cleanup below and notifies nothing (D4,
     // US-133.AC-2). Any other failure stays on the original, caches nothing, and is
     // notified exactly once (US-048.AC-1, US-048.AC-2).
-    if (!controller.signal.aborted && !isAbortRejection(error)) {
+    if (!controller.signal.aborted && !isAbortError(error)) {
       notifyFailure(error);
     }
   } finally {

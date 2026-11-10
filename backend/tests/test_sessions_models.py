@@ -1,6 +1,6 @@
 """Feature 011, step 001 — the two new domain errors and `app/models/sessions.py`.
 
-Expected values come from `docs/plans/011.rp-sessions/001.table-errors-models.md`
+Expected values come from `docs/decisions/011.rp-sessions.md`
 (DoD-5..8) and feature 011's `context.md`: the **Wire contract** (`Session` on the wire —
 eight keys, never `user_id`), **D12** (`session_not_found` → 404 and `setup_archived` →
 409, each with an empty `detail`) and **D2** (the start body: omitted / `{}` /
@@ -10,22 +10,22 @@ eight keys, never `user_id`), **D12** (`session_not_found` → 404 and `setup_ar
 `test_errors.py` is not this step's file, so the two error classes' own coverage lives here
 alongside the models they answer for, exactly as 009 and 010 placed theirs.
 
-Extended by feature 018, step 001 (`docs/plans/018.character-page/
-001.zone-insert-and-models.md`, DoD-5 / DoD-6; feature `context.md` **D3** and the Wire
+Extended by feature 018, step 001 (`docs/decisions/018.character-page.md`, DoD-5 / DoD-6; feature `context.md`
+**D3** and the Wire
 contract): `StartSessionRequest` gains an optional `opening_message`, and
 `StartedSessionResponse` is the session's eight keys plus `opening_message`. Three 011
 DoD-8 assertions that pinned the request's field set to exactly `setup_id` are widened to
 include `opening_message` (user-approved mechanical amendment); those tests and the new
 ones carry the suffix `__S018_001_DoD<n>`.
 
-Key-set repaired by feature 024, step 005 (`docs/plans/024.embedding-lifecycle/context.md`
+Key-set repaired by feature 024, step 005 (`docs/decisions/024.embedding-lifecycle.md`
 **Wire contract** and the regression-fallout protocol; authorised by `status.md`
 `## Ultra phase` conflict (5)): the embedded `MessageResponse` gained the required boolean
 `search_coverage_incomplete`, always present on the wire and `false` outside the
 record-keeping routes, so the embedded message's key set is **twelve** keys. Only the
 message key set, the message value and its expected wire object changed.
 
-Extended by feature 034 (`docs/plans/034.session-names/`): step 001 adds `name` to the
+Extended by feature 034 (`docs/decisions/034.session-names.md`): step 001 adds `name` to the
 session wire shape; step 002 adds `RenameSessionRequest`, the strict one-key rename body
 (suffix `__S034_002_DoD<n>`, section at the end).
 """
@@ -706,7 +706,7 @@ def test_start_request_ignores_a_name_key__S034_001_DoD3(body: dict[str, Any]) -
 # ============================================================= 034/002 DoD-1, DoD-2, DoD-4, DoD-5
 # `RenameSessionRequest`: exactly one field, `name` — required, a string or null, trimmed, blank
 # becomes null (DEC-034-1); any other key is refused (DEC-034-2); no length cap (DEC-034-3).
-# Expected values from `docs/plans/034.session-names/002.rename-route.md` (Interface intent and
+# Expected values from `docs/decisions/034.session-names.md` (Interface intent and
 # DoD). Binding: `## Skeleton` -> Step 002 — `class RenameSessionRequest(BaseModel)` with
 # `name: SessionNameIn`. A `ValidationError` here is what the route answers as 422.
 

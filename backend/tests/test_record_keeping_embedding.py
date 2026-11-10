@@ -1,7 +1,7 @@
 """Tests for the record-keeping write paths' degraded session refresh and the coverage flag
 — feature 024, step 005 (DoD-1..8).
 
-Every expected value comes from `docs/plans/024.embedding-lifecycle/005.record-keeping-paths.md`
+Every expected value comes from `docs/decisions/024.embedding-lifecycle.md`
 (its Interface intent and Definition of done), from `005.context.md` (the placement — the
 refresh is the **last** statement of settle's / re-open's block, so the composed text observes
 the post-settle state — and the "Test shape") and from the feature `context.md`:
@@ -13,7 +13,8 @@ the post-settle state — and the "Test shape") and from the feature `context.md
 - **D8** the degraded posture catches `NoEmbeddingModelError` **and** `LlmUnreachableError`
   — widened by fast feature 005 to the named set that also includes `SecretRefError`;
 - **U5**'s second half (leave the existing row as it is) is **reversed** by fast feature 005
-  (`docs/plans/fast/005.degraded-embedding-path/plan.md`, US-112.AC-3): a degraded write now
+  (`fast/005.degraded-embedding-path`, `docs/decisions/fast-005.degraded-embedding-path.md`,
+  US-112.AC-3): a degraded write now
   clears the session's existing `session_vec` row. No test here asserts that a degraded catch
   keeps a pre-existing vector;
 - the **Wire contract** — `search_coverage_incomplete` on `SettleResponse`, `ReopenResponse`
@@ -794,7 +795,7 @@ def test_a_settled_edit_with_an_unset_credential_saves_flags_and_clears__F005_Do
 class _ExplodingFactory(FakeClientFactory):
     """A client factory whose construction raises `RuntimeError` — a bug, not an outage."""
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeEmbeddingClient:
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeEmbeddingClient:
         self.calls.append((base_url, api_key, timeout_seconds))
         raise RuntimeError("a bug in the embedding code")
 
@@ -1126,7 +1127,8 @@ def test_settle_answers_the_coverage_flag_false_with_a_model__S024_005_DoD8(
 
 # =========================================================================== F005 — the wire
 # Fast feature 005 — degraded-embedding-path. Expected values come from
-# `docs/plans/fast/005.degraded-embedding-path/plan.md` (DoD-1, 2, 5, 13) and its `context.md`.
+# `fast/005.degraded-embedding-path` (`docs/decisions/fast-005.degraded-embedding-path.md`)
+# (DoD-1, 2, 5, 13) and its `context.md`.
 
 
 def test_a_settled_row_patch_with_an_unset_credential_answers_2xx__F005_DoD1(

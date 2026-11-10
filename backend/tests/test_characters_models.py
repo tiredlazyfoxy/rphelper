@@ -1,6 +1,6 @@
 """Feature 009, step 001 — `CharacterNotFoundError` and `app/models/characters.py`.
 
-Expected values come from `docs/plans/009.characters/001.table-error-models.md` (DoD-5..9)
+Expected values come from `docs/decisions/009.characters.md` (DoD-5..9)
 and feature 009's `context.md`: the **Wire contract** (`Character` on the wire) and **D8**
 (one 404 `character_not_found`; `name` stripped then required non-empty; `sheet` verbatim;
 unknown body keys ignored). Tests are suffixed `__S009_001_DoD<n>`.

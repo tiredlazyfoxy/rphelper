@@ -3,7 +3,8 @@
 // `DatabasePage.rebuild.test.tsx` (DoD-17..DoD-20). Backend DoD-1..DoD-14 live in
 // `backend/tests/test_admin_db_rebuild.py`; DoD-21 is [manual/live] and carries no test.
 //
-// Expected behaviour comes from `docs/plans/fast/002.vector-index-rebuild/plan.md` (Interface
+// Expected behaviour comes from `fast/002.vector-index-rebuild`
+// (`docs/decisions/fast-002.vector-index-rebuild.md`) (Interface
 // intent "Rebuild fields" and "`rebuildIndex`", DoD-15, DoD-16) and `context.md` (free functions
 // never reject, mutate inside `runInAction`, use `failureMessageOf` and `apiPost`). Bindings come
 // from the frozen `## Skeleton` record:

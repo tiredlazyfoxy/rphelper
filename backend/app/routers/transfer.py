@@ -27,14 +27,14 @@ so a non-numeric path id is refused with **422** by validation and the service i
 
 **Every export handler answers a raw `Response`, not a pydantic model, and every import handler
 takes a raw `dict[str, Any]` body, not a request model.** Both are the same deliberate, recorded
-exception to "routes return/accept pydantic models" (`030/003.context.md`, `031/005.context.md`,
-`outcome.md`): the envelope is column-agnostic, so no static model can describe it. The JSON id
-boundary still holds — `services/transfer.py`'s row serializer stringifies every id on the way
-out, `services/transfer_import.py`'s deserializer parses every id on the way in, and the two
-import answers (`app/models/transfer.py`) carry their ids as `SnowflakeOut`. FastAPI turns the
-`dict[str, Any]` body into "must be a JSON object", so an array or a scalar body is **422** before
-any service runs. Each router builds the attachment response **locally** — this module and
-`routers/admin_db.py` share the shape, not an import.
+exception to "routes return/accept pydantic models" (`docs/decisions/030.export-granularities.md`,
+`docs/decisions/031.import-and-id-remapping.md`): the envelope is column-agnostic, so no static
+model can describe it. The JSON id boundary still holds — `services/transfer.py`'s row serializer
+stringifies every id on the way out, `services/transfer_import.py`'s deserializer parses every id
+on the way in, and the two import answers (`app/models/transfer.py`) carry their ids as
+`SnowflakeOut`. FastAPI turns the `dict[str, Any]` body into "must be a JSON object", so an array
+or a scalar body is **422** before any service runs. Each router builds the attachment response
+**locally** — this module and `routers/admin_db.py` share the shape, not an import.
 
 **No error is translated here.** `CharacterNotFoundError` (404 `character_not_found`),
 `SessionNotFoundError` (404 `session_not_found`) and `ExportInvalidError` (400 `export_invalid`,

@@ -1,8 +1,12 @@
 """Tests for ``app.config`` — the ``Settings`` model and its cached accessor.
 
 Every expected value in this module comes from the field table in
-``docs/plans/001.backend-foundation/001.context.md``. Covers DoD-1 .. DoD-7 of
+``docs/decisions/001.backend-foundation.md``. Covers DoD-1 .. DoD-7 of
 ``001.scaffold-and-config.md``.
+
+Feature 035 step 001 (DoD-1, ``DEC-arch-llm-client-library-2``) raises the outbound-call timeout default from
+30.0 to 600.0 and keeps its alias; the field table below and the 006/001 timeout tests
+were updated to the new default deliberately, and the 035/001 DoD-1 tests sit at the end.
 """
 
 import ast
@@ -23,6 +27,7 @@ from app.config import Settings, get_settings
 # 028/001 (feature 028 context.md D2) adds a twelfth and thirteenth, the two search
 # credentials. Their aliases deliberately carry **no** `RPHELPER_` prefix: they are the
 # names the operator's environment already uses, and `RPHELPER_SEARCH_CSE_*` is not read.
+# 035/001 DoD-1 (DEC-arch-llm-client-library-2): the timeout default is 600.0 (was 30.0).
 EXPECTED_FIELDS: dict[str, tuple[Any, str]] = {
     "data_dir": (Path("data"), "RPHELPER_DATA_DIR"),
     "db_filename": ("rphelper.sqlite", "RPHELPER_DB_FILENAME"),
@@ -34,7 +39,7 @@ EXPECTED_FIELDS: dict[str, tuple[Any, str]] = {
     "log_file_path": (Path("data/logs/rphelper.log"), "RPHELPER_LOG_FILE_PATH"),
     "log_file_rotation": ("10 MB", "RPHELPER_LOG_FILE_ROTATION"),
     "log_file_retention": (5, "RPHELPER_LOG_FILE_RETENTION"),
-    "llm_request_timeout_seconds": (30.0, "RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS"),
+    "llm_request_timeout_seconds": (600.0, "RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS"),
     "search_cse_key": (None, "SEARCH_CSE_KEY"),
     "search_cse_id": (None, "SEARCH_CSE_ID"),
 }
@@ -287,13 +292,18 @@ def test_services_package_binds_no_name_of_its_own__DoD7() -> None:
 # ============================================================================
 # Feature 006, step 001 (``001.tables-errors-and-secret-ref.md``) — DoD-10:
 # ``Settings`` gains the outbound-call timeout (feature 006 ``context.md`` D13): a float,
-# default 30.0, read from ``RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS`` only. No other field's
-# default or alias changes. (The shared tables above were extended with the new field, so
-# the DoD-1..DoD-4 parametrised tests cover it too.)
+# read from ``RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS`` only. No other field's default or
+# alias changes. (The shared tables above were extended with the new field, so the
+# DoD-1..DoD-4 parametrised tests cover it too.) Its default was 30.0 under 006; feature
+# 035 step 001 DoD-1 (DEC-arch-llm-client-library-2) raises it to 600.0, so the default
+# assertions below pin the new value.
 # ============================================================================
 
 TIMEOUT_FIELD = "llm_request_timeout_seconds"
 TIMEOUT_ALIAS = "RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS"
+
+# 035/001 DoD-1: the timeout default (the library's own default, DEC-arch-llm-client-library-2).
+TIMEOUT_DEFAULT = 600.0
 
 
 def test_settings_exposes_the_timeout_field__S006_001_DoD10() -> None:
@@ -301,10 +311,10 @@ def test_settings_exposes_the_timeout_field__S006_001_DoD10() -> None:
     assert TIMEOUT_FIELD in Settings.model_fields
 
 
-def test_timeout_defaults_to_thirty_seconds_as_a_float__S006_001_DoD10() -> None:
-    """006/001 DoD-10: the default is 30.0, a float."""
+def test_timeout_defaults_to_six_hundred_seconds_as_a_float__S006_001_DoD10__S035_001_DoD1() -> None:
+    """006/001 DoD-10, superseded in value by 035/001 DoD-1: the default is 600.0, a float."""
     value = getattr(_hermetic_settings(), TIMEOUT_FIELD)
-    assert value == 30.0
+    assert value == TIMEOUT_DEFAULT
     assert isinstance(value, float)
 
 
@@ -349,7 +359,7 @@ def test_unprefixed_similar_variable_is_ignored__S006_001_DoD10(
 ) -> None:
     """006/001 DoD-10: an unprefixed variable of a similar name leaves the default in place."""
     monkeypatch.setenv(unprefixed_name, "3.0")
-    assert getattr(_hermetic_settings(), TIMEOUT_FIELD) == 30.0
+    assert getattr(_hermetic_settings(), TIMEOUT_FIELD) == TIMEOUT_DEFAULT
 
 
 @pytest.mark.parametrize("field_name", sorted(ORIGINAL_TEN_FIELDS))
@@ -409,3 +419,42 @@ def test_the_search_key_value_renders_nowhere_on_a_settings__S028_001_DoD3(
     assert SEARCH_KEY_MARKER not in repr(settings)
     assert SEARCH_KEY_MARKER not in str(settings)
     assert SEARCH_KEY_MARKER not in json.dumps(settings.model_dump(mode="json"))
+
+
+# ============================================================================
+# Feature 035, step 001 — DoD-1:
+# ``Settings().llm_request_timeout_seconds`` defaults to 600.0, and
+# ``RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS`` still overrides it
+# (``DEC-arch-llm-client-library-2``; the alias is unchanged).
+# ============================================================================
+
+
+def test_timeout_defaults_to_600_seconds__S035_001_DoD1() -> None:
+    """035/001 DoD-1: with no variable set, the outbound-call timeout is 600.0 seconds."""
+    value = _hermetic_settings().llm_request_timeout_seconds
+    assert value == 600.0
+    assert isinstance(value, float)
+
+
+def test_timeout_field_declares_its_default_as_600__S035_001_DoD1() -> None:
+    """035/001 DoD-1: the declared field default is 600.0 (what ``DEFAULT_EMBED_TIMEOUT_SECONDS`` derives from)."""
+    assert Settings.model_fields[TIMEOUT_FIELD].default == 600.0
+
+
+def test_timeout_alias_is_unchanged__S035_001_DoD1() -> None:
+    """035/001 DoD-1: the validation alias is still ``RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS``."""
+    assert Settings.model_fields[TIMEOUT_FIELD].validation_alias == TIMEOUT_ALIAS
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("30", 30.0), ("2.5", 2.5), ("1200", 1200.0)])
+def test_the_variable_still_overrides_the_600_default__S035_001_DoD1(
+    raw: str,
+    expected: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """035/001 DoD-1: ``RPHELPER_LLM_REQUEST_TIMEOUT_SECONDS`` overrides the 600.0 default, as a float."""
+    assert expected != 600.0
+    monkeypatch.setenv(TIMEOUT_ALIAS, raw)
+    value = _hermetic_settings().llm_request_timeout_seconds
+    assert value == expected
+    assert isinstance(value, float)

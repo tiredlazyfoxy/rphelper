@@ -1,6 +1,6 @@
 """Export, import and bootstrap-from-export sweep — step 005 of feature 032, DoD-1..DoD-7.
 
-Specification: ``docs/plans/032.privacy-isolation-audit/005.export-import-sweep.md``
+Specification: ``docs/decisions/032.privacy-isolation-audit.md``
 (Definition of done items 1..6 are ``[test]``; item 7 is ``[manual/live]`` and is the
 **verifier's** task, not a test — see below), with ``005.context.md`` for the gaps this
 step closes and the payload mechanics, and ``context.md`` for the shared vocabulary, the
@@ -25,7 +25,7 @@ Scope boundaries this module deliberately does not cross
   DoD-2/DoD-3**. 031's own DoD-9/10 own the admin import's contract; DoD-5 here adds only
   "nothing echoed, nothing wiped".
 * The whole-database export's **opacity rule is 030's** (``context.md`` "Out":
-  ``docs/plans/030.export-granularities/context.md`` ~L121, 030/005 DoD-2..4, 030/008
+  ``docs/decisions/030.export-granularities.md``, 030/005 DoD-2..4, 030/008
   DoD-7) and is **cited, never re-tested**. DoD-5 uses that export only as an import
   *payload*; nothing is asserted about its contents. **DoD-7 is the verifier's**: it
   confirms those 030 items are ``done`` rather than re-testing them, so this module
@@ -702,7 +702,7 @@ def test_admin_database_import_refuses_a_configured_instance__S032_005_DoD5(worl
 
 # DoD-7 is `[manual/live]` and is the **verifier's** task: it confirms that 030's
 # whole-database-export opacity items are `done`
-# (`docs/plans/030.export-granularities/context.md` ~L121, 030/005 DoD-2..4, 030/008
+# (`docs/decisions/030.export-granularities.md`, 030/005 DoD-2..4, 030/008
 # DoD-7) rather than re-testing them here. `context.md`'s Out boundary puts that rule in
 # 030, cited and never re-implemented or re-tested in 032, so this module deliberately
 # contains no test for it.

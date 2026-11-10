@@ -1,7 +1,7 @@
 """Tests for ``app.services.search.ports`` — the hybrid-search port's types and pure helpers.
 
 Every expected value comes from the spec, never from calling the code under test:
-``docs/plans/025.hybrid-search-port/001.port-contract.md`` (Interface intent + Definition
+``docs/decisions/025.hybrid-search-port.md`` (Interface intent + Definition
 of done), ``001.context.md`` (the six numbered FTS sanitising rules) and the feature
 ``context.md`` (U1 the variants and the owner/extra-predicate rule, U3 + D3 the hit shape,
 D1 the fusion formula with ``k = 60`` and ties by ascending id, D4 the leading extract).

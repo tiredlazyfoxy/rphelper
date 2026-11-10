@@ -2,7 +2,7 @@
 ``/api/sessions/{session_id}/configuration`` and ``/api/characters/{character_id}/configuration``
 — feature 017, step 005.
 
-Every expected value comes from ``docs/plans/017.session-configuration/005.configuration-router.md``
+Every expected value comes from ``docs/decisions/017.session-configuration.md``
 (Interface intent, DoD-1 .. DoD-10), ``005.context.md`` and the feature ``context.md``: the **Wire
 contract** (seven routes, the ``EnabledModel`` / ``UserSettings`` / ``CharacterConfiguration`` /
 ``Setting`` / ``SessionConfiguration`` shapes, the level rules, the request rules and the failure

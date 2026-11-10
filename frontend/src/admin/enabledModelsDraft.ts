@@ -3,6 +3,7 @@
 import { makeAutoObservable, runInAction } from "mobx";
 import { apiPost } from "../shared/api";
 import { ApiError, CLIENT_TRANSPORT_FAILED } from "../shared/apiError";
+import { isAbortError } from "../shared/abort";
 
 /** Keys of the server-error map: only the general catch-all. */
 export type EnabledModelsServerErrorKey = "general";
@@ -62,10 +63,6 @@ const GENERIC_FAILURE = "The enabled models could not be saved.";
 const NOT_FOUND_FAILURE = "This connection no longer exists. Close the dialog to refresh the list.";
 const TRANSPORT_FAILURE = "The server could not be reached. Check that it is running and try again.";
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /** Maps a failure onto the general key by status or code only; never by parsing prose. */
 function serverErrorsFor(error: unknown): EnabledModelsServerErrors {
   if (error instanceof ApiError) {
@@ -113,7 +110,7 @@ export async function submitEnabledModels(
       signal,
     );
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const serverErrors = serverErrorsFor(error);

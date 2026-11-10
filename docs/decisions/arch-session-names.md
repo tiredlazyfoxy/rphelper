@@ -43,7 +43,7 @@ feature that builds session names cites these ids and does not re-decide them.
 - **Cites:** `workspace-shell.md` § the tree row and geometry; US-151
 
 ### DEC-arch-session-names-4 — Rename interaction: in-place edit of the label
-- **Status:** accepted
+- **Status:** accepted; refined in part by DEC-034-11 (a failure renders inline under the editor instead of through `notifyFailure`; on success the returned session is applied instead of re-reading the lists)
 - **Stage:** — · **Feature:** arch-session-names · **Step:** —
 - **Date:** 2026-11-05 · **Decided by:** architect (default; the planner may refine)
 - **Question:** How does the roleplayer rename a session from the tree row and from the session header?
@@ -54,7 +54,7 @@ feature that builds session names cites these ids and does not re-decide them.
 - **Cites:** `workspace-shell.md` § rename; `forms-and-lists.md` § the named exceptions and § never optimistic; `ui-conventions.md` § icon table; US-150
 
 ### DEC-arch-session-names-5 — My-search's session name arm: `LIKE`, merged ahead of vector hits
-- **Status:** accepted
+- **Status:** accepted; superseded in part by DEC-F006-5 (the D-05 case caveat in Cites)
 - **Stage:** — · **Feature:** arch-session-names · **Step:** —
 - **Date:** 2026-11-05 · **Decided by:** user
 - **Question:** How does my-search find a session by its name, given the session corpus is the vector-only port variant?
@@ -62,7 +62,7 @@ feature that builds session names cites these ids and does not re-decide them.
 - **Reason:** A name is one short label per session; an index over it is out of proportion, and the `LIKE` path is already the project's answer for short owner-entered labels (characters, setups). Putting exact name matches first matches what the roleplayer typed the name to find. Matching the date form would need the roleplayer's timezone on the server, which nothing else needs.
 - **Rejected:** Creating `session_fts` over `name` — an FTS table, triggers and drift coverage for one short column; flip condition is FTS over `name` alone. Folding `name` into `session_vec`'s embedded text — a re-embed on every rename and a name that blurs semantically. Fusing name hits into the vector ranking by RRF — a substring match has no meaningful rank to fuse. Matching the client-computed date — needs a timezone the server does not have.
 - **Lands in:** my-search's service under `backend/app/services/search/`; the search response model in `backend/app/models/`; my-search's results rendering under `frontend/src/app/`
-- **Cites:** `search-and-retrieval.md` § three port variants and three `LIKE` matches, § hydration; `quick-reference.md` § search at a glance; defect D-05 (ASCII-only case folding) now covers session names too; US-152
+- **Cites:** `search-and-retrieval.md` § three port variants and three `LIKE` matches, § hydration; `quick-reference.md` § search at a glance; defect D-05 (ASCII-only case folding) now covers session names too; US-152 — **corrected 2026-11-09 by DEC-F006-5**: D-05 had already been closed by fast/006 (2026-10-07), and the session-name arm uses the same Unicode case fold on both sides as the character and setup matches, so the caveat does not apply
 
 ### DEC-arch-session-names-6 — A rename bumps `updated_at` only
 - **Status:** accepted

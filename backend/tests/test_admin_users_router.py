@@ -1,6 +1,6 @@
 """Tests for the admin users router: ``/api/admin/users`` and its four action routes.
 
-Every expected value comes from ``docs/plans/005.admin-shell-and-users/003.admin-users-router.md``
+Every expected value comes from ``docs/decisions/005.admin-shell-and-users.md``
 (Interface intent + Definition of done), ``003.context.md`` and the feature ``context.md``
 (D5 the route table, D6 password reset, D9 path ids, R5, the JSON id boundary), plus the
 ``004`` contracts this router's behaviour is observed through (``GET /api/me``,

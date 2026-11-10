@@ -3,7 +3,7 @@
 Covered route: ``POST /api/admin/database/import``, added to the admin database router so that
 it inherits that router's router-level ``require_admin`` guard (``005.context.md``).
 
-Every expected value comes from ``docs/plans/031.import-and-id-remapping/005.import-routes.md``
+Every expected value comes from ``docs/decisions/031.import-and-id-remapping.md``
 (its Interface intent and DoD-6, DoD-8, DoD-9, DoD-10, DoD-11), from ``005.context.md``
 (§"Why 204 + cookie clear on the database import", and the rule that **every envelope a router
 test posts is fetched from one of 030's ``GET`` export routes in the same test**, with
@@ -486,7 +486,7 @@ def test_the_admin_drift_report_route_still_answers_200__S031_005_DoD11(
 
 # ====================================================================== 034/001 DoD-6/7
 # Feature 034, step 001 — session names through the admin database replace route. Expected
-# values come from `docs/plans/034.session-names/001.session-name-column.md` DoD-6 (a renamed
+# values come from `docs/decisions/034.session-names.md` DoD-6 (a renamed
 # session keeps its name through the database replace, US-150.AC-5) and DoD-7 (a version-1
 # database file imports with every session `name` NULL). The other instance gets one session
 # whose `name` is written directly in setup; the envelope comes from 030's own GET route.

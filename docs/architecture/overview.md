@@ -363,7 +363,7 @@ and the withdrawal *simplifies* import rather than costing it anything, because
 there is no longer a collision case to detect.
 
 The mechanism — bit layout, the fixed epoch, the node-id rule, the
-backwards-clock refusal — is in `data-model.md`'s Identifiers section and is not
+backwards-clock tolerance and refusal — is in `data-model.md`'s Identifiers section and is not
 restated here.
 
 The cost is one rule that has to hold at every boundary: **an id is an `int` in
@@ -436,6 +436,24 @@ while the console still looks right. Two sinks (console `DEBUG`, rotating file
 `WARNING` under `data/logs/`), five `RPHELPER_LOG_*` settings, and an absolute
 redaction rule that FEAT-019 imposes at **every** level: full statement, flip
 condition and the forbidden/allowed lists in `deployment.md`.
+
+**`llm-client` 0.2.1 for every LLM call — RPHelper has no HTTP code of its own
+for LLM providers** (architecture revision, 2026-11-08, moved to 0.2.1 on
+2026-11-09; built 2026-11-09). A shared
+in-house library (github.com/Iezious/PythonLLMClient), pinned as a runtime
+dependency to its `v0.2.1` tag and running on `aiohttp`, sits behind **one
+gateway module** that is its only importer. Two reasons: it is **one maintained
+client shared with other projects**, and it **already implements the OpenAI
+Responses protocol**, which RPHelper needs — OpenAI's reasoning models refuse
+function tools on the chat-completions endpoint, and only the Responses protocol
+carries reasoning between tool rounds. Rejected: keeping RPHelper's own `httpx`
+client and adding the protocol to it (a second implementation to maintain), and a
+local path dependency (it breaks the container build and every other machine).
+**`httpx` stays a runtime dependency for the `web_search` provider alone**, which
+is not an LLM call. The gateway's contract, the per-kind client choice and its
+flip condition are in `llm-and-streaming.md`; the pin and rejected alternatives
+are `DEC-arch-llm-client-library-1`, the move to 0.2.1 `-13`. A git dependency also means the image build
+needs `git` and network access to github.com (`deployment.md`).
 
 **`web_search`: Google Custom Search behind a provider seam** (plan 028). The
 deferral this entry used to record is **closed**. A provider protocol in
@@ -637,3 +655,10 @@ satisfy:
 `_TBD: no concurrency target exists. The design assumes one active roleplayer at
 a time per instance, which SQLite's single-writer model suits; nothing in
 docs/product/ states a multi-user-concurrency expectation either way._`
+
+## Decision history
+
+- **2026-11-09 — the `llm-client` stack entry moves from 0.2.0 to 0.2.1**
+  (approved and built 2026-11-09 — feature 035 step 006). The library choice,
+  its reasons and the rejected alternatives are unchanged; only the pinned
+  release moves. `DEC-arch-llm-client-library-13`.

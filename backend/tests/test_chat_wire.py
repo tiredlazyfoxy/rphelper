@@ -1,6 +1,6 @@
 """Feature 021 step 002 — tool-capable chat values and their OpenAI wire form.
 
-Expected values come from `docs/plans/021.compose-loop-and-tools/002.chat-messages-and-replay.md`
+Expected values come from `docs/decisions/021.compose-loop-and-tools.md`
 (Interface intent, DoD-1 / DoD-2) and the feature `context.md` (D9, D10). Bindings come from
 `status.md` `## Skeleton` -> Step 002:
 

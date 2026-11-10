@@ -1,7 +1,7 @@
 """Feature 022, step 002 — the buried-group read: `list_discussion` and `GET …/discussion`
 (DoD-2..8).
 
-Every expected value comes from `docs/plans/022.discussion-ui/002.discussion-read.md`
+Every expected value comes from `docs/decisions/022.discussion-ui.md`
 (Interface intent + Definition of done), `002.context.md` (seeding states), `001.context.md`
 (payload row 3) and the feature `context.md` (**D1**'s answer table, **D3**'s tool view and
 eleven wire keys, R5 owner scoping, R11 reads change nothing). Bindings come from `status.md`

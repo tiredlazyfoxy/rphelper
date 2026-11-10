@@ -23,8 +23,10 @@ RUN cp dist/app/index.html dist/index.html
 # ---- Stage 2: runtime ----
 FROM python:3.12-slim AS runtime
 
+# `git` is needed by `uv sync` below: `llm-client` is pinned to a git tag, not an index release
+# (DEC-arch-llm-client-library-1).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends nginx supervisor curl \
+ && apt-get install -y --no-install-recommends nginx supervisor curl git \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/nginx/sites-enabled/default
 

@@ -1,7 +1,7 @@
 """`services/search/my_search.py` — feature 029, step 002 (DoD-1..12).
 
 Every expected value comes from the **spec**, never from the implementation:
-`docs/plans/029.my-search/002.my-search-orchestrator.md` (Interface intent and Definition of
+`docs/decisions/029.my-search.md` (Interface intent and Definition of
 done), `002.context.md` (the hydration statements, the port-call notes and the seeding notes)
 and the feature `context.md` — **U1** (an embedding failure fails the whole search), **U2** (no
 flag predicate on memos), **U3** (archived rows are included and flagged), **D1** (five fixed
@@ -55,7 +55,7 @@ Each test name ends `__S029_002_DoD<n>` with the DoD item it covers.
 
 Feature 034, step 003 (session names in my-search)
 --------------------------------------------------
-The later block of this module covers `docs/plans/034.session-names/003.my-search-names.md`
+The later block of this module covers `docs/decisions/034.session-names.md`
 DoD-1..DoD-9 (DEC-034-8, DEC-arch-session-names-5), each test ending `__S034_003_DoD<n>`.
 The two shapes above carry `SessionHit.name` and `EntryHit.session_name` (step 003's frozen
 record), and the step adds two bindings:

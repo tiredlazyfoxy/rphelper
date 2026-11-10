@@ -61,5 +61,5 @@
 - **Exception flows:**
   - Target account is the acting administrator's own account — refused, role unchanged.
 - **Postconditions:** The new role governs the account from its next action, with no re-login needed.
-- **Source:** `[confirmed: user]` finalization 2026-10-01, C31; shipped in docs/plans/005.admin-shell-and-users/.
+- **Source:** `[confirmed: user]` finalization 2026-10-01, C31; shipped by 005.admin-shell-and-users.
 <!-- product-spec:end -->

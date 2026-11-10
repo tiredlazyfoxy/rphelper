@@ -1,6 +1,6 @@
 """Step 007 — the log sentinel sweep (DoD-1..DoD-9; DoD-10 is ``[manual/live]``).
 
-Written from ``docs/plans/032.privacy-isolation-audit/007.log-sentinel-sweep.md`` (the
+Written from ``docs/decisions/032.privacy-isolation-audit.md`` (the
 ten-item Definition of done **is** the specification), ``007.context.md`` (mechanics, the
 step-001 dependency) and ``context.md`` (the citation mapping for logs). Bound to the
 support module frozen by ``status.md`` ``## Skeleton`` -> "Step 002 — frozen interface".
@@ -89,7 +89,7 @@ from sqlalchemy import Engine
 from app.config import Settings
 from app.errors import LlmUnreachableError
 from app.logging import configure_logging
-from app.services.llm.client import ProbeOutcome, ProbeResult
+from app.services.llm.gateway import ProbeOutcome, ProbeResult
 from app.services.llm_registry import LlmClientFactory
 from tests.privacy_audit_support import (
     ADMIN_SERVERS_PATH,

@@ -1,7 +1,7 @@
 """Configuration-gated registration of `web_search` (feature 028, step 002).
 
 Covers DoD-8 (the registry builder), DoD-9 (offered at the seam) and DoD-10 (offered at the
-route) of `docs/plans/028.web-search-tool/002.web-search-tool-and-registration.md`. The
+route) of `docs/decisions/028.web-search-tool.md`. The
 adapter, the formatter, the factory and the import shape are in
 `tests/test_web_search_tool.py`; the DoD-14 amendment is one assertion in
 `tests/test_tool_seam.py`. DoD-15 .. DoD-17 are `[manual/live]`.
@@ -32,11 +32,19 @@ the `Settings` the `get_settings` override returns, never through a real `.env`,
 are obvious fakes. **No test here makes a network request**: the fake chat client yields
 text and never calls a tool, so no provider ever runs. Each test name ends
 `__S028_002_DoD<n>`.
+
+Amended by feature 035 step 004:
+the chat client is now the gateway shape (DEC-035-6) — the fake's `compose(model, messages,
+tools)` records `tools.declarations` and yields one `ComposeText`; its factory takes
+`(kind, base_url, api_key, timeout_seconds)` (DEC-035-1). The all-three-offered route test also
+covers that step's DoD-6 (the fixed declaration order), and is tagged `__S035_004_DoD6` too.
 """
+
+from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -53,7 +61,7 @@ from app.roles import Role
 from app.routers.stream import get_chat_client_factory
 from app.services.configuration import ConfigLevel, ResolvedSetting, SessionConfiguration
 from app.services.llm.chat import ChatMessage
-from app.services.llm.client import ChatDelta
+from app.services.llm.gateway import ComposeText, ComposeTools
 from app.services.passwords import hash_password
 from app.services.tools.definitions import (
     MEMO_SEARCH,
@@ -406,7 +414,7 @@ def engine(db_engine: Engine) -> Engine:
 
 
 class ChatCall:
-    """What one `chat_stream` call received."""
+    """What one `compose` call received: the model, the messages and the offered declarations."""
 
     def __init__(
         self, model: str, messages: list[ChatMessage], tools: list[Mapping[str, object]]
@@ -417,35 +425,37 @@ class ChatCall:
 
 
 class FakeChatClient:
-    """Records every `chat_stream` call and answers with one text delta — never a tool call."""
+    """A gateway-shaped chat client (DEC-035-6): records every `compose` call's declarations and
+    answers with one text piece — it never invokes the runner, so no tool ever runs."""
 
     def __init__(self, text: str = "Hi") -> None:
         self.calls: list[ChatCall] = []
         self.text = text
 
-    def chat_stream(
+    async def complete(self, model: str, messages: Sequence[ChatMessage]) -> str:
+        raise AssertionError("the compose route never calls `complete`")
+
+    async def compose[E](
         self,
         model: str,
         messages: Sequence[ChatMessage],
-        tools: Sequence[Mapping[str, object]],
-    ) -> AsyncIterator[ChatDelta]:
-        self.calls.append(ChatCall(model, list(messages), [dict(tool) for tool in tools]))
-        return self._stream()
-
-    async def _stream(self) -> AsyncIterator[ChatDelta]:
+        tools: ComposeTools[E],
+    ) -> AsyncGenerator[ComposeText | E, None]:
+        self.calls.append(ChatCall(model, list(messages), [dict(tool) for tool in tools.declarations]))
         await asyncio.sleep(0)
-        yield ChatDelta(content=self.text)
+        yield ComposeText(self.text)
 
 
 class FakeFactory:
-    """A `ChatClientFactory` returning one fake client and recording its arguments."""
+    """A `ChatClientFactory` returning one fake client and recording its four arguments
+    `(kind, base_url, api_key, timeout_seconds)` (DEC-035-1)."""
 
     def __init__(self, client: FakeChatClient) -> None:
         self.client = client
-        self.calls: list[tuple[str, str | None, float]] = []
+        self.calls: list[tuple[str, str, str | None, float]] = []
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
-        self.calls.append((base_url, api_key, timeout_seconds))
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> Any:
+        self.calls.append((kind, base_url, api_key, timeout_seconds))
         return self.client
 
 
@@ -544,10 +554,12 @@ def _recorded_tool_names(client_fake: FakeChatClient) -> list[str]:
     return names
 
 
-def test_the_route_offers_all_three_tools_when_configured__S028_002_DoD10(
+def test_the_route_offers_all_three_tools_when_configured__S028_002_DoD10__S035_004_DoD6(
     application: FastAPI, db_settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DoD-10 / D3 — credentials `test-key` / `test-cx`, no switch set: three declarations."""
+    """DoD-10 / D3 — credentials `test-key` / `test-cx`, no switch set: three declarations.
+    035 step 004 DoD-6 — the client's `compose` receives them in the fixed order `memo_search`,
+    `session_search`, `web_search`."""
     settings = _settings_with(monkeypatch, db_settings, key=API_KEY, engine_id=ENGINE_ID)
     client_fake = FakeChatClient()
     _use(application, settings, FakeFactory(client_fake))

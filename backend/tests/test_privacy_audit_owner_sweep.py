@@ -1,9 +1,9 @@
 """Owner-scoped CRUD and stream sweep — step 003 of feature 032, DoD-1..DoD-11.
 
-Specification: ``docs/plans/032.privacy-isolation-audit/003.owner-scoped-sweep.md``
+Specification: ``docs/decisions/032.privacy-isolation-audit.md``
 (Definition of done items 1..11, every one ``[test]``), with the 74-row route
 enumeration, the class table and the "refusal identity" definition in
-``docs/plans/032.privacy-isolation-audit/context.md``. Every expected status, error
+``docs/decisions/032.privacy-isolation-audit.md``. Every expected status, error
 code and absence here comes from those two documents; the frozen support-module
 record in ``status.md`` supplies only *how to call*.
 

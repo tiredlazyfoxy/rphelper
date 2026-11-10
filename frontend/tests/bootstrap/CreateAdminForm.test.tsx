@@ -1,7 +1,7 @@
 // Feature 003, step 005 — the create-administrator form, its submit path, the hand-off,
 // and the refusal flip on the page (DoD-3..DoD-10). DoD-11..DoD-13 are [manual/live].
 //
-// Feature 004, step 004 (docs/plans/004.authentication-session/004.bootstrap-signs-in.md):
+// Feature 004, step 004 (docs/decisions/004.authentication-session.md):
 // - S004_004 DoD-9 — the hand-off target is corrected from `/login` to `/` (the two DoD-5
 //   tests and the DoD-7 re-submit test's target assertion); "runs, and runs once" unchanged.
 // - S004_004 DoD-10 — "nothing else in the form changes" is covered by the existing tests,

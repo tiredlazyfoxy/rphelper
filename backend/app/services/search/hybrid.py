@@ -52,7 +52,7 @@ from sqlalchemy import Connection, Row, Select, select
 from app.db.schema import memos
 from app.db.search_tables import MEMO_FTS_TABLE, MEMO_VEC_TABLE, MESSAGE_FTS_TABLE, SESSION_VEC_TABLE
 from app.services.embedding import DEFAULT_EMBED_TIMEOUT_SECONDS
-from app.services.llm.client import LlmClient
+from app.services.llm.gateway import LlmGateway
 from app.services.llm_registry import LlmClientFactory
 from app.services.search.candidates import base_relation, candidate_ids
 from app.services.search.lexical import lexical_ranking
@@ -86,7 +86,7 @@ def search(
     query_text: str,
     limit: int,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> list[SearchHit]:
     """Search one corpus and return at most `limit` fused hits, best first (U1, D1-D7).

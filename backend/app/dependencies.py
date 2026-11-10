@@ -41,7 +41,7 @@ from app.errors import InsufficientRoleError, NotAuthenticatedError
 from app.roles import Role, role_at_least
 from app.services.auth import resolve_session
 from app.services.bootstrap import any_user_exists
-from app.services.llm.client import LlmClient
+from app.services.llm.gateway import LlmGateway
 from app.services.llm_registry import LlmClientFactory
 
 
@@ -117,8 +117,8 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
 
 
 def get_llm_client_factory() -> LlmClientFactory:
-    """The registry's client factory for outbound calls; production answer is `LlmClient`.
+    """The registry's client factory for outbound calls; production answer is `LlmGateway`.
 
     Tests override this with `app.dependency_overrides[get_llm_client_factory]`.
     """
-    return LlmClient
+    return LlmGateway

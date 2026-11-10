@@ -1,5 +1,5 @@
 // Feature 022, step 007 — DiscussionGroup on its own: empty answer, inline failure with retry,
-// and unmount while pending (DoD-5..DoD-7) (docs/plans/022.discussion-ui/007.discussion-group.md).
+// and unmount while pending (DoD-5..DoD-7) (docs/decisions/022.discussion-ui.md).
 //
 // Expected values come from the step's Interface intent and Definition of done, context.md D1,
 // D11, the UI strings table and 007.context.md:

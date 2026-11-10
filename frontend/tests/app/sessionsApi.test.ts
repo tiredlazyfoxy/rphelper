@@ -2,12 +2,10 @@
 // Feature 034, step 004 — `name` on every session (S034_004_DoD4) and renameSession
 // (S034_004_DoD5); see the block at the end of the file.
 //
-// Expected behaviour comes from the step file's Interface intent and Definition of done,
-// 004.context.md ("Why startSession always sends a body") and context.md's "Wire contract —
-// sessions" plus the "Ids are strings" constraint. The six calls address the wire contract's
-// path families exactly: a listing takes ?include_archived=true only when asked and nothing
-// else, startSession always POSTs the single-key body { setup_id }, the two action routes are
-// POSTs, and nothing coerces an id — a decimal string beyond Number.MAX_SAFE_INTEGER must
+// Expected behaviour comes from the step file's Interface intent and Definition of done and
+// context.md's "Wire contract — sessions" plus the "Ids are strings" constraint. The calls
+// address the wire contract's path families exactly: a listing takes ?include_archived=true
+// only when asked and nothing else, the two action routes are POSTs, and nothing coerces an id — a decimal string beyond Number.MAX_SAFE_INTEGER must
 // survive a round trip character for character. Failures are the shared client's ApiErrors,
 // rethrown unchanged.
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +20,6 @@ import {
   restoreSession,
   type Session,
   type StartedSession,
-  startSession,
   startSessionWithMessage,
 } from "../../src/app/sessionsApi";
 import type { Message } from "../../src/app/streamApi";
@@ -234,38 +231,6 @@ describe("fetchSession", () => {
 });
 
 // ---------------------------------------------------------------------------
-describe("startSession always states the setup in its body", () => {
-  it("POSTs /api/characters/<id>/sessions with the JSON body exactly { setup_id: null } for no setup — DoD-2", async () => {
-    const created: Session = { ...TAVERN_RUN, setup_id: null, setup_name: null };
-    const mock = serve(created, 201);
-    await expect(startSession(CHARACTER_ID, null)).resolves.toEqual(created);
-    expect(seen(mock)).toEqual([
-      { method: "POST", path: CHARACTER_SESSIONS_PATH, search: "" },
-    ]);
-    expect(sentBody(mock)).toEqual({ setup_id: null });
-    expect(bodyKeys(mock)).toEqual(["setup_id"]);
-  });
-
-  it("POSTs the JSON body exactly { setup_id: \"<id>\" } for a chosen setup — DoD-2", async () => {
-    const mock = serve(TAVERN_RUN, 201);
-    await expect(startSession(CHARACTER_ID, SETUP_ID)).resolves.toEqual(TAVERN_RUN);
-    expect(seen(mock)).toEqual([
-      { method: "POST", path: CHARACTER_SESSIONS_PATH, search: "" },
-    ]);
-    expect(sentBody(mock)).toEqual({ setup_id: SETUP_ID });
-    expect(bodyKeys(mock)).toEqual(["setup_id"]);
-  });
-
-  it("sends the setup id as the identical string it was given, past MAX_SAFE_INTEGER — DoD-2", async () => {
-    const mock = serve(TAVERN_RUN, 201);
-    await startSession(CHARACTER_ID, SETUP_ID);
-    const body = sentBody(mock) as { setup_id: unknown };
-    expect(typeof body.setup_id).toBe("string");
-    expect(body.setup_id).toBe(SETUP_ID);
-  });
-});
-
-// ---------------------------------------------------------------------------
 describe("the two action calls", () => {
   it("archiveSession POSTs /api/sessions/<id>/archive and resolves to the response's session — DoD-2", async () => {
     const archived: Session = { ...TAVERN_RUN, archived_at: "2026-04-05T10:00:00.000000+00:00" };
@@ -321,18 +286,9 @@ describe("failures are the shared client's ApiErrors, rethrown unchanged", () =>
     }
   });
 
-  it("a 409 setup_archived envelope rejects startSession with that ApiError code — DoD-3", async () => {
-    serve(envelope("setup_archived", "That setup is archived."), 409);
-    const error = await rejection(() => startSession(CHARACTER_ID, SETUP_ID));
-    expect(isApiError(error)).toBe(true);
-    expect(isApiError(error) ? error.code : null).toBe("setup_archived");
-    expect(isApiError(error) ? error.status : null).toBe(409);
-  });
-
   it("a 404 character_not_found envelope rejects the character-addressed calls with that code — DoD-3", async () => {
     for (const call of [
       () => fetchCharacterSessions(CHARACTER_ID, false),
-      () => startSession(CHARACTER_ID, null),
     ]) {
       serve(envelope("character_not_found", "That character does not exist."), 404);
       const error = await rejection(call);
@@ -344,10 +300,10 @@ describe("failures are the shared client's ApiErrors, rethrown unchanged", () =>
 });
 
 // ---------------------------------------------------------------------------
-// Feature 018, step 004 — the start-with-message call and startSession's eight keys
-// (DoD-1, DoD-2). Expected values: the step's Interface intent and DoD plus 018 context.md's
-// Wire contract (StartedSession = the eight Session keys + opening_message, Message | null)
-// and D5 (startSession resolves to exactly the eight Session keys).
+// Feature 018, step 004 — the start-with-message call (DoD-1). Expected values: the step's
+// Interface intent and DoD plus 018 context.md's Wire contract (StartedSession = the eight
+// Session keys + opening_message, Message | null). The unused bare `startSession` (and its
+// DoD-2 cases) was removed: the character page starts sessions only with a message.
 // Feature 034, step 004 (S034_004_DoD4): `Session` gains `name`, so the Session key set is
 // now nine keys and a StartedSession ten; the 018 clauses below assert the widened sets.
 
@@ -442,44 +398,6 @@ describe("startSessionWithMessage (018 step 004)", () => {
   });
 });
 
-describe("startSession resolves to exactly the nine Session keys (018 step 004, D5; 034 step 004)", () => {
-  it("against a served ten-key StartedSession with opening_message null it resolves to exactly the nine Session keys — DoD-2, S034_004_DoD4", async () => {
-    serve(startedSession(null), 201);
-
-    const result = await startSession(CHARACTER_ID, null);
-
-    expect(Object.keys(result).sort()).toEqual(SESSION_KEYS);
-    expect(result).not.toHaveProperty("opening_message");
-    expect(result).toEqual(S018_SESSION);
-  });
-
-  it("its request is unchanged from 011: one POST with the body exactly { setup_id: null } — DoD-2", async () => {
-    const mock = serve(startedSession(null), 201);
-
-    await startSession(CHARACTER_ID, null);
-
-    expect(seen(mock)).toEqual([{ method: "POST", path: CHARACTER_SESSIONS_PATH, search: "" }]);
-    expect(sentBody(mock)).toEqual({ setup_id: null });
-    expect(bodyKeys(mock)).toEqual(["setup_id"]);
-  });
-
-  it("with a chosen setup, the ten-key answer still resolves to exactly the nine keys and the body stays { setup_id } — DoD-2, S034_004_DoD4", async () => {
-    const served: StartedSession = {
-      ...S018_SESSION,
-      setup_id: SETUP_ID,
-      setup_name: "The Gilded Tavern",
-      opening_message: null,
-    };
-    const mock = serve(served, 201);
-
-    const result = await startSession(CHARACTER_ID, SETUP_ID);
-
-    expect(Object.keys(result).sort()).toEqual(SESSION_KEYS);
-    expect(result).toEqual({ ...S018_SESSION, setup_id: SETUP_ID, setup_name: "The Gilded Tavern" });
-    expect(sentBody(mock)).toEqual({ setup_id: SETUP_ID });
-  });
-});
-
 // ---------------------------------------------------------------------------
 describe("isSessionArchived", () => {
   it("is true when archived_at is a string — DoD-3", () => {
@@ -535,23 +453,6 @@ describe("every sessions-API read carries name as received (034 step 004)", () =
     vi.unstubAllGlobals();
     serve(DATE_NAMED_RUN);
     expect((await restoreSession(OTHER_SESSION_ID)).name).toBe("2026-01-01");
-  });
-
-  it("startSession yields exactly the nine Session keys, name included as received — S034_004_DoD4", async () => {
-    // A just-started session is never renamed; the server answers name null (034 step 001).
-    serve(startedSession(null), 201);
-    const result = await startSession(CHARACTER_ID, null);
-    expect(Object.keys(result).sort()).toEqual(SESSION_KEYS);
-    expect(Object.keys(result)).toHaveLength(9);
-    expect(result).toHaveProperty("name", null);
-  });
-
-  it("startSession copies a served string name through unchanged — S034_004_DoD4", async () => {
-    // The wire value is copied, never derived: a string served is a string resolved.
-    serve({ ...startedSession(null), name: "Served name" }, 201);
-    const result = await startSession(CHARACTER_ID, null);
-    expect(result.name).toBe("Served name");
-    expect(Object.keys(result).sort()).toEqual(SESSION_KEYS);
   });
 
   it("startSessionWithMessage keeps the served name — S034_004_DoD4", async () => {

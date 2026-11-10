@@ -33,9 +33,9 @@ from app.errors import (
 )
 from app.services import parens
 from app.services.llm.chat import strip_think
+from app.services.llm.gateway import LlmGateway
 from app.services.session_index import (
     DEFAULT_EMBED_TIMEOUT_SECONDS,
-    LlmClient,
     LlmClientFactory,
     refresh_session_vector_degraded,
 )
@@ -75,7 +75,7 @@ def settle(
     user_id: int,
     session_id: int,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> SettleResult:
     """Settle the session's current zone onto its last row; bury the rest under it.
@@ -144,7 +144,7 @@ def reopen(
     user_id: int,
     session_id: int,
     *,
-    client_factory: LlmClientFactory = LlmClient,
+    client_factory: LlmClientFactory = LlmGateway,
     timeout_seconds: float = DEFAULT_EMBED_TIMEOUT_SECONDS,
 ) -> ReopenResult:
     """Re-open the session's last settled group back into an empty zone.

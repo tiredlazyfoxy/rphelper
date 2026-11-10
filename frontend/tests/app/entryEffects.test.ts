@@ -12,7 +12,7 @@
 //     API is absent — a transient textarea + document.execCommand("copy"), removed afterwards
 //     with focus restored; failures notify and resolve false; no request, no success notice.
 //
-// Amended by fast feature 014 (docs/plans/fast/014.message-delete/plan.md, context.md P4-P6):
+// Amended by fast feature 014 (fast/014.message-delete, docs/decisions/fast-014.message-delete.md):
 //   - deleteMessage sends DELETE /api/messages/<encoded id> and returns the parsed body;
 //   - deleteEntry: success removes the entry and sets searchCoverageIncomplete from the
 //     response, resolves true; abort resolves false silently with no re-read; any other

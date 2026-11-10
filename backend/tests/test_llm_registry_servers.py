@@ -15,11 +15,18 @@ Mechanics:
 - every operation is called on a *fresh* connection with no transaction open, and every
   post-condition is read on another fresh connection;
 - the outbound client is faked through the frozen ``client_factory=`` seam — a callable taking
-  ``(base_url, resolved_api_key, timeout_seconds)`` positionally and returning an object with
-  async ``probe()`` / ``embed()``; no network;
+  ``(kind, base_url, resolved_api_key, timeout_seconds)`` positionally (feature 035,
+  DEC-035-1) and returning an object with async ``probe()`` / ``embed()``; no network;
 - async operations run under ``asyncio.run``.
 
 Tests are suffixed ``__S006_003_DoD<n>``. DoD-22 is ``[manual/live]``.
+
+Feature 035 step 002: the
+factory now receives the server's ``kind`` first, so ``FakeFactory.calls`` entries are
+``(kind, base_url, api_key, timeout_seconds)``; the probe types come from
+``app.services.llm.gateway``; the timeout default is 600 s (step 001). Its tests are suffixed
+``__S035_002_DoD<n>``. DoD-20 of feature 006 is narrowed to "the registry itself does not
+branch on kind": two kinds now differ in exactly the ``kind`` they hand the factory.
 """
 
 import ast
@@ -40,7 +47,7 @@ import app.services.llm_registry as registry_module
 from app.config import Settings, get_settings
 from app.db import schema
 from app.errors import LlmServerNotFoundError, LlmUnreachableError, SecretRefError
-from app.services.llm.client import ProbeOutcome, ProbeResult
+from app.services.llm.gateway import ProbeOutcome, ProbeResult
 from app.services.llm_registry import (
     UNSET,
     ConnectionTestResult,
@@ -123,15 +130,18 @@ class FakeClient:
 
 
 class FakeFactory:
-    """A client factory recording every positional call it receives."""
+    """A client factory recording every positional call it receives.
+
+    Each ``calls`` entry is ``(kind, base_url, api_key, timeout_seconds)`` (DEC-035-1).
+    """
 
     def __init__(self, result: ProbeResult) -> None:
         self.result = result
         self.calls: list[tuple[Any, ...]] = []
         self.clients: list[FakeClient] = []
 
-    def __call__(self, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeClient:
-        self.calls.append((base_url, api_key, timeout_seconds))
+    def __call__(self, kind: str, base_url: str, api_key: str | None, timeout_seconds: float) -> FakeClient:
+        self.calls.append((kind, base_url, api_key, timeout_seconds))
         client = FakeClient(self.result)
         self.clients.append(client)
         return client
@@ -841,7 +851,7 @@ def test_probe_resolves_the_pointer_and_hands_the_credential_to_the_factory__S00
     assert result.outcome is ProbeOutcome.REACHABLE
     assert tuple(result.model_names) == ("m1", "m2")
     assert len(factory.calls) == 1
-    base_url, api_key, _timeout = factory.calls[0]
+    _kind, base_url, api_key, _timeout = factory.calls[0]
     assert base_url == OTHER_BASE_URL
     assert api_key == RESOLVED_KEY
     assert factory.probe_calls == 1
@@ -853,7 +863,7 @@ def test_probe_without_a_pointer_hands_no_credential__S006_003_DoD11(engine: Eng
     factory = FakeFactory(outcome_result(ProbeOutcome.REACHABLE))
     _probe(engine, 1102, db_settings, factory)
     assert len(factory.calls) == 1
-    assert factory.calls[0][1] is None
+    assert factory.calls[0][2] is None
 
 
 def test_probe_missing_variable_raises_before_any_client_exists__S006_003_DoD11(
@@ -882,7 +892,7 @@ def test_probe_resolves_at_call_time__S006_003_DoD11(
     _probe(engine, 1104, db_settings, factory)
     monkeypatch.setenv(KEY_VARIABLE, "rotated-value")
     _probe(engine, 1104, db_settings, factory)
-    assert [call[1] for call in factory.calls] == ["first-value", "rotated-value"]
+    assert [call[2] for call in factory.calls] == ["first-value", "rotated-value"]
 
 
 # ============================================================================ DoD-12
@@ -900,17 +910,17 @@ def test_probe_passes_the_configured_timeout_to_the_factory__S006_003_DoD12(
     factory = FakeFactory(outcome_result(ProbeOutcome.REACHABLE))
     _probe(engine, 1201, handed, factory)
     assert len(factory.calls) == 1
-    assert factory.calls[0][2] == 7.25
+    assert factory.calls[0][3] == 7.25
 
 
 def test_probe_default_timeout_is_the_settings_default__S006_003_DoD12(
     engine: Engine, db_settings: Settings
 ) -> None:
-    """DoD-12 — with the default settings, the client is built with 30.0 s."""
+    """DoD-12 — with the default settings, the client is built with the default (600 s since 035 step 001)."""
     _new(engine, 1202)
     factory = FakeFactory(outcome_result(ProbeOutcome.REACHABLE))
     _probe(engine, 1202, db_settings, factory)
-    assert factory.calls[0][2] == 30.0
+    assert factory.calls[0][3] == 600.0
 
 
 def test_the_timeout_reaches_the_client_through_every_route__S006_003_DoD12(
@@ -922,7 +932,7 @@ def test_the_timeout_reaches_the_client_through_every_route__S006_003_DoD12(
     factory = FakeFactory(outcome_result(ProbeOutcome.REACHABLE))
     _check(engine, 1203, handed, factory)
     _available(engine, 1203, handed, factory)
-    assert [call[2] for call in factory.calls] == [4.5, 4.5]
+    assert [call[3] for call in factory.calls] == [4.5, 4.5]
 
 
 def test_module_never_fetches_settings_itself__S006_003_DoD12() -> None:
@@ -1102,7 +1112,7 @@ def test_available_models_returns_names_for_reachable__S006_003_DoD17(
     factory = FakeFactory(outcome_result(ProbeOutcome.REACHABLE, ["zeta", "alpha", "mid"]))
     names = _available(engine, 1701, db_settings, factory)
     assert list(names) == ["zeta", "alpha", "mid"]
-    assert factory.calls[0][1] == RESOLVED_KEY
+    assert factory.calls[0][2] == RESOLVED_KEY
 
 
 def test_available_models_returns_empty_for_model_list_empty__S006_003_DoD17(
@@ -1234,7 +1244,8 @@ def test_module_has_one_probe_call_site_and_no_direct_client__S006_003_DoD19() -
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Attribute) and node.func.attr == "probe":
                 probe_calls += 1
-            if isinstance(node.func, ast.Name) and node.func.id == "LlmClient":
+            # The production factory is ``LlmGateway`` since 035 step 002 (``LlmClient`` before).
+            if isinstance(node.func, ast.Name) and node.func.id in {"LlmClient", "LlmGateway"}:
                 direct_constructions += 1
         elif isinstance(node, ast.Import):
             http_imports.extend(a.name for a in node.names if a.name.split(".")[0] in {"httpx", "requests", "urllib"})
@@ -1269,14 +1280,15 @@ def test_module_never_branches_on_kind__S006_003_DoD20() -> None:
 
 
 def test_both_kinds_probe_identically__S006_003_DoD20(engine: Engine, db_settings: Settings) -> None:
-    """DoD-20 — two registrations differing only in kind build identical clients and record
-    identical results."""
+    """DoD-20 (narrowed by 035 DoD-6) — two registrations differing only in kind hand the factory
+    the same arguments except their own ``kind``, and record identical results."""
     _new(engine, 2001, kind="llamaswap")
     _new(engine, 2002, kind="openai")
     factory = FakeFactory(outcome_result(ProbeOutcome.AUTH_FAILED))
     first = _check(engine, 2001, db_settings, factory)
     second = _check(engine, 2002, db_settings, factory)
-    assert factory.calls[0] == factory.calls[1]
+    assert [call[0] for call in factory.calls] == ["llamaswap", "openai"]
+    assert factory.calls[0][1:] == factory.calls[1][1:]
     assert first.outcome is second.outcome is ProbeOutcome.AUTH_FAILED
     assert (first.server.last_test_ok, first.server.last_test_error) == (
         second.server.last_test_ok,
@@ -1401,3 +1413,79 @@ def test_service_signatures_take_a_connection_first_and_plain_arguments__S006_00
         assert inspect.iscoroutinefunction(function), function.__name__
     for function in (list_servers, get_server, create_server, update_server, delete_server):
         assert not inspect.iscoroutinefunction(function), function.__name__
+
+
+# ==================================================================== 035 step 002
+
+
+@pytest.mark.parametrize("kind", ["llamaswap", "openai"])
+def test_probe_calls_the_factory_with_kind_base_url_key_and_timeout__S035_002_DoD6(
+    engine: Engine, db_settings: Settings, key_present: None, kind: str
+) -> None:
+    """035 DoD-6 — ``probe_server`` calls the factory ``(kind, base_url, resolved key, timeout)``, in that order."""
+    _new(engine, 3501, kind=kind, base_url=OTHER_BASE_URL, api_key_ref=POINTER)
+    handed = db_settings.model_copy(update={"llm_request_timeout_seconds": 12.5})
+    factory = FakeFactory(outcome_result(ProbeOutcome.REACHABLE, ["m1"]))
+    result = _probe(engine, 3501, handed, factory)
+    assert factory.calls == [(kind, OTHER_BASE_URL, RESOLVED_KEY, 12.5)]
+    assert result.outcome is ProbeOutcome.REACHABLE
+    assert tuple(result.model_names) == ("m1",)
+
+
+def test_probe_reads_the_current_kind_after_an_update__S035_002_DoD6(
+    engine: Engine, db_settings: Settings
+) -> None:
+    """035 DoD-6 — the ``kind`` handed to the factory is the server's stored kind at probe time."""
+    _new(engine, 3502, kind="llamaswap")
+    _update(engine, 3502, kind="openai")
+    factory = FakeFactory(outcome_result(ProbeOutcome.REACHABLE))
+    _probe(engine, 3502, db_settings, factory)
+    assert [call[0] for call in factory.calls] == ["openai"]
+
+
+@pytest.mark.parametrize("outcome", FAILING_OUTCOMES, ids=[o.value for o in FAILING_OUTCOMES])
+def test_check_connection_still_records_a_failing_outcome__S035_002_DoD6(
+    engine: Engine, db_settings: Settings, outcome: ProbeOutcome
+) -> None:
+    """035 DoD-6 — a failing outcome is still returned (not raised) and written to ``last_test_*``."""
+    _new(engine, 3503, kind="openai")
+    factory = FakeFactory(outcome_result(outcome))
+    tested = _check(engine, 3503, db_settings, factory)
+    assert tested.outcome is outcome
+    row = _server_row(engine, 3503)
+    assert row is not None
+    assert row["last_test_ok"] is False
+    assert row["last_test_error"] == outcome.value
+    assert row["last_test_at"] is not None
+    assert [call[0] for call in factory.calls] == ["openai"]
+
+
+@pytest.mark.parametrize(
+    "outcome", [ProbeOutcome.UNREACHABLE, ProbeOutcome.AUTH_FAILED], ids=["unreachable", "auth_failed"]
+)
+def test_available_models_still_raises_llm_unreachable__S035_002_DoD6(
+    engine: Engine, db_settings: Settings, outcome: ProbeOutcome
+) -> None:
+    """035 DoD-6 — unreachable / auth-failed listing still raises ``llm_unreachable`` with that reason."""
+    _new(engine, 3504, kind="llamaswap")
+    factory = FakeFactory(outcome_result(outcome))
+    with pytest.raises(LlmUnreachableError) as caught:
+        _available(engine, 3504, db_settings, factory)
+    assert caught.value.code == "llm_unreachable"
+    assert caught.value.detail == {"reason": outcome.value}
+    assert [call[0] for call in factory.calls] == ["llamaswap"]
+
+
+@pytest.mark.parametrize("operation", ["probe", "check", "available"])
+def test_missing_variable_raises_before_the_factory__S035_002_DoD9(
+    engine: Engine, db_settings: Settings, key_present: None, operation: str
+) -> None:
+    """035 DoD-9 — an ``api_key_ref`` naming an absent variable raises ``secret_ref_missing``;
+    the factory is never called."""
+    _new(engine, 3505, kind="openai", api_key_ref=MISSING_POINTER)
+    factory = FakeFactory(outcome_result(ProbeOutcome.REACHABLE))
+    call = {"probe": _probe, "check": _check, "available": _available}[operation]
+    with pytest.raises(SecretRefError) as caught:
+        call(engine, 3505, db_settings, factory)
+    assert caught.value.code == "secret_ref_missing"
+    assert factory.calls == []

@@ -1,6 +1,6 @@
 """Tests for `app/services/parens.py` — feature 012, step 003 (DoD-1..6).
 
-Every expected value comes from `docs/plans/012.messages-and-settle/003.parser-and-settle.md`
+Every expected value comes from `docs/decisions/012.messages-and-settle.md`
 (its Definition of done) and from `003.context.md` "The parser, as spec" (D8). No expected
 value is computed by calling the parser. Each test name ends `__S012_003_DoD<n>` with the
 DoD item it covers.

@@ -4,6 +4,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 import { apiPatch, apiPost } from "../shared/api";
 import { ApiError, CLIENT_TRANSPORT_FAILED } from "../shared/apiError";
 import type { LlmServerKind, LlmServerRow } from "./llmServersPageState";
+import { isAbortError } from "../shared/abort";
 
 /** The client-validated fields — the keys of the client-error map. `kind` is typed, never invalid. */
 export type ServerFormField = "name" | "baseUrl" | "pointer";
@@ -113,10 +114,6 @@ const TRANSPORT_FAILURE = "The server could not be reached. Check that it is run
 
 const SERVERS_PATH = "/api/admin/llm-servers";
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /**
  * Maps a failure onto the server-error map by status or code only. This router has no
  * field-specific refusal the client does not already catch, so everything lands on
@@ -203,7 +200,7 @@ export async function submitServerForm(
       await apiPatch<unknown>(`${SERVERS_PATH}/${encodeURIComponent(serverId)}`, body, signal);
     }
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const serverErrors = serverErrorsFor(error);

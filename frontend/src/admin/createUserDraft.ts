@@ -4,6 +4,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 import { apiPost } from "../shared/api";
 import { ApiError, CLIENT_TRANSPORT_FAILED } from "../shared/apiError";
 import type { AdminUserRole, AdminUserRow } from "./usersPageState";
+import { isAbortError } from "../shared/abort";
 
 /** The client-validated fields — the keys of the client-error map. */
 export type CreateUserField = "username" | "password" | "confirmation";
@@ -80,10 +81,6 @@ const GENERIC_FAILURE = "The account could not be created.";
 const TRANSPORT_FAILURE = "The server could not be reached. Check that it is running and try again.";
 const MALFORMED_RESPONSE = "The server returned an unreadable response.";
 
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
-
 /** The created row, or null when the 201 body is not row-shaped. The id is never parsed. */
 function asCreatedRow(value: unknown): AdminUserRow | null {
   if (typeof value !== "object" || value === null) {
@@ -152,7 +149,7 @@ export async function submitCreateUser(
     }
     created = asCreatedRow(response);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     const serverErrors = serverErrorsFor(error, secrets);

@@ -9,6 +9,7 @@ import { makeAutoObservable, runInAction } from "mobx";
 
 import type { Setup } from "./setupsApi";
 import { archiveSetup, fetchSetups, isSetupArchived, restoreSetup } from "./setupsApi";
+import { isAbortError } from "../shared/abort";
 
 /** Explicit load status: gates the loading and failure renders, not "rows are empty". */
 export type SetupsLoadStatus = "idle" | "loading" | "ready" | "failed";
@@ -34,10 +35,6 @@ export class SetupsSectionState {
 /** The two fixed row-action sentences (D12): one per action, never composed from an error. */
 const ARCHIVE_FAILED = "Could not archive the setup.";
 const RESTORE_FAILED = "Could not restore the setup.";
-
-function isAbortRejection(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
-}
 
 /** Whether this row belongs in the list: working, or archived while Show-archived is on. */
 function isVisible(setup: Setup, showArchived: boolean): boolean {
@@ -67,7 +64,7 @@ export async function loadSetups(
   try {
     setups = await fetchSetups(characterId, includeArchived, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {
@@ -154,7 +151,7 @@ async function runRowAction(
   try {
     setup = await action(setupId, signal);
   } catch (error) {
-    if (signal?.aborted || isAbortRejection(error)) {
+    if (signal?.aborted || isAbortError(error)) {
       return;
     }
     runInAction(() => {

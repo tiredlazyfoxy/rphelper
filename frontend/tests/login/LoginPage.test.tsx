@@ -1,5 +1,5 @@
 // Feature 004, step 005 — the `login` entry's page, its submit, the hand-off to `/`, and the
-// entry wiring (docs/plans/004.authentication-session/005.login-entry.md).
+// entry wiring (docs/decisions/004.authentication-session.md).
 // Covers DoD-3, DoD-4, DoD-5, DoD-6, DoD-7, DoD-8, DoD-9, DoD-10, DoD-11, DoD-12, DoD-13,
 // DoD-14 at the rendered level. DoD-15..DoD-19 are [manual/live] and have no test.
 //
@@ -8,7 +8,7 @@
 // their visible labels. The entry module itself is evaluated with the same recipe as
 // `tests/entries.test.tsx` (vi.resetModules, a fresh #root, pushState, dynamic import).
 //
-// fast/010.unconfigured-to-bootstrap (docs/plans/fast/010.unconfigured-to-bootstrap/plan.md):
+// fast/010.unconfigured-to-bootstrap (docs/decisions/fast-010.unconfigured-to-bootstrap.md):
 // the page now probes GET /api/health on mount and shows the form only once the probe has
 // settled on a configured instance (or failed). Its DoD-7: every pre-existing case keeps its
 // assertions; the only change is that `stubFetch` now answers `/api/health` with

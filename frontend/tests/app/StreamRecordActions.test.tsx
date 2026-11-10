@@ -14,7 +14,7 @@
 //     PATCH /api/messages/<id> {"text": ...}; success -> editor closes and the served row
 //     renders by its kind; 409 -> notifyFailure, GET …/entries, editor stays with the typed text.
 //
-// Amended by fast feature 014 (docs/plans/fast/014.message-delete/plan.md, context.md P7-P8):
+// Amended by fast feature 014 (fast/014.message-delete, docs/decisions/fast-014.message-delete.md):
 //   - every entry carries a "Delete entry" button, absent while that entry's editor is open and
 //     disabled while the stream is busy; it opens a confirm dialog titled "Delete entry?" with a
 //     "Delete" confirm; cancel sends nothing, confirm sends DELETE /api/messages/<id> and the

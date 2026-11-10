@@ -18,22 +18,23 @@
 - **Feature:** FEAT-007
 - **Preconditions:** Character exists; a setup under it may or may not exist.
 - **Main flow:**
-  1. Roleplayer starts a new session under a character.
+  1. Roleplayer opens a character.
   2. Roleplayer chooses an existing setup, or chooses none.
-  3. Instance starts the session accordingly.
+  3. Roleplayer writes the opening message (UC-080).
+  4. Instance creates the session accordingly.
 - **Postconditions:** A session with no setup works end to end — no flow requires choosing one before an RP can start.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 3, round 6.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 3, round 6; steps 1-4 reordered 2026-11-09 (finalize batch-2026-11-09b; 033.character-page-tabs removed the message-less start).
 
 ### UC-022 — Reuse one setup across several sessions
 - **Actor:** ACT-002
 - **Feature:** FEAT-007
 - **Preconditions:** Setup exists under a character.
 - **Main flow:**
-  1. Roleplayer starts a new session under the same character.
-  2. Roleplayer chooses the existing setup.
+  1. Roleplayer chooses the existing setup on the same character's page.
+  2. Roleplayer writes the opening message of a new session (UC-080).
   3. Instance attaches the setup to the new session.
 - **Postconditions:** Both sessions carry the setup's memos and search anchor independently of each other.
-- **Source:** `[confirmed: user]` interview 2026-09-27, round 2, round 3.
+- **Source:** `[confirmed: user]` interview 2026-09-27, round 2, round 3; steps 1-2 reordered 2026-11-09 (finalize batch-2026-11-09b; 033.character-page-tabs removed the message-less start).
 
 ### UC-068 — Archive and restore a setup
 - **Actor:** ACT-002
